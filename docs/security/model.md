@@ -435,6 +435,24 @@ guidance after each item names what to do.
   `WINDOWS_UNSIGNED_FINAL_TAG` is exactly that tag, so an unsigned final release needs a reviewed change for that one tag.
   Residual risk: the guard is a script of the repository and protects only as far as the release workflow runs it first and
   the tag ruleset limits who can push `v*` tags; the check of `ci-ok` trusts the check-run name and the GitHub Actions app.
+- **Authenticode adds to Sigstore and never replaces it.** From the keyless release workflow on
+  ([ADR-0023](../adr/0023-keyless-release-signing.md)), the trust anchor of installers and updater is its Sigstore identity;
+  Authenticode is the signature that
+  Windows evaluates (App Control for Business or AppLocker publisher rules, Smart App Control, the execution policy for the
+  two PowerShell scripts). The target is a signature by the SignPath Foundation with a manual approval of every release in a
+  second system, so that a leaked token or a compromised CI step cannot sign alone; the release workflow holds no long-lived
+  signing secret ([ADR-0034](../adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Release builds will no longer
+  accept a PFX file.
+- **Exception for v0.1.0: unsigned Windows files.** `v0.1.0` ships `myriarch-updater.exe`, `myrctl.exe` and the two PowerShell
+  scripts without Authenticode signatures, under a reviewed exception for exactly that tag; the release notes carry an
+  "unsigned" banner. Residual risk: Windows itself does not tell an operator who built an unsigned file, so integrity rests on
+  the Sigstore signature alone. Verify the Windows files with cosign before you run them, starting with `install-windows.ps1`
+  itself (use a `cosign.exe` from a folder that only Administrators can write); the verified installer may then verify the
+  binaries it downloads. Use `Unblock-File` only after that. Hosts with App Control allow the unsigned installer,
+  `myriarch-updater.exe`, `myrctl.exe` and `Set-ServiceEnvironment.ps1` by their hashes, one set of rules per release and each
+  only after its cosign verification, because there is no publisher to trust; a hash rule for a file that was not verified first trusts whatever the
+  file contains. Signing starts with a later release; a change of publisher resets SmartScreen reputation and breaks publisher
+  rules that operators wrote, so it is announced in the release notes.
 - **Website deployment uses a team-scoped Vercel token.** The token and the Vercel IDs exist only as secrets of the GitHub
   environments `website-preview` and `website-production`; the build job of `.github/workflows/website.yml`, which runs
   repository code, has no secrets, and the deploy job installs the pinned Vercel CLI without lifecycle scripts and uploads
