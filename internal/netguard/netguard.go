@@ -388,10 +388,14 @@ func proxyAddr(u *url.URL) string {
 	return net.JoinHostPort(strings.ToLower(u.Hostname()), port)
 }
 
+// ProxyEnvVars are the proxy variables whose host:port Transport exempts from the address check (net/http reads the same
+// variables, plus NO_PROXY). The environment reference documents them from here.
+var ProxyEnvVars = []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"}
+
 // proxyAddrsFromEnv returns the proxy addresses of the proxy variables that net/http uses.
 func proxyAddrsFromEnv() []string {
 	var out []string
-	for _, k := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
+	for _, k := range ProxyEnvVars {
 		v := getenv(k)
 		if v == "" {
 			continue

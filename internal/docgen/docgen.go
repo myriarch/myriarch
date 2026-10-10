@@ -1,9 +1,11 @@
 // Copyright The Myriarch Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package docgen holds the file handling that the generators of the reference documentation share (internal/clidoc for the
-// command line reference, internal/apidoc for the REST API reference): writing a directory of generated Markdown pages and
-// comparing it with the committed files. Both generators are guarded against drift by a test that calls Diff.
+// Package docgen holds the file handling that the generators of the reference documentation share: writing generated Markdown
+// pages and comparing them with the committed files. The generators are internal/clidoc (command line), internal/apidoc (REST
+// interface) and internal/refdoc (configuration, environment and metrics). Every one is guarded against drift by a test that
+// calls Diff or DiffFile. Write and Diff own a whole directory of generated pages; WriteFile and DiffFile handle single pages of
+// a directory that also holds hand-written files.
 package docgen
 
 import (
@@ -71,4 +73,29 @@ func Diff(dir string, files map[string][]byte) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// WriteFile writes one generated file (the parent directory is created when missing). A file with identical content is not
+// touched. Unlike Write it never removes other files, so it is safe for a directory with hand-written pages.
+func WriteFile(path string, content []byte) error {
+	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, content) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, content, 0o644)
+}
+
+// DiffFile compares content with the file at path and returns "" when they are identical, "missing: <base name>" when the
+// file does not exist (or cannot be read) and "changed: <base name>" when the content differs.
+func DiffFile(path string, content []byte) string {
+	old, err := os.ReadFile(path)
+	switch {
+	case err != nil:
+		return "missing: " + filepath.Base(path)
+	case !bytes.Equal(old, content):
+		return "changed: " + filepath.Base(path)
+	}
+	return ""
 }
