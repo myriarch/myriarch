@@ -38,7 +38,7 @@
   license_file: /licenses/lunr/LICENSE.txt
 - name: Mermaid
   package: "mermaid"
-  version: 11.17.2
+  version: 12.1.0
   license: MIT
   url: https://mermaid.js.org
   use: diagrams in the documentation
