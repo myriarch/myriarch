@@ -42,9 +42,7 @@ export default function AgentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const state = useMemo(() => parseAgentSearch(searchParams), [searchParams]);
   const [drawerOpen, drawer] = useDisclosure(false);
-  const [panelOpen, setPanelOpen] = useState(
-    () => readStorage(FILTER_PANEL_KEY) !== 'closed',
-  );
+  const [panelOpen, setPanelOpen] = useState(() => readStorage(FILTER_PANEL_KEY) !== 'closed');
   const togglePanel = () => {
     setPanelOpen((o) => {
       writeStorage(FILTER_PANEL_KEY, o ? 'closed' : 'open');

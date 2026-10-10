@@ -65,7 +65,7 @@ describe('WaveSteps', () => {
     expect(within(card).queryByText('Approval required')).toBeNull();
   });
 
-  it('is translated: "Freigegeben", never "Freigabe nötig" after the approval', () => { // check-language: ignore
+  it('is translated: "Freigegeben", never the label of the approval request after the approval', () => {
     renderWave(wave(), 'de');
     const card = screen.getByTestId('wave-1');
     expect(within(card).getByText('Freigegeben')).toBeTruthy();

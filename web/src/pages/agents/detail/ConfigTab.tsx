@@ -1,7 +1,17 @@
 // Copyright The Myriarch Authors
 // SPDX-License-Identifier: Apache-2.0
 
-import { Alert, Badge, Code, Grid, Group, SegmentedControl, Skeleton, Stack, Text } from '@mantine/core';
+import {
+  Alert,
+  Badge,
+  Code,
+  Grid,
+  Group,
+  SegmentedControl,
+  Skeleton,
+  Stack,
+  Text,
+} from '@mantine/core';
 import { IconInfoCircle } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -34,7 +44,12 @@ function DocHeader({ doc, hash }: { doc?: ConfigDocument; hash?: string }) {
         </Group>
       )}
       {doc?.redacted && (
-        <Badge size="xs" variant="light" color="yellow" title={t('agentDetail.config.redactedHint')}>
+        <Badge
+          size="xs"
+          variant="light"
+          color="yellow"
+          title={t('agentDetail.config.redactedHint')}
+        >
           {t('agentDetail.config.redacted')}
         </Badge>
       )}

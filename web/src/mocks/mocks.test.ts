@@ -99,7 +99,11 @@ describe('mock database', () => {
     const get = async (q: string) =>
       fetch(`${window.location.origin}/api/v1/rollouts/${id}/targets${q}`);
     const statuses = async (q: string) =>
-      ((await (await get(q)).json()) as { items: { status: string; wave: number; agentId: string }[] }).items;
+      (
+        (await (await get(q)).json()) as {
+          items: { status: string; wave: number; agentId: string }[];
+        }
+      ).items;
 
     const byWave = await statuses('?limit=100');
     expect(byWave[0]!.wave).toBe(0);

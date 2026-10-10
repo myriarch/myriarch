@@ -223,7 +223,9 @@ describe('language detection', () => {
   });
   it('offers no language when the allowed list contains no shipped locale', () => {
     expect(allowedLanguages({ languages: ['fr-FR', 'xx'] })).toEqual([]);
-    expect(detectLanguage({ browser: ['de-DE'], serverDefault: 'de', allowed: ['fr-FR'] })).toBe('en');
+    expect(detectLanguage({ browser: ['de-DE'], serverDefault: 'de', allowed: ['fr-FR'] })).toBe(
+      'en',
+    );
   });
   it('knows the registered languages', () => {
     expect(isLang('de')).toBe(true);
