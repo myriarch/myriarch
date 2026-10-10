@@ -1,0 +1,8 @@
+.github/workflows/release.yml:69: R13: job sign (id-token: write, attestations: write, environment): the command go must not run in a job with these privileges (build code runs only in jobs with contents: read)
+.github/workflows/release.yml:70: R13: job sign (id-token: write, attestations: write, environment): the command make must not run in a job with these privileges (build code runs only in jobs with contents: read)
+.github/workflows/release.yml:71: R13: job sign (id-token: write, attestations: write, environment): the command go must not run in a job with these privileges (build code runs only in jobs with contents: read)
+.github/workflows/release.yml:72: R13: job sign (id-token: write, attestations: write, environment): the command npm must not run in a job with these privileges (build code runs only in jobs with contents: read)
+.github/workflows/release.yml:73: R13: job sign (id-token: write, attestations: write, environment): the command go must not run in a job with these privileges (build code runs only in jobs with contents: read)
+.github/workflows/release.yml:74: R13: job sign (id-token: write, attestations: write, environment): the command node must not run in a job with these privileges (build code runs only in jobs with contents: read)
+.github/workflows/release.yml:75: R13: job sign (id-token: write, attestations: write, environment): the command pnpm must not run in a job with these privileges (build code runs only in jobs with contents: read)
+.github/workflows/release.yml:76: R13: job sign (id-token: write, attestations: write, environment): the command go must not run in a job with these privileges (build code runs only in jobs with contents: read)

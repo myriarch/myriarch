@@ -1,0 +1,1 @@
+.github/workflows/release.yml:81: R13: job finalize: 'if:' must not test the status of other jobs (always(), failure(), cancelled(), success()): the job would run although a job in needs: failed or was not approved

@@ -1,0 +1,1 @@
+.github/workflows/release.yml:58: R13: job sign (id-token: write, attestations: write, environment): defaults: run: shell: must be bash or sh (a script interpreter would read the run text as its own language)

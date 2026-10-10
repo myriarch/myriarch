@@ -1,0 +1,5 @@
+.github/workflows/release.yml:69: R13: job sign (id-token: write, attestations: write, environment): a shell that reads its script from standard input: the check cannot read it (write the commands into the run text or call a script)
+.github/workflows/release.yml:72: R13: job sign (id-token: write, attestations: write, environment): a shell that reads its script from standard input: the check cannot read it (write the commands into the run text or call a script)
+.github/workflows/release.yml:73: R13: job sign (id-token: write, attestations: write, environment): a shell that reads its script from standard input: the check cannot read it (write the commands into the run text or call a script)
+.github/workflows/release.yml:74: R13: job sign (id-token: write, attestations: write, environment): a shell that reads its script from standard input: the check cannot read it (write the commands into the run text or call a script)
+.github/workflows/release.yml:77: R13: job sign (id-token: write, attestations: write, environment): a shell that reads its script from standard input: the check cannot read it (write the commands into the run text or call a script)

@@ -58,10 +58,12 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dist
       - name: Sign the checksums (no go, no make, no pnpm in this job)
+        shell: bash
+        continue-on-error: false
         run: |
           # The build tools are not available in this job: no go, no make, no pnpm.
           echo "go and make run in the build job"
@@ -80,12 +82,32 @@ jobs:
           git log --grep make --oneline | head -n 1
           ./scripts/make-release-notes.sh
           x=$((1 + 2)); echo "${x} go"
+          tools=(go node)
+          declare -a more=(
+            make   # a comment
+            pnpm
+          )
+          echo "tools: ${tools[*]} ${more[*]}"
+          case "${TAG}" in
+            go) echo "the word go as a case pattern" ;;
+            make|node)
+              echo "make or node as case patterns"
+              ;;
+            (npm) echo npm ;;&
+            *) echo "other" ;;
+          esac
+          case "${TAG}" in v0.*) echo "an early release" ;; *) echo "later" ;; esac
+          bash ./ci/release/verify.sh "${TAG}"
+          bash -c 'echo go build is only text here'
+          time -p sha256sum checksums.txt
+          find . -name '*.go' -exec sha256sum {} +
+          env -S "printf %s go" > /dev/null
   verify:
     needs: sign
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dist
       - name: Verify

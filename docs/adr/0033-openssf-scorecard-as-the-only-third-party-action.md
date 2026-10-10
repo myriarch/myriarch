@@ -61,10 +61,16 @@ The release workflow does not exist yet. Its rules are decided first, so that th
    `cache: false` on `actions/setup-go` and `package-manager-cache: false` on `actions/setup-node` (both cache by default),
    and no local action or called workflow. An `environment:` is the literal `release`, never an expression. Build code runs
    only in jobs that have no write scope: a job with a write scope, with `id-token` or `attestations`, or with an
-   environment never runs `actions/setup-node`, `actions/setup-go` or a command `pnpm`, `npm`, `node`, `go`, `goreleaser`
-   or `make` (and `npx`, `pnpx`, `corepack`, `yarn`). The check matches command words at the start of a command, not words in
-   comments, strings or prose. A job `guard` exists, every other job needs it, and every privileged job has the environment
-   `release` itself or needs a job that has it, so that an approval gates it.
+   environment never runs `actions/setup-node`, `actions/setup-go` or one of the commands `pnpm`, `pnpx`, `npm`, `npx`,
+   `corepack`, `node`, `nodejs`, `yarn`, `go`, `goreleaser`, `make` and `gmake`. The check matches command words at the start
+   of a command (also behind wrappers such as `sudo`, `time` and `env -S`, and inside `sh -c`, `eval`, `find -exec` and
+   command substitutions), not words in comments, strings, here-documents, `case` patterns, arrays or prose. A shell that
+   reads its script from standard input (a here-document, a here-string, a pipe into `sh`, `bash -s`) is a finding in a
+   privileged job because its script is not in the run text, and so is a `shell:` other than `bash` or `sh` (for example
+   `node {0}`), in a privileged step or job and in the workflow defaults. A job `guard` exists, every other job needs it, and
+   every privileged job has the environment `release` itself or needs a job that has it, so that an approval gates it. Two
+   constructs would make `needs:` ineffective and are findings in every job: an `if:` that calls `always()`, `failure()`,
+   `cancelled()` or `success()`, and `continue-on-error` (at job or step level) other than `false`.
 5. **Any further exception needs its own record.** A second third-party action, another job that may use
    `ossf/scorecard-action`, or a release job that builds code with privileges is a change of this record or a new one that
    supersedes it, with its own entry in the policy check.
@@ -89,8 +95,10 @@ The release workflow does not exist yet. Its rules are decided first, so that th
   updates, the narrow permissions and exact identity pins in every verification that uses a workflow identity.
 - Rule R12 mirrors rules of an external API that may change; a change upstream breaks publishing until R12 and the workflow
   follow. The check fails closed for layouts it cannot read.
-- The checks are line- and token-based. R13 cannot see a program that a privileged job starts through a variable or through
-  a script; the scripts that such jobs call are therefore tested separately with a `PATH` that has no `go`, `node` or `pnpm`.
+- The checks are line- and token-based. R13 cannot see a program that a privileged job starts through a variable, through
+  a script, through an interpreter that is not a shell (`python`, `perl`) or through a wrapper that it does not know
+  (`flock -c`, `su -c`, `watch`); the scripts that such jobs call are therefore tested separately with a `PATH` that has no
+  `go`, `node` or `pnpm`.
 - The ban of caches and of local actions makes release builds slower and repeats a few steps; this is the intended price.
 
 ## Alternatives considered

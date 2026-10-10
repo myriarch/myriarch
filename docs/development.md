@@ -355,12 +355,16 @@ both, so a rule does not depend on how a file is named:
 - **The release workflow keeps build code away from privileges** (rule R13). `.github/workflows/release.yml` runs only for a
   pushed tag `v*` (no `workflow_dispatch`); uses no cache (no `actions/cache`, no `cache:` input, `cache: false` for
   `actions/setup-go`, `package-manager-cache: false` for `actions/setup-node`, no local action or called workflow); names
-  only the literal environment `release`; has a job `guard` that every other job needs; and runs `setup-node`, `setup-go`,
-  `pnpm`, `npm`, `node`, `go`, `goreleaser` and `make` (also `npx`, `pnpx`, `corepack`, `yarn`) only in jobs without a write
-  scope, `id-token`, `attestations` or an environment. Every such privileged job has the environment `release` itself or
-  needs a job that has it. The check matches a command at the start of a command, so comments, quoted text and here-documents
-  that mention `go` or `make` are fine; a program started through a variable or a script is out of reach, so the scripts that
-  privileged jobs call are tested with a `PATH` without `go`, `node` and `pnpm`.
+  only the literal environment `release`; has a job `guard` that every other job needs; and runs `setup-node`, `setup-go`
+  and the build commands listed in the docstring of `ci/check-workflows.py` (`pnpm`, `npm`, `node`, `go`, `goreleaser`,
+  `make` and similar) only in jobs without a write scope, `id-token`, `attestations` or an environment. Every such
+  privileged job has the environment `release` itself or needs a job that has it. No job has an `if:` with `always()`,
+  `failure()`, `cancelled()` or `success()` and none uses `continue-on-error`, because either makes `needs:` ineffective. A
+  privileged job uses no shell that reads its script from standard input (`bash <<EOF`, `| sh`) and no `shell:` other than
+  `bash` or `sh`. The check matches a command at the start of a command, so comments, quoted text, here-documents, `case`
+  patterns and arrays that mention `go` or `make` are fine; a program started through a variable, a script or an interpreter
+  that is not a shell is out of reach, so the scripts that privileged jobs call are tested with a `PATH` without `go`, `node`
+  and `pnpm`.
 - **A read-only token**: `permissions: contents: read` at the top of every workflow. A job-level write scope needs a line in
   `ci/workflow-permissions.txt` (`<workflow file> <job> <scope>`) and a review of the job.
 - **No `pull_request_target` and no `workflow_run`**, `persist-credentials: false` on every checkout, a timeout on

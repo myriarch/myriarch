@@ -67,16 +67,25 @@ Rules
       `package-manager-cache: false` on actions/setup-node (both cache by default), and no local action or reusable
       workflow (`uses: ./...`), which could restore one. An `environment:` is the literal `release`, never an
       expression. A privileged job (any write scope, `write-all`, id-token or attestations, or an environment) runs
-      neither actions/setup-node nor actions/setup-go, and no `run:` text of it starts pnpm, pnpx, npm, npx, corepack,
-      node, yarn, go, goreleaser or make. A command counts at the start of a simple command: at the beginning of a
-      line or after `|`, `;`, `&`, `&&`, `||`, a parenthesis, `then`, `do` and similar, behind assignments and wrappers
-      (`sudo`, `env`, `exec`, `timeout 5`, ...), inside `$(...)`, backticks, `sh -c '...'` and `eval`; words in
-      comments, quoted strings, here-documents and arguments (`echo go`, `command -v go`) are no commands. A program
-      started through a variable or a script is out of reach: the scripts that privileged jobs call are tested with a
-      PATH that has no go, node or pnpm. The job `guard` exists, every other job needs it (directly or through other
-      jobs), and every privileged job either has the environment release itself or needs a job that has it, so that an
-      approval gates it. R12 and R13 read the YAML with a small reader for block style (anchors, aliases, tags,
-      multi-line flow collections and multi-line scalars are findings of their own).
+      neither actions/setup-node nor actions/setup-go, and no `run:` text of it starts one of pnpm, pnpx, npm, npx,
+      corepack, node, nodejs, yarn, go, goreleaser, make or gmake. A command counts at the start of a simple command: at
+      the beginning of a line or after `|`, `;`, `&`, `&&`, `||`, a parenthesis, `then`, `do` and similar, behind
+      assignments and wrappers (`sudo`, `doas`, `env` also with `-S`, `exec`, `time`, `builtin`, `coproc`, `timeout 5`,
+      ...), inside `$(...)`, backticks, `sh -c '...'`, `eval` and `find -exec`; words in comments, quoted strings,
+      here-documents, the patterns of a `case` clause, the members of an array (`tools=(go node)`) and arguments
+      (`echo go`, `command -v go`) are no commands. A shell that reads its script from standard input (`bash <<EOF`,
+      `bash <<< text`, `echo ... | sh`, `bash -s`, `. /dev/stdin`) is a finding in a privileged job, because its script
+      is not in the run text. A `shell:` (of a step in a privileged job, of the `defaults: run:` of a privileged job, and of
+      the workflow `defaults: run:`) is bash or sh: another interpreter (`node {0}`, `python {0}`) would read the run
+      text as its own language. A program started through a variable, an interpreter that is not a shell or a script is
+      out of reach: the scripts that privileged jobs call are tested with a PATH that has no go, node or pnpm. The job
+      `guard` exists, every other job needs it (directly or through other jobs), and every privileged job either has the
+      environment release itself or needs a job that has it, so that an approval gates it. Two constructs would make
+      `needs:` ineffective and are findings in every job: an `if:` that calls always(), failure(), cancelled() or
+      success() (the job runs although a job in `needs:` failed or was not approved) and `continue-on-error` other than
+      `false`, at job and at step level (a failed guard, approval or verification counts as passed). R12 and R13 read the
+      YAML with a small reader for block style (anchors, aliases, tags, multi-line flow collections and multi-line
+      scalars are findings of their own).
 
 --remote (needs network, for updating pins): `git ls-remote` for every pinned action and a comparison of the SHA with
 the tag that the comment names.
@@ -88,6 +97,7 @@ The environment variable CHECK_WORKFLOWS_GATES (space-separated) replaces the ou
 import bisect
 import os
 import re
+import shlex
 import subprocess
 import sys
 
@@ -107,6 +117,9 @@ SCORECARD_PERMISSIONS = {"contents": "read", "actions": "read", "security-events
 UBUNTU_RUNNER = re.compile(r"^ubuntu-(\d{2})\.(\d{2})$")
 # R13: programs that build code; a job with a write scope, id-token or the environment release does not start them
 RELEASE_FORBIDDEN_COMMANDS = frozenset(["pnpm", "pnpx", "npm", "npx", "corepack", "node", "nodejs", "yarn", "go", "goreleaser", "make", "gmake"])
+# R13: a function that tests the status of other jobs or steps; in an `if:` it lets a job run although `needs:` did not succeed
+STATUS_FUNCTION = re.compile(r"\b(?:always|failure|cancelled|success)\s*\(", re.I)
+RELEASE_SHELLS = frozenset(["bash", "sh"])  # the values of `shell:` that R13 accepts (first word)
 VERSION_COMMENT = re.compile(r"^#\s*(v\d+\.\d+\.\d+)\s*$")
 EXPR_UNSAFE = re.compile(r"\$\{\{[^}]*\b(github\.event\.|github\.head_ref|github\.ref_name|inputs\.)")
 SECRETS_WORD = re.compile(r"\bsecrets\b", re.I)  # GitHub resolves context names without regard to case
@@ -542,9 +555,15 @@ def as_text(node):
 # ---- the shell commands of a `run:` text (rule R13) --------------------------------------------------------------------------
 
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-SHELL_SKIP = frozenset(["!", "{", "}", "if", "then", "else", "elif", "while", "until", "do", "time"])  # words in front of a command
-REDIRECTION = re.compile(r"^(?:[0-9]*|&)(?:>>?|<)")  # a redirection in front of a command: `2>&1 go`, `> log make`
+SHELL_SKIP = frozenset(["!", "{", "}", "if", "then", "else", "elif", "while", "until", "do"])  # words in front of a command
+# a redirection in front of a command (`2>&1 go`, `> log make`, `<<< text bash`); the target may be a word of its own
+REDIRECTION = re.compile(r"^(?:[0-9]*|&)(?:<<<|<<-?|<>|>>|>&|<&|>\||>|<)")
+ARRAY_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=$")  # `tools=` in front of `(go node)`
 SHELLS = frozenset(["sh", "bash", "dash", "zsh", "ksh", "ash"])
+SHELL_OPTIONS_WITH_VALUE = frozenset(["-o", "+o", "-O", "+O", "--rcfile", "--init-file"])
+FIND_EXEC = frozenset(["-exec", "-execdir", "-ok", "-okdir"])
+# a shell that reads its script from standard input (`bash <<EOF`, `echo ... | sh`, `bash -s`, `. /dev/stdin`): its text is not in the run text
+STDIN_SHELL = "a shell that reads its script from standard input"
 # wrappers that start another command: the options that take a value, and the number of positional arguments in front of it
 WRAPPERS = {
     "env": (frozenset(["-u", "-C"]), 0),
@@ -558,6 +577,10 @@ WRAPPERS = {
     "xargs": (frozenset(["-I", "-L", "-n", "-P", "-s", "-d", "-E", "-a"]), 0),
     "stdbuf": (frozenset(["-i", "-o", "-e"]), 0),
     "setsid": (frozenset(), 0),
+    "time": (frozenset(["-f", "-o", "--format", "--output"]), 0),
+    "builtin": (frozenset(), 0),
+    "coproc": (frozenset(), 0),
+    "doas": (frozenset(["-u", "-C", "-a"]), 0),
 }
 
 
@@ -586,25 +609,88 @@ def matching_paren(text, i):
     return len(text)
 
 
+def skip_blank(text, i):
+    """The index of the next character that is no white space and not part of a comment line."""
+    n = len(text)
+    while i < n:
+        if text[i] in " \t\n":
+            i += 1
+        elif text[i] == "#":
+            while i < n and text[i] != "\n":
+                i += 1
+        else:
+            break
+    return i
+
+
+def end_of_case_pattern(text, i):
+    """The index just behind the `)` that ends the pattern list of a `case` clause that starts at text[i]."""
+    n = len(text)
+    if text[i:i + 1] == "(":
+        i += 1
+    depth = 0
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "'":
+            j = text.find("'", i + 1)
+            i = (j if j >= 0 else n) + 1
+            continue
+        if c == '"':
+            i += 1
+            while i < n and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+            i += 1
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            if depth == 0:
+                return i + 1
+            depth -= 1
+        i += 1
+    return n
+
+
+def is_case_header(words):
+    """True for `case WORD in` (behind reserved words such as `then`)."""
+    k = 0
+    while k < len(words) and words[k] in SHELL_SKIP:
+        k += 1
+    return len(words) == k + 3 and words[k] == "case" and words[k + 2] == "in"
+
+
 def shell_commands(text, depth=0):
     """The simple commands of a shell script as [(words, line offset)]: quotes removed, a command ends at a newline, `;`, `&`,
-    `|`, `&&`, `||` or a parenthesis. Comments, the bodies of here-documents and the text of quotes are no commands; the text of
-    a command substitution (`$(...)` and backticks) is scanned as well."""
+    `|`, `&&`, `||` or a parenthesis. Comments, the bodies of here-documents, the text of quotes, the patterns of a `case`
+    clause and the members of an array assignment (`tools=(go node)`) are no commands; the text of a command substitution
+    (`$(...)` and backticks) is scanned as well."""
     cmds, words, cur = [], [], None
     here = []  # delimiters of the here-documents that start on the current line
     cmd_line = 0
+    case_depth = 0  # the number of open `case` commands
+    patterns = False  # the next text is the pattern list of a case clause
     i, n = 0, len(text)
 
     def end_word():
-        nonlocal cur
+        nonlocal cur, case_depth, patterns
         if cur is not None:
             words.append(cur)
             cur = None
+            if is_case_header(words):
+                cmds.append((list(words), cmd_line))
+                del words[:]
+                case_depth += 1
+                patterns = True
 
     def end_command():
-        nonlocal cmd_line
+        nonlocal cmd_line, case_depth
         end_word()
         if words:
+            if words[0] == "esac" and case_depth > 0:
+                case_depth -= 1
             cmds.append((list(words), cmd_line))
             del words[:]
 
@@ -622,6 +708,12 @@ def shell_commands(text, depth=0):
             cmds.extend((w, base + off) for w, off in shell_commands(inner, depth + 1))
 
     while i < n:
+        if patterns and cur is None and not words and not here:
+            patterns = False
+            j = skip_blank(text, i)
+            if not (text.startswith("esac", j) and text[j + 4:j + 5] in ("", " ", "\t", "\n", ";", "&", "|", "(", ")")):
+                i = end_of_case_pattern(text, j)
+                continue
         c = text[i]
         if c == "\\":
             if text[i + 1:i + 2] == "\n":
@@ -692,6 +784,15 @@ def shell_commands(text, depth=0):
         elif c == "&" and ((cur or "")[-1:] in ("<", ">") or text[i + 1:i + 2] == ">"):
             add(c)  # a redirection: 2>&1, &>file
             i += 1
+        elif c == ";" and case_depth > 0 and text[i + 1:i + 2] in (";", "&"):  # the end of a case clause: `;;`, `;&`, `;;&`
+            end_command()
+            i += 3 if text.startswith(";;&", i) else 2
+            patterns = True
+        elif c == "(" and cur is not None and ARRAY_ASSIGNMENT.match(cur):  # tools=(go node): the members are words
+            end = matching_paren(text, i + 1)
+            substitution("echo " + text[i + 1:end - 1].replace("\n", "\necho "))
+            i = end
+            add("x")
         elif c in ";&|()":
             end_command()
             i += 1
@@ -713,7 +814,8 @@ def shell_commands(text, depth=0):
 
 def command_word(words):
     """The words of the command that starts a simple command, without assignments (FOO=1), reserved words (`then`) and
-    wrappers (`sudo`, `env`, `timeout 5`); None when it starts none (`command -v go` only looks a program up)."""
+    wrappers (`sudo`, `env`, `time -p`, `timeout 5`; `env -S 'go build'` is split into words); None when it starts none
+    (`command -v go` only looks a program up)."""
     i = 0
     while i < len(words):
         w = words[i]
@@ -724,11 +826,12 @@ def command_word(words):
         if redirection:
             i += 2 if redirection.end() == len(w) else 1  # the target of a lone `>` is the next word
             continue
-        wrapper = WRAPPERS.get(w.rsplit("/", 1)[-1])
+        base = w.rsplit("/", 1)[-1]
+        wrapper = WRAPPERS.get(base)
         if wrapper is None:
             return words[i:]
         with_value, positional = wrapper
-        if w.rsplit("/", 1)[-1] == "command" and any(x in ("-v", "-V") for x in words[i + 1:i + 3]):
+        if base == "command" and any(x in ("-v", "-V") for x in words[i + 1:i + 3]):
             return None
         i += 1
         while i < len(words):
@@ -736,6 +839,18 @@ def command_word(words):
             if x == "--":
                 i += 1
                 break
+            if base == "env" and (x.startswith("-S") or x.startswith("--split-string")):
+                if x.startswith("--split-string="):
+                    value, used = x.split("=", 1)[1], 1
+                elif x in ("-S", "--split-string"):
+                    value, used = (words[i + 1] if i + 1 < len(words) else ""), 2
+                else:
+                    value, used = x[2:], 1
+                try:
+                    split = shlex.split(value)
+                except ValueError:
+                    split = value.split()
+                return command_word(split + words[i + used:])
             if ASSIGNMENT.match(x):
                 i += 1
             elif x.startswith("-") and len(x) > 1:
@@ -746,23 +861,66 @@ def command_word(words):
     return None
 
 
+def shell_script_source(args):
+    """How a shell that is started with `args` gets its script: ("c", text) for `-c text`, ("file", None) for a file operand
+    and ("stdin", None) when there is neither (or `-s`)."""
+    has_s, k = False, 0
+    while k < len(args):
+        x = args[k]
+        redirection = REDIRECTION.match(x)
+        if redirection:
+            k += 2 if redirection.end() == len(x) else 1
+        elif x == "--":
+            k += 1
+            break
+        elif x in SHELL_OPTIONS_WITH_VALUE:
+            k += 2
+        elif x[:1] in ("-", "+") and len(x) > 1:
+            if x[0] == "-" and not x.startswith("--") and "c" in x[1:]:
+                return ("c", args[k + 1]) if k + 1 < len(args) else ("file", None)
+            has_s = has_s or (x[0] == "-" and not x.startswith("--") and "s" in x[1:])
+            k += 1
+        else:
+            break
+    while k < len(args) and REDIRECTION.match(args[k]):  # redirections behind `--` are no operands
+        k += 2 if REDIRECTION.match(args[k]).end() == len(args[k]) else 1
+    return ("stdin", None) if has_s or k >= len(args) else ("file", None)
+
+
+def programs_of_words(words, depth):
+    """The names of the programs that one simple command starts: the command itself and what it runs through `sh -c '...'`,
+    `eval` and `find -exec`. The name is the last component of the path."""
+    rest = command_word(words)
+    if not rest:
+        return []
+    name = rest[0].rsplit("/", 1)[-1]
+    found = []
+    if name in SHELLS and depth < 4:
+        kind, script = shell_script_source(rest[1:])
+        if kind == "c":
+            found.extend(p for p, _ in started_programs(script, depth + 1))
+        elif kind == "stdin":
+            found.append(STDIN_SHELL)
+    elif name in ("source", ".") and any(x.startswith(("/dev/", "/proc/")) for x in rest[1:]):
+        found.append(STDIN_SHELL)
+    elif name == "eval" and depth < 4:
+        found.extend(p for p, _ in started_programs(" ".join(rest[1:]), depth + 1))
+    elif name == "find" and depth < 4:
+        for k, x in enumerate(rest):
+            if x in FIND_EXEC:
+                end = next((j for j in range(k + 1, len(rest)) if rest[j] in (";", "+")), len(rest))
+                found.extend(programs_of_words(rest[k + 1:end], depth + 1))
+    found.append(name)
+    return found
+
+
 def started_programs(text, depth=0):
     """[(program name, line offset)] of every command that the shell script starts: the first word of each simple command, also
-    behind a wrapper and inside `sh -c '...'` and `eval`. The name is the last component of the path."""
+    behind a wrapper and inside `sh -c '...'`, `eval` and `find -exec`. The name is the last component of the path. A shell
+    that reads its script from standard input is reported as STDIN_SHELL."""
     found = []
     for words, offset in shell_commands(text):
-        rest = command_word(words)
-        if not rest:
-            continue
-        name = rest[0].rsplit("/", 1)[-1]
-        if name in SHELLS and depth < 4:
-            for k, x in enumerate(rest[1:], 1):
-                if x.startswith("-") and not x.startswith("--") and "c" in x[1:] and k + 1 < len(rest):
-                    found.extend((p, offset) for p, _ in started_programs(rest[k + 1], depth + 1))
-                    break
-        elif name == "eval" and depth < 4:
-            found.extend((p, offset) for p, _ in started_programs(" ".join(rest[1:]), depth + 1))
-        found.append((name, offset))
+        found.extend((program, offset) for program in programs_of_words(words, depth))
     return found
 
 
@@ -1360,6 +1518,9 @@ class Checker:
             self.add(path, line, "R13", msg)
 
         self.release_triggers(top, add)
+        shell = self.default_shell(top.get("defaults"))
+        if shell is not None and not self.plain_shell(shell):
+            add(shell.line, "defaults: run: shell: must be bash or sh (a script interpreter would read the run text as its own language)")
         jobs = self.job_list(path, "R13", top)
         info = {}
         for job, body in jobs.items():
@@ -1381,6 +1542,17 @@ class Checker:
                 add(data["line"], "job %s: it must need the job guard (directly or through another job)" % job)
             if data["privileged"] and not data["release"] and not any(info[n]["release"] for n in needs):
                 add(data["line"], "job %s (%s): it must run after a job that uses environment release (needs:), so that the approval gates it" % (job, data["privileged"]))
+
+    @staticmethod
+    def default_shell(defaults):
+        """The node of `defaults: run: shell:` (None when there is none)."""
+        return ((as_map((as_map(defaults) or {}).get("run")) or {}).get("shell"))
+
+    @staticmethod
+    def plain_shell(node):
+        """True when a `shell:` value starts a POSIX shell that reads the run text as shell commands: bash or sh."""
+        words = (as_text(node) or "").split()
+        return bool(words) and words[0] in RELEASE_SHELLS
 
     def release_triggers(self, top, add):
         node = top.get("on")
@@ -1408,6 +1580,12 @@ class Checker:
         for key in ("uses",):
             if key in body:
                 add(body[key].line, "job %s: a job that calls a workflow is not allowed (it could restore a cache or hold a secret)" % job)
+        # a job that runs although its needs: failed, and a failure that does not stop the job
+        node = body.get("if")
+        if node is not None and (as_text(node) is None or STATUS_FUNCTION.search(as_text(node))):
+            add(node.line, "job %s: 'if:' must not test the status of other jobs (always(), failure(), cancelled(), success()): the job would run although a job in needs: failed or was not approved" % job)
+        if "continue-on-error" in body and as_text(body["continue-on-error"]) != "false":
+            add(body["continue-on-error"].line, "job %s: 'continue-on-error' lets a failed job count as passed, so that needs: does not gate the jobs behind it" % job)
         # needs
         needs = set()
         node = body.get("needs")
@@ -1443,6 +1621,9 @@ class Checker:
         if release:
             reasons.append("environment")
         privileged = ", ".join(reasons)
+        job_shell = self.default_shell(body.get("defaults"))
+        if privileged and job_shell is not None and not self.plain_shell(job_shell):
+            add(job_shell.line, "job %s (%s): defaults: run: shell: must be bash or sh (a script interpreter would read the run text as its own language)" % (job, privileged))
         for step in self.step_list(path, "R13", job, body):
             self.release_step(job, step, privileged, line, add)
         return {"line": line, "needs": needs, "release": release, "privileged": privileged}
@@ -1462,15 +1643,21 @@ class Checker:
             add(where, "job %s: actions/setup-go caches by default: set 'cache: false'" % job)
         if name == "actions/setup-node" and as_text(options.get("package-manager-cache")) != "false":
             add(where, "job %s: actions/setup-node caches by default: set 'package-manager-cache: false'" % job)
+        if "continue-on-error" in step and as_text(step["continue-on-error"]) != "false":
+            add(step["continue-on-error"].line, "job %s: 'continue-on-error' lets a failed step count as passed, so that a check (the tag guard, a verification) cannot stop the workflow" % job)
         if not privileged:
             return
+        if "shell" in step and not self.plain_shell(step["shell"]):
+            add(step["shell"].line, "job %s (%s): shell: must be bash or sh (a script interpreter would read the run text as its own language)" % (job, privileged))
         if name in ("actions/setup-go", "actions/setup-node"):
             add(where, "job %s (%s): %s must not run in a job with these privileges (build code runs only in jobs with contents: read)" % (job, privileged, name))
         script = step.get("run")
         if script is not None and as_text(script) is not None:
             base = script.line + (1 if isinstance(script.v, Block) else 0)
             for program, offset in started_programs(script.v):
-                if program in RELEASE_FORBIDDEN_COMMANDS:
+                if program == STDIN_SHELL:
+                    add(base + offset, "job %s (%s): %s: the check cannot read it (write the commands into the run text or call a script)" % (job, privileged, program))
+                elif program in RELEASE_FORBIDDEN_COMMANDS:
                     add(base + offset, "job %s (%s): the command %s must not run in a job with these privileges (build code runs only in jobs with contents: read)" % (job, privileged, program))
 
     # ---- repository level -------------------------------------------------------------------------------------
