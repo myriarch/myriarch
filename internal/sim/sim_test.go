@@ -442,11 +442,18 @@ func TestSimRealDownloadVerifiesSHA256(t *testing.T) {
 	}
 	// wrong hash -> INSTALL_FAILED, version unchanged
 	f.pushOffer(mk(sha256Bytes([]byte("wrong"))))
-	eventually(t, 20*time.Second, func() bool { return r.Stats().UpdatesFailed == 3 }, "hash mismatch detected")
+	// The counter moves before the INSTALL_FAILED status reaches the server, so wait for the server to hold the
+	// failure of every updater instead of for the counter.
+	eventually(t, 20*time.Second, func() bool {
+		return f.count(func(a *fakeAgent) bool {
+			s := a.pkgStatus[""]
+			return a.ident["service.name"] == "myriarch-updater" && s != nil &&
+				s.Status == protobufs.PackageStatusEnum_PackageStatusEnum_InstallFailed &&
+				strings.Contains(s.ErrorMessage, "SHA-256 mismatch")
+		}) == 3
+	}, "every updater reports INSTALL_FAILED with a SHA-256 mismatch")
+	assert.Equal(t, int64(3), r.Stats().UpdatesFailed)
 	for _, c := range r.Collectors() {
-		if c.updater != nil {
-			assert.Contains(t, f.get(c.updater.uid).pkgStatus[""].ErrorMessage, "SHA-256 mismatch")
-		}
 		assert.NotEqual(t, "0.163.0", c.Version())
 	}
 
@@ -637,7 +644,9 @@ func TestSimInterruptedApplyIsNotReplayedAfterReconnect(t *testing.T) {
 		return f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, []byte("h1"))
 	}, "the reconnected agent reports the config it runs instead of the interrupted apply")
 
-	// The timer of the interrupted apply would fire now; its epoch is gone, so it must not take effect.
+	// The timer of the interrupted apply would fire now; its epoch is gone, so it must not take effect. The test runs
+	// what the timer closure runs (finishApply with the epoch and generation captured when the apply started); it
+	// does not cover a regression of the closure itself, which captures both values when it is created.
 	c.finishApply(staleEpoch, staleGen, []byte("h2"), []byte("a: c\n"), "", false)
 	st := c.State()
 	assert.Equal(t, "6831", st.RemoteConfig, "the interrupted apply did not become the running config (hex of h1)")
@@ -801,9 +810,20 @@ func TestSimUpgradeReportsTheRealStartupSequenceAndReconnects(t *testing.T) {
 	}, "healthy with the new version")
 	f.with(c.uid, func(a *fakeAgent) {
 		assert.Greater(t, a.disconnects, discBefore, "the upgrade drops the connection and reconnects")
-		n := len(a.healthLog)
-		require.GreaterOrEqual(t, n, 3)
-		assert.Equal(t, []string{"", "StatusStarting", "StatusOK"}, a.healthLog[n-3:], "boot sequence of the new process")
+		// The boot sequence of the new process is what follows the stop of the old one. Its first report (healthy:
+		// false, no status yet) is the health the client sends on connect; when the connect is slow (a loaded
+		// runner), the starting phase has begun already and the client sends that instead.
+		boot := a.healthLog
+		for i := len(boot) - 1; i >= 0; i-- {
+			if boot[i] == "StatusStopping" {
+				boot = boot[i+1:]
+				break
+			}
+		}
+		if len(boot) > 0 && boot[0] == "" {
+			boot = boot[1:]
+		}
+		assert.Equal(t, []string{"StatusStarting", "StatusOK"}, boot, "boot sequence of the new process: %q", a.healthLog)
 	})
 }
 
