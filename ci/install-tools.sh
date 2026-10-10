@@ -8,8 +8,9 @@
 #   ci/install-tools.sh apt:osslsigncode apt:python3
 #
 # Go tools are built from ci/tools/<tool>/ (go.mod + go.sum in the repository) through the configured GOPROXY (no
-# downloads from GitHub needed); the versions are in ci/versions.env. A stamp per tool and version prevents rebuilds
-# from the cache. Debian packages (apt:<package>) come from the package sources configured in the image or the
+# downloads from GitHub needed); the versions are in ci/versions.env. A stamp per tool, version and content of its go.mod and
+# go.sum (go_tool_stamp in ci/lib.sh) prevents rebuilds from the cache: a changed module file rebuilds the tool, also when an
+# older tool cache was restored. Debian packages (apt:<package>) come from the package sources configured in the image or the
 # environment (apt honors http_proxy/https_proxy).
 set -euo pipefail
 # shellcheck source=ci/lib.sh
@@ -34,13 +35,15 @@ go_install() { # tool module-with-cmd version-var binary-name [no-trimpath] [mai
     toolchain="go$(awk '$1 == "go" { print $2; exit }' "${ROOT}/go.mod")"
     suffix="-${toolchain}"
   fi
-  local stamp="${TOOLS_BIN}/.stamp-${tool}-${version}${suffix}"
+  # The stamp names the content of the module files as well as the version. A tool cache that is restored under a new cache key
+  # (restore-keys in .github/actions/setup) can hold the binary of the same version built from older requirements.
+  local stamp
+  stamp="${TOOLS_BIN}/$(go_tool_stamp "${tool}" "${version}" "${suffix}")"
   if [ "${TOOLS_NO_CACHE:-0}" != 1 ] && [ -x "${TOOLS_BIN}/${bin}" ] && [ -f "${stamp}" ]; then
     log "${tool} ${version}: from the cache"
     return 0
   fi
   need_cmd go
-  [ -f "${CI_DIR}/tools/${tool}/go.sum" ] || die "ci/tools/${tool}/go.sum is missing (ci/tools/update.sh ${tool})"
   log "building ${tool} ${version} (ci/tools/${tool}, go build -mod=readonly)"
   ( cd "${CI_DIR}/tools/${tool}" && GOBIN="" GOFLAGS=-mod=readonly GOTOOLCHAIN="${toolchain}" CGO_ENABLED=0 go build ${trim} -o "${TOOLS_BIN}/${bin}" "${module}" ) \
     || die "go build ${module} (ci/tools/${tool}) failed (GOPROXY/HTTPS_PROXY set? go.sum up to date?)"
