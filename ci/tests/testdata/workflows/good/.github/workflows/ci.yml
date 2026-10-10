@@ -49,6 +49,37 @@ jobs:
         run: |
           echo "no secrets here"
           gh --version
+  manifest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # The word secrets followed by a colon is text, not a key of the workflow, inside a script, a folded text, a string and
+      # a quoted title.
+      - name: "Write the manifests, secrets: none"
+        env:
+          SAMPLE: '{"secrets": []}'
+          NOTE: "first line
+            secrets: none
+            last line"
+        run: |
+          cat > compose.yml <<'EOF'
+          services:
+            app:
+              image: example.test/app:1
+              secrets:
+                - token
+          secrets:
+            token:
+              file: ./token.txt
+          EOF
+          echo '{"secrets": []}' > config.json
+          printf '%s\n' "${SAMPLE} ${NOTE}"
+      - name: Folded text
+        uses: ./.github/actions/setup
+        with:
+          tools: >
+            secrets: none,
+            {"secrets": 1}
   deploy:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

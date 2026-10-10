@@ -1,0 +1,18 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+name: release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Publish
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: ./publish.sh

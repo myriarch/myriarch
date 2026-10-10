@@ -1,3 +1,4 @@
 .github/workflows/ci.yml:31: R10: a secrets: key (secrets: inherit, the secrets of a reusable workflow call or of a workflow_call trigger) is forbidden
 .github/workflows/ci.yml:34: R10: a secrets: key (secrets: inherit, the secrets of a reusable workflow call or of a workflow_call trigger) is forbidden
 .github/workflows/ci.yml:35: R10: a secrets: key (secrets: inherit, the secrets of a reusable workflow call or of a workflow_call trigger) is forbidden
+.github/workflows/ci.yml:39: R10: a secrets: key (secrets: inherit, the secrets of a reusable workflow call or of a workflow_call trigger) is forbidden

@@ -334,7 +334,9 @@ The Windows and macOS runners are the only place where `go test` runs on those s
 ### Security rules of the workflows
 
 The rules are enforced by `ci/check-workflows.py` (part of the `workflows` gate) and recorded in
-[ADR-0032](adr/0032-continuous-integration-on-github-actions.md):
+[ADR-0032](adr/0032-continuous-integration-on-github-actions.md). The check reads the workflow files in `.github/workflows`
+and the local actions below `.github/actions` (`action.yml`), each with the extension `.yml` or `.yaml` because GitHub reads
+both, so a rule does not depend on how a file is named:
 
 - **Only GitHub-owned actions** (`actions/*`, `github/*`), each pinned to a full commit SHA with the release in a comment:
   `uses: actions/checkout@<40 hex> # v7.0.1`. The same action has the same pin everywhere. Everything else comes from the
@@ -348,9 +350,11 @@ The rules are enforced by `ci/check-workflows.py` (part of the `workflows` gate)
   the environment apply before the job starts), and the expression is the whole value of a key in the `env:` of the job or of
   one of its steps (`KEY: ${{ secrets.NAME }}`). Everything else fails, also inside a listed job: a secret in `run:` text,
   `with:`, `if:`, the workflow-level `env:`, a flow mapping or a block scalar, in index syntax (`secrets['NAME']`) or as the
-  argument of a function (`toJSON(secrets)`), and every `secrets:` key (`secrets: inherit`). A line of the list whose workflow
-  file, job or secret is gone, a malformed line and a duplicate line fail too. `github.token` is not a secret in this sense:
-  use it (not `secrets.GITHUB_TOKEN`) when a step needs the token of the job.
+  argument of a function (`toJSON(secrets)`), and every `secrets:` key (`secrets: inherit`, also in a flow mapping that
+  spans lines). The same words inside a `run:` script, another block scalar or a quoted string are text and no key, so a
+  step may write a manifest that contains `secrets:`. A line of the list whose workflow file, job or secret is gone, a
+  malformed line and a duplicate line fail too. `github.token` is not a secret in this sense: use it (not
+  `secrets.GITHUB_TOKEN`) when a step needs the token of the job.
 - **Toolchains from the repository**: `go-version-file: go.mod` and `node-version-file: .node-version`, never a literal version.
 - **Caches** come from `actions/cache` and the `setup-*` actions only. A cache written by a pull request is not restored on `main`.
   A release workflow must not use caches (`TOOLS_NO_CACHE=1`).

@@ -33,3 +33,7 @@ jobs:
     uses: ./.github/workflows/reusable.yml
     "secrets": inherit
   call-flow: { uses: ./.github/workflows/reusable.yml, secrets: inherit }
+  call-pair:
+    uses: ./.github/workflows/reusable.yml
+    # an entry of a flow sequence may be a one-pair mapping: [ secrets: inherit ] is [ { secrets: inherit } ]
+    with: [ secrets: inherit ]

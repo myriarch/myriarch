@@ -393,8 +393,10 @@ guidance after each item names what to do.
   of one of its steps. `ci/check-workflows.py` rejects every other way to reach a secret, also inside a listed job (`run:`
   text, `with:`, `if:`, the workflow-level `env:`, index syntax, `toJSON(secrets)`, `secrets: inherit`), and a stale,
   malformed or duplicate line of the list. A line is reviewed like a new privilege: which secret, why the job needs it and
-  which environment protects it. Fork pull requests receive no secrets. Residual risk: the check sees that a job declares
-  an environment, not where the secret is defined, and it reads the text of a workflow, not the parsed YAML.
+  which environment protects it. Fork pull requests receive no secrets. The check reads every workflow file in
+  `.github/workflows` and every action file below `.github/actions` with the extension `.yml` or `.yaml` (hidden names and
+  upper-case spellings included), so the name of a file is no way around it. Residual risk: the check sees that a job
+  declares an environment, not where the secret is defined, and it reads the text of a workflow, not the parsed YAML.
 - **Release pipeline controls are pending.** Protected release environments, signing jobs without caches, SBOM and
   provenance attestations and a verification step before publishing belong to the release workflow, which does not
   exist yet. No release has been published.

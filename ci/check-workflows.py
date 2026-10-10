@@ -6,10 +6,12 @@
 
     python3 -I ci/check-workflows.py [--root DIR] [--remote]
 
-Scope: <root>/.github/workflows/*.yml and <root>/.github/actions/**/action.yml (root defaults to the repository).
-The check is line based (standard library only, Python 3.9 compatible) and relies on the layout that actionlint
-accepts: two-space indentation, one key per line. It prints one line per finding, "<file>:<line>: <rule>: <message>",
-and exits with 1 when there is a finding, 2 on a usage error and 0 otherwise.
+Scope: the workflow files in <root>/.github/workflows and the action files below <root>/.github/actions (root defaults
+to the repository). GitHub runs a workflow with the extension .yml or .yaml and reads a local action from action.yml or
+action.yaml, so the check reads both spellings (in any letter case, hidden names included). The check is line based
+(standard library only, Python 3.9 compatible) and relies on the layout that actionlint accepts: two-space indentation,
+one key per line. It prints one line per finding, "<file>:<line>: <rule>: <message>", and exits with 1 when there is a
+finding, 2 on a usage error and 0 otherwise.
 
 Rules
   R1  `uses:` is a local path (./...) or an action of the owners actions or github, pinned to a full commit SHA with
@@ -35,11 +37,13 @@ Rules
       fails, also inside a listed job: a secrets expression in `run:` text, `with:`, `if:`, the workflow-level `env:`, the
       `env:` of a service or container, concatenated with other text, in a flow mapping or a block scalar, in index syntax
       (`secrets['NAME']`), as the argument of a function (`toJSON(secrets)`), in any letter case, and a `secrets:` key
-      (`secrets: inherit`, the mapping of a reusable workflow call). A stale line of the list (no such workflow file or
-      job, or a job that does not read the secret), a malformed line and a duplicate line fail too. `github.token` is not
-      a secrets expression and needs no entry (`${{ secrets.GITHUB_TOKEN }}` is one: write `github.token`). The rule
-      reads the text of the file: a YAML alias (`*name`) in a workflow with a secrets expression fails, because it could
-      copy the secret into a job that is not listed, and YAML escapes that change what an expression is are out of reach.
+      (`secrets: inherit`, the mapping of a reusable workflow call), also in a flow mapping that spans lines. A key is
+      looked for where YAML puts keys: the word in the text of a block scalar (a `run:` script that writes a manifest with
+      `secrets:`) or of a quoted scalar is no key. A stale line of the list (no such workflow file or job, or a job that
+      does not read the secret), a malformed line and a duplicate line fail too. `github.token` is not a secrets
+      expression and needs no entry (`${{ secrets.GITHUB_TOKEN }}` is one: write `github.token`). The rule reads the text
+      of the file: a YAML alias (`*name`) in a workflow with a secrets expression fails, because it could copy the secret
+      into a job that is not listed, and YAML escapes that change what an expression is are out of reach.
   R11 A workflow that has both `workflow_call` and `schedule` triggers: inside a called workflow `github.event_name` is the
       event of the caller, so an `if:` that tests `github.event_name == 'schedule'` must also test `inputs.<name> == ''`
       (true only for the workflow's own schedule run).
@@ -52,7 +56,6 @@ The environment variable CHECK_WORKFLOWS_GATES (space-separated) replaces the ou
 """
 
 import bisect
-import glob
 import os
 import re
 import subprocess
@@ -67,12 +70,15 @@ PINNED = re.compile(r"^(actions|github)/([A-Za-z0-9._-]+)(/[A-Za-z0-9._/-]+)?@([
 VERSION_COMMENT = re.compile(r"^#\s*(v\d+\.\d+\.\d+)\s*$")
 EXPR_UNSAFE = re.compile(r"\$\{\{[^}]*\b(github\.event\.|github\.head_ref|github\.ref_name|inputs\.)")
 SECRETS_WORD = re.compile(r"\bsecrets\b", re.I)  # GitHub resolves context names without regard to case
-SECRETS_KEY = re.compile(r"""(?:^\s*(?:-\s+)*|[{,]\s*)["']?secrets["']?\s*:""", re.I)  # also in a flow mapping
+# a `secrets:` key at the start of a line or inside a flow collection (an entry of a flow sequence may be a one-pair mapping)
+SECRETS_KEY = re.compile(r"""(?:^\s*(?:-\s+)*|[\[{,]\s*)["']?secrets["']?\s*:""", re.I)
 SECRETS_ENTRY = re.compile(r"^ *[A-Za-z_][A-Za-z0-9_]*: +(\$\{\{ *secrets\.([A-Za-z_][A-Za-z0-9_]*) *\}\})(?:[ \t]+#.*|[ \t]*)$")
 MAPPING_KEY = re.compile(r"""^(?:([A-Za-z0-9_][A-Za-z0-9_-]*)|"([^"]*)"|'([^']*)') *:(?: +(.*)|$)""")
 BLOCK_SCALAR = re.compile(r"^[|>](?:[-+][0-9]?|[0-9][-+]?)? *(?:#.*)?$")
 NODE_PROPERTIES = re.compile(r"^(?:[&!]\S*(?: +|$))+")  # anchors and tags in front of a value
-ALLOW_WORKFLOW = re.compile(r"^[A-Za-z0-9._-]+\.yml$")
+ALLOW_WORKFLOW = re.compile(r"^[A-Za-z0-9._-]+\.ya?ml$", re.I)
+WORKFLOW_FILE = re.compile(r"\.ya?ml$", re.I)  # a file below .github/workflows that GitHub runs as a workflow
+ACTION_FILE = re.compile(r"^action\.ya?ml$", re.I)  # the metadata file of a local action
 ALLOW_JOB = re.compile(r"^[A-Za-z0-9_-]+$")
 ALLOW_SECRET = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 TRIGGER_KEY = re.compile(r"^\s*(pull_request_target|workflow_run)\s*:")
@@ -123,8 +129,9 @@ def expressions(text):
 
 
 def scan_flow(text, depth, quote):
-    """Follow the brackets and quotes of a flow collection or a quoted scalar through one more line. Returns the new
-    (depth, quote); (0, "") means that the collection or the scalar is closed."""
+    """Follow the brackets and quotes of a flow collection or a quoted scalar through one more line. Returns (depth, quote,
+    end): the new state, where (0, "") means that the collection or the scalar is closed, and the offset in `text` at which
+    the scan stopped: its end, the place just behind the closing bracket or quote, or the `#` that starts a comment."""
     i = 0
     while i < len(text):
         c = text[i]
@@ -147,7 +154,7 @@ def scan_flow(text, depth, quote):
         i += 1
         if depth == 0 and not quote:
             break  # what follows the closing bracket or quote is a comment
-    return depth, quote
+    return depth, quote, min(i, len(text))
 
 
 def pop_parents(stack, indent, is_item):
@@ -183,6 +190,18 @@ def jobs_with_environment(where):
         elif len(anc) == 3 and anc[2] == "environment" and key == "name" and scalar_text(value):
             found.add(anc[1])
     return found
+
+
+def find_files(directory, name, recursive=False):
+    """The sorted paths of the files in `directory` (and below it, with `recursive`) whose name matches the pattern `name`.
+    Names that begin with a dot count, and so do directories that do: GitHub reads them as well. A link that leads nowhere
+    (the lock file `.#ci.yml` of an editor) is no file."""
+    found = []
+    for dirpath, _, filenames in os.walk(directory, followlinks=recursive):
+        found += [p for p in (os.path.join(dirpath, n) for n in filenames if name.search(n)) if os.path.isfile(p)]
+        if not recursive:
+            break
+    return sorted(found)
 
 
 class Checker:
@@ -427,14 +446,18 @@ class Checker:
     def structure(self, lines):
         """Where every line stands in the block structure of the file (two-space indentation, one key per line).
 
-        Returns (where, code). where[i] is None for a line that is not part of the structure (blank, comment, the content of a
-        block scalar, the continuation of a quoted scalar or of a flow collection) and otherwise (ancestors, key, value): the
-        keys above the line ('-' stands for a list item, for example ('jobs', 'deploy', 'steps', '-', 'env')), the key of the
-        line and the text after its colon. code[i] is the text of the line that can hold an expression: empty for a blank line
-        or a comment, and without the trailing comment where the value is a plain scalar (the one case in which `#` surely
-        starts a comment; the content of a block scalar or a quoted scalar is code as a whole)."""
+        Returns (where, code, keys). where[i] is None for a line that is not part of the structure (blank, comment, the content
+        of a block scalar, the continuation of a quoted scalar or of a flow collection) and otherwise (ancestors, key, value):
+        the keys above the line ('-' stands for a list item, for example ('jobs', 'deploy', 'steps', '-', 'env')), the key of
+        the line and the text after its colon. code[i] is the text of the line that can hold an expression: empty for a blank
+        line or a comment, and without the trailing comment where the value is a plain scalar (the one case in which `#` surely
+        starts a comment; the content of a block scalar or a quoted scalar is code as a whole). keys[i] is the part of the line
+        in which a mapping key can stand: the text in front of the value of a structural line, that value too where it opens a
+        flow collection, and the lines of a flow collection up to its end. It is empty for the content of a block scalar (a
+        `run:` script) and of a quoted scalar, where text such as `secrets:` is no key."""
         where = [None] * len(lines)
         code = [""] * len(lines)
+        keys = [""] * len(lines)
         stack = []  # (indent, name) of the open parents: a key without a value of its own, or '-' for a list item
         block = None  # indent of the key whose block scalar is open
         flow = (0, "")  # open brackets and quote of a flow collection or quoted scalar that spans lines
@@ -442,7 +465,10 @@ class Checker:
             if line.strip() == "":
                 continue
             if flow != (0, ""):
-                flow = scan_flow(line, *flow)
+                depth, quote, end = scan_flow(line, *flow)
+                if flow[0] > 0:  # inside a flow collection, also when a string of it spans lines: keys can stand anywhere
+                    keys[i] = line[:end]
+                flow = (depth, quote)
                 code[i] = line
                 continue
             ind = indent_of(line)
@@ -468,6 +494,7 @@ class Checker:
                 raw = km.group(4) or ""
                 at += km.start(4) if km.group(4) is not None else km.end()
             value = NODE_PROPERTIES.sub("", raw.rstrip())
+            start = at + len(raw.rstrip()) - len(value)  # where the value starts in the line
             if value[:1] not in ("'", '"', "{", "[", "|", ">"):  # a plain scalar: ' #' starts a comment
                 comment = re.search(r"(?:^|\s)#", raw)
                 if comment:
@@ -486,18 +513,25 @@ class Checker:
                 if item is not None and BLOCK_SCALAR.match(value):
                     block = item
             where[i] = (ancestors, key, value)
+            # Where a key can stand: in front of the value, and in the value if it opens a flow collection (up to the end of
+            # its first line). A quoted or plain scalar holds no key. A line that is no `key: value` is read whole, to be safe.
             if value[:1] in ("'", '"', "{", "["):
-                flow = scan_flow(value, 0, "")
-        return where, code
+                depth, quote, end = scan_flow(value, 0, "")
+                flow = (depth, quote)
+                keys[i] = line[:start + (end if value[0] in "{[" else 0)]
+            else:
+                keys[i] = line[:start] if km else code[i]
+        return where, code, keys
 
     def rule_secrets(self, path, lines, is_workflow):
         wf = os.path.basename(path)
-        where, code = self.structure(lines)
+        where, code, keys = self.structure(lines)
         if is_workflow:
             self.job_ids[wf] = set(w[1] for w in where if w is not None and w[0] == ("jobs",) and w[1])
         declared = jobs_with_environment(where)
-        # `secrets:` keys: `secrets: inherit` or the mapping of a reusable workflow call
-        for i, row in enumerate(code):
+        # `secrets:` keys: `secrets: inherit` or the mapping of a reusable workflow call. They are looked for where a key can
+        # stand: the same words in a `run:` script, another block scalar or a quoted scalar are text.
+        for i, row in enumerate(keys):
             if SECRETS_KEY.search(row):
                 self.add(path, i + 1, "R10", "a secrets: key (secrets: inherit, the secrets of a reusable workflow call or of a workflow_call trigger) is forbidden")
         # expressions: found in the text of the whole file, because they may span lines
@@ -664,8 +698,8 @@ def main(argv):
             sys.stderr.write("usage: check-workflows.py [--root DIR] [--remote]\n")
             return 2
     wf_dir = os.path.join(root, ".github", "workflows")
-    workflows = sorted(glob.glob(os.path.join(wf_dir, "*.yml")))
-    actions = sorted(glob.glob(os.path.join(root, ".github", "actions", "**", "action.yml"), recursive=True))
+    workflows = find_files(wf_dir, WORKFLOW_FILE)
+    actions = find_files(os.path.join(root, ".github", "actions"), ACTION_FILE, recursive=True)
     if not workflows:
         sys.stderr.write("check-workflows: no workflow in %s\n" % wf_dir)
         return 2

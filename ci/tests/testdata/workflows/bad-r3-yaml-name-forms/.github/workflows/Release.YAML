@@ -1,0 +1,12 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+name: release
+on:
+  workflow_dispatch:
+jobs:
+  noop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - run: echo ok
