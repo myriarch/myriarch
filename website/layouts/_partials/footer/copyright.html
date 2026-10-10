@@ -1,0 +1,21 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+Override of the Docsy v0.18.0 partial layouts/_partials/footer/copyright.html (Apache-2.0, derived work; see website/overrides.txt).
+The footer states the copyright holder, the licenses of documentation and code, links to the privacy page and the third-party
+notices, and the trademark notice (wording of assets/brand/README.md, ADR-0016).
+*/ -}}
+<span class="td-footer__copyright">&copy; {{ .Site.Params.copyright }}</span>
+<span class="td-footer__legal">
+  <span aria-hidden="true">&middot;</span> Documentation <a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener">CC BY 4.0</a>
+  <span aria-hidden="true">&middot;</span> Code <a href="https://www.apache.org/licenses/LICENSE-2.0" rel="noopener">Apache-2.0</a>
+  {{ with site.GetPage "/legal/privacy" -}}
+  <span aria-hidden="true">&middot;</span> <a href="{{ .RelPermalink }}">Privacy</a>
+  {{ end -}}
+  {{ with site.GetPage "/legal/third-party" -}}
+  <span aria-hidden="true">&middot;</span> <a href="{{ .RelPermalink }}">Third-party notices</a>
+  {{ end -}}
+</span>
+<span class="td-footer__trademark">OpenTelemetry is a trademark of The Linux Foundation. Myriarch is not affiliated with or endorsed by The Linux Foundation.</span>

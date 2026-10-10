@@ -1,0 +1,12 @@
+name: edge-be-2001
+attributes:
+  service.name: otelcol-contrib
+  service.version: 0.160.0
+  os.type: windows
+  host.name: EDGE-2001-01
+  host.arch: amd64
+  site.type: edge
+  site.id: "2001"
+  site.country: BE
+  site.region: east
+  site.timezone: Europe/Brussels

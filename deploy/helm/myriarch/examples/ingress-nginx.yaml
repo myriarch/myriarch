@@ -1,0 +1,25 @@
+# Ingress variant: ingress-nginx (Kubernetes community controller, class "nginx").
+#
+#   helm upgrade --install myriarch <chart> -n myriarch \
+#     -f deploy/examples/production/myriarch-values.yaml -f deploy/helm/myriarch/examples/ingress-nginx.yaml
+#
+# NOTE ON THE STATE OF THE PROJECT: according to the Kubernetes project announcement of November 2025, ingress-nginx
+# is no longer maintained since March 2026 (no releases, no security fixes). This variant is meant only for existing
+# clusters that already run it; choose a maintained controller for new installations (check the current state at
+# https://github.com/kubernetes/ingress-nginx).
+#
+# This is also the configuration of myriarch-values.yaml; the file makes it explicit and sets the namespace of
+# the controller in the NetworkPolicy (ADJUST if it is named differently).
+ingress:
+  className: nginx
+  annotations:
+    # OpAMP connections are long-lived WebSockets: without long timeouts the controller drops them after 60 s.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+networkPolicy:
+  ingress:
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: ingress-nginx

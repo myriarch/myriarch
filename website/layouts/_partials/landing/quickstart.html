@@ -1,0 +1,25 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Quickstart (README.md, "Quickstart"). It will be replaced by the kind or Docker Compose quickstart when those exist.
+  The command block uses Hugo's highlighter, so that the theme's copy button works.
+*/ -}}
+{{ $q := hugo.Data.landing.quickstart -}}
+{{ $more := site.GetPage (path.Clean (strings.TrimSuffix ".md" $q.link)) -}}
+{{ if not $more }}{{ errorf "landing: the link %q of the quickstart names no page of the site" $q.link }}{{ end -}}
+<section class="landing-section landing-section--alt" id="quickstart" aria-labelledby="landing-quickstart-title">
+  <div class="landing-container landing-quickstart">
+    <div class="landing-quickstart__intro">
+      <h2 id="landing-quickstart-title" class="landing-h2">{{ $q.title }}</h2>
+      <p class="landing-lead">{{ $q.lead }}</p>
+      <p>{{ $q.after }}</p>
+      <p class="landing-warning"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <span>{{ $q.warning }}</span></p>
+      <p class="landing-more"><a href="{{ $more.RelPermalink }}">{{ $q.link_label }} <span aria-hidden="true">&rarr;</span></a></p>
+    </div>
+    <div class="landing-code">
+      {{ transform.Highlight (strings.TrimSpace $q.commands) "bash" "" }}
+    </div>
+  </div>
+</section>

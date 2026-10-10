@@ -1,0 +1,132 @@
+/*
+ * Copyright The Myriarch Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+:root {
+  --myr-nav-width: 252px;
+  --myr-header-height: 56px;
+  --myr-page-max-width: 1500px;
+  --myr-surface: var(--mantine-color-white);
+  --myr-surface-muted: var(--mantine-color-gray-0);
+  --myr-border: var(--mantine-color-gray-3);
+  --myr-text-dimmed: var(--mantine-color-gray-6);
+  --myr-track: var(--mantine-color-gray-2);
+}
+
+:root[data-mantine-color-scheme='dark'] {
+  --myr-surface: var(--mantine-color-dark-7);
+  --myr-surface-muted: var(--mantine-color-dark-8);
+  --myr-border: var(--mantine-color-dark-4);
+  --myr-text-dimmed: var(--mantine-color-dark-2);
+  --myr-track: var(--mantine-color-dark-5);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numbers in tables and tiles line up. */
+.myr-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.myr-mono {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 0.92em;
+}
+
+.myr-page {
+  width: 100%;
+  max-width: var(--myr-page-max-width);
+  margin-inline: auto;
+}
+
+.myr-surface-muted {
+  background: var(--myr-surface-muted);
+}
+
+a.myr-link {
+  color: inherit;
+  text-decoration: none;
+}
+a.myr-link:hover {
+  text-decoration: underline;
+}
+
+.myr-row-link {
+  cursor: pointer;
+}
+
+.myr-sticky-th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--myr-surface);
+  box-shadow: inset 0 -1px 0 var(--myr-border);
+}
+
+.myr-truncate {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.myr-scroll-x {
+  overflow-x: auto;
+}
+
+.myr-cm {
+  border: 1px solid var(--myr-border);
+  border-radius: var(--mantine-radius-md);
+  overflow: hidden;
+}
+.myr-cm .cm-editor {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 12.5px;
+}
+.myr-cm .cm-editor.cm-focused {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+.myr-skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 8px;
+  z-index: 1000;
+  padding: 8px 14px;
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-brand-6);
+  color: #fff;
+}
+.myr-skip-link:focus {
+  left: 8px;
+}
+
+.myr-stat-link:hover {
+  box-shadow: var(--mantine-shadow-md);
+  transform: translateY(-1px);
+}
+
+.myr-nowrap-table th,
+.myr-nowrap-table td {
+  white-space: nowrap;
+}
+.myr-nowrap-table .mantine-Badge-root {
+  max-width: none;
+}

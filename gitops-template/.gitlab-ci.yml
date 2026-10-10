@@ -1,0 +1,107 @@
+# GitLab CI of your GitOps repository (starter taken from gitops-template/). A GitHub Actions variant follows later.
+#
+# What the pipeline does
+#   validate      myrctl validate as myriarchd does it before accepting a state (+ check against the component list)
+#   render        renders the collector config for every sample agent (config/samples/agents) - reviewers see
+#                 in the merge request what changes for which host
+#   notify-myriarchd only on the default branch: triggers the sync in myriarchd through the webhook
+#
+# CI/CD variables (project: Settings -> CI/CD -> Variables)
+#   MYRCTL_IMAGE                  Image with myrctl (released with the code project; it must contain sh and curl).
+#                                   Default below; override with a project variable (project variables take precedence)
+#   MYRIARCH_URL                      https://fleet.example.com (only for notify-myriarchd; deliberately WITHOUT a default)
+#   MYRIARCH_GITOPS_WEBHOOK_SECRET    Webhook secret = content of gitops-webhook-secret in the myriarchd Secret.
+#                                   Masked + protected (only available on protected branches -> protect main!)
+#   MYRIARCH_CA_FILE                  optional, type "File": PEM of your CA if the myriarchd certificate was issued by it
+#                                   (the runner/image does not know it otherwise)
+#
+# Component list: ci/components-otelcol-contrib-0.162.0.json (copy from the code project, examples/sim/). When
+# you change the collector version, update the file and COMPONENTS below.
+# The list comes from a real deployment: myriarchd shows it per agent at /api/v1/agents/<id>/components.
+
+workflow:
+  rules:
+    # Merge request pipelines and pipelines on the default branch; no duplicate branch pipelines
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+stages: [validate, render, notify]
+
+variables:
+  MYRCTL_IMAGE: registry.example.com/myriarch/myrctl:0.1.0
+  CONFIG_DIR: config
+  COMPONENTS: ci/components-otelcol-contrib-0.162.0.json
+
+default:
+  image:
+    name: ${MYRCTL_IMAGE}
+    entrypoint: [""]          # the myrctl image has no mandatory entrypoint; GitLab starts its scripts with it
+  interruptible: true
+
+validate:
+  stage: validate
+  script:
+    - myrctl version
+    - mkdir -p reports
+    - |
+      rc=0
+      # machine-readable (artifact, also on failure) ...
+      myrctl validate "$CONFIG_DIR" --strict --components "$COMPONENTS" --output json > reports/validate.json || rc=$?
+      # ... and readable in the job log. --strict: warnings (for example sample_unassigned, unused_component) are errors too.
+      myrctl validate "$CONFIG_DIR" --strict --components "$COMPONENTS" || rc=$?
+      exit "$rc"
+  artifacts:
+    when: always
+    paths: [reports/]
+    expire_in: 14 days
+
+render:
+  stage: render
+  needs: [validate]
+  script:
+    - mkdir -p rendered
+    - |
+      # file name of a sample agent = field "name"
+      for s in "$CONFIG_DIR"/samples/agents/*.yaml; do
+        n=$(basename "$s" .yaml)
+        echo "render $n"
+        myrctl render --dir "$CONFIG_DIR" --sample "$n" --components "$COMPONENTS" > "rendered/$n.yaml"
+      done
+    - ls -l rendered/
+  artifacts:
+    # Shown in the merge request as the link "Rendered configs"
+    expose_as: "Rendered configs"
+    paths: [rendered/]
+    expire_in: 14 days
+
+notify-myriarchd:
+  stage: notify
+  needs: [validate]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+  # Not critical: myriarchd polls the repository every 60 s anyway. If the job fails, the webhook connection (URL,
+  # secret, CA, ingress) is broken - that should be noticed, hence no allow_failure.
+  script:
+    - |
+      : "${MYRIARCH_URL:?Variable MYRIARCH_URL is missing (https://fleet.example.com)}"
+      : "${MYRIARCH_GITOPS_WEBHOOK_SECRET:?Variable MYRIARCH_GITOPS_WEBHOOK_SECRET is missing (masked + protected; main must be a protected branch)}"
+      case "$MYRIARCH_URL" in https://*) ;; *) echo "MYRIARCH_URL must start with https://" >&2; exit 1 ;; esac
+      # optional custom CA (file variable); "set --" keeps paths with special characters together
+      set --
+      if [ -n "${MYRIARCH_CA_FILE:-}" ]; then set -- --cacert "$MYRIARCH_CA_FILE"; fi
+      # X-Gitlab-Event-UUID: myriarchd processes every ID only once (repeats are acknowledged without a sync).
+      # With the job ID, "retry job" also triggers a new sync.
+      rc=0
+      rm -f webhook-response.json
+      code=$(curl --fail-with-body -sS --retry 3 --retry-delay 5 --max-time 30 "$@" \
+        -o webhook-response.json -w '%{http_code}' \
+        -X POST "$MYRIARCH_URL/api/v1/gitops/webhook" \
+        -H "X-Gitlab-Token: $MYRIARCH_GITOPS_WEBHOOK_SECRET" \
+        -H "Content-Type: application/json" \
+        -H "X-Gitlab-Event-UUID: pipeline-$CI_PIPELINE_ID-job-$CI_JOB_ID" \
+        --data "{\"ref\":\"refs/heads/$CI_COMMIT_BRANCH\"}") || rc=$?
+      echo "HTTP $code"; cat webhook-response.json 2>/dev/null; echo
+      if [ "$rc" -ne 0 ] || [ "$code" != "202" ]; then
+        echo "ERROR: myriarchd did not accept the sync with 202 (curl rc=$rc). 401 = wrong secret, 404 = webhook not configured in myriarchd." >&2
+        exit 1
+      fi

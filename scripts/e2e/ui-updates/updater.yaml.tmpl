@@ -1,0 +1,34 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# myriarch-updater in container mode for the local E2E test (scripts/e2e-ui-updates.sh replaces the @@NAME@@ placeholders).
+server:
+  endpoint: ws://127.0.0.1:@@PORT_MYRIARCHD@@/v1/opamp
+  token: "${env:MYRIARCH_ENROLLMENT_TOKEN}"
+supervisor:
+  storageDir: @@SUPERVISOR_STORAGE@@
+  serviceName: opampsupervisor
+  healthUrl: http://127.0.0.1:@@PORT_SUP_HEALTH@@/health
+collector:
+  installDir: @@INSTALL_DIR@@
+  binaryName: otelcol-contrib
+  healthUrl: http://127.0.0.1:@@PORT_COL_HEALTH@@/
+  keepVersions: 2
+  activation: symlink
+update:
+  requireSignature: true
+  trustedRootFile: @@TRUSTED_ROOT@@
+  # short times so that the failure case (rollback) and the retry take seconds instead of minutes
+  failedRetryBackoff: 15s
+  healthTimeout: 30s
+  healthInterval: 2s
+  healthSuccesses: 3
+  preflightValidate: true
+container:
+  supervisorCommand: ["@@SUPERVISOR_BIN@@", "--config=@@SUPERVISOR_CONFIG@@"]
+  seedBinary: @@SEED_BINARY@@
+  seedPolicy: newest
+  stopTimeout: 20s
+  healthListen: "127.0.0.1:@@PORT_UPD_HEALTH@@"
+stateDir: @@STATE_DIR@@
+log: {level: info, format: json}

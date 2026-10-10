@@ -1,0 +1,35 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- if and (include "myriarch.openshift" .) .Values.openshift.route.enabled }}
+{{- /*
+  OpenShift Route with edge TLS. The router needs long timeouts for the long-lived OpAMP WebSockets. The Route does not
+  require config.server.trustedProxies, but the router CIDR is recommended (NOTES.txt).
+*/ -}}
+{{- $annotations := merge (deepCopy (.Values.openshift.route.annotations | default dict)) (dict "haproxy.router.openshift.io/timeout" (toString .Values.openshift.route.timeout) "haproxy.router.openshift.io/timeout-tunnel" (toString .Values.openshift.route.timeout)) }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "myriarch.fullname" . }}
+  labels:
+    {{- include "myriarch.labels" . | nindent 4 }}
+  annotations:
+    {{- toYaml $annotations | nindent 4 }}
+spec:
+  host: {{ include "myriarch.routeHost" . | quote }}
+  to:
+    kind: Service
+    name: {{ include "myriarch.fullname" . }}
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: {{ .Values.openshift.route.tls.insecureEdgeTerminationPolicy }}
+    {{- with .Values.openshift.route.tls.externalCertificateSecret }}
+    externalCertificate:
+      name: {{ . }}
+    {{- end }}
+  wildcardPolicy: None
+{{- end }}

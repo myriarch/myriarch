@@ -1,0 +1,24 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: office
+  description: Linux office servers, updates through Ansible AWX
+spec:
+  displayName: Office servers
+  priority: 50
+  selector:
+    matchAttributes:
+      site.type: office
+      os.type: linux
+  blueprint: office-linux
+  parameters:
+    gatewayEndpoint: otel-gw-1.example.internal:4317
+    journaldUnits: [sshd.service, nginx.service, postgresql.service]
+  collector:
+    version: 0.162.0
+  update:
+    executor: awx
+    executorRef: awx-linux
+  rollout:
+    configPolicy: standard
+    versionPolicy: standard

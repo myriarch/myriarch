@@ -1,0 +1,31 @@
+# License overrides for Go modules whose license go-licenses cannot classify or reports ambiguously.
+#
+# Shared by ci/check-release-licenses.sh (release license allowlist) and scripts/gen-third-party-notices.sh
+# (THIRD_PARTY_NOTICES). Every entry was checked by reading the license file of the module.
+#
+# Format: one entry per line, six fields separated by "|"; "#" starts a comment line, empty lines are ignored.
+#
+#   <package path prefix>|<license go-licenses reports>|<license to declare>|<license file>|<scope>|<reason>
+#
+# - The prefix matches the package path itself or any package below it ("<prefix>/...").
+# - The scope is "*" (every package below the prefix) or a comma-separated list of exact import paths. With a list the
+#   entry fails closed: go-licenses names a library after the module root, so it cannot tell which package of the module
+#   carries the reported license. If a build links a package of the prefix that is not in the list, the notices generator
+#   and ci/check-release-licenses.sh fail until the package is reviewed and the entry is changed.
+# - The entry applies only to packages for which go-licenses reports exactly the second field.
+# - The declared license must be on the allowlist of ci/check-release-licenses.sh.
+# - The license file is relative to the module root. "-" keeps the file that go-licenses reports (its whole directory
+#   is reproduced in THIRD_PARTY_NOTICES).
+# - An entry that matches no package of the linked builds is stale and makes the notices generator fail.
+#
+# go-licenses cannot classify these LICENSE files; each one is the short Apache License 2.0 notice, not the license text.
+github.com/in-toto/attestation|Unknown|Apache-2.0|LICENSE|*|go-licenses cannot classify the LICENSE file; the file is the Apache-2.0 license notice (copyright line and boilerplate), not the full text. The full Apache-2.0 text is in the LICENSE file of this project.
+github.com/in-toto/in-toto-golang|Unknown|Apache-2.0|LICENSE|*|go-licenses cannot classify the LICENSE file; the file is the Apache-2.0 license notice (copyright line and boilerplate), not the full text. The full Apache-2.0 text is in the LICENSE file of this project.
+github.com/cyberphone/json-canonicalization|Unknown|Apache-2.0|LICENSE|*|go-licenses cannot classify the LICENSE file; the file is the Apache-2.0 license notice (copyright line and boilerplate), not the full text. The full Apache-2.0 text is in the LICENSE file of this project.
+# The module is "BSD-3-Clause AND MPL-2.0" (COPYING.md). The root package and internal/consts, the only packages that are
+# linked (through go-git), are BSD-3-Clause (LICENSE.BSD). The scope lists exactly these two packages; any other linked
+# package of the module (for example pathrs-lite, which is MPL-2.0) makes the gates fail.
+github.com/cyphar/filepath-securejoin|MPL-2.0|BSD-3-Clause|-|github.com/cyphar/filepath-securejoin,github.com/cyphar/filepath-securejoin/internal/consts|Only the BSD-3-Clause packages (the root package and internal/consts) are linked; the MPL-2.0 files of the module are not part of the binaries.
+# go-licenses reports Apache-2.0 for the module. The module also ships LICENSE.docs (CC-BY-SA-4.0); it covers the documentation of the
+# module, which is not part of the binaries. The entry keeps the files go-licenses reports and adds the note to THIRD_PARTY_NOTICES.
+github.com/opencontainers/go-digest|Apache-2.0|Apache-2.0|-|*|The code of the module is Apache-2.0 (LICENSE). LICENSE.docs (CC-BY-SA-4.0) covers the documentation of the module, which is not part of the binaries.

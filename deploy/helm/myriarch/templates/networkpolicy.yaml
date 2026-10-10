@@ -1,0 +1,110 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- if .Values.networkPolicy.enabled }}
+{{- /*
+  Segmentation of myriarchd: without this policy every pod in the cluster can reach port 8080 directly (bypassing
+  the ingress: forged X-Forwarded-* and client certificate headers when trustedProxies/clientCertHeader are
+  set) and read the unauthenticated metrics (9090).
+*/ -}}
+{{- $_ := include "myriarch.checkIngressSources" . }}
+{{- $np := .Values.networkPolicy }}
+{{- $openshift := include "myriarch.openshift" . }}
+{{- $clientCertHeader := (.Values.config.opamp | default dict).clientCertHeader }}
+{{- if and $np.ingress.allowSameNamespace (or .Values.config.server.trustedProxies $clientCertHeader) }}
+{{- fail "networkPolicy.ingress.allowSameNamespace: must be false when config.server.trustedProxies or config.opamp.clientCertHeader is set; any pod of the namespace could forge the forwarded headers. List the permitted sources in networkPolicy.ingress.from instead" }}
+{{- end }}
+{{- /* sources of port 8080 */ -}}
+{{- $sources := list }}
+{{- if $np.ingress.allowSameNamespace }}
+{{- $sources = append $sources (dict "podSelector" (dict)) }}
+{{- end }}
+{{- range $np.ingress.from }}
+{{- $sources = append $sources . }}
+{{- end }}
+{{- if and $openshift .Values.openshift.route.enabled }}
+{{- $sources = append $sources (dict "namespaceSelector" .Values.openshift.routerNamespaceSelector) }}
+{{- end }}
+{{- /* DNS: OpenShift profile uses the OpenShift DNS pods */ -}}
+{{- $dnsTo := $np.egress.dns.to }}
+{{- $dnsPorts := $np.egress.dns.ports }}
+{{- if $openshift }}
+{{- $dnsTo = .Values.openshift.dns.to }}
+{{- $dnsPorts = .Values.openshift.dns.ports }}
+{{- end }}
+{{- /* egress ports: ports + extraPorts + Git over SSH, deduplicated */ -}}
+{{- $ports := list }}
+{{- range concat ($np.egress.ports | default list) ($np.egress.extraPorts | default list) }}
+{{- $ports = append $ports (int .) }}
+{{- end }}
+{{- with include "myriarch.gitSshPort" . }}
+{{- $ports = append $ports (int .) }}
+{{- end }}
+{{- $ports = uniq $ports }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "myriarch.fullname" . }}
+  labels:
+    {{- include "myriarch.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "myriarch.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    {{- if $np.egress.enabled }}
+    - Egress
+    {{- end }}
+  {{- if or $sources $np.metrics.from }}
+  ingress:
+    {{- if $sources }}
+    - from:
+        {{- toYaml $sources | nindent 8 }}
+      ports:
+        - port: http
+          protocol: TCP
+    {{- end }}
+    {{- with $np.metrics.from }}
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - port: metrics
+          protocol: TCP
+    {{- end }}
+  {{- end }}
+  {{- if $np.egress.enabled }}
+  egress:
+    # DNS
+    - to:
+        {{- toYaml $dnsTo | nindent 8 }}
+      ports:
+        {{- range $dnsPorts }}
+        - {port: {{ int . }}, protocol: UDP}
+        - {port: {{ int . }}, protocol: TCP}
+        {{- end }}
+    {{- if $ports }}
+    # PostgreSQL, OIDC provider, Git, GitHub, notification webhooks (the destination addresses are not
+    # known in advance: restricted by port; use networkPolicy.egress.extraRules with ipBlock/selectors if needed).
+    # The link-local address of the cloud metadata service is excluded from the external range; destinations
+    # inside the cluster (PostgreSQL, an IdP such as Dex) are covered by the namespace selector. In addition
+    # myriarchd checks every outbound connection against outbound.allowedCidrs itself.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            {{- with $np.egress.exceptCidrs }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+        - namespaceSelector: {}
+      ports:
+        {{- range $ports }}
+        - {port: {{ . }}, protocol: TCP}
+        {{- end }}
+    {{- end }}
+    {{- with $np.egress.extraRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+{{- end }}

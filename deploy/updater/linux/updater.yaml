@@ -1,0 +1,31 @@
+# Myriarch - myriarch-updater (Linux)
+# Template for deploy/scripts/install-linux.sh; placeholders in double at-signs (for example OPAMP_ENDPOINT) are replaced,
+# lines with an empty value are dropped.
+server:
+  endpoint: "@@OPAMP_ENDPOINT@@"
+  tokenFile: /etc/myriarch/enrollment-token
+  caFile: "@@CA_FILE@@"
+supervisor:
+  storageDir: /var/lib/otelcol/supervisor
+  serviceName: otelcol-supervisor
+  healthUrl: http://localhost:13134/health
+collector:
+  installDir: /opt/myriarch/collector
+  binaryName: otelcol-contrib
+  healthUrl: http://localhost:13133/
+  keepVersions: 2
+update:
+  # Host-side anti-downgrade rules (default: forward updates only, plus the step back to the previous version):
+  # minimumVersion: "0.162.0"   # offers below this version are never installed
+  # allowDowngrade: false       # true allows any older signed version
+  # empty = https://<myriarchd-host>/api/v1/artifacts/ (derived from server.endpoint)
+  # allowedUrlPrefixes: ["https://fleet.example.com/api/v1/artifacts/"]
+  requireSignature: true
+  # empty = fetch the Sigstore trusted root online via TUF; air-gapped: ship the file (--trusted-root)
+  trustedRootFile: "@@TRUSTED_ROOT_FILE@@"
+  certificateIdentityRegexp: '^https://github\.com/open-telemetry/opentelemetry-collector-releases/\.github/workflows/base-release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$'
+  certificateOidcIssuer: https://token.actions.githubusercontent.com
+  healthTimeout: 120s
+  preflightValidate: true
+stateDir: /var/lib/myriarch-updater
+log: {level: info}

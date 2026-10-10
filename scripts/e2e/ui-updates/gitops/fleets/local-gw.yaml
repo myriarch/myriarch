@@ -1,0 +1,25 @@
+# Fleet of the local E2E test: Git sets the frame (>=0.161.0, <=0.162.0), the test picks the target version like an operator in the UI.
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: local-gw
+  description: local collector with myriarch-updater in container mode (E2E)
+spec:
+  displayName: Local gateway (E2E)
+  priority: 100
+  selector:
+    matchAttributes:
+      site.id: e2e-gw
+  blueprint: local-gw
+  collector:
+    version: 0.161.0              # Git target; the UI selection overrides it with 0.162.0
+  update:
+    executor: updater
+    selection:
+      enabled: true
+      versionRange: ">=0.161.0, <=0.162.0"
+      allowDowngrade: false
+      requireReason: false
+  rollout:
+    configPolicy: e2e-config
+    versionPolicy: e2e-version

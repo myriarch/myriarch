@@ -1,0 +1,8 @@
+{
+  "name": "myriarch-brand-tools",
+  "private": true,
+  "dependencies": {
+    "@resvg/resvg-js": "2.6.2",
+    "svgo": "4.1.0"
+  }
+}

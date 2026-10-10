@@ -1,0 +1,10 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: RolloutPolicy
+metadata:
+  name: p
+spec:
+  maintenanceWindows:
+    - start: "25:00"
+      end: "06:00"
+      days: [Mon, Funday]
+      timezone: Mars/Olympus

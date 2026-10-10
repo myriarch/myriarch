@@ -1,0 +1,83 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Link render hook (ADR-0031). The Markdown files of the repository are written for GitHub: their links are relative to the file
+  (../tasks/_index.md, gitops-schema.md#fields). This hook maps them to the site, in this order:
+    1. A destination with a scheme stays as it is (http, https, mailto, tel; any other scheme fails the build). External http(s) links get rel="noopener".
+    2. A fragment-only destination (#x) stays as it is. Heading ids follow the GitHub slugs (markup.goldmark.parser.autoHeadingIDType).
+    3. A site-absolute destination (/docs/...) is allowed in website/content only. A destination without a file extension must be a page of the site.
+    4. A relative destination is resolved against the repository path of the page's source file. A page of the site renders it
+       (RelPermalink plus fragment); a directory maps to its _index.md or README.md page, otherwise to GitHub (tree); any other
+       repository file maps to GitHub (blob; GitHub redirects a directory without a trailing slash). A path that leaves the repository fails the build.
+*/ -}}
+{{ $dest := .Destination -}}
+{{ $page := .Page -}}
+{{ $src := partial "repo/source-path.html" $page -}}
+{{ $where := $src | default $page.Path -}}
+{{ $text := .Text | safeHTML -}}
+{{ $href := $dest -}}
+{{ $external := false -}}
+{{ $u := urls.Parse $dest -}}
+{{ if $u.Scheme -}}
+  {{ if not (in (slice "http" "https" "mailto" "tel") $u.Scheme) -}}
+    {{ errorf "%s: link with the scheme %q is not allowed: %s" $where $u.Scheme $dest -}}
+  {{ end -}}
+  {{ $external = in (slice "http" "https") $u.Scheme -}}
+{{ else if hasPrefix $dest "//" -}}
+  {{ errorf "%s: protocol-relative link is not allowed: %s" $where $dest -}}
+{{ else if hasPrefix $dest "#" -}}
+  {{/* the fragment stays */ -}}
+{{ else -}}
+  {{ $frag := cond (ne $u.Fragment "") (printf "#%s" $u.Fragment) "" -}}
+  {{ $p := $u.Path -}}
+  {{ if hasPrefix $p "/" -}}
+    {{ if not (hasPrefix $src "website/") -}}
+      {{ errorf "%s: site-absolute link %q is only allowed in website/content" $src $dest -}}
+    {{ end -}}
+    {{ if eq $p "/" -}}
+      {{ $href = printf "%s%s" site.Home.RelPermalink $frag -}}
+    {{ else if path.Ext $p -}}
+      {{ if eq (path.Ext $p) ".md" -}}
+        {{ with site.GetPage (strings.TrimSuffix ".md" $p) -}}
+          {{ $href = printf "%s%s" .RelPermalink $frag -}}
+        {{ else -}}
+          {{ errorf "%s: link target %q is not a page of the site" $src $dest -}}
+        {{ end -}}
+      {{ end -}}
+    {{ else -}}
+      {{ with site.GetPage (strings.TrimSuffix "/" $p) -}}
+        {{ $href = printf "%s%s" .RelPermalink $frag -}}
+      {{ else -}}
+        {{ errorf "%s: link target %q is not a page of the site" $src $dest -}}
+      {{ end -}}
+    {{ end -}}
+  {{ else if eq $p "" -}}
+    {{ errorf "%s: empty link destination" $src -}}
+  {{ else -}}
+    {{ if eq $src "" -}}
+      {{ errorf "%s: cannot resolve the relative link %q (the source file of the page is unknown)" $page.Path $dest -}}
+    {{ end -}}
+    {{ $isDir := hasSuffix $p "/" -}}
+    {{ $target := path.Clean (path.Join (path.Dir $src) $p) -}}
+    {{ if or (eq $target "..") (hasPrefix $target "../") (hasPrefix $target "/") -}}
+      {{ errorf "%s: link %q leaves the repository" $src $dest -}}
+    {{ end -}}
+    {{ $index := partialCached "repo/page-index.html" "index" "index" -}}
+    {{ $hit := index $index $target -}}
+    {{ if and (not $hit) -}}
+      {{ range slice "_index.md" "README.md" -}}
+        {{ if not $hit }}{{ $hit = index $index (path.Join $target .) }}{{ end -}}
+      {{ end -}}
+    {{ end -}}
+    {{ if $hit -}}
+      {{ $href = printf "%s%s" $hit $frag -}}
+    {{ else -}}
+      {{ $kind := cond $isDir "tree" "blob" -}}
+      {{ $href = partial "repo/github-url.html" (dict "kind" $kind "path" $target "fragment" $u.Fragment) -}}
+      {{ $external = true -}}
+    {{ end -}}
+  {{ end -}}
+{{ end -}}
+<a href="{{ $href }}"{{ with .Title }} title="{{ . }}"{{ end }}{{ if $external }} rel="noopener"{{ end }}>{{ $text }}</a>{{- /* no trailing whitespace: the hook is inline */ -}}

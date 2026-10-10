@@ -1,0 +1,83 @@
+# PostgreSQL of the probe (namespace probe-infra). One replica, 2 Gi volume, enough connections for three myriarchd
+# replicas during a rolling update (20 connections each). The init script creates the database of the Dex stage.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: probe-infra
+data:
+  01-dex-database.sql: |
+    CREATE DATABASE myriarch_dex OWNER myriarch;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: probe-infra
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - {name: postgres, port: 5432, targetPort: postgres}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: probe-infra
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: postgres
+          image: "@@POSTGRES_IMAGE@@"
+          imagePullPolicy: IfNotPresent
+          args: ["-c", "max_connections=200"]
+          env:
+            - {name: POSTGRES_USER, value: myriarch}
+            - {name: POSTGRES_DB, value: myriarch}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: postgres-password, key: password}
+          ports:
+            - {name: postgres, containerPort: 5432}
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "myriarch", "-d", "myriarch"]
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "myriarch", "-d", "myriarch"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 100Mi}
+            limits: {memory: 768Mi, ephemeral-storage: 1Gi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: init, mountPath: /docker-entrypoint-initdb.d, readOnly: true}
+      volumes:
+        - name: init
+          configMap: {name: postgres-init}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: {storage: 2Gi}

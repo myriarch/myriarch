@@ -1,0 +1,136 @@
+# Hugo module configuration. Explicit project mounts replace Hugo's defaults, so content, static, layouts, assets, data, i18n and
+# archetypes are listed. The repository's Markdown files are mounted, never copied (ADR-0031): docs/ becomes content/docs, the ADRs
+# and the root files reach the site through content adapters (website/content/**/_content.gotmpl) that read them as assets.
+module:
+  hugoVersion:
+    extended: true
+    min: "0.167.0"
+  imports:
+    # Docsy 0.18 moved from github.com/google/docsy to github.com/docsy/docsy/theme. Pinned in go.mod and go.sum.
+    - path: github.com/docsy/docsy/theme
+      # The theme's own mounts, minus the node_modules mounts that point into its (absent) module directory - the project mounts those
+      # below - and minus the static files of features that are off (Prism syntax highlighting, PlantUML deflate script).
+      mounts:
+        - source: assets
+          target: assets
+        - source: data
+          target: data
+        - source: i18n
+          target: i18n
+        - source: layouts
+          target: layouts
+        - source: static
+          target: static
+          files:
+            - '! css/prism.css'
+            - '! js/prism.js'
+            - '! js/deflate.js'
+        # The license of the theme goes with the site (MIT/Apache terms require the text to accompany copies).
+        - source: LICENSE
+          target: static/licenses/docsy/LICENSE.txt
+  mounts:
+    # ---- the defaults ----------------------------------------------------------------------------------
+    - source: content
+      target: content
+    - source: static
+      target: static
+    - source: layouts
+      target: layouts
+    - source: assets
+      target: assets
+    - source: data
+      target: data
+    - source: i18n
+      target: i18n
+    - source: archetypes
+      target: archetypes
+
+    # ---- the documentation: docs/ is the content of /docs/ ---------------------------------------------
+    # The ADRs are rendered by an adapter (their H1 is the title, the status is a parameter), the two README files become section indexes.
+    - source: ../docs
+      target: content/docs
+      files:
+        - '! adr/**'
+        - '! design/README.md'
+        - '! **/.DS_Store'
+    - source: ../docs/adr/README.md
+      target: content/docs/adr/_index.md
+    - source: ../docs/design/README.md
+      target: content/docs/design/_index.md
+
+    # ---- repository files that the content adapters render (read as assets: assets/repo/<repository path>) ----
+    - source: ../docs/adr
+      target: assets/repo/docs/adr
+    - source: ../ROADMAP.md
+      target: assets/repo/ROADMAP.md
+    - source: ../CHANGELOG.md
+      target: assets/repo/CHANGELOG.md
+    - source: ../CONTRIBUTING.md
+      target: assets/repo/CONTRIBUTING.md
+    - source: ../GOVERNANCE.md
+      target: assets/repo/GOVERNANCE.md
+    - source: ../SECURITY.md
+      target: assets/repo/SECURITY.md
+    - source: ../CODE_OF_CONDUCT.md
+      target: assets/repo/CODE_OF_CONDUCT.md
+    - source: ../MAINTAINERS.md
+      target: assets/repo/MAINTAINERS.md
+    - source: ../ADOPTERS.md
+      target: assets/repo/ADOPTERS.md
+    - source: ../CONTRIBUTOR_LADDER.md
+      target: assets/repo/CONTRIBUTOR_LADDER.md
+    - source: ../deploy/helm/myriarch/README.md
+      target: assets/repo/deploy/helm/myriarch/README.md
+    - source: ../gitops-template/README.md
+      target: assets/repo/gitops-template/README.md
+    - source: ../assets/brand/README.md
+      target: assets/repo/assets/brand/README.md
+
+    # ---- the brand files (assets/brand, ADR-0016 rules apply) -------------------------------------------
+    - source: ../assets/brand
+      target: static/brand
+      files: ['*.svg', '*.png', '*.ico']
+    # The mark as ten separate shapes: inlined into the hero of the landing page by layouts/_partials/landing/hero.html.
+    - source: ../assets/brand/myriarch-icon-parts.svg
+      target: assets/brand/myriarch-icon-parts.svg
+    - source: ../assets/brand/favicon.ico
+      target: static/favicon.ico
+    - source: ../assets/brand/favicon.svg
+      target: static/favicon.svg
+    - source: ../assets/brand/apple-touch-icon.png
+      target: static/apple-touch-icon.png
+    - source: ../assets/brand/icon-192.png
+      target: static/icon-192.png
+    - source: ../assets/brand/icon-512.png
+      target: static/icon-512.png
+    - source: ../assets/brand/og-image.png
+      target: static/images/og-image.png
+
+    # ---- vendored assets from node_modules (pinned in package.json and pnpm-lock.yaml) -------------------
+    # Docsy mounts these relative to its own module directory, where they do not exist, so the project mounts them.
+    - source: node_modules/bootstrap
+      target: assets/vendor/bootstrap
+    - source: node_modules/@fortawesome/fontawesome-free
+      target: assets/vendor/Font-Awesome
+    - source: node_modules/@fortawesome/fontawesome-free/webfonts
+      target: static/webfonts
+    - source: node_modules/lunr
+      target: assets/vendor/lunr
+      files: ['lunr.min.js']
+    - source: node_modules/mermaid/dist
+      target: static/vendor/mermaid
+      files: ['mermaid.esm.min.mjs', 'chunks/mermaid.esm.min/**']
+    # The license texts of the shipped packages are published next to the site (/licenses/<package>/LICENSE.txt, linked from the
+    # third-party page); website/scripts/check-notices.py fails when a listed component has no file there.
+    - source: node_modules/bootstrap/LICENSE
+      target: static/licenses/bootstrap/LICENSE.txt
+    - source: node_modules/@fortawesome/fontawesome-free/LICENSE.txt
+      target: static/licenses/fontawesome-free/LICENSE.txt
+    - source: node_modules/lunr/LICENSE
+      target: static/licenses/lunr/LICENSE.txt
+    - source: node_modules/mermaid/LICENSE
+      target: static/licenses/mermaid/LICENSE.txt
+    # The committed REST contract: the API reference offers exactly this file for download, so no copy can drift. The pages of the
+    # reference are generated from it (make docs-gen) and mounted from docs/reference/api.
+    - source: ../api/openapi.yaml
+      target: assets/api/openapi.yaml

@@ -1,0 +1,32 @@
+# OPTIONAL: like linux-hosts, but version updates go through Ansible AWX (executors/awx-linux.yaml). It applies only
+# to hosts with the inventory label update-via=awx (see inventory/waves.yaml, commented out there) and has the higher
+# priority. Do not use this file without AWX access (delete it, or do not set the label) - a host in this fleet gets
+# no version updates otherwise.
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: linux-hosts-awx
+  description: Optional - Linux hosts, updates through Ansible AWX
+spec:
+  displayName: Linux hosts (AWX)
+  priority: 200
+  selector:
+    matchAttributes:
+      labels.update-via: awx
+      os.type: linux
+    matchExpressions:
+      - key: site.type
+        operator: In
+        values: [datacenter, office]
+  blueprint: linux-host
+  parameters:
+    gatewayEndpoint: gateway.example.com:4317
+  collector:
+    distribution: otelcol-contrib
+    version: 0.161.0
+  update:
+    executor: awx
+    executorRef: awx-linux
+  rollout:
+    configPolicy: canary-then-all
+    versionPolicy: version-canary-then-all

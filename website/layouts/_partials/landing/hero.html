@@ -1,0 +1,48 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Hero of the landing page: value proposition, status chip, the three calls to action (data/landing.yaml, key hero) and the mark.
+  The mark is the inline SVG of assets/brand/myriarch-icon-parts.svg (the mark as ten separate shapes, generated with the other brand files;
+  config/_default/module.yaml mounts it). It is inline so that it follows the colour of the page (currentColor, set in _landing.scss) in
+  both appearances and so that a stylesheet can play the rollout on its parts (assets/brand/README.md, "Motion"). It is decoration: the
+  heading and the logo in the navbar carry the name, so the title and the label of the file are dropped and the element is hidden from
+  assistive technology.
+*/ -}}
+{{ $hero := hugo.Data.landing.hero -}}
+{{ $markFile := resources.Get "brand/myriarch-icon-parts.svg" -}}
+{{ if not $markFile }}{{ errorf "landing: assets/brand/myriarch-icon-parts.svg is not mounted (config/_default/module.yaml)" }}{{ end -}}
+{{ $mark := $markFile.Content -}}
+{{ $mark = replace $mark "<title>myriarch</title>" "" -}}
+{{ $mark = replace $mark ` aria-label="myriarch"` "" -}}
+{{ $mark = replace $mark ` role="img"` ` class="landing-hero__mark" aria-hidden="true" focusable="false"` -}}
+{{ if or (in $mark "<title") (in $mark "aria-label") (not (in $mark `aria-hidden="true"`)) -}}
+  {{ errorf "landing: the mark file is not in the expected form (title, aria-label and role are rewritten for decoration)" }}
+{{ end -}}
+<section class="landing-hero" aria-labelledby="landing-hero-title">
+  <div class="landing-container landing-hero__grid">
+    <div class="landing-hero__copy">
+      <p class="landing-chip">
+        <span class="landing-chip__level">{{ $hero.status }}</span>
+        <span class="landing-chip__note">{{ $hero.status_note }}</span>
+      </p>
+      <h1 id="landing-hero-title" class="landing-hero__title">{{ $hero.title }}</h1>
+      <p class="landing-hero__subline">{{ $hero.subline }}</p>
+      <p class="landing-hero__ctas">
+        {{ range $hero.ctas -}}
+          {{ $href := .link -}}
+          {{ $external := not (hasPrefix $href "/") -}}
+          {{ if not $external -}}
+            {{ $page := site.GetPage (path.Clean (strings.TrimSuffix ".md" $href)) -}}
+            {{ with $page }}{{ $href = .RelPermalink }}{{ else }}{{ errorf "landing: the link %q of the hero names no page of the site" $href }}{{ end -}}
+          {{ end -}}
+          <a class="landing-btn{{ if .primary }} landing-btn--primary{{ end }}" href="{{ $href }}"{{ if $external }} rel="noopener"{{ end }}>
+            {{- with .icon }}<i class="{{ . }}" aria-hidden="true"></i> {{ end }}{{ .label -}}
+          </a>
+        {{ end -}}
+      </p>
+    </div>
+    {{ $mark | safeHTML }}
+  </div>
+</section>

@@ -1,0 +1,139 @@
+# Regional OTLP gateway: StatefulSet, every replica is an OpAMP agent with a stable identity
+# (PVC for the supervisor storage so that persistent_state.yaml/the instance UID survives pod restarts).
+# The config comes from myriarchd (blueprint k8s-gateway); version changes happen through the image tag
+# (kustomize "images:" or the deployment repository, triggered by a webhook executor).
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-gateway
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: otel-gateway
+    app.kubernetes.io/part-of: myriarch
+spec:
+  selector:
+    app.kubernetes.io/name: otel-gateway
+  ports:
+    - {name: otlp-grpc, port: 4317, targetPort: otlp-grpc}
+    - {name: otlp-http, port: 4318, targetPort: otlp-http}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-gateway-headless
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: otel-gateway
+    app.kubernetes.io/part-of: myriarch
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: otel-gateway
+  ports:
+    - {name: health, port: 13133, targetPort: health}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: otel-gateway
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: otel-gateway
+    app.kubernetes.io/part-of: myriarch
+spec:
+  serviceName: otel-gateway-headless
+  replicas: 2
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otel-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: otel-gateway
+        app.kubernetes.io/part-of: myriarch
+    spec:
+      # no Kubernetes API credential in a pod that runs configuration from Git; k8sattributes needs a dedicated
+      # ServiceAccount with a read-only Role (see README.md)
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: otel-gateway
+      containers:
+        - name: collector
+          # Supervisor + otelcol-contrib in one image (Dockerfile in this directory)
+          image: registry.example.com/observability/otel-supervisor-collector:0.162.0
+          imagePullPolicy: IfNotPresent
+          args: ["--config=/etc/opampsupervisor/supervisor.yaml"]
+          envFrom:
+            - configMapRef: {name: myriarch-site}
+            - secretRef: {name: otel-collector-secrets}
+          env:
+            - name: MYRIARCH_ENROLLMENT_TOKEN
+              valueFrom:
+                secretKeyRef: {name: myriarch-enrollment, key: token}
+            # site.* : matches fleets/k8s-gateway.yaml (matchAttributes site.type=k8s-gateway)
+            - {name: SITE_TYPE, value: k8s-gateway}
+            - {name: SITE_ID, value: k8s-de-prod}
+            - {name: SITE_NAME, value: Regional gateway DE}
+            # Downward API (pod and node attributes of the agent)
+            - name: K8S_POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: K8S_NAMESPACE_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            - name: K8S_NODE_NAME
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+          ports:
+            - {name: otlp-grpc, containerPort: 4317}
+            - {name: otlp-http, containerPort: 4318}
+            - {name: health, containerPort: 13133}
+            - {name: sup-health, containerPort: 13134}
+          # Supervisor health check (checks only the supervisor) and collector health_check
+          # (from the fallback/blueprint config)
+          livenessProbe:
+            httpGet: {path: /health, port: sup-health}
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            failureThreshold: 4
+          readinessProbe:
+            httpGet: {path: /, port: health}
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: supervisor-config, mountPath: /etc/opampsupervisor/supervisor.yaml, subPath: supervisor.yaml, readOnly: true}
+            - {name: supervisor-config, mountPath: /etc/myriarch/fallback.yaml, subPath: fallback.yaml, readOnly: true}
+            - {name: storage, mountPath: /var/lib/otelcol/supervisor}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: supervisor-config
+          configMap: {name: otel-supervisor-config}
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+  volumeClaimTemplates:
+    - metadata:
+        name: storage
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: {storage: 1Gi}

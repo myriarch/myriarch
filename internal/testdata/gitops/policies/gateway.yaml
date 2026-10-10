@@ -1,0 +1,18 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: RolloutPolicy
+metadata:
+  name: gateway
+  description: Gateways one at a time, automatic rollback on failure
+spec:
+  waves:
+    - name: first
+      percent: 34
+    - name: rest
+      percent: 100
+      requireApproval: true
+  maxConcurrent: 1
+  healthWait: 5m
+  applyTimeout: 20m
+  failureThreshold:
+    maxFailed: 1
+  onFailure: rollback

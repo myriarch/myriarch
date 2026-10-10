@@ -1,0 +1,30 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: base
+spec:
+  parameters:
+    - name: endpoint
+      type: string
+      default: "gw.example:4317"
+    - name: port
+      type: int
+      default: 8080
+  config:
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "localhost:[[ .params.port ]]"
+    exporters:
+      otlp_grpc/gw:
+        endpoint: "[[ .params.endpoint ]]"
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters: [otlp_grpc/gw]
+  fragments:
+    - name: oops
+      when: "[[ .params.endpoint ]]"
+      config: {}

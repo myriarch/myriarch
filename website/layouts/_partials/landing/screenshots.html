@@ -1,0 +1,42 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Screenshots of the web UI (assets/images/screenshots/<name>-light.png and -dark.png, made by scripts/screenshots.mjs from the mock
+  mode). Hugo creates WebP variants of 640, 960 and 1440 px; the width and height attributes reserve the space. The light and the dark
+  image are both in the page and CSS shows one of them ([data-bs-theme]); the other one is lazy and not displayed, so the browser
+  does not fetch it. The hero holds no image, so no screenshot is above the fold and every one is lazy; an image above the fold
+  would get fetchpriority="high" and no loading="lazy" instead.
+*/ -}}
+{{ $shots := hugo.Data.landing.screenshots -}}
+<section class="landing-section" id="screenshots" aria-labelledby="landing-screenshots-title">
+  <div class="landing-container">
+    <h2 id="landing-screenshots-title" class="landing-h2">{{ $shots.title }}</h2>
+    <p class="landing-lead">{{ $shots.lead }}</p>
+    <div class="landing-shots">
+      {{ range $shots.items -}}
+        {{ $item := . -}}
+        <figure class="landing-shot">
+          {{ range $mode := slice "light" "dark" -}}
+            {{ $path := printf "images/screenshots/%s-%s.png" $item.name $mode -}}
+            {{ $src := resources.Get $path -}}
+            {{ if not $src }}{{ errorf "landing: the screenshot %s is missing (run node website/scripts/screenshots.mjs)" $path }}{{ end -}}
+            {{ $small := $src.Resize "640x webp q80" -}}
+            {{ $medium := $src.Resize "960x webp q80" -}}
+            {{ $large := $src.Resize "1440x webp q80" -}}
+            {{ $alt := cond (eq $mode "light") $item.alt_light $item.alt_dark -}}
+            <img class="landing-shot__img landing-shot__img--{{ $mode }}"
+              src="{{ $medium.RelPermalink }}"
+              srcset="{{ $small.RelPermalink }} 640w, {{ $medium.RelPermalink }} 960w, {{ $large.RelPermalink }} 1440w"
+              sizes="(min-width: 1200px) 560px, (min-width: 768px) 46vw, 92vw"
+              width="{{ $large.Width }}" height="{{ $large.Height }}"
+              alt="{{ $alt }}" loading="lazy" decoding="async">
+          {{ end -}}
+          <figcaption class="landing-shot__caption"><strong>{{ $item.title }}.</strong> {{ $item.text }}</figcaption>
+        </figure>
+      {{ end -}}
+    </div>
+    <p class="landing-note">{{ $shots.note }}</p>
+  </div>
+</section>

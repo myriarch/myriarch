@@ -1,0 +1,47 @@
+# Version rollouts: first the wave "canary" (hosts with the inventory label wave=canary, see inventory/waves.yaml),
+# then - after manual approval in the UI - all remaining hosts.
+#
+# Maintenance windows restrict when a target may START its update. Two zones are used on purpose:
+#   * Weekdays 22:00-05:00 in the LOCAL time of the host. The zone comes from the attribute site.timezone (the
+#     attribute named by timezoneAttribute); edge sites report Europe/Amsterdam, a zone with daylight saving time.
+#     The window crosses midnight (end <= start) and belongs to the day it starts on.
+#   * Saturday and Sunday around the clock (00:00-00:00) in UTC, independent of the host zone.
+# Hosts without a site.timezone fall back to defaultTimezone. Outside a window targets stay in "waiting_window",
+# so a version rollout started during the day only begins in the evening.
+#
+# onFailure: pause - the myriarch-updater rolls a host back to the previous version itself if the new one does not
+# become healthy. Whether the rest of the fleet is updated anyway is decided by a human afterwards (resume,
+# retry-failed, abort or rollback).
+apiVersion: myriarch.dev/v1alpha1
+kind: RolloutPolicy
+metadata:
+  name: canary-then-all
+  description: Version rollout canary -> approval -> rest, maintenance windows in local time and UTC, pause on failure
+spec:
+  waves:
+    - name: canary
+      selector:
+        matchAttributes:
+          labels.wave: canary
+    - name: rest
+      percent: 100
+      requireApproval: true
+  maxConcurrent: 5
+  healthWait: 5m
+  applyTimeout: 30m
+  offlineGracePeriod: 30m
+  failureThreshold:
+    maxFailed: 1
+  onFailure: pause
+  timezoneAttribute: site.timezone
+  defaultTimezone: UTC
+  maintenanceWindows:
+    # Site-local time (agent zone, for example Europe/Amsterdam with daylight saving time)
+    - days: [Mon, Tue, Wed, Thu, Fri]
+      start: "22:00"
+      end: "05:00"
+    # Weekend: always open, evaluated in UTC
+    - days: [Sat, Sun]
+      start: "00:00"
+      end: "00:00"
+      timezone: UTC

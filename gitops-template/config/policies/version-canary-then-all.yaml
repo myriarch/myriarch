@@ -1,0 +1,27 @@
+# Version rollouts (updater executor): the same waves as canary-then-all, but with longer deadlines (download of
+# about 112 MB per host, restart, probation time).
+# onFailure: pause instead of rollback: the myriarch-updater rolls the host back to the previous version itself if the
+# new one does not become healthy. Whether the rest of the fleet is updated anyway is decided by a human afterwards
+# (resume, retry-failed, abort or rollback).
+# No maintenance windows; for a production variant see policies/canary-then-all.yaml.
+apiVersion: myriarch.dev/v1alpha1
+kind: RolloutPolicy
+metadata:
+  name: version-canary-then-all
+  description: Version rollout canary -> approval -> rest, pause on failure
+spec:
+  waves:
+    - name: canary
+      selector:
+        matchAttributes:
+          labels.wave: canary
+    - name: rest
+      percent: 100
+      requireApproval: true
+  maxConcurrent: 5
+  healthWait: 5m
+  applyTimeout: 30m
+  offlineGracePeriod: 30m
+  failureThreshold:
+    maxFailed: 1
+  onFailure: pause

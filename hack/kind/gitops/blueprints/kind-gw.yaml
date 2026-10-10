@@ -1,0 +1,35 @@
+# Blueprint of the real probe collector. health_check listens on all interfaces: the kubelet readiness probe and the
+# myriarch-updater health check (collector.healthUrl http://127.0.0.1:13133/) both use it.
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: kind-gw
+  description: probe collector (OTLP on loopback, debug exporter, health_check on :13133)
+spec:
+  config:
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 127.0.0.1:4317
+          http:
+            endpoint: 127.0.0.1:4318
+    processors:
+      batch:
+        timeout: 5s
+    exporters:
+      debug:
+        verbosity: basic
+    service:
+      extensions: [health_check]
+      telemetry:
+        metrics:
+          level: none
+      pipelines:
+        logs:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug]

@@ -1,0 +1,37 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: edge-be
+  description: Windows edge nodes in BE - own gateway, own time zone
+spec:
+  displayName: Edge sites BE
+  priority: 100
+  selector:
+    matchAttributes:
+      site.type: edge
+      site.country: BE
+    matchExpressions:
+      - key: os.type
+        operator: In
+        values: [windows]
+  blueprint: edge-windows
+  parameters:
+    gatewayEndpoint: otel-gw-2.example.internal:4317
+    appLogPaths:
+      - 'C:\ProgramData\EdgeApp\logs\*.log'
+      - 'D:\EdgeApp\journal\*.log'
+  collector:
+    version: 0.161.0
+  update:
+    executor: updater
+    # Frame for choosing the target version in the UI: Git decides which
+    # versions can be chosen, the UI chooses among them
+    # (docs/concepts/fleets.md, "Target version from the UI within the Git
+    # frame"). collector.version remains the Git target.
+    selection:
+      enabled: true
+      versionRange: ">=0.161.0, <=0.162.0"
+      requireReason: true
+  rollout:
+    configPolicy: edge-careful
+    versionPolicy: edge-careful

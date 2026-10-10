@@ -1,0 +1,93 @@
+# Linux hosts (systemd): host metrics, optional journald and log files.
+#
+# journald and log files are OFF by default because the service user "otelcol" needs group membership for them
+# (systemd-journal or adm). Enable them in three steps:
+#   1. Create a systemd drop-in on the host:
+#        /etc/systemd/system/otelcol-supervisor.service.d/logs.conf
+#          [Service]
+#          SupplementaryGroups=systemd-journal adm
+#      then "systemctl daemon-reload && systemctl restart otelcol-supervisor".
+#   2. Set collectJournald: true or logPaths in the fleet (or via the inventory).
+#   3. Roll the change out with a merge request (waves, see policies/config-canary.yaml).
+# The three fragments at the end are deliberately disjoint: a list (here the receivers of the logs pipeline) is
+# replaced completely when merging, not extended.
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: linux-host
+  description: Linux host - host metrics, optional journald and log files
+spec:
+  extends: base
+  parameters:
+    - name: hostMetricsInterval
+      type: duration
+      default: 30s
+    - name: collectJournald
+      type: bool
+      default: false
+      description: Read journald (needs SupplementaryGroups=systemd-journal for the service)
+    - name: journaldUnits
+      type: list
+      default: []
+      description: Read only these systemd units (empty = all)
+    - name: logPaths
+      type: list
+      default: []
+      description: Glob patterns of log files (for example /var/log/syslog; empty = no file logs)
+  config:
+    receivers:
+      host_metrics:
+        collection_interval: "[[ .params.hostMetricsInterval ]]"
+        scrapers:
+          cpu: {}
+          load: {}
+          memory: {}
+          disk: {}
+          filesystem: {}
+          network: {}
+          paging: {}
+    service:
+      pipelines:
+        metrics:
+          receivers: [otlp, host_metrics]
+  fragments:
+    # Receiver definitions (without pipeline assignment; that follows in the fragments below)
+    - name: journald-receiver
+      when: "[[ .params.collectJournald ]]"
+      config:
+        receivers:
+          journald:
+            directory: /var/log/journal
+            units: "[[ .params.journaldUnits ]]"
+            start_at: end
+            priority: info
+    - name: files-receiver
+      when: '[[ gt (len .params.logPaths) 0 ]]'
+      config:
+        receivers:
+          file_log/host:
+            include: "[[ .params.logPaths ]]"
+            start_at: end
+            storage: file_storage/queue
+    # Pipeline assignment per combination
+    - name: logs-journald
+      when: '[[ and .params.collectJournald (eq (len .params.logPaths) 0) ]]'
+      config:
+        service:
+          pipelines:
+            logs:
+              receivers: [otlp, journald]
+    - name: logs-files
+      when: '[[ and (not .params.collectJournald) (gt (len .params.logPaths) 0) ]]'
+      config:
+        service:
+          pipelines:
+            logs:
+              receivers: [otlp, file_log/host]
+    - name: logs-journald-and-files
+      when: '[[ and .params.collectJournald (gt (len .params.logPaths) 0) ]]'
+      config:
+        service:
+          pipelines:
+            logs:
+              receivers: [otlp, journald, file_log/host]

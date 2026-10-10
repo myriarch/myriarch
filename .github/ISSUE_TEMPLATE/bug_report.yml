@@ -1,0 +1,102 @@
+name: Bug report
+description: Report something that does not work as documented
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a bug.
+
+        **Do not report security vulnerabilities here.** Use [private vulnerability reporting](https://github.com/myriarch/myriarch/security/advisories/new) instead, see SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `myriarchd version` (or `myrctl version`, `myriarch-updater version`, `myriarch-sim version`), or the commit hash if you build from source.
+      placeholder: "0.1.0 (abc1234, 2026-01-01T00:00:00Z, go1.26.6, linux/amd64)"
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part is affected?
+      options:
+        - myriarchd
+        - myriarch-updater
+        - myrctl
+        - myriarch-sim
+        - Helm chart
+        - web UI
+        - documentation
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      description: How do you run myriarch?
+      options:
+        - Development mode (myriarchd dev)
+        - Linux host (systemd)
+        - Windows host
+        - Container
+        - Kubernetes (Helm chart)
+        - Kubernetes (other manifests)
+        - Docker Compose
+        - other
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Operating system, CPU architecture, Kubernetes version if relevant, PostgreSQL version and collector version.
+      placeholder: "Linux amd64, Kubernetes 1.31, PostgreSQL 17, otelcol-contrib 0.162.0"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of steps that shows the problem. Include relevant configuration and GitOps files with secrets removed.
+      placeholder: |
+        1. Start myriarchd with ...
+        2. Open ...
+        3. Click ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include error messages and screenshots if they help.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Relevant log lines of the affected component.
+
+        **Redact secrets before you paste.** Remove API tokens (`myra_...`), enrollment tokens (`myre_...`), download tokens (`myrd_...`), passwords, private keys, signed URLs and any other credential. Check host names and addresses you do not want to publish.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched the existing issues and the documentation.
+          required: true
+        - label: I removed all tokens and secrets from this report.
+          required: true

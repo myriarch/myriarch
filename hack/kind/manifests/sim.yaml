@@ -1,0 +1,57 @@
+# Simulated collectors of the probe (namespace myriarch, Pod Security "restricted"): myriarch-sim from the server image,
+# 20 collectors in the groups of examples/sim/small.yaml (15 edge, 5 data center), no simulated updaters. The token comes
+# from the Secret the chart generated for the declared enrollment token "kind-sim". myriarch-sim reads it from the environment
+# variable MYRIARCH_ENROLLMENT_TOKEN: neither the pod spec (only a reference) nor the process arguments hold the value.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myriarch-sim
+  namespace: myriarch
+  labels:
+    app.kubernetes.io/name: myriarch-sim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: myriarch-sim
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: myriarch-sim
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sim
+          image: "@@SERVER_IMAGE@@"
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/myriarch-sim"]
+          args:
+            - run
+            - --server=ws://myriarch:8080/v1/opamp
+            - --agents=20
+            - --updaters=false
+            - --profile=/opt/myriarch/examples/sim/small.yaml
+            - --metrics-listen=:9464
+          env:
+            - name: MYRIARCH_ENROLLMENT_TOKEN
+              valueFrom:
+                secretKeyRef: {name: myriarch-enrollment-kind-sim, key: token}
+          ports:
+            - {name: metrics, containerPort: 9464}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi, ephemeral-storage: 50Mi}
+            limits: {cpu: 250m, memory: 128Mi, ephemeral-storage: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}

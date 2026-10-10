@@ -1,0 +1,18 @@
+# Sample agent of the optional fleet linux-hosts-awx (inventory label update-via=awx, see inventory/waves.yaml).
+# Attributes as the supervisor and installer report them; labels as they come from the enrollment token or the
+# inventory.
+name: linux-02-awx
+attributes:
+  service.name: otelcol-contrib
+  service.version: 0.161.0
+  os.type: linux
+  host.name: linux-02.example.com
+  host.arch: amd64
+  deployment.environment.name: production
+  site.type: datacenter
+  site.id: site-002
+  site.name: Example data center (host 2), update through AWX
+  site.country: ZZ
+  site.timezone: UTC
+labels:
+  update-via: awx

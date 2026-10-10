@@ -1,0 +1,11 @@
+# Deny-ingress policy for the self-test target (applied after the reachability check).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: np-target-deny
+  namespace: probe-outside
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: np-target
+  policyTypes: [Ingress]

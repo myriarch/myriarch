@@ -1,0 +1,17 @@
+# Main menu. pageRef entries resolve at build time (a missing page fails the build).
+main:
+  - name: Documentation
+    pageRef: /docs
+    weight: 10
+  - name: API reference
+    pageRef: /docs/reference/api
+    weight: 20
+  - name: Project
+    pageRef: /project
+    weight: 30
+  - name: Releases
+    url: https://github.com/myriarch/myriarch/releases
+    weight: 40
+  - name: GitHub
+    url: https://github.com/myriarch/myriarch
+    weight: 50

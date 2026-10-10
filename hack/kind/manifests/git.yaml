@@ -1,0 +1,64 @@
+# In-cluster Git server of the probe (namespace probe-infra): sshd on port 2222, user "git" with git-shell, bare repository
+# /srv/git/fleet.git on an emptyDir. The image is plain alpine; git and openssh are installed at start in the pinned series (git/setup.sh).
+# Scripts come from the ConfigMap git-scripts (--from-file hack/kind/git), keys from the Secret git-keys.
+apiVersion: v1
+kind: Service
+metadata:
+  name: git
+  namespace: probe-infra
+  labels:
+    app.kubernetes.io/name: git
+spec:
+  selector:
+    app.kubernetes.io/name: git
+  ports:
+    - {name: ssh, port: 2222, targetPort: ssh}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git
+  namespace: probe-infra
+  labels:
+    app.kubernetes.io/name: git
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: git
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: git
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: git
+          image: "@@GIT_SERVER_IMAGE@@"
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "/scripts/setup.sh"]
+          env:
+            - {name: GIT_SERVER_GIT_SERIES, value: "@@GIT_SERVER_GIT_SERIES@@"}
+            - {name: GIT_SERVER_OPENSSH_SERIES, value: "@@GIT_SERVER_OPENSSH_SERIES@@"}
+          ports:
+            - {name: ssh, containerPort: 2222}
+          readinessProbe:
+            tcpSocket: {port: ssh}
+            periodSeconds: 3
+            failureThreshold: 60
+          resources:
+            requests: {cpu: 50m, memory: 64Mi, ephemeral-storage: 50Mi}
+            limits: {memory: 256Mi, ephemeral-storage: 512Mi}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+            - {name: keys, mountPath: /keys, readOnly: true}
+            - {name: srv, mountPath: /srv}
+      volumes:
+        - name: scripts
+          configMap: {name: git-scripts, defaultMode: 0555}
+        - name: keys
+          secret: {secretName: git-keys, defaultMode: 0444}
+        - name: srv
+          emptyDir: {sizeLimit: 256Mi}

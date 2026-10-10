@@ -1,0 +1,43 @@
+# Myriarch - myriarch-updater in container mode (Kubernetes/OpenShift)
+#
+#   command: ["/usr/local/bin/myriarch-updater", "container", "--config=/etc/myriarch/updater.yaml"]
+#
+# myriarch-updater is PID 1 of the pod, starts the OpAMP supervisor as a child process and swaps the collector binary on a
+# volume (versions/<v> + symlink current). Same verification, same health check and same rollback as the service on
+# Linux/Windows (README, "container mode"). ${env:VAR} is expanded from the pod environment at startup (an unset
+# value without a :- default is an error).
+server:
+  # the host is the in-cluster myriarch Service (the Helm chart installed as release 'myriarch'); adjust it to your release name
+  endpoint: ws://myriarch:8080/v1/opamp
+  # the same token as the supervisor: myriarchd links updater and collector only when token and hostname are the same
+  token: "${env:MYRIARCH_ENROLLMENT_TOKEN}"
+  allowInsecureTransport: true            # ws:// only inside the namespace; always wss:// over routes
+supervisor:
+  storageDir: /var/lib/otelcol/supervisor # supervisor storage (persistent_state.yaml = instance UID of the collector)
+  serviceName: opampsupervisor            # only a name in the container (no systemd/SCM)
+  healthUrl: http://127.0.0.1:13134/health
+collector:
+  installDir: /var/lib/myriarch/collector   # on the volume; supervisor: agent.executable = <installDir>/current/otelcol-contrib
+  binaryName: otelcol-contrib
+  healthUrl: http://127.0.0.1:13133/         # health_check extension of the collector config
+  keepVersions: 2
+  activation: symlink                        # mandatory in container mode
+update:
+  # empty = http://<myriarchd-host:port>/api/v1/artifacts/ (derived from server.endpoint)
+  # allowedUrlPrefixes: ["http://myriarch:8080/api/v1/artifacts/"]
+  requireSignature: true
+  trustedRootFile: /etc/myriarch/trust/trusted_root.json   # Sigstore trusted root offline (ConfigMap), no TUF access
+  healthTimeout: 120s
+  preflightValidate: true                    # `validate` of the new binary with the current effective config, same UID
+container:
+  supervisorCommand: ["/usr/local/bin/opampsupervisor", "--config=/etc/opampsupervisor/supervisor.yaml"]
+  seedBinary: /usr/local/bin/otelcol-contrib # collector binary of the image: copied to the volume on first start
+  # newest: the higher version wins (tie: volume); image: emergency switch, the image binary is always activated
+  seedPolicy: newest
+  stopTimeout: 30s                           # SIGTERM -> SIGKILL for the supervisor
+  restartDelay: 2s                           # backoff when the supervisor ends unexpectedly (doubles up to 60 s)
+  maxRestarts: 5                             # more than 5 restarts within restartWindow -> exit 1 (crash loop becomes visible)
+  restartWindow: 10m
+  healthListen: "0.0.0.0:13135"              # GET /healthz (liveness), GET /readyz; "" = off
+stateDir: /var/lib/myriarch/updater         # state and download spool, on the same volume
+log: {level: info, format: json}

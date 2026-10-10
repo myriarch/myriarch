@@ -1,0 +1,11 @@
+name: k8s-gw-0
+attributes:
+  service.name: otelcol-contrib
+  service.version: 0.162.0
+  os.type: linux
+  host.name: otel-gateway-7f9c8d-x2k4p
+  host.arch: amd64
+  site.type: k8s-gateway
+  site.id: k8s-prod
+  site.country: NL
+  site.timezone: Europe/Amsterdam

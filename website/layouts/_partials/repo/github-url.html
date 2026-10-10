@@ -1,0 +1,20 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Returns the GitHub URL of a repository path. Repository URL and branch come from params.repo.
+  Call: partial "repo/github-url.html" (dict "kind" "blob" "path" "docs/architecture.md" "fragment" "observability")
+  kind is blob (a file), tree (a directory), edit (the web editor; both with an optional #fragment) or issues (a new issue; the keys
+  title and body prefill it, there is no path).
+*/ -}}
+{{ $repo := site.Params.repo -}}
+{{ $kind := .kind -}}
+{{ $url := "" -}}
+{{ if eq $kind "issues" -}}
+  {{ $url = printf "%s/issues/new?%s" $repo.url (querify "title" .title "body" (.body | default "")) -}}
+{{ else -}}
+  {{ $url = printf "%s/%s/%s/%s" $repo.url $kind $repo.branch (strings.TrimPrefix "/" .path) -}}
+  {{ with .fragment }}{{ $url = printf "%s#%s" $url . }}{{ end -}}
+{{ end -}}
+{{ return $url -}}

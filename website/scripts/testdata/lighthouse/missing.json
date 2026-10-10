@@ -1,0 +1,14 @@
+{
+  "finalDisplayedUrl": "http://127.0.0.1:1313/x/",
+  "categories": {
+    "performance": {
+      "score": 1
+    },
+    "accessibility": {
+      "score": null
+    },
+    "best-practices": {
+      "score": 1
+    }
+  }
+}

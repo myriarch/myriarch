@@ -1,0 +1,24 @@
+# Site-specific deviations. Matches on exact attribute values that the
+# installation script sets on the supervisor as non_identifying_attributes.
+apiVersion: myriarch.dev/v1alpha1
+kind: Inventory
+metadata:
+  name: sites
+  description: Pilot sites and special cases
+spec:
+  entries:
+    - match:
+        site.id: "1001"
+      labels:
+        pilot: "true"
+    - match:
+        site.id: "1002"
+      labels:
+        pilot: "true"
+      parameters:
+        logLevel: debug
+    - match:
+        site.id: "1003"
+      parameters:
+        gatewayEndpoint: otel-gw-3.example.internal:4317
+        collectEventLog: false

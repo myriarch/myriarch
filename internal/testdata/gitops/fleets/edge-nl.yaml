@@ -1,0 +1,29 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: edge-nl
+  description: Windows edge nodes in NL
+  labels:
+    team: edge-ops
+spec:
+  displayName: Edge sites NL
+  priority: 100
+  selector:
+    matchAttributes:
+      site.type: edge
+      site.country: NL
+    matchExpressions:
+      - key: os.type
+        operator: In
+        values: [windows]
+  blueprint: edge-windows
+  parameters:
+    gatewayEndpoint: otel-gw-1.example.internal:4317
+  collector:
+    distribution: otelcol-contrib
+    version: 0.162.0
+  update:
+    executor: updater
+  rollout:
+    configPolicy: edge-careful
+    versionPolicy: edge-careful

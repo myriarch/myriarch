@@ -1,0 +1,27 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Returns a map from a repository path to the RelPermalink of the page that renders it (docs/concepts/gitops.md -> /docs/concepts/gitops/).
+  Besides the source path of every page, the paths listed in params.represents (a page that stands for other files, for example the
+  API reference for api/openapi.yaml) and params.placeholder.replaces (a placeholder that stands in for a page that will be written) are
+  included. Used by the link render hooks; call it through partialCached with a constant key.
+  The map is built in a scratch because merge could change the case of a key and repository paths are case sensitive.
+*/ -}}
+{{ $s := newScratch -}}
+{{ $s.Set "index" dict -}}
+{{ range site.Pages -}}
+  {{ $page := . -}}
+  {{ $link := $page.RelPermalink -}}
+  {{ with partial "repo/source-path.html" $page -}}
+    {{ $s.SetInMap "index" . $link -}}
+  {{ end -}}
+  {{ range $page.Params.represents -}}
+    {{ $s.SetInMap "index" . $link -}}
+  {{ end -}}
+  {{ with $page.Params.placeholder -}}
+    {{ with .replaces }}{{ $s.SetInMap "index" . $link }}{{ end -}}
+  {{ end -}}
+{{ end -}}
+{{ return ($s.Get "index") -}}

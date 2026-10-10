@@ -1,0 +1,4 @@
+@import "https://fonts.example.com/a.css";
+.a { background: url( "https://example.com/a.png" ); }
+.b { background: url(/local.png); }
+@font-face { src: url(//example.com/f.woff2) format("woff2"); }

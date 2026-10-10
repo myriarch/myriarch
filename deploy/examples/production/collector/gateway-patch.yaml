@@ -1,0 +1,30 @@
+# Adjustments to the StatefulSet otel-gateway (strategic merge: lists are merged by name or mountPath).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: otel-gateway
+  namespace: observability
+spec:
+  # replicas: 2 (default of the base) - two agents with the same site.id, each with its own pod name and PVC.
+  # Reduce to 1 (replicas: 1) for a minimal installation.
+  template:
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: registry-pull-secret
+      containers:
+        - name: collector
+          env:
+            # site.* matching the fleet k8s-gateway of gitops-template (matchAttributes site.type=k8s-gateway)
+            - {name: SITE_TYPE, value: k8s-gateway}
+            - {name: SITE_ID, value: example-cluster}
+            - {name: SITE_NAME, value: Example gateway (example-cluster)}
+          volumeMounts:
+            # CA bundle for wss://fleet.example.com (server.tls.ca_file in the supervisor.yaml below)
+            - {name: internal-ca, mountPath: /etc/myriarch/ca, readOnly: true}
+      volumes:
+        - name: internal-ca
+          configMap:
+            name: internal-ca
+            items:
+              - {key: ca.crt, path: ca.crt}

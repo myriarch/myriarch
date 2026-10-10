@@ -1,0 +1,45 @@
+# Gateway collector of the production example (Kubernetes cluster, namespace observability).
+#
+#   kubectl apply -k deploy/examples/production/collector
+#
+# Overlay on the unchanged base deploy/k8s/collector (the base is checked by Go tests and stays the source of
+# truth): only the StatefulSet otel-gateway (the DaemonSet otel-agent and its NetworkPolicy are removed), image from
+# your registry pinned by digest, site values of the cluster, CA bundle for wss://. A version change is made through
+# the image digest (images: below).
+#
+# Create first (create-secrets.example.sh): namespace, pull secret registry-pull-secret, ConfigMap internal-ca,
+# Secret myriarch-enrollment (key token: enrollment token) and Secret otel-collector-secrets (BACKEND_API_TOKEN,
+# a dummy value in this example).
+#
+# Optional: host collectors send OTLP to the gateway -> uncomment the component:
+#   components:
+#     - components/external-gateway
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: observability
+
+resources:
+  - ../../../k8s/collector
+
+# components:
+#   - components/external-gateway
+
+# Image from your container registry (replace registry.example.com via IMAGE_REGISTRY, see README.md).
+# The digest is mandatory in this example: tags are mutable references. Take the digest of the signed release image
+# (COLLECTOR_DIGEST of the release pipeline) and enter it below; kustomize then renders name@sha256:... and ignores
+# any tag.
+images:
+  - name: registry.example.com/observability/otel-supervisor-collector
+    newName: registry.example.com/myriarch/myriarch-collector
+    # PLACEHOLDER digest (all zeros): replace it with the digest of the real image before applying
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+patches:
+  # The node agent (DaemonSet) and its NetworkPolicy are removed: this example runs only the gateway.
+  - path: delete-node-agent.yaml
+  # Pull secret, SITE_* values, CA bundle in the StatefulSet
+  - path: gateway-patch.yaml
+  # Site values of the cluster (overrides all keys of the ConfigMap myriarch-site)
+  - path: site-configmap-patch.yaml
+  # supervisor.yaml with server.tls.ca_file (otherwise identical to the base; verify.sh checks that)
+  - path: supervisor-configmap-patch.yaml

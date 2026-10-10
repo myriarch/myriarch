@@ -1,0 +1,147 @@
+# Quickstart base blueprint: health check, memory limiter, batching, resource attributes from the site.* attributes and the
+# OTLP/gRPC export to a gateway. All other blueprints extend it.
+#
+# myriarchd evaluates the template expressions "[[ ... ]]"; "${env:...}" is left untouched and resolved by the
+# collector itself (secrets never belong in this repository). Values that start with "[[" are quoted.
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: base
+  description: Common base of all collectors (health, queue, export to the gateway)
+spec:
+  parameters:
+    - name: gatewayEndpoint
+      type: string
+      required: true
+      description: OTLP/gRPC endpoint of the gateway (host:port)
+    - name: gatewayInsecure
+      type: bool
+      default: false
+      description: Disable TLS for the gateway export - only for tests or a fully trusted network
+    - name: gatewayAuth
+      type: bool
+      default: false
+      description: Send a bearer token from the environment variable OTEL_GATEWAY_TOKEN
+    - name: healthEndpoint
+      type: string
+      default: localhost:13133
+      description: Listener of the health_check extension (the updater and the supervisor probe http://localhost:13133/)
+    - name: otlpListenHost
+      type: string
+      default: localhost
+      description: Bind address of the local OTLP receivers (4317/4318); loopback only on hosts
+    - name: environment
+      type: string
+      fromAttribute: deployment.environment.name
+      default: production
+      enum: [production, staging, development]
+    - name: logLevel
+      type: string
+      default: info
+      enum: [debug, info, warn, error]
+    - name: batchMaxSize
+      type: int
+      default: 0
+      min: 0
+      description: >-
+        send_batch_max_size of the batch processor (0 = unlimited). A value below send_batch_size (2048), for
+        example 10, passes "myrctl validate" but fails the collector/supervisor validation on the host.
+    - name: memoryLimitPercent
+      type: int
+      default: 75
+      min: 20
+      max: 90
+    - name: storageDir
+      type: string
+      default: /var/lib/otelcol/storage
+      description: Directory of the persistent sending queue (Linux; the Windows blueprint overrides it)
+    - name: siteId
+      type: string
+      fromAttribute: site.id
+      default: unknown
+    - name: siteType
+      type: string
+      fromAttribute: site.type
+      default: unknown
+    - name: siteCountry
+      type: string
+      fromAttribute: site.country
+      default: unknown
+  config:
+    extensions:
+      health_check:
+        endpoint: "[[ .params.healthEndpoint ]]"
+      file_storage/queue:
+        directory: "[[ .params.storageDir ]]"
+        create_directory: true
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "[[ .params.otlpListenHost ]]:4317"
+          http:
+            endpoint: "[[ .params.otlpListenHost ]]:4318"
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: "[[ .params.memoryLimitPercent ]]"
+        spike_limit_percentage: 15
+      resource_detection:
+        detectors: [env, system]
+        system:
+          hostname_sources: [os]
+      resource/site:
+        attributes:
+          - key: site.id
+            value: "[[ .params.siteId ]]"
+            action: upsert
+          - key: site.type
+            value: "[[ .params.siteType ]]"
+            action: upsert
+          - key: site.country
+            value: "[[ .params.siteCountry ]]"
+            action: upsert
+          - key: deployment.environment.name
+            value: "[[ .params.environment ]]"
+            action: upsert
+      batch:
+        send_batch_size: 2048
+        send_batch_max_size: "[[ .params.batchMaxSize ]]"
+        timeout: 5s
+    exporters:
+      otlp_grpc/gateway:
+        endpoint: "[[ .params.gatewayEndpoint ]]"
+        tls:
+          insecure: "[[ .params.gatewayInsecure ]]"
+        sending_queue:
+          enabled: true
+          storage: file_storage/queue
+        retry_on_failure:
+          enabled: true
+          max_elapsed_time: 0s
+    service:
+      extensions: [health_check, file_storage/queue]
+      telemetry:
+        logs:
+          level: "[[ .params.logLevel ]]"
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource_detection, resource/site, batch]
+          exporters: [otlp_grpc/gateway]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, resource_detection, resource/site, batch]
+          exporters: [otlp_grpc/gateway]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, resource_detection, resource/site, batch]
+          exporters: [otlp_grpc/gateway]
+  fragments:
+    - name: gateway-auth
+      when: "[[ .params.gatewayAuth ]]"
+      config:
+        exporters:
+          otlp_grpc/gateway:
+            headers:
+              authorization: "Bearer ${env:OTEL_GATEWAY_TOKEN}"

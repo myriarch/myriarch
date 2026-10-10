@@ -1,0 +1,60 @@
+# Edge nodes (Windows): host metrics, Windows event log, application log files.
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: edge-windows
+  description: Edge nodes on Windows - host metrics, event log, application logs
+spec:
+  extends: base
+  parameters:
+    - name: storageDir
+      type: string
+      default: 'C:\ProgramData\Myriarch\storage'
+    - name: appLogPaths
+      type: list
+      default: ['C:\ProgramData\EdgeApp\logs\*.log']
+      description: Glob patterns of the application log files
+    - name: collectEventLog
+      type: bool
+      default: true
+    - name: hostMetricsInterval
+      type: duration
+      default: 60s
+  config:
+    receivers:
+      host_metrics:
+        collection_interval: "[[ .params.hostMetricsInterval ]]"
+        scrapers:
+          cpu: {}
+          memory: {}
+          disk: {}
+          filesystem: {}
+          network: {}
+          paging: {}
+      windows_event_log/application:
+        channel: application
+        start_at: end
+      windows_event_log/system:
+        channel: system
+        start_at: end
+      file_log/app:
+        include: "[[ .params.appLogPaths ]]"
+        start_at: end
+        storage: file_storage/queue
+    service:
+      pipelines:
+        metrics:
+          receivers: [otlp, host_metrics]
+        logs:
+          receivers: [otlp, windows_event_log/application, windows_event_log/system, file_log/app]
+  fragments:
+    - name: no-eventlog
+      when: "[[ not .params.collectEventLog ]]"
+      remove:
+        - receivers::windows_event_log/application
+        - receivers::windows_event_log/system
+      config:
+        service:
+          pipelines:
+            logs:
+              receivers: [otlp, file_log/app]

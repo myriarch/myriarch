@@ -1,0 +1,17 @@
+# Configuration rollouts of the probe: one wave, short wait times, pause on failure.
+apiVersion: myriarch.dev/v1alpha1
+kind: RolloutPolicy
+metadata:
+  name: probe-config
+  description: one wave, 10 targets in parallel, pause on failure
+spec:
+  waves:
+    - name: all
+      percent: 100
+  maxConcurrent: 10
+  healthWait: 5s
+  applyTimeout: 5m
+  offlineGracePeriod: 2m
+  failureThreshold:
+    maxFailed: 1
+  onFailure: pause

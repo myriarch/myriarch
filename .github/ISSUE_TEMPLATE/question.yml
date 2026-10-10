@@ -1,0 +1,23 @@
+name: Question
+description: Ask how something works or how to approach a problem
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read the [documentation](https://github.com/myriarch/myriarch/tree/main/docs) first. For security problems use the private reporting link on the issue chooser, not this form.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What do you want to know, and what have you tried or read so far?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `myriarchd version` or the image tag, if it matters for the question.
+    validations:
+      required: false

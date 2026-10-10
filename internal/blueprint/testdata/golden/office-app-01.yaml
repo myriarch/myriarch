@@ -1,0 +1,121 @@
+exporters:
+  otlp_grpc/gateway:
+    endpoint: otel-gw-1.example.internal:4317
+    headers:
+      authorization: Bearer ${env:OTEL_GATEWAY_TOKEN}
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 0s
+    sending_queue:
+      enabled: true
+      storage: file_storage/queue
+    tls:
+      insecure: false
+extensions:
+  file_storage/queue:
+    create_directory: true
+    directory: /var/lib/otelcol/storage
+  health_check:
+    endpoint: localhost:13133
+processors:
+  batch:
+    send_batch_size: 2048
+    timeout: 5s
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 15
+  resource/site:
+    attributes:
+      - action: upsert
+        key: site.id
+        value: OFFICE1
+      - action: upsert
+        key: site.type
+        value: office
+      - action: upsert
+        key: site.country
+        value: NL
+      - action: upsert
+        key: deployment.environment.name
+        value: prod
+  resource_detection:
+    detectors:
+      - env
+      - system
+    system:
+      hostname_sources:
+        - os
+receivers:
+  file_log/syslog:
+    include:
+      - /var/log/syslog
+      - /var/log/messages
+    start_at: end
+    storage: file_storage/queue
+  host_metrics:
+    collection_interval: 30s
+    scrapers:
+      cpu: {}
+      disk: {}
+      filesystem: {}
+      load: {}
+      memory: {}
+      network: {}
+      paging: {}
+      processes: {}
+  journald:
+    directory: /var/log/journal
+    priority: info
+    start_at: end
+    units:
+      - sshd.service
+      - nginx.service
+      - postgresql.service
+  otlp:
+    protocols:
+      grpc:
+        endpoint: localhost:4317
+      http:
+        endpoint: localhost:4318
+service:
+  extensions:
+    - health_check
+    - file_storage/queue
+  pipelines:
+    logs:
+      exporters:
+        - otlp_grpc/gateway
+      processors:
+        - memory_limiter
+        - resource_detection
+        - resource/site
+        - batch
+      receivers:
+        - otlp
+        - journald
+        - file_log/syslog
+    metrics:
+      exporters:
+        - otlp_grpc/gateway
+      processors:
+        - memory_limiter
+        - resource_detection
+        - resource/site
+        - batch
+      receivers:
+        - otlp
+        - host_metrics
+    traces:
+      exporters:
+        - otlp_grpc/gateway
+      processors:
+        - memory_limiter
+        - resource_detection
+        - resource/site
+        - batch
+      receivers:
+        - otlp
+  telemetry:
+    logs:
+      level: info

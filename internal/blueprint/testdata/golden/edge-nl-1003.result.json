@@ -1,0 +1,44 @@
+{
+  "fleet": "edge-nl",
+  "blueprint": "edge-windows",
+  "layers": [
+    "base",
+    "base#gateway-auth",
+    "edge-windows",
+    "edge-windows#no-eventlog"
+  ],
+  "parameters": {
+    "appLogPaths": [
+      "C:\\ProgramData\\EdgeApp\\logs\\*.log"
+    ],
+    "collectEventLog": false,
+    "environment": "prod",
+    "gatewayAuth": true,
+    "gatewayEndpoint": "otel-gw-3.example.internal:4317",
+    "gatewayInsecure": false,
+    "hostMetricsInterval": "60s",
+    "logLevel": "info",
+    "memoryLimitPercent": 75,
+    "siteCountry": "NL",
+    "siteId": "1003",
+    "siteType": "edge",
+    "storageDir": "C:\\ProgramData\\Myriarch\\storage"
+  },
+  "parameterSources": {
+    "appLogPaths": "default",
+    "collectEventLog": "inventory",
+    "environment": "default",
+    "gatewayAuth": "default",
+    "gatewayEndpoint": "inventory",
+    "gatewayInsecure": "default",
+    "hostMetricsInterval": "default",
+    "logLevel": "default",
+    "memoryLimitPercent": "default",
+    "siteCountry": "attribute",
+    "siteId": "attribute",
+    "siteType": "attribute",
+    "storageDir": "default"
+  },
+  "hash": "dcbf57897df12e932f08c1b26c3257cc0ebbefda6b3310eda9c44c687898a8ef",
+  "issues": []
+}

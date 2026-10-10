@@ -1,0 +1,23 @@
+# Ingress variant: HAProxy Ingress Controller (haproxytech/kubernetes-ingress, annotations "haproxy.org/...").
+#
+#   helm upgrade --install myriarch <chart> -n myriarch \
+#     -f deploy/examples/production/myriarch-values.yaml -f deploy/helm/myriarch/examples/ingress-haproxy.yaml
+#
+# The tunnel timeout applies to WebSocket connections. CHECK: (1) class and namespace of the controller,
+# (2) the community controller jcmoraisjr/haproxy-ingress uses different annotations
+# (haproxy-ingress.github.io/timeout-tunnel), (3) that the controller sets X-Forwarded-For.
+# The ingress-nginx annotations from the production values are removed (null).
+ingress:
+  className: haproxy
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: null
+    nginx.ingress.kubernetes.io/proxy-send-timeout: null
+    nginx.ingress.kubernetes.io/proxy-body-size: null
+    haproxy.org/timeout-tunnel: "3600s"
+    haproxy.org/forwarded-for: "true"
+networkPolicy:
+  ingress:
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: haproxy-controller

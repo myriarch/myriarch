@@ -1,0 +1,50 @@
+# myriarch-sim profile "small": a fast round trip for local development (make dev + myriarch-sim), matching the quickstart
+# GitOps repository (examples/quickstart):
+#   go run ./cmd/myriarch-sim run --server ws://localhost:8080/v1/opamp --agents 20 \
+#       --profile examples/sim/small.yaml --control-listen 127.0.0.1:9465
+# Short durations make config rollouts and updates visible within seconds. The fixed site IDs hit the canary wave
+# of examples/quickstart/inventory/waves.yaml (edge-001, dc-01).
+seed: 1
+components: components-otelcol-contrib-0.162.0.json
+groups:
+  - name: windows-edge
+    weight: 3
+    os: windows
+    arch: amd64
+    version: 0.161.0
+    updater: true
+    hostnamePattern: "WIN-EDGE-%02d"
+    siteIdPattern: "edge-%03d"
+    attributes:
+      site.type: edge
+      site.country: NL
+      site.timezone: Europe/Amsterdam
+      deployment.environment.name: prod
+    fixedSiteIds: ["edge-001", "edge-002"]
+  - name: linux-datacenter
+    weight: 1
+    os: linux
+    arch: amd64
+    version: 0.162.0
+    updater: false
+    hostnamePattern: "linux-dc-%02d.example.com"
+    siteIdPattern: "dc-%02d"
+    attributes:
+      site.type: datacenter
+      site.country: NL
+      site.timezone: UTC
+behavior:
+  connectRate: 50
+  heartbeatInterval: 30s
+  configApplyDelay: 200ms-1s
+  configFailureRate: 0.0
+  failConfigsContaining: "simulate-config-failure"
+  unhealthyAfterApplyRate: 0.0
+  restartDuration: 1s
+  startupDuration: 1s-2s     # after a restart the supervisor reports {healthy:false}, then StatusStarting, then StatusOK
+  reconnectOnUpgrade: true   # a version change restarts the supervisor: the connection drops, a new client connects
+  validateConfig: true       # like validate_config in the supervisor: FAILED, then the old config keeps running (no APPLIED)
+  updaterInstallDuration: 2s-6s
+  updateFailureRate: 0.0
+  versionAfterUpdate: offered
+  offlineChurnRate: 0.0

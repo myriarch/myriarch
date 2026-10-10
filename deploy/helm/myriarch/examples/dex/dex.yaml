@@ -1,0 +1,62 @@
+# Values for the upstream Dex Helm chart (https://charts.dexidp.io): a demo identity provider for
+# examples/quickstart-dex.yaml. Placeholders only: replace <bcrypt hash> and <client secret> yourself and never commit
+# real values. The client secret below is a Helm value: it is stored in the Helm release (a Secret in the cluster that
+# everyone who can read releases can read). That is acceptable for a local demo only; a real identity provider keeps
+# its client secrets in a Secret that is referenced from the values (for Dex: secretEnv with envFrom).
+# Check the keys against the chart version you install (https.enabled, volumes and volumeMounts exist in the
+# current chart).
+#
+#   helm repo add dex https://charts.dexidp.io
+#   # self-signed certificate for dex.example.test (demo only), mounted as the Secret dex-tls:
+#   openssl req -x509 -newkey rsa:2048 -nodes -days 30 -keyout tls.key -out tls.crt \
+#     -subj "/CN=dex.example.test" -addext "subjectAltName=DNS:dex.example.test"
+#   kubectl create namespace dex
+#   kubectl -n dex create secret tls dex-tls --cert=tls.crt --key=tls.key
+#   helm upgrade --install dex dex/dex -n dex -f deploy/helm/myriarch/examples/dex/dex.yaml
+#
+# Reaching Dex: myriarchd resolves dex.example.test to the Service (CoreDNS rewrite, see quickstart-dex.yaml) and
+# connects to port 5554. The browser needs the same name and port: add "127.0.0.1 dex.example.test" to /etc/hosts and run
+#   kubectl -n dex port-forward svc/dex 5554:5554
+#
+# Bcrypt hash of the demo password (reads the password from standard input; 12 to 72 characters):
+#   printf '%s' "$DEMO_PASSWORD" | myriarchd auth hash-password
+# Client secret: any random string, for example the output of "openssl rand -hex 24" (the same value goes into the
+# Secret key oidc-client-secret of myriarch).
+https:
+  enabled: true
+volumes:
+  - name: tls
+    secret:
+      secretName: dex-tls
+volumeMounts:
+  - name: tls
+    mountPath: /etc/dex/tls
+    readOnly: true
+config:
+  # must equal config.auth.oidc.issuerUrl of myriarch, including the port: the Service of the Dex chart serves https
+  # on 5554 (the issuer names that port because the Service is not exposed on 443)
+  issuer: https://dex.example.test:5554/dex
+  storage:
+    type: kubernetes
+    config:
+      inCluster: true
+  web:
+    https: 0.0.0.0:5554
+    tlsCert: /etc/dex/tls/tls.crt
+    tlsKey: /etc/dex/tls/tls.key
+  oauth2:
+    skipApprovalScreen: true
+  enablePasswordDB: true
+  staticClients:
+    - id: myriarch
+      name: Myriarch
+      redirectURIs:
+        - https://myriarch.example.test/api/v1/auth/callback
+      secret: <client secret>
+  staticPasswords:
+    - email: admin@example.test
+      username: admin
+      emailVerified: true
+      hash: "<bcrypt hash>"
+      # any unique ID of the user (sub claim)
+      userID: 00000000-0000-4000-8000-000000000001

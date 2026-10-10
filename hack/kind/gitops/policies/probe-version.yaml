@@ -1,0 +1,17 @@
+# Version rollouts of the probe: one wave, one target at a time, pause on failure (the probe retries with retry-failed).
+apiVersion: myriarch.dev/v1alpha1
+kind: RolloutPolicy
+metadata:
+  name: probe-version
+  description: one wave, healthWait 20 s, pause on failure
+spec:
+  waves:
+    - name: all
+      percent: 100
+  maxConcurrent: 1
+  healthWait: 20s
+  applyTimeout: 10m
+  offlineGracePeriod: 2m
+  failureThreshold:
+    maxFailed: 1
+  onFailure: pause

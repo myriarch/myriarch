@@ -1,0 +1,19 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: base
+spec:
+  parameters:
+    - name: token
+      type: string
+      required: true
+  config:
+    receivers:
+      otlp: {}
+    exporters:
+      debug: {}
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters: [debug]

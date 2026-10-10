@@ -1,0 +1,3310 @@
+openapi: 3.1.0
+info:
+  title: Myriarch REST API
+  version: 1.0.0-alpha.1
+  summary: Management API of myriarchd (OpAMP based OpenTelemetry Collector fleet management)
+  description: |
+    REST API used by the myriarch web UI, myrctl and automation.
+
+    **Conventions**
+    - Base path `/api/v1`. JSON (UTF-8) request and response bodies; field names are camelCase.
+    - Timestamps are RFC 3339 in UTC. Durations are Go duration strings (`"30s"`, `"5m"`).
+    - Hashes are lower-case hex strings (SHA-256 unless stated otherwise).
+    - Collector versions are given WITHOUT a leading `v` (`"0.162.0"`), except package offers.
+    - Maps and arrays marked as required are never `null` (empty `{}` / `[]`).
+    - Errors use RFC 9457 problem details (`application/problem+json`, schema `Problem`) with a
+      stable machine readable `code`.
+    - Paginated lists: `limit` (1..500, default 50) and `offset` (0..100000) query parameters; response
+      `{items, total, limit, offset}`. Unpaginated lists: `{items}`.
+    - Sorting: `sort=<field>` ascending, `sort=-<field>` descending.
+
+    **Authentication**
+    - Browser: server-side session cookie `myriarch_session` (OIDC login or dev login); with Secure
+      cookies (the production setting) the cookie is named `__Host-myriarch_session`. Mutating
+      requests (POST/PUT/PATCH/DELETE) authenticated by the cookie MUST send the header
+      `X-CSRF-Token` with the value of the `myriarch_csrf` cookie (also returned by `GET /auth/me`).
+    - Automation: `Authorization: Bearer myra_...` (API token with a fixed role, never higher than the
+      role of its creator; it stops working when the creator is disabled and after the maximum token
+      lifetime `auth.apiTokenMaxTtl`, default 90 days). No CSRF header needed.
+    - Request bodies must be `application/json` (other content types: 415). Sessions have an idle
+      timeout and an absolute maximum age. Repeated failed logins or invalid bearer tokens are rate
+      limited per client address (429 with `Retry-After`).
+    - Roles: `viewer` (read), `operator` (viewer + operational actions), `admin` (operator + users,
+      API tokens, enrollment tokens). Each operation lists its permission in `x-permission`.
+
+    **Live updates**: `GET /events/stream` (Server-Sent Events), see operation `streamEvents`.
+
+    **Non-REST endpoints** (not part of this document): OpAMP `/v1/opamp` (WebSocket + HTTP,
+    agents authenticate with `Authorization: Bearer myre_...` enrollment tokens), `/healthz`
+    (liveness), `/readyz` (readiness), `/metrics` (Prometheus, by default on the separate
+    metrics listener), `/licenses` (`LICENSE` and `THIRD_PARTY_NOTICES` as `text/plain`, no login).
+  contact:
+    name: The Myriarch Authors
+    url: https://myriarch.dev
+  license:
+    name: Apache License 2.0
+    identifier: Apache-2.0
+servers:
+  - url: /api/v1
+    description: same origin as the UI
+security:
+  - sessionCookie: []
+  - bearerToken: []
+tags:
+  - name: auth
+    description: Login, logout, current principal
+  - name: users
+    description: Users and roles
+  - name: tokens
+    description: API tokens and agent enrollment tokens
+  - name: agents
+    description: OpAMP agents (collectors and myriarch-updaters)
+  - name: savedFilters
+    description: Saved agent list filters
+  - name: stats
+    description: Dashboard aggregates
+  - name: system
+    description: System information and effective settings
+  - name: audit
+    description: Audit log
+  - name: live
+    description: Server-Sent Events for live UI updates
+  - name: fleets
+    description: Fleets from GitOps (read-only), fleet matching, UI version selection within the Git frame
+  - name: blueprints
+    description: Blueprints from GitOps (read-only), rendering preview
+  - name: rolloutPolicies
+    description: Rollout policies from GitOps (read-only)
+  - name: executors
+    description: Update executor definitions from GitOps (read-only)
+  - name: rollouts
+    description: Config and version rollouts, operator actions
+  - name: releases
+    description: Upstream collector releases, breaking changes
+  - name: gitops
+    description: GitOps sync status, history, manual sync, webhook
+  - name: artifacts
+    description: Artifact cache for collector binaries
+  - name: notifications
+    description: Notification channels
+
+paths:
+  # ===================================================================== auth
+  /auth/config:
+    get:
+      operationId: getAuthConfig
+      tags: [auth]
+      summary: Login options (public)
+      security: []
+      x-permission: public
+      responses:
+        '200':
+          description: Login options
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthConfigInfo' }
+  /auth/login:
+    get:
+      operationId: startOidcLogin
+      tags: [auth]
+      summary: Start the OIDC authorization code flow (PKCE) - browser redirect
+      security: []
+      x-permission: public
+      parameters:
+        - name: redirect
+          in: query
+          description: UI path to return to after login (must start with "/").
+          schema: { type: string, default: / }
+      responses:
+        '302':
+          description: Redirect to the identity provider
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /auth/callback:
+    get:
+      operationId: oidcCallback
+      tags: [auth]
+      summary: OIDC redirect URI - creates the session and redirects to the UI
+      security: []
+      x-permission: public
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses:
+        '302':
+          description: |
+            Redirect to the UI (session and CSRF cookies set). On failure the redirect goes to
+            `/login?error=access_denied` (no role mapped for the user) or `/login?error=oidc_error`.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/dev-login:
+    post:
+      operationId: devLogin
+      tags: [auth]
+      summary: Local login (only when auth.devLogin.enabled, i.e. dev mode)
+      security: []
+      x-permission: public
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DevLoginRequest' }
+      responses:
+        '200':
+          description: Logged in; session and CSRF cookies set
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          description: Too many login attempts for this client address or user name (code too_many_requests, header Retry-After)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /auth/bootstrap-login:
+    post:
+      operationId: bootstrapLogin
+      tags: [auth]
+      summary: Break-glass sign-in of the bootstrap admin (only while auth.bootstrapAdmin is active)
+      security: []
+      x-permission: public
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BootstrapLoginRequest' }
+      responses:
+        '200':
+          description: Signed in; session and CSRF cookies set
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          description: Too many sign-in attempts for this client address or for the bootstrap admin (code too_many_requests, header Retry-After)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: End the session
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '204':
+          description: Logged out
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Current principal with effective permissions
+      x-permission: read
+      responses:
+        '200':
+          description: Current principal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==================================================================== users
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List users
+      x-permission: users:manage
+      responses:
+        '200':
+          description: Users
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserList' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /users/{id}:
+    patch:
+      operationId: updateUser
+      tags: [users]
+      summary: Change role (sets roleSource=manual) or disable a user
+      x-permission: users:manage
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateUserRequest' }
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  # =================================================================== tokens
+  /tokens:
+    get:
+      operationId: listApiTokens
+      tags: [tokens]
+      summary: List API tokens (without secrets)
+      x-permission: tokens:manage
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: API tokens
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/APITokenList' }
+    post:
+      operationId: createApiToken
+      tags: [tokens]
+      summary: Create an API token (the secret is returned only once)
+      x-permission: tokens:manage
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAPITokenRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreatedAPIToken' }
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /tokens/{id}:
+    delete:
+      operationId: revokeApiToken
+      tags: [tokens]
+      summary: Revoke an API token
+      x-permission: tokens:manage
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Revoked
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /enrollment-tokens:
+    get:
+      operationId: listEnrollmentTokens
+      tags: [tokens]
+      summary: List agent enrollment tokens (without secrets)
+      x-permission: enrollment:manage
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Enrollment tokens
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EnrollmentTokenList' }
+    post:
+      operationId: createEnrollmentToken
+      tags: [tokens]
+      summary: Create an enrollment token for supervisors/myriarch-updaters (secret returned once)
+      x-permission: enrollment:manage
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateEnrollmentTokenRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreatedEnrollmentToken' }
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /enrollment-tokens/{id}:
+    delete:
+      operationId: revokeEnrollmentToken
+      tags: [tokens]
+      summary: Revoke an enrollment token (connected agents are not disconnected; reconnects fail)
+      x-permission: enrollment:manage
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Revoked
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # =================================================================== agents
+  /agents:
+    get:
+      operationId: listAgents
+      tags: [agents]
+      summary: List agents (server-side filtering, sorting, pagination)
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/AgentQ'
+        - $ref: '#/components/parameters/AgentKindFilter'
+        - $ref: '#/components/parameters/AgentStatusFilter'
+        - $ref: '#/components/parameters/AgentHealthyFilter'
+        - $ref: '#/components/parameters/AgentFleetFilter'
+        - $ref: '#/components/parameters/AgentUnassignedFilter'
+        - $ref: '#/components/parameters/AgentVersionFilter'
+        - $ref: '#/components/parameters/AgentOutdatedFilter'
+        - $ref: '#/components/parameters/AgentOSFilter'
+        - $ref: '#/components/parameters/AgentAttrFilter'
+        - $ref: '#/components/parameters/AgentConfigSyncFilter'
+        - name: sort
+          in: query
+          description: Sort field, prefix "-" for descending.
+          schema:
+            type: string
+            enum: [hostname, -hostname, version, -version, status, -status, fleet, -fleet, lastSeenAt, -lastSeenAt,
+                   firstSeenAt, -firstSeenAt, health, -health, configSync, -configSync, osType, -osType, siteId, -siteId]
+            default: hostname
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Page of agents
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentSummaryPage' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /agents/facets:
+    get:
+      operationId: getAgentFacets
+      tags: [agents]
+      summary: Value counts for filter UIs (same filters as listAgents)
+      description: >
+        Counts are disjunctive: the counts of a facet ignore the filter of that
+        facet's own dimension (so selecting one fleet still lists the other
+        fleets with their counts and a multi-select is possible) and apply all
+        other filters. `total` counts the agents matching all filters.
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/AgentQ'
+        - $ref: '#/components/parameters/AgentKindFilter'
+        - $ref: '#/components/parameters/AgentStatusFilter'
+        - $ref: '#/components/parameters/AgentHealthyFilter'
+        - $ref: '#/components/parameters/AgentFleetFilter'
+        - $ref: '#/components/parameters/AgentUnassignedFilter'
+        - $ref: '#/components/parameters/AgentVersionFilter'
+        - $ref: '#/components/parameters/AgentOutdatedFilter'
+        - $ref: '#/components/parameters/AgentOSFilter'
+        - $ref: '#/components/parameters/AgentAttrFilter'
+        - $ref: '#/components/parameters/AgentConfigSyncFilter'
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Facets
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentFacets' }
+  /agents/{id}:
+    parameters:
+      - $ref: '#/components/parameters/AgentIDPath'
+    get:
+      operationId: getAgent
+      tags: [agents]
+      summary: Agent details
+      x-permission: read
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '200':
+          description: Agent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentDetail' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteAgent
+      tags: [agents]
+      summary: Forget an agent (only allowed while offline; 412 otherwise)
+      x-permission: agents:delete
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+  /agents/{id}/effective-config:
+    get:
+      operationId: getAgentEffectiveConfig
+      tags: [agents]
+      summary: Effective config reported by the agent (expanded, includes defaults, secrets redacted by the collector)
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/AgentIDPath'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '200':
+          description: Effective config
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigDocument' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /agents/{id}/desired-config:
+    get:
+      operationId: getAgentDesiredConfig
+      tags: [agents]
+      summary: Rendered config currently offered (desired) or assigned by GitOps
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/AgentIDPath'
+        - name: which
+          in: query
+          schema: { type: string, enum: [desired, assigned], default: desired }
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '200':
+          description: Rendered config
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigDocument' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /agents/{id}/components:
+    get:
+      operationId: getAgentComponents
+      tags: [agents]
+      summary: Available components reported by the agent
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/AgentIDPath'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '200':
+          description: Component set
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComponentSet' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /agents/{id}/events:
+    get:
+      operationId: listAgentEvents
+      tags: [agents]
+      summary: Event history of the agent (newest first, cursor pagination)
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/AgentIDPath'
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+        - name: before
+          in: query
+          description: Return events with id < before (0 = newest).
+          schema: { type: integer, format: int64, minimum: 0, default: 0 }
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '200':
+          description: Events
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentEventList' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /agents/{id}/actions/restart:
+    post:
+      operationId: restartAgent
+      tags: [agents]
+      summary: Send an OpAMP restart command (agent must have AcceptsRestartCommand)
+      x-permission: agents:operate
+      parameters:
+        - $ref: '#/components/parameters/AgentIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '202':
+          description: Command queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionAccepted' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+  /agents/{id}/actions/resync:
+    post:
+      operationId: resyncAgent
+      tags: [agents]
+      summary: Force resync - clear failed config hash, re-send desired config, request full state
+      x-permission: agents:operate
+      parameters:
+        - $ref: '#/components/parameters/AgentIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '202':
+          description: Command queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionAccepted' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /agents/{id}/actions/reenroll:
+    post:
+      operationId: reenrollAgent
+      tags: [agents]
+      summary: Clear the credential binding of an agent (the instance uid is bound to the enrollment token / client certificate of its first registration; the next connection with a valid credential claims it)
+      x-permission: enrollment:manage
+      parameters:
+        - $ref: '#/components/parameters/AgentIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '202':
+          description: Binding cleared
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionAccepted' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================= savedFilters
+  /saved-filters:
+    get:
+      operationId: listSavedFilters
+      tags: [savedFilters]
+      summary: Own and shared saved filters
+      x-permission: read
+      parameters:
+        - name: page
+          in: query
+          schema: { type: string, default: agents }
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Saved filters
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SavedFilterList' }
+    post:
+      operationId: createSavedFilter
+      tags: [savedFilters]
+      summary: Save a filter
+      x-permission: saved_filters:write
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSavedFilterRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SavedFilter' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /saved-filters/{id}:
+    delete:
+      operationId: deleteSavedFilter
+      tags: [savedFilters]
+      summary: Delete an own saved filter
+      x-permission: saved_filters:write
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================================================================== stats
+  /stats/overview:
+    get:
+      operationId: getOverviewStats
+      tags: [stats]
+      summary: Dashboard aggregates
+      x-permission: read
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Overview
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OverviewStats' }
+
+  # =================================================================== system
+  /system/info:
+    get:
+      operationId: getSystemInfo
+      tags: [system]
+      summary: Version, replicas, leader, database, features and effective non-secret settings
+      x-permission: read
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: System info
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemInfo' }
+
+  # ==================================================================== audit
+  /audit:
+    get:
+      operationId: listAuditEvents
+      tags: [audit]
+      summary: Audit log (newest first)
+      x-permission: audit:read
+      parameters:
+        - { name: actor, in: query, description: Actor id or display name (exact match; the name case-insensitively), schema: { type: string } }
+        - { name: action, in: query, description: 'Exact action or prefix with "*" (e.g. "rollout.*")', schema: { type: string } }
+        - { name: targetType, in: query, schema: { type: string } }
+        - { name: targetId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '200':
+          description: Audit events
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditEventPage' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ===================================================================== live
+  /events/stream:
+    get:
+      operationId: streamEvents
+      tags: [live]
+      summary: Live updates as Server-Sent Events
+      description: |
+        `text/event-stream`. Each message has `event: <type>`, `id: <monotonic id>` and
+        `data: <JSON>`:
+
+        | event | data schema |
+        |---|---|
+        | `agent.updated` | `AgentSummary` (coalesced, max 1/s per agent) |
+        | `agent.removed` | `LiveAgentRemovedData` |
+        | `rollout.updated` | `RolloutSummary` |
+        | `fleet.updated` | `LiveFleetUpdatedData` - the effective target version or the UI version selection of a fleet changed (select, clear, superseded/invalidated by Git): refetch fleet views |
+        | `gitops.synced` | `GitOpsBrief` |
+        | `release.new` | `ReleaseSummary` |
+        | `stats.changed` | `{}` - hint to refetch the dashboard (max 1 per 5 s) |
+        | `resync` | `{}` - client fell behind or the server lost events: refetch all views |
+
+        A comment line `: ping` is sent every 15 s. Clients use `EventSource` (cookie auth) and
+        reconnect automatically; after a reconnect they should refetch visible data
+        (no replay; `Last-Event-ID` is ignored).
+      x-permission: read
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+
+  # =================================================================== fleets
+  /fleets:
+    get:
+      operationId: listFleets
+      tags: [fleets]
+      summary: All fleets with live status
+      x-permission: read
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Fleets
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FleetSummaryList' }
+  /fleets/match:
+    post:
+      operationId: matchFleets
+      tags: [fleets]
+      summary: Explain which fleet an (existing or hypothetical) agent belongs to
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MatchFleetsRequest' }
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Match result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MatchFleetsResponse' }
+  /fleets/{name}:
+    get:
+      operationId: getFleet
+      tags: [fleets]
+      summary: Fleet details
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+      responses:
+        '200':
+          description: Fleet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FleetDetail' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /fleets/{name}/version-options:
+    get:
+      operationId: getFleetVersionOptions
+      tags: [fleets]
+      summary: Versions an operator may select for the fleet (frame from Git, dialog data)
+      description: |
+        Returns the effective target, the frame from Git (`spec.update.selection`) and every candidate version with
+        the information the update dialog shows. Candidates are the known non-prerelease releases of the fleet's
+        distribution that satisfy the frame, the versions listed in `spec.update.selection.versions`, the Git
+        target (`spec.collector.version`) and the version of an existing UI selection; newest first. A candidate
+        that cannot be selected carries `selectable=false` and a `reasonCode`. Works for every fleet: without a
+        frame `allowed` is false (`notAllowedCode=selection_disabled`) and `options` lists only the Git target.
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Version options
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FleetVersionOptions' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /fleets/{name}/actions/select-version:
+    post:
+      operationId: selectFleetVersion
+      tags: [fleets]
+      summary: Set the target collector version of the fleet within the Git frame and start the version rollout
+      description: |
+        Stores a UI version selection for the fleet (who, when, why; audited as `fleet.version.select`, also when
+        refused) and asks the leader to plan the fleet. The version rollout is created by the planner on the leader
+        with the policy `spec.update.selection.rolloutPolicy` (default `spec.rollout.versionPolicy`), `origin=ui`,
+        `createdBy` = the operator and `requestReason` = `reason`; an active version rollout to another version is
+        superseded. If `version` already is the effective target, nothing is stored (200, `planned=false`, message).
+
+        The handler waits up to 10 s for the leader to plan the fleet. `planned=true`: the planner has run for this
+        selection; `rolloutId` is the version rollout that brings the fleet to the selected version (absent if no
+        member collector needs an update). `planned=false`: not planned within the wait time (leader busy or
+        changing); the rollout follows, the UI waits for `fleet.updated` / `rollout.updated`.
+
+        Preconditions (412 `precondition_failed`): `spec.update.selection.enabled` is true, the fleet has an update
+        executor (not `none`), and the fleet has no version rollout in status `failed` or `rolling_back` (abort it
+        first). Validation (422 `validation_failed`, `issues[].code`): `version_not_allowed` (outside the frame),
+        `downgrade_not_allowed` (lower than the current effective target and `allowDowngrade` is false),
+        `unknown_version` (not a known release of the distribution and not listed in `selection.versions`),
+        `prerelease_not_allowed`, `reason_required` (`selection.requireReason` and no reason). 409 `conflict`:
+        `expectedTargetVersion` does not match the current effective target (someone else changed it).
+      x-permission: fleets:set_version
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SelectFleetVersionRequest' }
+      responses:
+        '200':
+          description: Selection stored (and usually planned)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SelectFleetVersionResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /fleets/{name}/actions/clear-version-selection:
+    post:
+      operationId: clearFleetVersionSelection
+      tags: [fleets]
+      summary: Remove the UI version selection; the Git target (spec.collector.version) applies again
+      description: |
+        Deletes the UI selection (active or invalidated) of the fleet; audited as `fleet.version.clear`. The effective
+        target becomes `spec.collector.version` (or none). The planner then supersedes a version rollout to the
+        previously selected version and, if the Git target differs from the members' versions, creates a new rollout
+        (this can be a downgrade: the UI warns before). Allowed even when `spec.update.selection.enabled` is false.
+        Without a selection the call changes nothing and returns the current target (200). With
+        `spec.update.selection.requireReason` a reason is mandatory (422 `validation_failed`, issue `reason_required`).
+      x-permission: fleets:set_version
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClearFleetVersionSelectionRequest' }
+      responses:
+        '200':
+          description: Effective target after clearing
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FleetVersionTarget' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  # =============================================================== blueprints
+  /blueprints:
+    get:
+      operationId: listBlueprints
+      tags: [blueprints]
+      summary: All blueprints
+      x-permission: read
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Blueprints
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BlueprintSummaryList' }
+  /blueprints/{name}:
+    get:
+      operationId: getBlueprint
+      tags: [blueprints]
+      summary: Blueprint details (chain, merged parameters, usage, issues)
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+      responses:
+        '200':
+          description: Blueprint
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BlueprintDetail' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /blueprints/{name}/render:
+    post:
+      operationId: renderBlueprint
+      tags: [blueprints]
+      summary: Render a preview for an agent or hypothetical attributes (no side effects)
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RenderRequest' }
+      responses:
+        '200':
+          description: Render result (issues instead of HTTP errors for rendering problems)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RenderResponse' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ========================================================== rolloutPolicies
+  /rollout-policies:
+    get:
+      operationId: listRolloutPolicies
+      tags: [rolloutPolicies]
+      summary: All rollout policies (including the built-in "default" if not overridden)
+      x-permission: read
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Policies
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RolloutPolicyList' }
+  /rollout-policies/{name}:
+    get:
+      operationId: getRolloutPolicy
+      tags: [rolloutPolicies]
+      summary: One rollout policy
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+      responses:
+        '200':
+          description: Policy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RolloutPolicy' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ================================================================ executors
+  /executors:
+    get:
+      operationId: listExecutors
+      tags: [executors]
+      summary: Executor definitions (webhook/AWX) without secrets
+      x-permission: read
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Executors
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExecutorSummaryList' }
+
+  # ================================================================= rollouts
+  /rollouts:
+    get:
+      operationId: listRollouts
+      tags: [rollouts]
+      summary: Rollouts (newest first)
+      x-permission: read
+      parameters:
+        - { name: fleet, in: query, schema: { type: string } }
+        - name: kind
+          in: query
+          schema: { $ref: '#/components/schemas/RolloutKind' }
+        - name: status
+          in: query
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/RolloutStatus' }
+        - name: active
+          in: query
+          description: Only non-terminal rollouts.
+          schema: { type: boolean }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Rollouts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RolloutSummaryPage' }
+  /rollouts/{id}:
+    get:
+      operationId: getRollout
+      tags: [rollouts]
+      summary: Rollout with waves, counts and policy snapshot
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+      responses:
+        '200':
+          description: Rollout
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rollout' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /rollouts/{id}/targets:
+    get:
+      operationId: listRolloutTargets
+      tags: [rollouts]
+      summary: Targets (agents) of a rollout
+      description: Without `sort`, targets are ordered by wave, hostname and agent ID.
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+        - { name: wave, in: query, schema: { type: integer, minimum: 0 } }
+        - name: status
+          in: query
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/TargetStatus' }
+        - name: agent
+          in: query
+          description: >-
+            Only the target of this agent (at most one item). The UI uses it to keep an open detail view current
+            while the target moves between pages of the `activity` order.
+          schema: { type: string, format: uuid }
+        - name: sort
+          in: query
+          description: >-
+            `wave` (default) orders by wave, hostname and agent ID. This order does not change while target statuses
+            change, so use it to page through all targets. `activity` ranks by status first (in_progress and verifying,
+            waiting_window, failed and rolled_back, pending, succeeded, skipped, cancelled), then by wave, hostname and
+            agent ID. Statuses change while a rollout runs, so a target can move between pages between two requests.
+          schema: { type: string, enum: [wave, activity], default: wave }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Targets
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RolloutTargetPage' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /rollouts/{id}/actions/pause:
+    post:
+      operationId: pauseRollout
+      tags: [rollouts]
+      summary: Pause (no new targets are started; in-progress targets finish)
+      x-permission: rollouts:operate
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RolloutActionRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/RolloutOK' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /rollouts/{id}/actions/resume:
+    post:
+      operationId: resumeRollout
+      tags: [rollouts]
+      summary: Resume a paused rollout
+      x-permission: rollouts:operate
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RolloutActionRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/RolloutOK' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /rollouts/{id}/actions/abort:
+    post:
+      operationId: abortRollout
+      tags: [rollouts]
+      summary: Abort - stop starting targets, cancel pending ones (updated agents keep the new state)
+      x-permission: rollouts:operate
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RolloutActionRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/RolloutOK' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /rollouts/{id}/actions/approve:
+    post:
+      operationId: approveRolloutWave
+      tags: [rollouts]
+      summary: Approve a wave that requires approval
+      x-permission: rollouts:operate
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApproveWaveRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/RolloutOK' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /rollouts/{id}/actions/rollback:
+    post:
+      operationId: rollbackRollout
+      tags: [rollouts]
+      summary: Roll back all touched targets to their previous config/version
+      x-permission: rollouts:operate
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RolloutActionRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/RolloutOK' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /rollouts/{id}/actions/retry-failed:
+    post:
+      operationId: retryFailedRolloutTargets
+      tags: [rollouts]
+      summary: Reset failed/skipped targets to pending (rollout must be paused, running or failed)
+      x-permission: rollouts:operate
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RolloutActionRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/RolloutOK' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+
+  # ================================================================= releases
+  /releases:
+    get:
+      operationId: listReleases
+      tags: [releases]
+      summary: Detected upstream releases (highest version first)
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/Distribution'
+        - { name: includePrerelease, in: query, schema: { type: boolean, default: false } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Releases
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReleaseSummaryPage' }
+  /releases/latest:
+    get:
+      operationId: getLatestRelease
+      tags: [releases]
+      summary: Latest stable release of a distribution
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/Distribution'
+      responses:
+        '200':
+          description: Latest release
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReleaseDetail' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /releases/compare:
+    get:
+      operationId: compareVersions
+      tags: [releases]
+      summary: Breaking changes and deprecations for versions in (from, to]
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/Distribution'
+        - { name: from, in: query, required: true, schema: { type: string, example: 0.150.0 } }
+        - { name: to, in: query, required: true, schema: { type: string, example: 0.162.0 } }
+      responses:
+        '200':
+          description: Comparison
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VersionComparison' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /releases/actions/refresh:
+    post:
+      operationId: refreshReleases
+      tags: [releases]
+      summary: Poll upstream releases now
+      x-permission: releases:acknowledge
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '202':
+          description: Refresh requested
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionAccepted' }
+  /releases/{distribution}/{version}:
+    get:
+      operationId: getRelease
+      tags: [releases]
+      summary: Release details incl. fleets behind and GitOps snippet
+      x-permission: read
+      parameters:
+        - { name: distribution, in: path, required: true, schema: { type: string, example: otelcol-contrib } }
+        - { name: version, in: path, required: true, schema: { type: string, example: 0.162.0 } }
+      responses:
+        '200':
+          description: Release
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReleaseDetail' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /releases/{distribution}/{version}/actions/acknowledge:
+    post:
+      operationId: acknowledgeRelease
+      tags: [releases]
+      summary: Acknowledge the release notice
+      x-permission: releases:acknowledge
+      parameters:
+        - { name: distribution, in: path, required: true, schema: { type: string } }
+        - { name: version, in: path, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: Acknowledged release
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Release' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # =================================================================== gitops
+  /gitops/status:
+    get:
+      operationId: getGitOpsStatus
+      tags: [gitops]
+      summary: Sync status, applied/latest commit, validation issues
+      x-permission: read
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GitOpsSyncStatus' }
+  /gitops/syncs:
+    get:
+      operationId: listGitOpsSyncs
+      tags: [gitops]
+      summary: Sync history (newest first)
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Syncs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GitOpsSyncPage' }
+  /gitops/objects:
+    get:
+      operationId: listGitOpsObjects
+      tags: [gitops]
+      summary: All synced objects with their source file
+      x-permission: read
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Objects
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GitOpsObjectRefList' }
+  /gitops/actions/sync:
+    post:
+      operationId: triggerGitOpsSync
+      tags: [gitops]
+      summary: Request an immediate sync (performed by the leader replica)
+      x-permission: gitops:sync
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '202':
+          description: Sync requested
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionAccepted' }
+  /gitops/webhook:
+    post:
+      operationId: gitopsWebhook
+      tags: [gitops]
+      summary: Push webhook from GitLab (X-Gitlab-Token) or GitHub (X-Hub-Signature-256)
+      description: Authenticated with the shared secret gitops.webhookSecret (not a session/API token).
+      security: []
+      x-permission: custom
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '202':
+          description: Sync requested
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionAccepted' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ================================================================ artifacts
+  /artifacts:
+    get:
+      operationId: listArtifacts
+      tags: [artifacts]
+      summary: Cached artifacts
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/Distribution'
+        - { name: version, in: query, schema: { type: string } }
+        - name: status
+          in: query
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/ArtifactStatus' }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Artifacts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArtifactPage' }
+  /artifacts/actions/prefetch:
+    post:
+      operationId: prefetchArtifacts
+      tags: [artifacts]
+      summary: Download and verify artifacts for a version and platforms
+      x-permission: artifacts:manage
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PrefetchRequest' }
+      responses:
+        '202':
+          description: Prefetch started; current artifact states
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArtifactList' }
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /artifacts/{id}:
+    get:
+      operationId: getArtifact
+      tags: [artifacts]
+      summary: One artifact
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+      responses:
+        '200':
+          description: Artifact
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Artifact' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deleteArtifact
+      tags: [artifacts]
+      summary: Remove an artifact from the cache
+      x-permission: artifacts:manage
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /artifacts/{id}/content/{filename}:
+    get:
+      operationId: downloadArtifact
+      tags: [artifacts]
+      summary: Download artifact bytes (used by myriarch-updater; Range supported)
+      description: |
+        Authenticated with a short-lived download token issued in the OpAMP package offer
+        (`DownloadableFile.headers`: `Authorization: Bearer myrd_...`). The filename segment
+        lets agents detect the archive format from the URL suffix.
+      security: []
+      x-permission: custom
+      parameters:
+        - $ref: '#/components/parameters/UUIDPath'
+        - { name: filename, in: path, required: true, schema: { type: string } }
+        - { name: Range, in: header, schema: { type: string } }
+      responses:
+        '200':
+          description: Full content
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '206':
+          description: Partial content
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================ notifications
+  /notifications/channels:
+    get:
+      operationId: listNotificationChannels
+      tags: [notifications]
+      summary: Configured channels (secrets redacted)
+      x-permission: read
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Channels
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChannelInfoList' }
+  /notifications/channels/{name}/actions/test:
+    post:
+      operationId: testNotificationChannel
+      tags: [notifications]
+      summary: Send a test notification
+      x-permission: notifications:test
+      parameters:
+        - $ref: '#/components/parameters/NamePath'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '202':
+          description: Sent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionAccepted' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: myriarch_session
+      description: >-
+        Browser session. With Secure cookies (the production setting) the cookie is named `__Host-myriarch_session`.
+        Mutating requests also need header X-CSRF-Token (= cookie myriarch_csrf).
+    bearerToken:
+      type: http
+      scheme: bearer
+      description: API token "myra_..." created via POST /tokens.
+
+  parameters:
+    CSRFToken:
+      name: X-CSRF-Token
+      in: header
+      required: false
+      description: Required for cookie-authenticated mutating requests (value of cookie myriarch_csrf).
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, maximum: 100000, default: 0 }
+    UUIDPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AgentIDPath:
+      name: id
+      in: path
+      required: true
+      description: OpAMP instance_uid as UUID string.
+      schema: { type: string, format: uuid }
+    NamePath:
+      name: name
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' }
+    Distribution:
+      name: distribution
+      in: query
+      schema: { type: string, default: otelcol-contrib, enum: [otelcol-contrib, opampsupervisor] }
+    AgentQ:
+      name: q
+      in: query
+      description: Case-insensitive substring search in hostname, id, version and attribute values (at most 200 characters; multi-value filters accept at most 50 values, attr at most 20 pairs).
+      schema: { type: string, maxLength: 200 }
+    AgentKindFilter:
+      name: kind
+      in: query
+      style: form
+      explode: true
+      schema:
+        type: array
+        items: { $ref: '#/components/schemas/AgentKind' }
+    AgentStatusFilter:
+      name: status
+      in: query
+      style: form
+      explode: true
+      schema:
+        type: array
+        items: { $ref: '#/components/schemas/ConnectionStatus' }
+    AgentHealthyFilter:
+      name: healthy
+      in: query
+      schema: { type: boolean }
+    AgentFleetFilter:
+      name: fleet
+      in: query
+      style: form
+      explode: true
+      schema:
+        type: array
+        items: { type: string }
+    AgentUnassignedFilter:
+      name: unassigned
+      in: query
+      description: Only agents without a fleet. Combined with `fleet` by AND (so the result is empty when a fleet is given).
+      schema: { type: boolean }
+    AgentVersionFilter:
+      name: version
+      in: query
+      style: form
+      explode: true
+      schema:
+        type: array
+        items: { type: string }
+    AgentOutdatedFilter:
+      name: outdated
+      in: query
+      description: true = collectors below the latest stable otelcol-contrib release; false = collectors at or above it (implies kind=collector).
+      schema: { type: boolean }
+    AgentOSFilter:
+      name: os
+      in: query
+      style: form
+      explode: true
+      schema:
+        type: array
+        items: { type: string, example: windows }
+    AgentAttrFilter:
+      name: attr
+      in: query
+      description: 'Exact attribute match "key=value" (repeatable; values of the same key are ORed, different keys ANDed). Keys: agent attributes or "labels.<key>".'
+      style: form
+      explode: true
+      schema:
+        type: array
+        items: { type: string, example: site.type=edge }
+    AgentConfigSyncFilter:
+      name: configSync
+      in: query
+      style: form
+      explode: true
+      schema:
+        type: array
+        items: { $ref: '#/components/schemas/ConfigSyncState' }
+
+  responses:
+    BadRequest:
+      description: Invalid request (code bad_request)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: Not authenticated (code unauthorized)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: Missing permission (code forbidden) or CSRF failure (code csrf_failed)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: Not found (code not_found)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Conflict:
+      description: Conflict (code conflict)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    PreconditionFailed:
+      description: Invalid state transition or precondition (code precondition_failed)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ValidationFailed:
+      description: Validation failed (code validation_failed, details in issues)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    RolloutOK:
+      description: Updated rollout
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Rollout' }
+
+  schemas:
+    # ------------------------------------------------------------ common
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, description: 'URI reference ("about:blank")' }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code:
+          type: string
+          enum: [bad_request, unauthorized, forbidden, not_found, conflict, precondition_failed,
+                 validation_failed, too_many_requests, internal, not_implemented, unavailable, csrf_failed]
+        requestId: { type: string }
+        issues:
+          type: array
+          items: { $ref: '#/components/schemas/Issue' }
+    Issue:
+      type: object
+      required: [severity, code, message]
+      properties:
+        severity: { $ref: '#/components/schemas/IssueSeverity' }
+        code: { type: string, example: unknown_component }
+        message: { type: string }
+        file: { type: string }
+        line: { type: integer }
+        path: { type: string, example: 'service::pipelines::logs' }
+        object: { type: string, example: Fleet/edge-nl }
+    IssueSeverity:
+      type: string
+      enum: [error, warning]
+    Hash:
+      type: string
+      description: Lower-case hex encoded hash
+      pattern: '^[0-9a-f]*$'
+    Duration:
+      type: string
+      description: Go duration string
+      example: 30s
+    StringMap:
+      type: object
+      additionalProperties: { type: string }
+    AnyMap:
+      type: object
+      additionalProperties: true
+    ActionAccepted:
+      type: object
+      required: [accepted]
+      properties:
+        accepted: { type: boolean }
+        message: { type: string }
+    FacetValue:
+      type: object
+      required: [value, count]
+      properties:
+        value: { type: string }
+        count: { type: integer }
+    SourceRef:
+      type: object
+      required: [path, commit]
+      properties:
+        path: { type: string, example: fleets/edge-nl.yaml }
+        commit: { type: string }
+        contentHash: { $ref: '#/components/schemas/Hash' }
+
+    # ------------------------------------------------------------ enums
+    AgentKind:
+      type: string
+      enum: [collector, updater, unknown]
+    ConnectionStatus:
+      type: string
+      enum: [online, offline]
+    RemoteConfigStatus:
+      type: string
+      enum: [unset, applying, applied, failed]
+    ConfigSyncState:
+      type: string
+      enum: [none, in_sync, pending, failed, drift]
+      description: |
+        none = unassigned/no config; in_sync = agent applied the desired config; pending = offered/applying/offline;
+        failed = agent reported FAILED for the desired config; drift = desired differs from assigned (rollout pending or rolled back).
+    PackageInstallStatus:
+      type: string
+      enum: [installed, install_pending, installing, install_failed, downloading]
+    Role:
+      type: string
+      enum: [viewer, operator, admin]
+    ActorType:
+      type: string
+      enum: [user, token, system, gitops, agent]
+    ObjectKind:
+      type: string
+      enum: [Fleet, Blueprint, RolloutPolicy, Executor, Inventory]
+    ExecutorType:
+      type: string
+      enum: [none, updater, webhook, awx, manual]
+      description: |
+        none = versions are only reported; updater = OpAMP package offers to myriarch-updater; webhook/awx = external
+        call (Executor object); manual = version rollouts are created and wait for the reported version without any
+        external call (the version is changed outside of myriarchd, e.g. image tag by merge request).
+    ParameterType:
+      type: string
+      enum: [string, int, number, bool, duration, list, map]
+    SelectorOperator:
+      type: string
+      enum: [In, NotIn, Exists, DoesNotExist, Glob]
+    FailureAction:
+      type: string
+      enum: [pause, rollback]
+    RolloutKind:
+      type: string
+      enum: [config, version]
+    RolloutStatus:
+      type: string
+      enum: [pending, running, waiting_approval, paused, completed, failed, aborted, rolling_back, rolled_back, superseded]
+    WaveStatus:
+      type: string
+      enum: [pending, waiting_approval, running, completed, failed, skipped]
+    TargetStatus:
+      type: string
+      enum: [pending, waiting_window, in_progress, verifying, succeeded, failed, skipped, cancelled, rolled_back]
+    RolloutOrigin:
+      type: string
+      enum: [gitops, ui, system]
+      description: |
+        What caused the rollout: gitops = the goal comes from Git (new commit, `spec.collector.version`; also after an
+        operator cleared a UI selection - the clear itself is in the audit log), ui = the target version was selected by
+        an operator in the UI/API (`selectFleetVersion`), system = anything else. Derived from createdBy for rollouts
+        created before this field existed ("gitops" -> gitops, "user:"/"token:" -> ui, else system).
+    VersionTargetSource:
+      type: string
+      enum: [git, ui, hold, none]
+      description: |
+        Where the effective target version of a fleet comes from: git = `spec.collector.version`; ui = an active UI
+        selection; hold = a UI selection that a later Git change excluded from the frame (no target, no new version
+        rollouts until an operator selects an allowed version, clears the selection or Git changes
+        `spec.collector.version`); none = no target (no Git version, no selection).
+    VersionSelectionState:
+      type: string
+      enum: [active, invalidated]
+    UpdatePhase:
+      type: string
+      enum: [offered, downloading, verifying, installing, restarting, health_check, rolling_back, health_wait, succeeded, failed, rolled_back, cancelled]
+      description: |
+        Current phase of a version update on one target. offered = the update was handed to the executor (package
+        offered to the myriarch-updater / external call accepted) and the host has not started yet; downloading ..
+        health_check, rolling_back = reported by the myriarch-updater; health_wait = the collector reports the target
+        version and myriarchd's health wait (policy healthWait) runs; succeeded / failed / cancelled = final target state;
+        rolled_back = the host runs the previous version again (automatic rollback by the myriarch-updater, target
+        status failed, or rollout rollback, target status rolled_back).
+    UpdateStepName:
+      type: string
+      enum: [offered, downloading, verifying, installing, restarting, health_check, rolling_back, health_wait]
+    UpdateStepStatus:
+      type: string
+      enum: [pending, running, done, failed, skipped]
+    ProgressSource:
+      type: string
+      enum: [updater, package_status, executor]
+      description: |
+        updater = steps reported by the myriarch-updater (health component "dev.myriarch.update"); package_status = only the
+        OpAMP package status of the updater is known (older or simulated updater without the component); executor =
+        webhook/awx/manual executors (no host-side steps: offered, then waiting for the reported version).
+    ArtifactStatus:
+      type: string
+      enum: [pending, downloading, ready, failed]
+
+    # ------------------------------------------------------------ agents
+    Agent:
+      type: object
+      required: [id, kind, serviceName, version, hostname, osType, osDescription, arch, identifyingAttributes,
+                 nonIdentifyingAttributes, labels, capabilities, connection, remoteConfig, assignment, firstSeenAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/AgentKind' }
+        serviceName: { type: string, example: otelcol-contrib }
+        version: { type: string, example: 0.162.0 }
+        hostname: { type: string }
+        osType: { type: string, example: windows }
+        osDescription: { type: string }
+        arch: { type: string, example: amd64 }
+        identifyingAttributes: { $ref: '#/components/schemas/StringMap' }
+        nonIdentifyingAttributes: { $ref: '#/components/schemas/StringMap' }
+        labels: { $ref: '#/components/schemas/StringMap' }
+        capabilities: { type: integer, format: int64, description: OpAMP AgentCapabilities bitmask }
+        connection: { $ref: '#/components/schemas/AgentConnection' }
+        health: { $ref: '#/components/schemas/AgentHealth' }
+        remoteConfig: { $ref: '#/components/schemas/RemoteConfigState' }
+        assignment: { $ref: '#/components/schemas/AgentAssignment' }
+        updater: { $ref: '#/components/schemas/UpdaterLink' }
+        packageStatus: { $ref: '#/components/schemas/PackageStatuses' }
+        effectiveConfigHash: { $ref: '#/components/schemas/Hash' }
+        effectiveConfigUpdatedAt: { type: string, format: date-time }
+        availableComponentsHash: { $ref: '#/components/schemas/Hash' }
+        enrollmentTokenId: { type: string, format: uuid }
+        firstSeenAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AgentConnection:
+      type: object
+      required: [status]
+      properties:
+        status: { $ref: '#/components/schemas/ConnectionStatus' }
+        replicaId: { type: string }
+        transport: { type: string, enum: [websocket, http] }
+        remoteAddr: { type: string }
+        connectedAt: { type: string, format: date-time }
+        disconnectedAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+    AgentHealth:
+      type: object
+      required: [healthy, updatedAt]
+      properties:
+        healthy: { type: boolean }
+        status: { type: string, example: StatusOK }
+        lastError: { type: string }
+        startTime: { type: string, format: date-time }
+        components:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/ComponentHealth' }
+        updatedAt: { type: string, format: date-time }
+    ComponentHealth:
+      type: object
+      required: [healthy]
+      properties:
+        healthy: { type: boolean }
+        status: { type: string }
+        lastError: { type: string }
+        startTime: { type: string, format: date-time }
+        statusTime: { type: string, format: date-time }
+        components:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/ComponentHealth' }
+    RemoteConfigState:
+      type: object
+      required: [status]
+      properties:
+        status: { $ref: '#/components/schemas/RemoteConfigStatus' }
+        lastHash: { $ref: '#/components/schemas/Hash' }
+        errorMessage: { type: string }
+        updatedAt: { type: string, format: date-time }
+    AgentAssignment:
+      type: object
+      properties:
+        fleetName: { type: string }
+        assignedConfigHash: { $ref: '#/components/schemas/Hash' }
+        desiredConfigHash: { $ref: '#/components/schemas/Hash' }
+        failedConfigHash: { $ref: '#/components/schemas/Hash' }
+        targetVersion: { type: string, description: 'Effective target version of the fleet (Git target or UI selection; absent while on hold)' }
+        error: { type: string }
+        assignedAt: { type: string, format: date-time }
+    UpdaterLink:
+      type: object
+      required: [agentId, online]
+      properties:
+        agentId: { type: string, format: uuid }
+        online: { type: boolean }
+        ambiguous:
+          type: boolean
+          description: Collector side only - more than one online myriarch-updater with the same credential claims this collector; package offers are not made in that state.
+    PackageStatuses:
+      type: object
+      required: [packages, updatedAt]
+      properties:
+        serverProvidedAllPackagesHash: { $ref: '#/components/schemas/Hash' }
+        errorMessage: { type: string }
+        packages:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/PackageStatus' }
+        updatedAt: { type: string, format: date-time }
+    PackageStatus:
+      type: object
+      required: [name, status]
+      properties:
+        name: { type: string }
+        agentHasVersion: { type: string }
+        agentHasHash: { $ref: '#/components/schemas/Hash' }
+        serverOfferedVersion: { type: string }
+        serverOfferedHash: { $ref: '#/components/schemas/Hash' }
+        status: { $ref: '#/components/schemas/PackageInstallStatus' }
+        errorMessage: { type: string }
+        downloadPercent: { type: number }
+    AgentSummary:
+      type: object
+      required: [id, kind, hostname, serviceName, version, outdated, osType, arch, status, configSync, hasUpdater]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/AgentKind' }
+        hostname: { type: string }
+        serviceName: { type: string }
+        version: { type: string }
+        outdated: { type: boolean }
+        osType: { type: string }
+        arch: { type: string }
+        status: { $ref: '#/components/schemas/ConnectionStatus' }
+        lastSeenAt: { type: string, format: date-time }
+        healthy: { type: boolean }
+        healthStatus: { type: string }
+        fleetName: { type: string }
+        configSync: { $ref: '#/components/schemas/ConfigSyncState' }
+        targetVersion: { type: string }
+        site:
+          $ref: '#/components/schemas/StringMap'
+          description: site.* attributes (site.type, site.id, site.name, site.country, site.region, site.timezone)
+        labels: { $ref: '#/components/schemas/StringMap' }
+        hasUpdater: { type: boolean }
+    AgentSummaryPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AgentSummary' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    AgentDetail:
+      type: object
+      required: [agent, configSync, outdated, capabilityNames, activeRolloutTargets]
+      properties:
+        agent: { $ref: '#/components/schemas/Agent' }
+        configSync: { $ref: '#/components/schemas/ConfigSyncState' }
+        outdated: { type: boolean }
+        latestVersion: { type: string }
+        capabilityNames:
+          type: array
+          items: { type: string, example: AcceptsRemoteConfig }
+        activeRolloutTargets:
+          type: array
+          items: { $ref: '#/components/schemas/RolloutTarget' }
+        linkedAgent: { $ref: '#/components/schemas/AgentSummary' }
+    ConfigDocument:
+      type: object
+      required: [hash, contentType, body, source]
+      properties:
+        hash: { $ref: '#/components/schemas/Hash' }
+        contentType: { type: string, example: text/yaml }
+        body: { type: string, description: YAML text }
+        updatedAt: { type: string, format: date-time }
+        source: { type: string, enum: [effective, desired, assigned] }
+        redacted:
+          type: boolean
+          description: Secret-bearing values of an effective config were replaced by "[REDACTED]" (keys such as password, token, secret, api key, authorization, header values, credentials in URLs). The hash identifies the stored original.
+    ComponentSet:
+      type: object
+      required: [hash, components]
+      properties:
+        hash: { $ref: '#/components/schemas/Hash' }
+        components:
+          type: object
+          description: 'kind ("receivers", "processors", "exporters", "extensions", "connectors") -> type -> details'
+          additionalProperties:
+            type: object
+            additionalProperties: { $ref: '#/components/schemas/ComponentDetails' }
+    ComponentDetails:
+      type: object
+      properties:
+        module: { type: string }
+        metadata: { $ref: '#/components/schemas/StringMap' }
+    AgentEvent:
+      type: object
+      required: [id, agentId, time, type, severity, message]
+      properties:
+        id: { type: integer, format: int64 }
+        agentId: { type: string, format: uuid }
+        time: { type: string, format: date-time }
+        type:
+          type: string
+          enum: [connected, disconnected, registered, description_changed, version_changed, health_changed,
+                 config_offered, config_applied, config_failed, assigned, package_offered, package_status,
+                 command, rollout_target, identity_conflict]
+        severity: { type: string, enum: [info, warning, error] }
+        message: { type: string }
+        details: { $ref: '#/components/schemas/AnyMap' }
+    AgentEventList:
+      type: object
+      required: [items, nextBefore]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AgentEvent' }
+        nextBefore: { type: integer, format: int64 }
+    AgentFacets:
+      type: object
+      required: [total, status, health, kinds, versions, fleets, osTypes, siteTypes, countries, configSync]
+      properties:
+        total: { type: integer }
+        status: { type: array, items: { $ref: '#/components/schemas/FacetValue' } }
+        health:
+          type: array
+          description: values healthy | unhealthy | unknown
+          items: { $ref: '#/components/schemas/FacetValue' }
+        kinds: { type: array, items: { $ref: '#/components/schemas/FacetValue' } }
+        versions: { type: array, items: { $ref: '#/components/schemas/FacetValue' } }
+        fleets:
+          type: array
+          description: value "" = unassigned
+          items: { $ref: '#/components/schemas/FacetValue' }
+        osTypes: { type: array, items: { $ref: '#/components/schemas/FacetValue' } }
+        siteTypes: { type: array, items: { $ref: '#/components/schemas/FacetValue' } }
+        countries: { type: array, items: { $ref: '#/components/schemas/FacetValue' } }
+        configSync: { type: array, items: { $ref: '#/components/schemas/FacetValue' } }
+    SavedFilter:
+      type: object
+      required: [id, userId, name, page, query, shared, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        name: { type: string }
+        page: { type: string, example: agents }
+        query: { $ref: '#/components/schemas/AnyMap' }
+        shared: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    SavedFilterList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SavedFilter' }
+    CreateSavedFilterRequest:
+      type: object
+      required: [name, page, query]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        page: { type: string, example: agents }
+        query: { $ref: '#/components/schemas/AnyMap' }
+        shared: { type: boolean, default: false }
+
+    # ------------------------------------------------------------ stats/system
+    OverviewStats:
+      type: object
+      required: [generatedAt, agents, versions, outdated, configSync, fleets, unassigned, activeRollouts, gitops]
+      properties:
+        generatedAt: { type: string, format: date-time }
+        agents: { $ref: '#/components/schemas/AgentCounts' }
+        versions:
+          type: array
+          items: { $ref: '#/components/schemas/VersionCount' }
+        outdated: { $ref: '#/components/schemas/OutdatedSummary' }
+        configSync:
+          type: array
+          items: { $ref: '#/components/schemas/FacetValue' }
+        fleets:
+          type: array
+          items: { $ref: '#/components/schemas/FleetCounts' }
+        unassigned: { type: integer }
+        activeRollouts:
+          type: array
+          items: { $ref: '#/components/schemas/RolloutSummary' }
+        latestRelease: { $ref: '#/components/schemas/ReleaseSummary' }
+        gitops: { $ref: '#/components/schemas/GitOpsBrief' }
+    AgentCounts:
+      type: object
+      required: [total, collectors, updaters, online, offline, healthy, unhealthy, healthUnknown]
+      properties:
+        total: { type: integer }
+        collectors: { type: integer }
+        updaters: { type: integer }
+        online: { type: integer }
+        offline: { type: integer }
+        healthy: { type: integer }
+        unhealthy: { type: integer }
+        healthUnknown: { type: integer }
+    VersionCount:
+      type: object
+      required: [version, count, outdated]
+      properties:
+        version: { type: string }
+        count: { type: integer }
+        outdated: { type: boolean }
+    OutdatedSummary:
+      type: object
+      required: [count, percent]
+      properties:
+        latestVersion: { type: string }
+        count: { type: integer }
+        percent: { type: number }
+    FleetCounts:
+      type: object
+      required: [fleet, total, online, healthy, inSync, pending, failed, onTarget]
+      properties:
+        fleet: { type: string }
+        total: { type: integer }
+        online: { type: integer }
+        healthy: { type: integer }
+        inSync: { type: integer }
+        pending: { type: integer }
+        failed: { type: integer }
+        targetVersion: { type: string, description: Effective target version of the fleet (Git target or UI selection) }
+        onTarget: { type: integer }
+    GitOpsBrief:
+      type: object
+      required: [state, issueCount]
+      properties:
+        state: { type: string, enum: [ok, error, syncing, never] }
+        appliedCommit: { type: string }
+        issueCount: { type: integer }
+    SystemInfo:
+      type: object
+      required: [version, commit, buildDate, replicaId, replicas, publicUrl, opampEndpoint, database, features, settings]
+      properties:
+        version: { type: string }
+        commit: { type: string }
+        buildDate: { type: string }
+        replicaId: { type: string }
+        leaderId: { type: string }
+        replicas:
+          type: array
+          items: { $ref: '#/components/schemas/Replica' }
+        publicUrl: { type: string }
+        opampEndpoint: { type: string, example: 'wss://fleet.example.com/v1/opamp' }
+        database: { $ref: '#/components/schemas/DatabaseInfo' }
+        features: { $ref: '#/components/schemas/FeatureFlags' }
+        settings: { $ref: '#/components/schemas/SettingsSummary' }
+    Replica:
+      type: object
+      required: [id, hostname, version, startedAt, lastHeartbeatAt, isLeader, connections]
+      properties:
+        id: { type: string }
+        hostname: { type: string }
+        version: { type: string }
+        startedAt: { type: string, format: date-time }
+        lastHeartbeatAt: { type: string, format: date-time }
+        isLeader: { type: boolean }
+        connections: { type: integer }
+    DatabaseInfo:
+      type: object
+      required: [ok, migrationVersion]
+      properties:
+        ok: { type: boolean }
+        serverVersion: { type: string }
+        migrationVersion: { type: integer, format: int64 }
+    FeatureFlags:
+      type: object
+      required: [oidc, devLogin, bootstrapAdmin, gitops, releases, devMode]
+      properties:
+        oidc: { type: boolean }
+        devLogin: { type: boolean }
+        bootstrapAdmin:
+          type: boolean
+          description: The bootstrap admin (break-glass account) accepts sign-ins.
+        gitops: { type: boolean }
+        releases: { type: boolean }
+        devMode: { type: boolean }
+    SettingsSummary:
+      type: object
+      required: [gitopsSource, gitopsBranch, gitopsPollInterval, releasesRepo, releasesPollInterval, trackedDistributions,
+                 artifactSource, signatureVerification, defaultTimezone, offlineAfter, retentionAgentEvents, retentionAudit]
+      properties:
+        gitopsSource: { type: string }
+        gitopsBranch: { type: string }
+        gitopsPollInterval: { $ref: '#/components/schemas/Duration' }
+        releasesRepo: { type: string }
+        releasesPollInterval: { $ref: '#/components/schemas/Duration' }
+        trackedDistributions: { type: array, items: { type: string } }
+        artifactSource: { type: string }
+        signatureVerification: { type: boolean }
+        defaultTimezone: { type: string }
+        offlineAfter: { $ref: '#/components/schemas/Duration' }
+        retentionAgentEvents: { $ref: '#/components/schemas/Duration' }
+        retentionAudit: { $ref: '#/components/schemas/Duration' }
+
+    # ------------------------------------------------------------ auth/users/tokens
+    AuthConfigInfo:
+      type: object
+      required: [oidcEnabled, devLoginEnabled, bootstrapPasswordEnabled, bootstrapTokenEnabled, ui]
+      properties:
+        oidcEnabled: { type: boolean }
+        oidcDisplayName: { type: string }
+        devLoginEnabled: { type: boolean }
+        bootstrapPasswordEnabled:
+          type: boolean
+          description: The bootstrap admin is active and accepts its password (POST /auth/bootstrap-login with username and password).
+        bootstrapTokenEnabled:
+          type: boolean
+          description: The bootstrap admin is active and accepts a one-time token (POST /auth/bootstrap-login with token).
+        ui: { $ref: '#/components/schemas/UIConfigInfo' }
+    UIConfigInfo:
+      type: object
+      description: Language options of the web UI (ui.* in the server configuration). Contains no secrets.
+      required: [defaultLanguage]
+      properties:
+        defaultLanguage:
+          type: string
+          description: BCP 47 tag the UI uses when the user has no stored choice and no browser language matches a shipped locale.
+        languages:
+          type: array
+          items: { type: string }
+          description: Restricts the languages the UI offers. Entries are BCP 47 tags and match a shipped language by the full tag or the primary subtag ("de-DE" enables "de"). Omitted or empty means every language the UI ships.
+    DevLoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+    BootstrapLoginRequest:
+      type: object
+      description: Exactly one of password (together with username) and token.
+      properties:
+        username:
+          type: string
+          description: User name of the bootstrap admin (password sign-in).
+        password: { type: string, format: password }
+        token:
+          type: string
+          format: password
+          description: One-time token of the bootstrap admin (token sign-in).
+    Me:
+      type: object
+      required: [type, id, name, role, authMethod, permissions]
+      properties:
+        type: { type: string, enum: [user, token] }
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        authMethod: { type: string, enum: [oidc, local, bootstrap, api_token] }
+        permissions:
+          type: array
+          items:
+            type: string
+            enum: [read, 'saved_filters:write', 'agents:operate', 'agents:delete', 'rollouts:operate',
+                   'fleets:set_version', 'releases:acknowledge', 'gitops:sync', 'artifacts:manage', 'notifications:test',
+                   'audit:read', 'tokens:manage', 'enrollment:manage', 'users:manage']
+          description: "fleets:set_version (operator+): select/clear the UI target version of a fleet within the Git frame."
+        csrfToken: { type: string }
+    User:
+      type: object
+      required: [id, subject, provider, role, roleSource, disabled, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        subject: { type: string }
+        provider: { type: string, enum: [oidc, local, bootstrap] }
+        email: { type: string }
+        name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        roleSource: { type: string, enum: [mapping, manual] }
+        disabled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        lastLoginAt: { type: string, format: date-time }
+    UserList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/User' }
+    UpdateUserRequest:
+      type: object
+      properties:
+        role: { $ref: '#/components/schemas/Role' }
+        disabled: { type: boolean }
+    APIToken:
+      type: object
+      required: [id, name, displayPrefix, role, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        displayPrefix: { type: string, example: myra_3kQ9zXw }
+        role: { $ref: '#/components/schemas/Role' }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        expiresAt:
+          type: string
+          format: date-time
+          description: >-
+            Effective expiry: the earlier of the stored expiry and `createdAt` plus `auth.apiTokenMaxTtl`.
+            Absent only for a token without an expiry on a server configured without a maximum.
+        lastUsedAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time }
+    APITokenList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/APIToken' }
+    CreateAPITokenRequest:
+      type: object
+      required: [name, role]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        role: { $ref: '#/components/schemas/Role' }
+        expiresAt:
+          type: string
+          format: date-time
+          description: >-
+            Expiry of the token. Optional: without it the token gets the maximum lifetime `auth.apiTokenMaxTtl`
+            (default 90 days; no expiry only where the server is configured with 0). A later expiry is refused (422).
+    CreatedAPIToken:
+      type: object
+      required: [token, secret]
+      properties:
+        token: { $ref: '#/components/schemas/APIToken' }
+        secret: { type: string, description: 'Full token "myra_..." - shown only once' }
+    EnrollmentToken:
+      type: object
+      required: [id, name, displayPrefix, createdBy, createdAt, useCount]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        displayPrefix: { type: string }
+        labels: { $ref: '#/components/schemas/StringMap' }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        lastUsedAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time }
+        useCount: { type: integer, format: int64 }
+    EnrollmentTokenList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/EnrollmentToken' }
+    CreateEnrollmentTokenRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        labels: { $ref: '#/components/schemas/StringMap' }
+        expiresAt: { type: string, format: date-time }
+    CreatedEnrollmentToken:
+      type: object
+      required: [token, secret]
+      properties:
+        token: { $ref: '#/components/schemas/EnrollmentToken' }
+        secret: { type: string, description: 'Full token "myre_..." - shown only once' }
+
+    # ------------------------------------------------------------ audit
+    AuditEvent:
+      type: object
+      required: [id, time, actorType, actorId, actorName, action, result]
+      properties:
+        id: { type: integer, format: int64 }
+        time: { type: string, format: date-time }
+        actorType: { $ref: '#/components/schemas/ActorType' }
+        actorId: { type: string }
+        actorName: { type: string }
+        action: { type: string, example: rollout.pause }
+        targetType: { type: string, example: rollout }
+        targetId: { type: string }
+        result: { type: string, enum: [success, failure] }
+        details: { $ref: '#/components/schemas/AnyMap' }
+        sourceIp: { type: string }
+        requestId: { type: string }
+    AuditEventPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AuditEvent' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    # ------------------------------------------------------------ fleets
+    Selector:
+      type: object
+      description: All matchAttributes and matchExpressions must match (AND). Empty selector matches all agents.
+      properties:
+        matchAttributes: { $ref: '#/components/schemas/StringMap' }
+        matchExpressions:
+          type: array
+          items: { $ref: '#/components/schemas/SelectorRequirement' }
+    SelectorRequirement:
+      type: object
+      required: [key, operator]
+      properties:
+        key: { type: string, example: site.type }
+        operator: { $ref: '#/components/schemas/SelectorOperator' }
+        values: { type: array, items: { type: string } }
+    CollectorSpec:
+      type: object
+      properties:
+        distribution: { type: string, default: otelcol-contrib }
+        version: { type: string, example: 0.162.0 }
+    UpdateSpec:
+      type: object
+      properties:
+        executor: { $ref: '#/components/schemas/ExecutorType' }
+        executorRef: { type: string }
+        params: { $ref: '#/components/schemas/AnyMap' }
+        selection: { $ref: '#/components/schemas/VersionSelectionSpec' }
+    VersionSelectionSpec:
+      type: object
+      description: |
+        `spec.update.selection` in Git: the frame within which operators may choose the target version of the fleet
+        in the UI/API (docs/concepts/fleets.md). Exactly one of versionRange / versions is set when enabled.
+      required: [enabled, allowDowngrade, requireReason]
+      properties:
+        enabled: { type: boolean, description: UI/API-triggered version updates are allowed (default false) }
+        versionRange:
+          type: string
+          description: Semantic version constraint (Masterminds semver v3 syntax, versions without "v")
+          example: '>=0.161.0, <=0.162.0'
+        versions:
+          type: array
+          items: { type: string, example: 0.162.0 }
+          description: Explicit list of selectable versions (alternative to versionRange)
+        allowDowngrade: { type: boolean, description: 'Versions lower than the current effective target may be selected (default false)' }
+        requireReason: { type: boolean, description: 'A reason is mandatory when selecting or clearing (default false)' }
+        rolloutPolicy:
+          type: string
+          description: RolloutPolicy for rollouts caused by a UI selection (default spec.rollout.versionPolicy)
+    FleetVersionSelection:
+      type: object
+      description: A target version chosen by an operator in the UI/API (one per fleet).
+      required: [fleet, version, state, selectedBy, selectedAt, updatedAt]
+      properties:
+        fleet: { type: string }
+        version: { type: string, example: 0.162.0 }
+        state: { $ref: '#/components/schemas/VersionSelectionState' }
+        stateReason:
+          type: string
+          description: Why the selection is invalidated (English), e.g. "version 0.162.0 is outside the frame of commit 1a2b3c4 (>=0.161.0, <0.162.0)"
+        gitVersion: { type: string, description: 'spec.collector.version in Git when the selection was made (absent = none)' }
+        gitCommit: { type: string, description: Applied GitOps revision when the selection was made }
+        selectedBy:
+          type: string
+          description: Display name of the operator (or API token); resolved by the server like RolloutWave.approvedBy.
+        selectedAt: { type: string, format: date-time }
+        reason: { type: string }
+        rolloutId: { type: string, format: uuid, description: Version rollout created for this selection }
+        plannedAt: { type: string, format: date-time, description: When the leader planned the fleet for this selection }
+        updatedAt: { type: string, format: date-time }
+    FleetVersionTarget:
+      type: object
+      description: Effective target version of a fleet and where it comes from.
+      required: [source, selectionEnabled]
+      properties:
+        version: { type: string, description: 'Effective target version (absent: source none or hold)' }
+        source: { $ref: '#/components/schemas/VersionTargetSource' }
+        gitVersion: { type: string, description: 'spec.collector.version (absent = not set)' }
+        selectionEnabled: { type: boolean, description: spec.update.selection.enabled }
+        frame: { $ref: '#/components/schemas/VersionSelectionSpec' }
+        selection: { $ref: '#/components/schemas/FleetVersionSelection' }
+    VersionOption:
+      type: object
+      required: [version, selectable, known, prerelease, isLatest, isCurrentTarget, isGitVersion, isDowngrade, agentsToUpdate,
+                 breakingCount, deprecationCount]
+      properties:
+        version: { type: string }
+        selectable: { type: boolean }
+        reasonCode:
+          type: string
+          enum: [current_target, outside_frame, downgrade_not_allowed, prerelease_not_allowed, unknown_version]
+          description: Why the version cannot be selected (absent when selectable)
+        reason: { type: string, description: English explanation of reasonCode }
+        known: { type: boolean, description: The release tracker knows this release }
+        prerelease: { type: boolean }
+        isLatest: { type: boolean, description: Latest stable release of the distribution }
+        isCurrentTarget: { type: boolean }
+        isGitVersion: { type: boolean, description: Equals spec.collector.version }
+        isDowngrade: { type: boolean, description: Lower than the current effective target }
+        publishedAt: { type: string, format: date-time }
+        agentsToUpdate: { type: integer, description: Member collectors whose reported version differs from this version }
+        breakingCount: { type: integer, description: 'Breaking changes between the current effective target (else the lowest member version) and this version; 0 if unknown' }
+        deprecationCount: { type: integer }
+    PlatformCount:
+      type: object
+      required: [os, arch, agents]
+      properties:
+        os: { type: string, example: linux }
+        arch: { type: string, example: amd64 }
+        agents: { type: integer }
+    FleetVersionOptions:
+      type: object
+      required: [fleet, distribution, allowed, target, executor, versionPolicy, options, platforms]
+      properties:
+        fleet: { type: string }
+        distribution: { type: string, example: otelcol-contrib }
+        allowed: { type: boolean, description: 'An operator may select a version now (frame enabled, executor set, no blocking rollout)' }
+        notAllowedCode:
+          type: string
+          enum: [selection_disabled, no_executor, blocking_rollout]
+        notAllowedReason: { type: string }
+        target: { $ref: '#/components/schemas/FleetVersionTarget' }
+        executor: { $ref: '#/components/schemas/ExecutorType' }
+        versionPolicy: { type: string, description: 'Name of the rollout policy a selection uses (selection.rolloutPolicy, else spec.rollout.versionPolicy, else "default")' }
+        activeRollout: { $ref: '#/components/schemas/RolloutSummary' }
+        options:
+          type: array
+          items: { $ref: '#/components/schemas/VersionOption' }
+        platforms:
+          type: array
+          description: os/arch of the member collectors (artifacts the update needs)
+          items: { $ref: '#/components/schemas/PlatformCount' }
+    SelectFleetVersionRequest:
+      type: object
+      required: [version]
+      properties:
+        version:
+          type: string
+          pattern: '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
+          example: 0.162.0
+        reason: { type: string, maxLength: 500 }
+        expectedTargetVersion:
+          type: string
+          description: Optimistic concurrency - the effective target the operator saw ("" = none). Mismatch -> 409.
+    SelectFleetVersionResponse:
+      type: object
+      required: [target, planned]
+      properties:
+        target: { $ref: '#/components/schemas/FleetVersionTarget' }
+        planned: { type: boolean, description: The leader planned the fleet for this selection within the wait time }
+        rolloutId: { type: string, format: uuid }
+        targets: { type: integer, description: Targets of the rollout (when rolloutId is set) }
+        message: { type: string, description: 'English hint, e.g. "no collector of the fleet needs an update"' }
+    ClearFleetVersionSelectionRequest:
+      type: object
+      properties:
+        reason: { type: string, maxLength: 500 }
+    FleetRolloutSpec:
+      type: object
+      properties:
+        configPolicy: { type: string, default: default }
+        versionPolicy: { type: string, default: default }
+    Fleet:
+      type: object
+      required: [name, priority, selector, blueprint, collector, update, rollout, source]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        labels: { $ref: '#/components/schemas/StringMap' }
+        displayName: { type: string }
+        priority: { type: integer }
+        selector: { $ref: '#/components/schemas/Selector' }
+        blueprint: { type: string }
+        parameters: { $ref: '#/components/schemas/AnyMap' }
+        collector: { $ref: '#/components/schemas/CollectorSpec' }
+        update: { $ref: '#/components/schemas/UpdateSpec' }
+        rollout: { $ref: '#/components/schemas/FleetRolloutSpec' }
+        source: { $ref: '#/components/schemas/SourceRef' }
+    FleetStatus:
+      type: object
+      required: [agents, versions, activeRollouts, behindLatest, renderErrors, versionTarget]
+      properties:
+        agents: { $ref: '#/components/schemas/FleetCounts' }
+        versions:
+          type: array
+          items: { $ref: '#/components/schemas/VersionCount' }
+        activeRollouts:
+          type: array
+          items: { $ref: '#/components/schemas/RolloutSummary' }
+        behindLatest: { type: boolean, description: The effective target version is lower than the latest stable release }
+        latestVersion: { type: string }
+        renderErrors: { type: integer }
+        versionTarget: { $ref: '#/components/schemas/FleetVersionTarget' }
+    FleetSummary:
+      type: object
+      required: [fleet, status]
+      properties:
+        fleet: { $ref: '#/components/schemas/Fleet' }
+        status: { $ref: '#/components/schemas/FleetStatus' }
+    FleetSummaryList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/FleetSummary' }
+    FleetDetail:
+      type: object
+      required: [fleet, status, blueprintChain, configPolicy, versionPolicy, issues]
+      properties:
+        fleet: { $ref: '#/components/schemas/Fleet' }
+        status: { $ref: '#/components/schemas/FleetStatus' }
+        blueprintChain: { type: array, items: { type: string } }
+        configPolicy: { $ref: '#/components/schemas/RolloutPolicy' }
+        versionPolicy: { $ref: '#/components/schemas/RolloutPolicy' }
+        executor: { $ref: '#/components/schemas/ExecutorSummary' }
+        issues:
+          type: array
+          items: { $ref: '#/components/schemas/Issue' }
+        webUrl: { type: string }
+    MatchFleetsRequest:
+      type: object
+      properties:
+        agentId: { type: string, format: uuid }
+        attributes: { $ref: '#/components/schemas/StringMap' }
+    MatchFleetsResponse:
+      type: object
+      required: [candidates]
+      properties:
+        fleet: { type: string }
+        candidates: { type: array, items: { type: string } }
+        error: { type: string }
+        inventoryLabels: { $ref: '#/components/schemas/StringMap' }
+    ExecutorSummary:
+      type: object
+      required: [name, type, target, source, usedBy]
+      properties:
+        name: { type: string }
+        type: { $ref: '#/components/schemas/ExecutorType' }
+        description: { type: string }
+        target: { type: string, description: Redacted destination URL }
+        source: { $ref: '#/components/schemas/SourceRef' }
+        usedBy: { type: array, items: { type: string } }
+    ExecutorSummaryList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ExecutorSummary' }
+
+    # ------------------------------------------------------------ blueprints
+    ParameterSpec:
+      type: object
+      required: [name, type]
+      properties:
+        name: { type: string }
+        type: { $ref: '#/components/schemas/ParameterType' }
+        description: { type: string }
+        default: {}
+        required: { type: boolean }
+        enum: { type: array, items: {} }
+        pattern: { type: string }
+        min: { type: number }
+        max: { type: number }
+        fromAttribute: { type: string }
+    Fragment:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        when: { type: string, example: '[[ eq (attr "os.type") "windows" ]]' }
+        config: { $ref: '#/components/schemas/AnyMap' }
+        remove: { type: array, items: { type: string } }
+    Blueprint:
+      type: object
+      required: [name, source]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        labels: { $ref: '#/components/schemas/StringMap' }
+        extends: { type: string }
+        parameters:
+          type: array
+          items: { $ref: '#/components/schemas/ParameterSpec' }
+        config: { $ref: '#/components/schemas/AnyMap' }
+        fragments:
+          type: array
+          items: { $ref: '#/components/schemas/Fragment' }
+        remove: { type: array, items: { type: string } }
+        source: { $ref: '#/components/schemas/SourceRef' }
+    BlueprintSummary:
+      type: object
+      required: [name, parameterCount, fragmentCount, usedBy, source, issueCount]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        extends: { type: string }
+        parameterCount: { type: integer }
+        fragmentCount: { type: integer }
+        usedBy: { type: array, items: { type: string } }
+        source: { $ref: '#/components/schemas/SourceRef' }
+        issueCount: { type: integer }
+    BlueprintSummaryList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/BlueprintSummary' }
+    BlueprintDetail:
+      type: object
+      required: [blueprint, chain, parameters, usedBy, issues]
+      properties:
+        blueprint: { $ref: '#/components/schemas/Blueprint' }
+        chain: { type: array, items: { type: string } }
+        parameters:
+          type: array
+          items: { $ref: '#/components/schemas/ParameterSpec' }
+        usedBy: { type: array, items: { type: string } }
+        issues:
+          type: array
+          items: { $ref: '#/components/schemas/Issue' }
+        webUrl: { type: string }
+    RenderRequest:
+      type: object
+      properties:
+        agentId: { type: string, format: uuid }
+        attributes: { $ref: '#/components/schemas/StringMap' }
+        fleet: { type: string }
+        parameters: { $ref: '#/components/schemas/AnyMap' }
+        validate: { type: boolean, default: true, description: "false skips only the check against the agent's reported component list (unknown_component); structural checks always run." }
+    RenderResponse:
+      type: object
+      required: [blueprint, layers, parameters, parameterSources, body, issues]
+      properties:
+        blueprint: { type: string }
+        fleet: { type: string }
+        layers: { type: array, items: { type: string } }
+        parameters: { $ref: '#/components/schemas/AnyMap' }
+        parameterSources:
+          type: object
+          additionalProperties: { type: string, enum: [default, fleet, attribute, inventory, override] }
+        hash: { $ref: '#/components/schemas/Hash' }
+        body: { type: string }
+        issues:
+          type: array
+          items: { $ref: '#/components/schemas/Issue' }
+
+    # ------------------------------------------------------------ rollout policies
+    WaveSpec:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        selector: { $ref: '#/components/schemas/Selector' }
+        percent: { type: integer, minimum: 1, maximum: 100 }
+        requireApproval: { type: boolean }
+    FailureThreshold:
+      type: object
+      properties:
+        maxFailed: { type: integer, minimum: 0 }
+        maxFailedPercent: { type: integer, minimum: 0, maximum: 100 }
+    MaintenanceWindow:
+      type: object
+      required: [start, end]
+      properties:
+        days:
+          type: array
+          items: { type: string, enum: [Mon, Tue, Wed, Thu, Fri, Sat, Sun] }
+        start: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', example: '21:30' }
+        end: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', example: '05:30' }
+        timezone: { type: string, default: agent, example: Europe/Brussels }
+    RolloutPolicy:
+      type: object
+      required: [name, waves, failureThreshold, source]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        labels: { $ref: '#/components/schemas/StringMap' }
+        waves:
+          type: array
+          items: { $ref: '#/components/schemas/WaveSpec' }
+        maxConcurrent: { type: integer }
+        healthWait: { $ref: '#/components/schemas/Duration' }
+        applyTimeout: { $ref: '#/components/schemas/Duration' }
+        offlineGracePeriod: { $ref: '#/components/schemas/Duration' }
+        failureThreshold: { $ref: '#/components/schemas/FailureThreshold' }
+        onFailure: { $ref: '#/components/schemas/FailureAction' }
+        maintenanceWindows:
+          type: array
+          items: { $ref: '#/components/schemas/MaintenanceWindow' }
+        timezoneAttribute: { type: string, default: site.timezone }
+        defaultTimezone: { type: string }
+        source: { $ref: '#/components/schemas/SourceRef' }
+    RolloutPolicyList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/RolloutPolicy' }
+
+    # ------------------------------------------------------------ rollouts
+    RolloutCounts:
+      type: object
+      required: [total, pending, waitingWindow, inProgress, succeeded, failed, skipped, cancelled, rolledBack]
+      properties:
+        total: { type: integer }
+        pending: { type: integer }
+        waitingWindow: { type: integer }
+        inProgress: { type: integer }
+        succeeded: { type: integer }
+        failed: { type: integer }
+        skipped: { type: integer }
+        cancelled: { type: integer }
+        rolledBack: { type: integer }
+    RolloutWave:
+      type: object
+      required: [index, name, requireApproval, status, counts]
+      properties:
+        index: { type: integer }
+        name: { type: string }
+        selector: { $ref: '#/components/schemas/Selector' }
+        percent:
+          type: integer
+          description: 'Percentage waves only: cumulative share of all targets of the rollout that is reached with this wave (1 to 100). Not progress.'
+        requireApproval: { type: boolean }
+        status: { $ref: '#/components/schemas/WaveStatus' }
+        approvedBy:
+          type: string
+          description: Display name of the user (or API token) that approved the wave; the server resolves the stored actor reference. Unresolvable references (deleted users) are returned as stored ("user:<id>").
+        approvedAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        counts: { $ref: '#/components/schemas/RolloutCounts' }
+    Rollout:
+      type: object
+      required: [id, kind, fleetName, policyName, policy, status, toRef, currentWave, waves, counts, createdBy, origin, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/RolloutKind' }
+        fleetName: { type: string }
+        policyName: { type: string }
+        policy: { $ref: '#/components/schemas/RolloutPolicy' }
+        status: { $ref: '#/components/schemas/RolloutStatus' }
+        statusReason: { type: string }
+        fromRef: { type: string }
+        toRef: { type: string, description: 'Git commit (config rollouts) or version (version rollouts)' }
+        gitCommit: { type: string }
+        executor: { $ref: '#/components/schemas/ExecutorType' }
+        currentWave: { type: integer }
+        waves:
+          type: array
+          items: { $ref: '#/components/schemas/RolloutWave' }
+        counts: { $ref: '#/components/schemas/RolloutCounts' }
+        createdBy:
+          type: string
+          example: gitops
+          description: '"gitops", "system", or the display name of the operator/API token for UI-triggered rollouts (stored as "user:<uuid>"/"token:<uuid>", resolved like RolloutWave.approvedBy)'
+        origin: { $ref: '#/components/schemas/RolloutOrigin' }
+        requestReason: { type: string, description: Reason the operator gave when selecting the version (origin ui) }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        annotations:
+          $ref: '#/components/schemas/AnyMap'
+          description: |
+            Engine annotations (persisted state, values may be objects): executorRef, distribution, updateParams (object),
+            selection (object, origin ui: {version, selectedBy, selectedAt, reason}), ackedFailures, healthTrack,
+            rollbackStartedAt, rollbackSent (internal). Clients must not assume string values.
+    RolloutSummary:
+      type: object
+      required: [id, kind, fleetName, policyName, status, toRef, currentWave, waveCount, counts, origin, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/RolloutKind' }
+        fleetName: { type: string }
+        policyName: { type: string }
+        status: { $ref: '#/components/schemas/RolloutStatus' }
+        statusReason: { type: string }
+        fromRef: { type: string }
+        toRef: { type: string }
+        gitCommit: { type: string }
+        currentWave: { type: integer }
+        waveCount: { type: integer }
+        counts: { $ref: '#/components/schemas/RolloutCounts' }
+        origin: { $ref: '#/components/schemas/RolloutOrigin' }
+        createdBy: { type: string, description: Same as Rollout.createdBy (display name) }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+    RolloutSummaryPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/RolloutSummary' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    RolloutTarget:
+      type: object
+      required: [rolloutId, agentId, wave, status, toRef, attempts, updatedAt]
+      properties:
+        rolloutId: { type: string, format: uuid }
+        agentId: { type: string, format: uuid }
+        hostname: { type: string }
+        wave: { type: integer }
+        status: { $ref: '#/components/schemas/TargetStatus' }
+        fromRef: { type: string }
+        toRef: { type: string }
+        attempts: { type: integer }
+        startedAt: { type: string, format: date-time }
+        verifiedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        lastError: { type: string }
+        executorRef: { type: string }
+        updatedAt: { type: string, format: date-time }
+        progress: { $ref: '#/components/schemas/TargetProgress' }
+    TargetProgress:
+      type: object
+      description: |
+        Live progress of a version-rollout target, derived by the rollout engine (leader) from the target, the OpAMP
+        package status of the linked myriarch-updater and the myriarch-updater's update-phase health component
+        "dev.myriarch.update" (docs/design/version-selection.md, Target progress, and docs/design/updater-protocol.md,
+        Update health component). Refreshed on every engine tick after a change (about 1-2 s) and frozen when the
+        target reaches a final status. Absent for config rollouts and for targets that were never started.
+      required: [phase, source, steps, updatedAt]
+      properties:
+        phase: { $ref: '#/components/schemas/UpdatePhase' }
+        source: { $ref: '#/components/schemas/ProgressSource' }
+        attempt: { type: integer, description: Target attempt this progress belongs to }
+        fromVersion: { type: string }
+        toVersion: { type: string }
+        downloadPercent: { type: number, minimum: 0, maximum: 100 }
+        error: { type: string, description: Error of the failed step or of the target (English) }
+        steps:
+          type: array
+          description: |
+            Fixed order offered, downloading, verifying, installing, restarting, health_check, rolling_back (only when
+            a rollback happened), health_wait. Executor source: offered, installing (external update until the
+            version is reported), health_wait.
+          items: { $ref: '#/components/schemas/UpdateStep' }
+        updatedAt: { type: string, format: date-time }
+    UpdateStep:
+      type: object
+      required: [name, status]
+      properties:
+        name: { $ref: '#/components/schemas/UpdateStepName' }
+        status: { $ref: '#/components/schemas/UpdateStepStatus' }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        detail: { type: string, description: 'Short English detail, e.g. "sha256 + sigstore verified", or the error of a failed step' }
+    RolloutTargetPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/RolloutTarget' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    RolloutActionRequest:
+      type: object
+      properties:
+        reason: { type: string, maxLength: 500 }
+    ApproveWaveRequest:
+      type: object
+      required: [wave]
+      properties:
+        wave: { type: integer, minimum: 0 }
+        reason: { type: string, maxLength: 500 }
+
+    # ------------------------------------------------------------ releases
+    ChangelogEntry:
+      type: object
+      required: [source, file, version, text]
+      properties:
+        source: { type: string, enum: [core, contrib, releases] }
+        file: { type: string, example: CHANGELOG.md }
+        version: { type: string }
+        component: { type: string, example: receiver/kafka }
+        text: { type: string }
+        issues: { type: array, items: { type: integer } }
+    ReleaseAsset:
+      type: object
+      required: [name, url, size]
+      properties:
+        name: { type: string }
+        url: { type: string }
+        size: { type: integer, format: int64 }
+        os: { type: string }
+        arch: { type: string }
+        format: { type: string, enum: [tar.gz, zip, msi, deb, rpm, apk, binary] }
+        contentType: { type: string }
+    Release:
+      type: object
+      required: [distribution, version, tag, prerelease, breakingChanges, deprecations, assets, detectedAt]
+      properties:
+        distribution: { type: string }
+        version: { type: string }
+        tag: { type: string }
+        publishedAt: { type: string, format: date-time }
+        prerelease: { type: boolean }
+        htmlUrl: { type: string }
+        notes: { type: string }
+        breakingChanges:
+          type: array
+          items: { $ref: '#/components/schemas/ChangelogEntry' }
+        deprecations:
+          type: array
+          items: { $ref: '#/components/schemas/ChangelogEntry' }
+        assets:
+          type: array
+          items: { $ref: '#/components/schemas/ReleaseAsset' }
+        detectedAt: { type: string, format: date-time }
+        acknowledgedBy:
+          type: string
+          description: Display name of the user (or API token) that acknowledged the release; resolved by the server like RolloutWave.approvedBy.
+        acknowledgedAt: { type: string, format: date-time }
+    ReleaseSummary:
+      type: object
+      required: [distribution, version, tag, prerelease, breakingCount, deprecationCount, acknowledged, fleetsBehind, isLatest]
+      properties:
+        distribution: { type: string }
+        version: { type: string }
+        tag: { type: string }
+        publishedAt: { type: string, format: date-time }
+        prerelease: { type: boolean }
+        htmlUrl: { type: string }
+        breakingCount: { type: integer }
+        deprecationCount: { type: integer }
+        acknowledged: { type: boolean }
+        fleetsBehind: { type: integer }
+        isLatest: { type: boolean }
+    ReleaseSummaryPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ReleaseSummary' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    FleetBehind:
+      type: object
+      required: [fleet, targetVersion, agents, versions, breakingCount, sourcePath]
+      properties:
+        fleet: { type: string }
+        targetVersion: { type: string }
+        agents: { type: integer }
+        versions:
+          type: array
+          items: { $ref: '#/components/schemas/VersionCount' }
+        breakingCount: { type: integer }
+        sourcePath: { type: string }
+    ReleaseDetail:
+      type: object
+      required: [release, isLatest, fleetsBehind, agentsBehind, gitopsSnippet, updatableFleets]
+      properties:
+        release: { $ref: '#/components/schemas/Release' }
+        isLatest: { type: boolean }
+        fleetsBehind:
+          type: array
+          items: { $ref: '#/components/schemas/FleetBehind' }
+        agentsBehind: { type: integer }
+        gitopsSnippet: { type: string, description: 'YAML snippet setting spec.collector.version' }
+        updatableFleets:
+          type: array
+          description: Every fleet of the release's distribution and whether this release can be selected for it in the UI (selectable first, then by name)
+          items: { $ref: '#/components/schemas/ReleaseFleetOption' }
+    ReleaseFleetOption:
+      type: object
+      required: [fleet, target, selectable, agentsToUpdate]
+      properties:
+        fleet: { type: string }
+        displayName: { type: string }
+        target: { $ref: '#/components/schemas/FleetVersionTarget' }
+        selectable: { type: boolean }
+        reasonCode:
+          type: string
+          enum: [selection_disabled, no_executor, blocking_rollout, current_target, outside_frame, downgrade_not_allowed,
+                 prerelease_not_allowed, unknown_version]
+        reason: { type: string }
+        agentsToUpdate: { type: integer }
+    VersionComparison:
+      type: object
+      required: [distribution, from, to, versions, breakingChanges, deprecations]
+      properties:
+        distribution: { type: string }
+        from: { type: string }
+        to: { type: string }
+        versions: { type: array, items: { type: string } }
+        breakingChanges:
+          type: array
+          items: { $ref: '#/components/schemas/ChangelogEntry' }
+        deprecations:
+          type: array
+          items: { $ref: '#/components/schemas/ChangelogEntry' }
+
+    # ------------------------------------------------------------ gitops
+    GitCommit:
+      type: object
+      required: [sha, time]
+      properties:
+        sha: { type: string }
+        author: { type: string }
+        message: { type: string }
+        time: { type: string, format: date-time }
+    GitOpsSyncStatus:
+      type: object
+      required: [source, state, issues, objectCounts]
+      properties:
+        source: { type: string }
+        branch: { type: string }
+        path: { type: string }
+        state: { type: string, enum: [ok, error, syncing, never] }
+        lastSyncAt: { type: string, format: date-time }
+        lastSuccessAt: { type: string, format: date-time }
+        appliedCommit: { $ref: '#/components/schemas/GitCommit' }
+        latestCommit: { $ref: '#/components/schemas/GitCommit' }
+        issues:
+          type: array
+          items: { $ref: '#/components/schemas/Issue' }
+        objectCounts:
+          type: object
+          additionalProperties: { type: integer }
+          description: kind -> count
+    GitOpsSync:
+      type: object
+      required: [id, startedAt, trigger, result, issues]
+      properties:
+        id: { type: integer, format: int64 }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        trigger: { type: string, enum: [poll, webhook, manual, startup] }
+        commit: { $ref: '#/components/schemas/GitCommit' }
+        result: { type: string, enum: [applied, unchanged, invalid, error] }
+        issues:
+          type: array
+          items: { $ref: '#/components/schemas/Issue' }
+        added: { type: array, items: { type: string } }
+        changed: { type: array, items: { type: string } }
+        removed: { type: array, items: { type: string } }
+    GitOpsSyncPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/GitOpsSync' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    GitOpsObjectRef:
+      type: object
+      required: [kind, name, path, commit]
+      properties:
+        kind: { $ref: '#/components/schemas/ObjectKind' }
+        name: { type: string }
+        path: { type: string }
+        commit: { type: string }
+        webUrl: { type: string }
+    GitOpsObjectRefList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/GitOpsObjectRef' }
+
+    # ------------------------------------------------------------ artifacts
+    Artifact:
+      type: object
+      required: [id, distribution, version, os, arch, format, filename, size, signatureVerified, sourceUrl, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        distribution: { type: string }
+        version: { type: string }
+        os: { type: string }
+        arch: { type: string }
+        format: { type: string, enum: [tar.gz, zip] }
+        filename: { type: string }
+        size: { type: integer, format: int64 }
+        sha256: { $ref: '#/components/schemas/Hash' }
+        signatureVerified: { type: boolean }
+        signatureIdentity: { type: string }
+        verificationError: { type: string }
+        sourceUrl: { type: string }
+        status: { $ref: '#/components/schemas/ArtifactStatus' }
+        error: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ArtifactPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Artifact' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    ArtifactList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Artifact' }
+    PrefetchRequest:
+      type: object
+      required: [distribution, version]
+      properties:
+        distribution: { type: string, example: otelcol-contrib }
+        version: { type: string, example: 0.162.0 }
+        platforms:
+          type: array
+          items: { type: string, example: windows/amd64 }
+          description: >-
+            Platforms (os/arch) to fetch. Omitted or empty means the server
+            default: the configured artifacts.prefetchPlatforms (empty by
+            default); when none are configured either, the distinct platforms
+            of the connected collectors of the fleets that use this
+            distribution. The request fails with 422 if that set is empty too.
+
+    # ------------------------------------------------------------ notifications
+    ChannelInfo:
+      type: object
+      required: [name, type, events, minSeverity, target]
+      properties:
+        name: { type: string }
+        type: { type: string, enum: [webhook, teams, slack] }
+        events: { type: array, items: { type: string } }
+        minSeverity: { type: string, enum: [info, warning, critical] }
+        target: { type: string }
+    ChannelInfoList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ChannelInfo' }
+
+    # ------------------------------------------------------------ live events
+    LiveAgentRemovedData:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, format: uuid }
+    LiveFleetUpdatedData:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, description: Fleet name }

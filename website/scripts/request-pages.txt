@@ -1,0 +1,24 @@
+# Pages that website/scripts/check-requests.mjs loads (one path per line; # starts a comment). Add the pages of new features here:
+# the check fails on a request to another origin, a browser CSP violation or a console error. The pages that need a script (search,
+# Mermaid diagrams, the tables of the API reference) are exercised in the checks of the node script.
+/
+/docs/
+/docs/concepts/gitops/
+/docs/architecture/
+/docs/design/version-selection/
+/docs/adr/
+/docs/adr/0031-website-with-hugo-and-docsy/
+/docs/reference/cli/myriarchd/
+/docs/reference/api/
+/docs/reference/api/agents/
+/docs/reference/api/rollouts/
+/docs/reference/api/data-types/
+/docs/reference/helm-chart/
+/docs/operations/install-helm/
+/project/
+/project/faq/
+/project/brand/
+/project/roadmap/
+/legal/privacy/
+/legal/third-party/
+/404.html

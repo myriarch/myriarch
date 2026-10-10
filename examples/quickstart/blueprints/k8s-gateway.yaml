@@ -1,0 +1,93 @@
+# OTLP gateway in Kubernetes (for example a StatefulSet "otel-gateway" in the namespace "observability"): accepts
+# OTLP from the hosts (ports 4317/4318) and exports with the "debug" exporter. As soon as a backend exists,
+# backendEndpoint additionally enables the OTLP/HTTP export (fragment "backend"; the token comes from
+# ${env:BACKEND_API_TOKEN}, which the pod environment must provide).
+# The gateway only forwards telemetry: the site enrichment, the queue and the gateway export of the base are removed.
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: k8s-gateway
+  description: OTLP gateway in Kubernetes (supervisor in the pod), debug export, optional backend
+spec:
+  extends: base
+  parameters:
+    # Required in the base; the gateway does not export to another gateway.
+    - name: gatewayEndpoint
+      type: string
+      default: unused
+      description: Not used in the gateway
+    - name: healthEndpoint
+      type: string
+      default: 0.0.0.0:13133
+      description: Listener of the readiness probe of the StatefulSet (port 13133)
+    - name: otlpListenHost
+      type: string
+      default: 0.0.0.0
+      description: The OTLP receivers listen on all pod addresses
+    - name: backendEndpoint
+      type: string
+      default: ""
+      description: OTLP/HTTP endpoint of the observability backend (https://...); empty = debug export only
+    - name: debugVerbosity
+      type: string
+      default: basic
+      enum: [basic, normal, detailed]
+  remove:
+    - exporters::otlp_grpc/gateway
+    - extensions::file_storage/queue
+    - processors::resource/site
+    - processors::resource_detection
+  config:
+    extensions:
+      health_check:
+        endpoint: "[[ .params.healthEndpoint ]]"
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "[[ .params.otlpListenHost ]]:4317"
+            max_recv_msg_size_mib: 16
+          http:
+            endpoint: "[[ .params.otlpListenHost ]]:4318"
+    exporters:
+      debug:
+        verbosity: "[[ .params.debugVerbosity ]]"
+        sampling_initial: 5
+        sampling_thereafter: 200
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug]
+  fragments:
+    - name: backend
+      when: '[[ ne .params.backendEndpoint "" ]]'
+      config:
+        exporters:
+          otlp_http/backend:
+            endpoint: "[[ .params.backendEndpoint ]]"
+            headers:
+              authorization: "Bearer ${env:BACKEND_API_TOKEN}"
+            sending_queue:
+              enabled: true
+              queue_size: 5000
+            retry_on_failure:
+              enabled: true
+        service:
+          pipelines:
+            traces:
+              exporters: [debug, otlp_http/backend]
+            metrics:
+              exporters: [debug, otlp_http/backend]
+            logs:
+              exporters: [debug, otlp_http/backend]

@@ -1,0 +1,30 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# .gitleaks.toml (gitleaks v8.30.1): the default rules plus narrow allowlists.
+# Each entry is limited to one file and one rule, so a real secret in another file, or one that another rule finds,
+# still fails the gate (ci/secrets-scan.sh). Paths match both "gitleaks dir ." and "gitleaks git" output.
+title = "myriarch"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test constant: HMAC secret of the webhook executor tests"
+targetRules = ["generic-api-key"]
+paths = ['''(^|/)internal/executor/webhookexec/webhookexec_test\.go$''']
+
+[[allowlists]]
+description = "Test constant: HMAC secret of the notification channel tests"
+targetRules = ["generic-api-key"]
+paths = ['''(^|/)internal/notify/channels/channels_test\.go$''']
+
+[[allowlists]]
+description = "Test dummy: enrollment token of the installer and env-file tests"
+targetRules = ["generic-api-key"]
+paths = ['''(^|/)internal/updater/deploy_test\.go$''']
+
+[[allowlists]]
+description = "Documentation false positive: a shell helper named api followed by a URL path"
+targetRules = ["generic-api-key"]
+paths = ['''(^|/)docs/getting-started/local-dev\.md$''']

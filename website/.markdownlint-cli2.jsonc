@@ -1,0 +1,23 @@
+// markdownlint-cli2 configuration of the website gate (ci/website.sh check; ADR-0031). The files to lint are named on the command
+// line: docs/**/*.md, the root files that the website renders and website/content/**/*.md.
+{
+  "config": {
+    "default": true,
+    // long lines are fine: the documents are wrapped by hand where it helps, tables and links are not
+    "MD013": false,
+    // raw HTML is not used in the documentation, but the table rule would flag the autolink and entity forms Hugo accepts
+    "MD033": false,
+    // the front matter holds the title; the page body starts at H2 (docs/development.md#documentation)
+    "MD041": false,
+    // table alignment style is not enforced
+    "MD060": false,
+    // a tab in a code block is part of the code (tab-separated flag lists)
+    "MD010": { "code_blocks": false },
+    // decision records repeat section names (Context, Decision, ...) under different parents
+    "MD024": { "siblings_only": true },
+    "MD004": { "style": "consistent" }
+  },
+  "gitignore": true,
+  "noBanner": true,
+  "noProgress": true
+}

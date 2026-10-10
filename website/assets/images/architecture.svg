@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 520" width="1000" height="520" role="img" aria-labelledby="arch-title arch-desc" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="15">
+  <title id="arch-title">myriarch architecture</title>
+  <desc id="arch-desc">Operators use the web UI and REST API of myriarchd. The GitOps syncer of myriarchd reads a Git repository that holds blueprints, fleets, rollout policies and allowed collector versions. myrctl checks pull requests of that repository in CI. Several myriarchd replicas share one PostgreSQL database. The OpAMP endpoint talks to a Supervisor with a Collector at an edge site, in a data center and in Kubernetes. The rollout engine starts collector binary updates through executors: myriarch-updater, webhook or AWX.</desc>
+  <style>
+    .t { fill: var(--arch-text, #2b0a1f); }
+    .m { fill: var(--arch-muted, #5c4656); font-size: 13px; }
+    .h { font-weight: 600; }
+    .box { fill: var(--arch-box, #ffffff); stroke: var(--arch-line, #b3338a); stroke-width: 1.5; }
+    .core { fill: var(--arch-core, #fbf6f9); stroke: var(--arch-line, #b3338a); stroke-width: 2; }
+    .part { fill: var(--arch-box, #ffffff); stroke: var(--arch-soft, #cfb7c6); stroke-width: 1.2; }
+    .edge { fill: none; stroke: var(--arch-line, #b3338a); stroke-width: 1.8; }
+    .edge-soft { fill: none; stroke: var(--arch-soft, #8d7384); stroke-width: 1.5; stroke-dasharray: 5 4; }
+    .tip { fill: var(--arch-line, #b3338a); }
+    .lbl { fill: var(--arch-text, #2b0a1f); font-size: 13px; font-weight: 600; }
+  </style>
+  <defs>
+    <marker id="arch-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path class="tip" d="M0 0 L10 5 L0 10 z"/>
+    </marker>
+  </defs>
+
+  <!-- Operators -->
+  <rect class="box" x="330" y="8" width="300" height="46" rx="8"/>
+  <text class="t h" x="480" y="29" text-anchor="middle">Operators</text>
+  <text class="m" x="480" y="46" text-anchor="middle">browser and API clients</text>
+  <path class="edge" d="M480 54 V100" marker-end="url(#arch-arrow)"/>
+
+  <!-- CI -->
+  <rect class="box" x="20" y="60" width="190" height="64" rx="8"/>
+  <text class="t h" x="115" y="84" text-anchor="middle">CI</text>
+  <text class="m" x="115" y="104" text-anchor="middle">myrctl validate, render</text>
+  <path class="edge" d="M115 124 V186" marker-end="url(#arch-arrow)"/>
+  <text class="lbl" x="127" y="152">checks pull</text>
+  <text class="lbl" x="127" y="169">requests</text>
+
+  <!-- Git -->
+  <rect class="box" x="20" y="186" width="190" height="84" rx="8"/>
+  <text class="t h" x="115" y="212" text-anchor="middle">Git repository</text>
+  <text class="m" x="115" y="234" text-anchor="middle">blueprints, fleets,</text>
+  <text class="m" x="115" y="252" text-anchor="middle">policies, allowed versions</text>
+
+  <!-- PostgreSQL -->
+  <rect class="box" x="20" y="300" width="190" height="84" rx="8"/>
+  <text class="t h" x="115" y="326" text-anchor="middle">PostgreSQL</text>
+  <text class="m" x="115" y="348" text-anchor="middle">state, events,</text>
+  <text class="m" x="115" y="366" text-anchor="middle">leader election</text>
+
+  <!-- myriarchd -->
+  <rect class="core" x="250" y="100" width="460" height="270" rx="12"/>
+  <text class="t h" x="270" y="128">myriarchd</text>
+  <text class="m" x="690" y="128" text-anchor="end">one or more replicas</text>
+
+  <rect class="part" x="270" y="146" width="200" height="46" rx="6"/>
+  <text class="t" x="370" y="174" text-anchor="middle">Web UI</text>
+  <rect class="part" x="490" y="146" width="200" height="46" rx="6"/>
+  <text class="t" x="590" y="174" text-anchor="middle">REST API</text>
+
+  <rect class="part" x="270" y="206" width="200" height="46" rx="6"/>
+  <text class="t" x="370" y="234" text-anchor="middle">GitOps syncer</text>
+  <rect class="part" x="490" y="206" width="200" height="46" rx="6"/>
+  <text class="t" x="590" y="234" text-anchor="middle">OpAMP endpoint</text>
+
+  <rect class="part" x="270" y="266" width="200" height="46" rx="6"/>
+  <text class="t" x="370" y="294" text-anchor="middle">Rollout engine</text>
+  <rect class="part" x="490" y="266" width="200" height="46" rx="6"/>
+  <text class="t" x="590" y="294" text-anchor="middle">Release tracker</text>
+
+  <text class="m" x="480" y="344" text-anchor="middle">every operator action is audited</text>
+
+  <!-- edges that end inside the box are drawn after it -->
+  <path class="edge" d="M210 228 H268" marker-end="url(#arch-arrow)"/>
+  <text class="lbl" x="214" y="218">reads</text>
+  <path class="edge" d="M210 342 H250" marker-start="url(#arch-arrow)" marker-end="url(#arch-arrow)"/>
+
+  <!-- OpAMP bus to the collectors -->
+  <path class="edge" d="M690 228 H752"/>
+  <path class="edge" d="M752 132 V324"/>
+  <path class="edge" d="M752 132 H772" marker-end="url(#arch-arrow)"/>
+  <path class="edge" d="M752 228 H772" marker-end="url(#arch-arrow)"/>
+  <path class="edge" d="M752 324 H772" marker-end="url(#arch-arrow)"/>
+  <text class="lbl" x="700" y="218">OpAMP</text>
+
+  <rect class="box" x="780" y="90" width="200" height="84" rx="8"/>
+  <text class="t h" x="880" y="116" text-anchor="middle">Edge site</text>
+  <text class="m" x="880" y="140" text-anchor="middle">Supervisor + Collector</text>
+  <rect class="box" x="780" y="186" width="200" height="84" rx="8"/>
+  <text class="t h" x="880" y="212" text-anchor="middle">Data center</text>
+  <text class="m" x="880" y="236" text-anchor="middle">Supervisor + Collector</text>
+  <rect class="box" x="780" y="282" width="200" height="84" rx="8"/>
+  <text class="t h" x="880" y="308" text-anchor="middle">Kubernetes</text>
+  <text class="m" x="880" y="332" text-anchor="middle">Supervisor + Collector</text>
+
+  <!-- Executors -->
+  <path class="edge" d="M480 370 V416" marker-end="url(#arch-arrow)"/>
+  <text class="lbl" x="492" y="398">start updates</text>
+  <rect class="core" x="250" y="416" width="460" height="86" rx="12"/>
+  <text class="t h" x="270" y="442">Executors</text>
+  <text class="m" x="690" y="442" text-anchor="end">replace the collector binary</text>
+  <rect class="part" x="270" y="456" width="130" height="34" rx="6"/>
+  <text class="t" x="335" y="478" text-anchor="middle">updater</text>
+  <rect class="part" x="415" y="456" width="130" height="34" rx="6"/>
+  <text class="t" x="480" y="478" text-anchor="middle">webhook</text>
+  <rect class="part" x="560" y="456" width="130" height="34" rx="6"/>
+  <text class="t" x="625" y="478" text-anchor="middle">AWX</text>
+  <path class="edge-soft" d="M710 459 H880 V370" marker-end="url(#arch-arrow)"/>
+  <text class="lbl" x="730" y="449">binary updates</text>
+</svg>

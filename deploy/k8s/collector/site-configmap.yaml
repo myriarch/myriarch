@@ -1,0 +1,18 @@
+# Shared values to adapt per cluster (injected through envFrom into the gateway and the DaemonSet).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: myriarch-site
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: myriarch-site
+    app.kubernetes.io/part-of: myriarch
+data:
+  MYRIARCH_OPAMP_ENDPOINT: wss://fleet.example.com/v1/opamp
+  K8S_CLUSTER_NAME: example-cluster
+  # ISO 3166-1 alpha-2 country code of the site, optional (e.g. DE, US).
+  SITE_COUNTRY: ""
+  SITE_REGION: example-region
+  # IANA time zone of the site, e.g. America/New_York.
+  SITE_TIMEZONE: UTC
+  ENVIRONMENT: prod

@@ -1,0 +1,35 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# OpAMP supervisor of the local E2E test (scripts/e2e-ui-updates.sh replaces the @@NAME@@ placeholders).
+# agent.executable points to the "current" symlink of the myriarch-updater: swapping the version changes only this symlink.
+server:
+  endpoint: ws://127.0.0.1:@@PORT_MYRIARCHD@@/v1/opamp
+  headers:
+    Authorization: "Bearer ${env:MYRIARCH_ENROLLMENT_TOKEN}"
+capabilities:
+  accepts_remote_config: true
+  accepts_restart_command: true
+  reports_effective_config: true
+  reports_health: true
+  reports_available_components: true
+  reports_heartbeat: true
+agent:
+  executable: @@INSTALL_DIR@@/current/otelcol-contrib
+  config_apply_timeout: 30s
+  bootstrap_timeout: 15s
+  validate_config: true
+  automatic_config_rollback: true
+  passthrough_logs: true
+  description:
+    non_identifying_attributes:
+      # myriarchd links updater and collector only with the same token AND the same host name
+      host.name: @@HOSTNAME@@
+      site.type: local-gw
+      site.id: e2e-gw
+      site.country: DE
+      site.timezone: Europe/Berlin
+storage:
+  directory: @@SUPERVISOR_STORAGE@@
+healthcheck:
+  endpoint: 127.0.0.1:@@PORT_SUP_HEALTH@@

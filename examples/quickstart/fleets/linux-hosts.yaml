@@ -1,0 +1,39 @@
+# Linux hosts at edge sites and in data centers. Collector updates go through the myriarch-updater.
+#
+# Assignment: os.type=linux AND site.type is edge or datacenter. The three quickstart fleets use the same priority;
+# their selectors are disjoint (os.type / site.type), so no agent is ambiguous. Give new fleets that can match the
+# same agents a unique priority (the higher one wins).
+#
+# Version change: set collector.version in a merge request, or let the UI choose a version inside update.selection
+# (the repository defines the allowed range, the UI picks within it). Never roll out a config change and a version
+# change in the same merge request.
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: linux-hosts
+  description: Linux hosts at edge sites and in data centers, updates through the myriarch-updater
+spec:
+  displayName: Linux hosts
+  priority: 100
+  selector:
+    matchAttributes:
+      os.type: linux
+    matchExpressions:
+      - key: site.type
+        operator: In
+        values: [edge, datacenter]
+  blueprint: linux-host
+  parameters:
+    gatewayEndpoint: gateway.example.com:4317
+  collector:
+    distribution: otelcol-contrib
+    version: 0.162.0
+  update:
+    executor: updater
+    # Frame for the version choice in the UI: the repository defines which versions are selectable.
+    selection:
+      enabled: true
+      versionRange: ">=0.161.0, <=0.162.0"
+  rollout:
+    configPolicy: config-canary
+    versionPolicy: canary-then-all

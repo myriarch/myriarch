@@ -1,0 +1,3 @@
+const m = await import("https://cdn.example.com/m.mjs");
+import y from "//cdn.example.com/y.js";
+const ok = await import("/vendor/ok.mjs");

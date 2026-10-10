@@ -1,0 +1,129 @@
+# Base blueprint for all collectors: health check, persistent queue,
+# resource enrichment and export to the regional gateway.
+# Template expressions "[[ ... ]]" are evaluated by myriarchd; "${env:...}"
+# is left untouched and resolved by the collector itself (secrets!).
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: base
+  description: Common base for all collectors (health, queue, export to the gateway)
+spec:
+  parameters:
+    - name: gatewayEndpoint
+      type: string
+      required: true
+      description: OTLP/gRPC endpoint of the regional gateway (host:port)
+    - name: gatewayInsecure
+      type: bool
+      default: false
+      description: Disable TLS for the gateway export (test only)
+    - name: gatewayAuth
+      type: bool
+      default: true
+      description: Send the bearer token from the environment variable OTEL_GATEWAY_TOKEN
+    - name: environment
+      type: string
+      default: prod
+      enum: [prod, test, dev]
+    - name: logLevel
+      type: string
+      default: info
+      enum: [debug, info, warn, error]
+    - name: memoryLimitPercent
+      type: int
+      default: 75
+      min: 20
+      max: 90
+    - name: storageDir
+      type: string
+      default: /var/lib/otelcol/storage
+      description: Directory of the persistent send queue
+    - name: siteId
+      type: string
+      fromAttribute: site.id
+      default: unknown
+    - name: siteType
+      type: string
+      fromAttribute: site.type
+      default: unknown
+    - name: siteCountry
+      type: string
+      fromAttribute: site.country
+      default: unknown
+  config:
+    extensions:
+      health_check:
+        endpoint: localhost:13133
+      file_storage/queue:
+        directory: "[[ .params.storageDir ]]"
+        create_directory: true
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: localhost:4317
+          http:
+            endpoint: localhost:4318
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: "[[ .params.memoryLimitPercent ]]"
+        spike_limit_percentage: 15
+      resource_detection:
+        detectors: [env, system]
+        system:
+          hostname_sources: [os]
+      resource/site:
+        attributes:
+          - key: site.id
+            value: "[[ .params.siteId ]]"
+            action: upsert
+          - key: site.type
+            value: "[[ .params.siteType ]]"
+            action: upsert
+          - key: site.country
+            value: "[[ .params.siteCountry ]]"
+            action: upsert
+          - key: deployment.environment.name
+            value: "[[ .params.environment ]]"
+            action: upsert
+      batch:
+        send_batch_size: 2048
+        timeout: 5s
+    exporters:
+      otlp_grpc/gateway:
+        endpoint: "[[ .params.gatewayEndpoint ]]"
+        tls:
+          insecure: "[[ .params.gatewayInsecure ]]"
+        sending_queue:
+          enabled: true
+          storage: file_storage/queue
+        retry_on_failure:
+          enabled: true
+          max_elapsed_time: 0s
+    service:
+      extensions: [health_check, file_storage/queue]
+      telemetry:
+        logs:
+          level: "[[ .params.logLevel ]]"
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource_detection, resource/site, batch]
+          exporters: [otlp_grpc/gateway]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, resource_detection, resource/site, batch]
+          exporters: [otlp_grpc/gateway]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, resource_detection, resource/site, batch]
+          exporters: [otlp_grpc/gateway]
+  fragments:
+    - name: gateway-auth
+      when: "[[ .params.gatewayAuth ]]"
+      config:
+        exporters:
+          otlp_grpc/gateway:
+            headers:
+              authorization: "Bearer ${env:OTEL_GATEWAY_TOKEN}"

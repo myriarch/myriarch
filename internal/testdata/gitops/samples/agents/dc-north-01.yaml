@@ -1,0 +1,11 @@
+name: dc-north-01
+attributes:
+  service.name: otelcol-contrib
+  service.version: 0.162.0
+  os.type: linux
+  host.name: dc-north-01
+  host.arch: arm64
+  site.type: datacenter
+  site.id: DC-NORTH
+  site.country: NL
+  site.timezone: Europe/Amsterdam

@@ -1,0 +1,22 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+Override of the Docsy v0.18.0 layout layouts/404.html (Apache-2.0, derived work; see website/overrides.txt). Hugo writes /404.html,
+which Vercel, Netlify and GitHub Pages serve for unknown paths. This version names the way back (home page, documentation, project)
+and offers the search box on narrow screens, where the navbar hides it.
+*/ -}}
+{{ define "main" -}}
+<div class="td-content">
+  <h1>Page not found</h1>
+  <p class="lead">The page you are looking for does not exist or has moved.</p>
+  <p>Try the search in the navigation bar, or go to one of these places:</p>
+  <ul>
+    <li><a href="{{ "" | relURL }}">The home page</a></li>
+    {{ with site.GetPage "/docs" }}<li><a href="{{ .RelPermalink }}">The documentation</a></li>{{ end }}
+    {{ with site.GetPage "/project" }}<li><a href="{{ .RelPermalink }}">The project: roadmap, release notes, governance</a></li>{{ end }}
+  </ul>
+  <div class="d-lg-none my-4">{{ partial "search-input.html" . }}</div>
+</div>
+{{- end }}

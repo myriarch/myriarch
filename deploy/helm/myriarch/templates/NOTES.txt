@@ -1,0 +1,96 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+myriarchd {{ .Chart.AppVersion }} was installed as release "{{ .Release.Name }}".
+{{- $openshift := include "myriarch.openshift" . }}
+{{- $fullname := include "myriarch.fullname" . }}
+{{- $host := "" }}
+{{- if and $openshift .Values.openshift.route.enabled }}{{ $host = include "myriarch.routeHost" . }}
+{{- else if and .Values.ingress.enabled .Values.ingress.hosts }}{{ $host = (index .Values.ingress.hosts 0).host }}
+{{- else if and .Values.httpRoute.enabled .Values.httpRoute.hostnames }}{{ $host = index .Values.httpRoute.hostnames 0 }}
+{{- end }}
+
+Access:
+{{- if $host }}
+  OpAMP endpoint for agents:  wss://{{ $host }}{{ .Values.config.opamp.path }}
+  Web UI/REST:                {{ .Values.config.server.publicUrl }}
+{{- if $openshift }}
+  Reached through the OpenShift Route {{ $fullname }} (edge TLS, router timeouts {{ .Values.openshift.route.timeout }}).
+{{- else if .Values.httpRoute.enabled }}
+  Reached through the HTTPRoute {{ $fullname }} (Gateway API).
+{{- else }}
+  Reached through the Ingress {{ $fullname }}.
+{{- end }}
+{{- else }}
+  No Ingress, HTTPRoute or Route is enabled. Reach the server from your workstation with a port-forward:
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $fullname }} 8080:{{ .Values.service.port }}
+  then open http://localhost:8080 (the NetworkPolicy does not affect a port-forward). For access from outside the
+  cluster enable httpRoute (recommended), ingress or, on OpenShift, openshift.route.
+{{- end }}
+{{- if include "myriarch.bootstrap.active" . }}
+
+Sign in (bootstrap admin "{{ .Values.bootstrapAdmin.username }}"):
+{{- if and (not .Values.bootstrapAdmin.existingSecret) }}
+  The chart generated a one-time token. Read it (the value is not printed here):
+    kubectl -n {{ .Release.Namespace }} get secret {{ include "myriarch.bootstrap.secretName" . }} -o jsonpath='{.data.{{ include "myriarch.bootstrap.tokenKey" . }}}' | base64 -d
+  The token works for ONE sign-in. For a new token delete the Secret and run "helm upgrade" again, or use
+  bootstrapAdmin.existingSecret with a bcrypt password hash (bootstrapAdmin.passwordHashKey) for a durable account.
+  GitOps note: "helm template" (Argo CD, Flux without cluster access) cannot see existing Secrets and generates a new
+  token on every render; use bootstrapAdmin.existingSecret there.
+{{- else }}
+  Credentials come from the Secret {{ .Values.bootstrapAdmin.existingSecret }}{{ if .Values.bootstrapAdmin.passwordHashKey }} (password hash in key {{ .Values.bootstrapAdmin.passwordHashKey }}){{ end }}{{ if .Values.bootstrapAdmin.tokenKey }} (one-time token in key {{ .Values.bootstrapAdmin.tokenKey }}){{ end }}.
+{{- end }}
+  The bootstrap admin is meant for the initial setup: configure single sign-on (config.auth.oidc) and set
+  bootstrapAdmin.enabled=false afterwards. Every sign-in is audited (auth.bootstrap.login).
+{{- else if include "myriarch.oidc.enabled" . }}
+
+{{ if .Values.config.auth.oidc.enabled -}}
+Sign in: through single sign-on (config.auth.oidc, issuer {{ .Values.config.auth.oidc.issuerUrl }}).
+{{- else -}}
+Sign in: through single sign-on, which oidcFromEnvironment declares as enabled by environment variables
+  (MYRIARCH_AUTH_OIDC_ENABLED and the other MYRIARCH_AUTH_OIDC_* variables); the chart does not check them.
+{{- end }}
+{{- if .Values.bootstrapAdmin.enabled }}
+  The bootstrap admin is configured but inactive while OIDC is enabled (bootstrapAdmin.keepWithOidc=false).
+{{- end }}
+{{- end }}
+{{- if .Values.enrollmentTokens }}
+
+Declared enrollment tokens (mounted at /etc/myriarchd/enrollment):
+{{- range .Values.enrollmentTokens }}
+  {{ .name }}: Secret {{ include "myriarch.enrollment.secretName" (dict "root" $ "entry" .) }}, key {{ .key | default "token" }}
+{{- end }}
+  Agents in the cluster can mount the same Secret; read a generated value with kubectl get secret <name> -o jsonpath='{.data.token}' | base64 -d.
+{{- end }}
+{{- if and (include "myriarch.openshift" .) (not .Values.config.server.trustedProxies) }}
+
+OpenShift: config.server.trustedProxies is empty, so all clients appear with the address of the router (login rate
+limit, audit source address). Set it to the CIDR of the router pods (networkPolicy.ingress.allowSameNamespace=false is
+required with it).
+{{- end }}
+{{- if and (eq (toString .Values.openshift.enabled) "auto") (not $openshift) }}
+
+openshift.enabled=auto rendered the STANDARD profile. "helm template" does not know the cluster APIs; pass
+--api-versions security.openshift.io/v1 or set openshift.enabled=true for the OpenShift profile.
+{{- end }}
+
+Check:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ $fullname }}
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl -n {{ .Release.Namespace }} port-forward deploy/{{ $fullname }} 8080:8080   # then open /healthz and /readyz
+
+Validate the configuration before deploying (no secrets, no network):
+  helm template {{ .Release.Name }} <chart> -f <values> | yq 'select(.kind == "ConfigMap").data["myriarchd.yaml"]' > myriarchd.yaml
+  myriarchd config validate --config myriarchd.yaml --skip-files
+Production example (values and a verification script): deploy/examples/production/README.md
+Ingress variants, OpenShift and Dex quickstart: deploy/helm/myriarch/examples/
+Authentication: docs/operations/authentication.md
+
+Upgrading from a version before migration 00003 (user identity from provider+issuer+subject): old replicas can no
+longer store OIDC logins once the migration has run. For this upgrade scale down to one replica
+(replicaCount=1), upgrade, then scale up again; during a rolling update OIDC logins fail on old replicas until all
+replicas are updated (existing sessions, agents and API tokens keep working).
+
+Prerequisites (see values.yaml): Secret "{{ .Values.existingSecret }}" containing database-dsn (and the other files you
+reference), PostgreSQL without PgBouncer transaction pooling, WebSocket-capable access with long timeouts.

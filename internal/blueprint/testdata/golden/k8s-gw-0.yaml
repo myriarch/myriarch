@@ -1,0 +1,67 @@
+exporters:
+  otlp_http/backend:
+    endpoint: https://otlp.observability.example.com
+    headers:
+      authorization: Bearer ${env:BACKEND_API_TOKEN}
+    retry_on_failure:
+      enabled: true
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+processors:
+  batch:
+    send_batch_size: 2048
+    timeout: 5s
+  filter/healthchecks:
+    error_mode: ignore
+    traces:
+      span:
+        - attributes["url.path"] == "/health"
+        - attributes["url.path"] == "/healthz"
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 15
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 16
+      http:
+        endpoint: 0.0.0.0:4318
+service:
+  extensions:
+    - health_check
+  pipelines:
+    logs:
+      exporters:
+        - otlp_http/backend
+      processors:
+        - memory_limiter
+        - batch
+      receivers:
+        - otlp
+    metrics:
+      exporters:
+        - otlp_http/backend
+      processors:
+        - memory_limiter
+        - batch
+      receivers:
+        - otlp
+    traces:
+      exporters:
+        - otlp_http/backend
+      processors:
+        - memory_limiter
+        - filter/healthchecks
+        - batch
+      receivers:
+        - otlp
+  telemetry:
+    logs:
+      level: info

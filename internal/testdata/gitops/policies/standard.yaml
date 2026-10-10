@@ -1,0 +1,21 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: RolloutPolicy
+metadata:
+  name: standard
+  description: 10 % -> all, at night between 01:00 and 05:00 (Europe/Amsterdam)
+spec:
+  waves:
+    - name: canary
+      percent: 10
+    - name: all
+      percent: 100
+  maxConcurrent: 20
+  healthWait: 2m
+  applyTimeout: 15m
+  failureThreshold:
+    maxFailed: 1
+  onFailure: pause
+  maintenanceWindows:
+    - start: "01:00"
+      end: "05:00"
+      timezone: Europe/Amsterdam

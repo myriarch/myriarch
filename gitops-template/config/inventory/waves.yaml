@@ -1,0 +1,32 @@
+# Wave assignment: the first host of each type is in the canary wave. Entries match EXACT attribute values reported by
+# the installer/supervisor (site.id, k8s.pod.name); labels.* is NOT matchable here. The labels appear in the fleet and
+# policy selectors as labels.<key> (for example labels.wave). Values are always strings ("canary", not a number).
+apiVersion: myriarch.dev/v1alpha1
+kind: Inventory
+metadata:
+  name: waves
+  description: Canary wave - the first host of each type
+spec:
+  entries:
+    # Linux host 1
+    - match:
+        site.id: site-001
+      labels:
+        wave: canary
+    # Windows host 1
+    - match:
+        site.id: site-101
+      labels:
+        wave: canary
+    # Gateway: only the first pod; all pods share the site.id example-cluster, the pod name tells them apart
+    - match:
+        site.id: example-cluster
+        k8s.pod.name: otel-gateway-0
+      labels:
+        wave: canary
+    # OPTIONAL (only with AWX and the files fleets/linux-hosts-awx.yaml and executors/awx-linux.yaml): update Linux
+    # host 2 through AWX.
+    # - match:
+    #     site.id: site-002
+    #   labels:
+    #     update-via: awx

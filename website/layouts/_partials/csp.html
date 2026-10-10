@@ -1,0 +1,34 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Content Security Policy of the site as a meta tag (ADR-0031), emitted by the head.html override right after the viewport meta tag,
+  so that it applies to every resource of the page. Every build but `hugo server` (production and preview; the development server needs live reload). Everything is served
+  by the site itself. A page can extend a directive or add one through params.csp (a map from directive to a list of sources; the output lists the directives in alphabetical order); the API
+  reference needs nothing beyond what is allowed here. frame-ancestors and HSTS cannot be set in a meta tag; they belong to the host
+  (website/README.md).
+*/ -}}
+{{ if not hugo.IsServer -}}
+{{ $csp := dict
+    "default-src" (slice "'self'")
+    "script-src" (slice "'self'" "'unsafe-inline'")
+    "style-src" (slice "'self'" "'unsafe-inline'")
+    "img-src" (slice "'self'" "data:")
+    "font-src" (slice "'self'" "data:")
+    "connect-src" (slice "'self'")
+    "worker-src" (slice "'self'" "blob:")
+    "frame-src" (slice "'none'")
+    "object-src" (slice "'none'")
+    "base-uri" (slice "'self'")
+    "form-action" (slice "'self'") -}}
+{{ range $directive, $sources := .Params.csp -}}
+  {{ $csp = merge $csp (dict $directive (union (index $csp $directive | default slice) $sources)) -}}
+{{ end -}}
+{{ $policy := slice -}}
+{{/* range over a map visits the keys in sorted order, so the policy is stable and every directive of $csp is written */ -}}
+{{ range $name, $sources := $csp -}}
+  {{ if $sources }}{{ $policy = $policy | append (printf "%s %s" $name (delimit $sources " ")) }}{{ end -}}
+{{ end -}}
+<meta http-equiv="Content-Security-Policy" content="{{ delimit $policy "; " }}">
+{{ end -}}

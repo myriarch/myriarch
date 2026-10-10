@@ -1,0 +1,31 @@
+# Myriarch - myriarch-updater (Windows)
+# Template for deploy/scripts/install-windows.ps1; placeholders in double at-signs (for example OPAMP_ENDPOINT) are replaced,
+# lines with an empty value are dropped. Paths with backslashes are in single quotes.
+server:
+  endpoint: "@@OPAMP_ENDPOINT@@"
+  tokenFile: 'C:\ProgramData\Myriarch\config\enrollment-token'
+  caFile: "@@CA_FILE@@"
+supervisor:
+  storageDir: 'C:\ProgramData\Myriarch\supervisor'
+  serviceName: otelcol-supervisor
+  healthUrl: http://localhost:13134/health
+collector:
+  installDir: 'C:\Program Files\Myriarch\collector'
+  binaryName: otelcol-contrib.exe
+  activation: copy
+  healthUrl: http://localhost:13133/
+  keepVersions: 2
+update:
+  # Host-side anti-downgrade rules (default: forward updates only, plus the step back to the previous version):
+  # minimumVersion: "0.162.0"   # offers below this version are never installed
+  # allowDowngrade: false       # true allows any older signed version
+  requireSignature: true
+  trustedRootFile: "@@TRUSTED_ROOT_FILE@@"
+  certificateIdentityRegexp: '^https://github\.com/open-telemetry/opentelemetry-collector-releases/\.github/workflows/base-release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$'
+  certificateOidcIssuer: https://token.actions.githubusercontent.com
+  healthTimeout: 120s
+  preflightValidate: true
+stateDir: 'C:\ProgramData\Myriarch\updater'
+log:
+  level: info
+  file: 'C:\ProgramData\Myriarch\logs\myriarch-updater.log'

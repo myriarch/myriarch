@@ -1,0 +1,17 @@
+# Sample agent for "myrctl validate/render" (not a myriarchd object): the first Linux host of edge site 1.
+# Attributes as the supervisor and installer report them; labels as they would come from the enrollment token.
+name: linux-edge-01
+attributes:
+  service.name: otelcol-contrib
+  service.version: 0.161.0
+  os.type: linux
+  host.name: linux-edge-01.example.com
+  host.arch: amd64
+  deployment.environment.name: production
+  site.type: edge
+  site.id: edge-001
+  site.name: Edge site 1
+  site.country: NL
+  site.region: north
+  site.timezone: Europe/Amsterdam
+labels: {}

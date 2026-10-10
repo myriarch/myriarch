@@ -1,0 +1,31 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Adds the pages of one section of data/repo_pages.yaml to a content adapter.
+  Call: partial "repo/add-pages.html" (dict "adapter" . "section" "project")
+  Each entry names a repository file (source, mounted as assets/repo/<source>), the slug, title, weight and description of the page.
+  The leading H1 of the file is dropped because the title replaces it. params.sourcePath records the repository path for the link
+  render hook and the "edit this page" links.
+*/ -}}
+{{ $adapter := .adapter -}}
+{{ $entries := index hugo.Data.repo_pages .section -}}
+{{ if not $entries }}{{ errorf "data/repo_pages.yaml has no section %q" .section }}{{ end -}}
+{{ range $entries -}}
+  {{ $entry := . -}}
+  {{ with resources.Get (printf "repo/%s" $entry.source) -}}
+    {{ $body := replaceRE `\A# [^\n]*\n` "" .Content 1 -}}
+    {{ $page := dict
+        "path" $entry.slug
+        "title" $entry.title
+        "weight" $entry.weight
+        "description" $entry.description
+        "params" (dict "sourcePath" $entry.source)
+        "content" (dict "mediaType" "text/markdown" "value" $body) -}}
+    {{ with $entry.linkTitle }}{{ $page = merge $page (dict "params" (dict "sourcePath" $entry.source "linkTitle" .)) }}{{ end -}}
+    {{ $adapter.AddPage $page -}}
+  {{ else -}}
+    {{ errorf "data/repo_pages.yaml: %s is not mounted (config/_default/module.yaml)" $entry.source -}}
+  {{ end -}}
+{{ end -}}

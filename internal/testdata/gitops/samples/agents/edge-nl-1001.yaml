@@ -1,0 +1,14 @@
+# Example agent for "myrctl validate/render" (not a myriarchd object).
+name: edge-nl-1001
+attributes:
+  service.name: otelcol-contrib
+  service.version: 0.161.0
+  os.type: windows
+  host.name: EDGE-1001-01
+  host.arch: amd64
+  site.type: edge
+  site.id: "1001"
+  site.name: Site 1001
+  site.country: NL
+  site.region: north
+  site.timezone: Europe/Amsterdam

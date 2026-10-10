@@ -1,0 +1,26 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Architecture diagram. assets/images/architecture.svg is inlined, so that it takes its colors from the CSS variables of
+  assets/scss/_landing.scss (light and dark appearance). The namespace attribute is only needed in a standalone file.
+*/ -}}
+{{ $arch := hugo.Data.landing.architecture -}}
+{{ $svg := resources.Get "images/architecture.svg" -}}
+{{ if not $svg }}{{ errorf "landing: assets/images/architecture.svg is missing" }}{{ end -}}
+{{ $more := site.GetPage (path.Clean (strings.TrimSuffix ".md" $arch.more_link)) -}}
+{{ if not $more }}{{ errorf "landing: the link %q of the architecture section names no page of the site" $arch.more_link }}{{ end -}}
+<section class="landing-section landing-section--alt" id="architecture" aria-labelledby="landing-architecture-title">
+  <div class="landing-container">
+    <h2 id="landing-architecture-title" class="landing-h2">{{ $arch.title }}</h2>
+    <p class="landing-lead">{{ $arch.lead }}</p>
+    <figure class="landing-diagram">
+      <div class="landing-diagram__scroll" role="group" aria-label="Architecture diagram, scrollable" tabindex="0">
+        {{ replace $svg.Content ` xmlns="http://www.w3.org/2000/svg"` "" | safeHTML }}
+      </div>
+      <figcaption class="landing-diagram__caption">{{ $arch.caption }}</figcaption>
+    </figure>
+    <p class="landing-more"><a href="{{ $more.RelPermalink }}">{{ $arch.more_label }} <span aria-hidden="true">&rarr;</span></a></p>
+  </div>
+</section>

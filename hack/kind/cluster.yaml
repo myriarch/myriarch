@@ -1,0 +1,17 @@
+# kind cluster of the probe: one control plane and two workers (real pod spreading; the CI cluster test pauses a worker).
+# The subnets are fixed because the probe values name the service range in config.outbound.allowedCidrs.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/16"
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+# containerd reads /etc/containerd/certs.d/<registry>/hosts.toml (written by up.sh) only when config_path is set. The node
+# image ships a version 2 config file, so the patch uses the version 2 plugin name.
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"

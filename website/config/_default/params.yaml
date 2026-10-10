@@ -1,0 +1,63 @@
+# Site parameters (Docsy 0.18). Privacy rules (ADR-0031): no analytics, no search service, no comments, no CDN features.
+copyright: The Myriarch Authors
+description: Fleet manager for OpenTelemetry Collectors, built on OpAMP. Git is the source of truth; every operator action is audited.
+images: [images/og-image.png]
+
+repo:
+  url: https://github.com/myriarch/myriarch
+  branch: main
+
+# Search runs in the browser (lunr, self-hosted); the index is a file of the site.
+offlineSearch: true
+offlineSearchSummaryLength: 140
+offlineSearchMaxResults: 20
+
+# Linked from the footer (Font Awesome solid icons only: no brand logos, ADR-0016).
+links:
+  developer:
+    - name: Repository
+      url: https://github.com/myriarch/myriarch
+      icon: fa-solid fa-code-branch
+    - name: Releases
+      url: https://github.com/myriarch/myriarch/releases
+      icon: fa-solid fa-tag
+    - name: Issues
+      url: https://github.com/myriarch/myriarch/issues
+      icon: fa-solid fa-bug
+  user:
+    - name: Security policy
+      url: /project/security/
+      icon: fa-solid fa-shield-halved
+    - name: Contributing
+      url: /project/contributing/
+      icon: fa-solid fa-hand-holding-heart
+
+docsy:
+  plugins:
+    # Mermaid is used by docs/architecture.md and docs/design/version-selection.md. The script is the self-hosted copy from
+    # node_modules (layouts/_partials/scripts/plugins/mermaid.html); the version equals the one in package.json.
+    mermaid: { enable: true, version: 11.17.2 }
+    markmap: { enable: false }
+    click-to-copy: { enable: true }
+    tabpane-persist: { enable: true }
+
+ui:
+  # Follows prefers-color-scheme; the menu stores the choice in the browser (localStorage), see /legal/privacy/.
+  showLightDarkModeMenu: true
+  # The logo is the CSS background of .navbar-brand__logo (assets/scss/_styles_project.scss), so the light and dark variants switch.
+  navbar_logo: false
+  sidebar_search_disable: true
+  sidebar_menu_compact: true
+  sidebar_menu_foldable: true
+  breadcrumb_disable: false
+  taxonomy_breadcrumb_disable: true
+  footer_about_enable: false
+  # No feedback widget (it would report to an analytics service).
+  feedback:
+    enable: false
+  readingtime:
+    enable: false
+  navbar_translucent_over_cover_disable: false
+
+# The following services of the theme stay disabled on purpose; each one loads scripts from a third party.
+prism_syntax_highlighting: false

@@ -1,0 +1,25 @@
+# LoadBalancer for OTLP/gRPC. Expose it to the internal network only: depending on the platform an annotation for an
+# internal load balancer is needed (for example a MetalLB address pool, Azure: service.beta.kubernetes.io/azure-load-balancer-internal,
+# AWS: service.beta.kubernetes.io/aws-load-balancer-internal) - ask your cluster operator.
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-gateway-external
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: otel-gateway
+    app.kubernetes.io/part-of: myriarch
+spec:
+  type: LoadBalancer
+  # Local: the client address is preserved (needed for the ipBlock rule of the NetworkPolicy and loadBalancerSourceRanges);
+  # drawback: only nodes with a gateway pod accept traffic (health check of the load balancer).
+  externalTrafficPolicy: Local
+  # PLACEHOLDER: networks of the host collectors (in addition to the NetworkPolicy; not every platform enforces this).
+  # RFC 5737 documentation ranges.
+  loadBalancerSourceRanges:
+    - 198.51.100.0/24   # example: server network
+    - 203.0.113.0/24    # example: workstation network
+  selector:
+    app.kubernetes.io/name: otel-gateway
+  ports:
+    - {name: otlp-grpc, port: 4317, targetPort: otlp-grpc, protocol: TCP}

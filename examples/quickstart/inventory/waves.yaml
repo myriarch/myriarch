@@ -1,0 +1,27 @@
+# Wave assignment: the first host of each kind is in the canary wave. Entries match EXACT attribute values reported
+# by the installer/supervisor (site.id, host.name); labels.* is NOT matchable here. The labels appear in the fleet and
+# policy selectors as labels.<key> (for example labels.wave). Values are always strings ("canary", not a number).
+# The simulator profile examples/sim/mixed-fleet.yaml generates hosts that match these entries.
+apiVersion: myriarch.dev/v1alpha1
+kind: Inventory
+metadata:
+  name: waves
+  description: Canary wave - the first host of each kind
+spec:
+  entries:
+    # Edge site 1: the first Linux host and the first Windows host share this site
+    - match:
+        site.id: edge-001
+      labels:
+        wave: canary
+    # Data center: the first site
+    - match:
+        site.id: dc-01
+      labels:
+        wave: canary
+    # Gateway: only the first pod; all pods share the site.id cloud-01, the host name tells them apart
+    - match:
+        site.id: cloud-01
+        host.name: otel-gateway-1
+      labels:
+        wave: canary

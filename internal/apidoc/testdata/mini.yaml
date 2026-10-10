@@ -1,0 +1,213 @@
+openapi: 3.1.0
+info:
+  title: Mini API
+  version: 0.1.0
+  description: |
+    A small contract for the tests of the generator.
+
+    **Conventions**
+    - Base path `/api/v1`.
+    - Sorting: `sort=<field>` or `sort=a|b`.
+
+    **Authentication**
+    - Browser: session cookie.
+    - Automation: bearer token.
+
+    **Live updates**: `GET /events` (Server-Sent Events).
+
+    **Non-REST endpoints** (not part of this document): `/healthz`.
+servers:
+  - url: /api/v1
+security:
+  - sessionCookie: []
+  - bearerToken: []
+tags:
+  - name: items
+    description: Items and their parts
+  - name: liveEvents
+    description: Server-Sent Events
+paths:
+  /items:
+    get:
+      operationId: listItems
+      tags: [items]
+      summary: List items
+      x-permission: read
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - name: kind
+          in: query
+          description: 'Filter by kind. Values are ORed: "a|b".'
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/Kind' }
+      responses:
+        '200':
+          description: Items
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ItemList' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createItem
+      tags: [items]
+      summary: Create an item
+      description: |
+        Creates an item. The name must be unique; a <placeholder> is escaped and `<code>` is not.
+      x-permission: items:write
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateItem' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Item' }
+        '422':
+          $ref: '#/components/responses/Unauthorized'
+  /items/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      operationId: deleteItem
+      tags: [items]
+      summary: Delete an item
+      x-permission: items:write
+      responses:
+        '204':
+          description: Deleted
+  /login:
+    get:
+      operationId: login
+      tags: [items]
+      summary: Sign in
+      security: []
+      x-permission: public
+      responses:
+        '302':
+          description: Redirect to the identity provider
+  /hook:
+    post:
+      operationId: hook
+      tags: [items]
+      summary: Receive a webhook
+      description: Authenticated with a shared secret.
+      security: []
+      x-permission: custom
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '202':
+          description: Accepted
+  /events:
+    get:
+      operationId: streamEvents
+      tags: [liveEvents]
+      summary: Live updates as Server-Sent Events
+      description: |
+        `text/event-stream`. Each message has `event: <type>` and `data: <JSON>`:
+
+        | event | data schema |
+        |---|---|
+        | `item.updated` | `Item` |
+        | `resync` | `{}` - refetch all views |
+      x-permission: read
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: mini_session
+      description: Browser session.
+    bearerToken:
+      type: http
+      scheme: bearer
+      description: API token.
+  parameters:
+    CSRFToken:
+      name: X-CSRF-Token
+      in: header
+      description: Required for cookie-authenticated mutating requests.
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+  responses:
+    Unauthorized:
+      description: Not authenticated (code unauthorized)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      required: [title, status, code]
+      properties:
+        title: { type: string }
+        status: { type: integer }
+        code:
+          type: string
+          enum: [unauthorized, validation_failed]
+    Kind:
+      type: string
+      description: Kind of an item.
+      enum: [alpha, beta]
+    Item:
+      type: object
+      description: An item.
+      required: [id, name, kind]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 63, pattern: '^[a-z]+(a|b)$' }
+        kind: { $ref: '#/components/schemas/Kind' }
+        createdAt: { type: string, format: date-time }
+        labels:
+          type: object
+          description: Free-form labels, a | b.
+          additionalProperties: { type: string }
+        parts:
+          type: array
+          items: { $ref: '#/components/schemas/Part' }
+    Part:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, example: bolt }
+        subParts:
+          type: array
+          items: { $ref: '#/components/schemas/Part' }
+        parent: { $ref: '#/components/schemas/Part' }
+    CreateItem:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 63 }
+        kind: { $ref: '#/components/schemas/Kind' }
+        weight: { type: number, default: 1.5 }
+    ItemList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Item' }

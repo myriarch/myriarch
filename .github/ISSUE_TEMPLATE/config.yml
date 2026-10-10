@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/myriarch/myriarch/security/advisories/new
+    about: Report vulnerabilities privately. Do not open a public issue for them.
+  - name: Documentation
+    url: https://github.com/myriarch/myriarch/tree/main/docs
+    about: Read the concepts, task guides and reference before you open an issue.

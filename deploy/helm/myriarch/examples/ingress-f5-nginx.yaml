@@ -1,0 +1,28 @@
+# Ingress variant: F5 NGINX Ingress Controller (nginxinc/kubernetes-ingress, annotations "nginx.org/...").
+#
+#   helm upgrade --install myriarch <chart> -n myriarch \
+#     -f deploy/examples/production/myriarch-values.yaml -f deploy/helm/myriarch/examples/ingress-f5-nginx.yaml
+#
+# CHECK before use: (1) the name of the controller's IngressClass (the default class is also called "nginx" - when
+# running next to ingress-nginx it is usually renamed), (2) the namespace for the NetworkPolicy, (3) whether the
+# controller sets X-Forwarded-For (default: yes) and whether a load balancer in front of it preserves the client
+# address.
+#
+# The ingress-nginx annotations from the production values do not apply here and are removed (null).
+ingress:
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: null
+    nginx.ingress.kubernetes.io/proxy-send-timeout: null
+    nginx.ingress.kubernetes.io/proxy-body-size: null
+    # WebSocket must be enabled per service (value = service name; for the release "myriarch" the service is "myriarch")
+    nginx.org/websocket-services: "myriarch"
+    nginx.org/proxy-read-timeout: "3600s"
+    nginx.org/proxy-send-timeout: "3600s"
+    nginx.org/client-max-body-size: "16m"
+networkPolicy:
+  ingress:
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: nginx-ingress

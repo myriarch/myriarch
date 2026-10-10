@@ -1,0 +1,60 @@
+# Quickstart with Dex as a demo identity provider (kind or any test cluster). Values for the myriarch chart; the
+# values for Dex itself are in dex/dex.yaml.
+#
+#   helm upgrade --install myriarch <chart> -n myriarch --create-namespace \
+#     -f deploy/helm/myriarch/examples/quickstart-dex.yaml
+#
+# This is a demo, not a production setup: one static Dex user, a self-signed certificate, no ingress. For a real
+# identity provider see docs/operations/authentication.md (Keycloak, Okta, Entra ID, Google, authentik, Zitadel).
+#
+# Steps (all host names are placeholders; dex.example.test must resolve to the Dex Service inside the cluster, for
+# example with a CoreDNS "rewrite name dex.example.test dex.dex.svc.cluster.local" rule, and the browser needs the same
+# name and port 5554, for example through /etc/hosts and "kubectl -n dex port-forward svc/dex 5554:5554"):
+#   1. Install Dex with the values in dex/dex.yaml (its header lists the steps, including the TLS secret).
+#   2. Create the client secret of the demo client (the same value as in the Dex values) in the myriarch namespace:
+#        kubectl -n myriarch create secret generic myriarch-secrets \
+#          --from-file=database-dsn=<file with the DSN> --from-file=oidc-client-secret=<file with the client secret>
+#   3. Install the chart with this file. Log in through "Single sign-on"; the user admin@example.test becomes admin
+#      through roleMapping.users below.
+config:
+  server:
+    publicUrl: https://myriarch.example.test
+  auth:
+    oidc:
+      enabled: true
+      displayName: Dex
+      # Dex issuer including the port of the Dex Service (5554) and the /dex path; it must match the issuer of the Dex
+      # configuration (dex/dex.yaml) exactly
+      issuerUrl: https://dex.example.test:5554/dex
+      clientId: myriarch
+      # key oidc-client-secret of the Secret
+      clientSecretFile: /etc/myriarchd/secrets/oidc-client-secret
+      scopes: [openid, profile, email]
+      roleMapping:
+        users:
+          admin: ["email:admin@example.test"]
+  outbound:
+    # Service range of the kind cluster (the default kind service CIDR); loopback and private addresses are blocked for
+    # outbound connections unless listed here. Adapt it to your cluster.
+    allowedCidrs: [10.96.0.0/12]
+    # Dex uses a self-signed certificate in this demo: mount its CA and enable
+    #   caFile: /etc/myriarchd/ca/ca.crt
+    # together with extraVolumes and extraVolumeMounts below.
+bootstrapAdmin:
+  # Dex is the login path, so the demo has no break-glass account. (Left on, the chart would still render
+  # auth.bootstrapAdmin but not mount its Secret, because OIDC is enabled and keepWithOidc is unset: the server
+  # keeps the account inactive and deactivates an existing one.)
+  enabled: false
+networkPolicy:
+  egress:
+    # TLS port of Dex inside the cluster (container port of the Dex chart with https.enabled)
+    extraPorts: [5554]
+# CA of the self-signed Dex certificate (kubectl -n myriarch create configmap dex-ca --from-file=ca.crt=<file>):
+# extraVolumes:
+#   - name: dex-ca
+#     configMap:
+#       name: dex-ca
+# extraVolumeMounts:
+#   - name: dex-ca
+#     mountPath: /etc/myriarchd/ca
+#     readOnly: true

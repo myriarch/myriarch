@@ -1,0 +1,17 @@
+{
+  "finalDisplayedUrl": "http://127.0.0.1:1313/",
+  "categories": {
+    "performance": {
+      "score": 0.99
+    },
+    "accessibility": {
+      "score": 1
+    },
+    "best-practices": {
+      "score": 1
+    },
+    "seo": {
+      "score": 0.92
+    }
+  }
+}

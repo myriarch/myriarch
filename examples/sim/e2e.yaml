@@ -1,0 +1,88 @@
+# myriarch-sim profile "e2e": small variant (32 agents) with short durations for scripts/e2e.sh. The groups mirror the
+# fleets of the test data repository internal/testdata/gitops (edge-nl, edge-be, office, datacenter, k8s-gateway).
+# Group weights are scaled to --agents (largest remainder method). The load run E2E_AGENTS=1000 scripts/e2e.sh yields
+# 375 edge-nl, 125 edge-be, 188 office, 187 datacenter and 125 k8s-gateway agents and 687 myriarch-updaters;
+# internal/sim/profile_test.go pins these numbers.
+# Each simulated supervisor reports its attributes like a real installation (non_identifying_attributes).
+seed: 42
+components: components-otelcol-contrib-0.162.0.json   # relative to this file
+groups:
+  - name: edge-nl
+    weight: 12
+    os: windows
+    arch: amd64
+    version: 0.161.0
+    updater: true
+    hostnamePattern: "EDGE-NL-%04d"
+    siteIdPattern: "%04d"
+    attributes:
+      site.type: edge
+      site.country: NL
+      site.timezone: Europe/Amsterdam
+      deployment.environment.name: prod
+    # Pilot sites: these site.id values are always generated (see the inventory of the test data)
+    fixedSiteIds: ["1001", "1002", "1003"]
+  - name: edge-be
+    weight: 4
+    os: windows
+    arch: amd64
+    version: 0.160.0
+    updater: true
+    hostnamePattern: "EDGE-BE-%04d"
+    siteIdPattern: "%04d"
+    attributes:
+      site.type: edge
+      site.country: BE
+      site.timezone: Europe/Brussels
+      deployment.environment.name: prod
+  - name: office
+    weight: 6
+    os: linux
+    arch: amd64
+    version: 0.162.0
+    updater: false          # updates through an external executor (webhook)
+    hostnamePattern: "office-app-%03d.example.internal"
+    siteIdPattern: "OFFICE1"
+    attributes:
+      site.type: office
+      site.country: NL
+      site.timezone: Europe/Amsterdam
+  - name: datacenter
+    weight: 6
+    os: linux
+    arch: arm64
+    version: 0.161.0
+    updater: true
+    hostnamePattern: "dc-%03d"
+    siteIdPattern: "DC-%02d"
+    attributes:
+      site.type: datacenter
+      site.country: NL
+      site.timezone: Europe/Amsterdam
+  - name: k8s-gateway
+    weight: 4
+    os: linux
+    arch: amd64
+    version: 0.162.0
+    updater: false          # updates through an image tag webhook
+    hostnamePattern: "otel-gateway-%05d"
+    siteIdPattern: "k8s-prod"
+    attributes:
+      site.type: k8s-gateway
+      site.country: NL
+      site.timezone: Europe/Amsterdam
+behavior:
+  connectRate: 200            # new connections per second (ramp-up)
+  heartbeatInterval: 30s
+  configApplyDelay: 200ms-1s     # random duration APPLYING -> APPLIED
+  configFailureRate: 0.0      # probability that a config apply fails
+  failConfigsContaining: "simulate-config-failure"   # configs containing this text always fail
+  unhealthyAfterApplyRate: 0.0
+  restartDuration: 1s
+  startupDuration: 1s-2s     # after a restart the supervisor reports {healthy:false}, then StatusStarting, then StatusOK
+  reconnectOnUpgrade: true   # a version change restarts the supervisor: the connection drops, a new client connects
+  validateConfig: true       # like validate_config in the supervisor: FAILED, then the old config keeps running (no APPLIED)
+  updaterInstallDuration: 2s-5s
+  updateFailureRate: 0.0
+  versionAfterUpdate: offered # the simulated collector reports the offered version after an update
+  offlineChurnRate: 0.0       # share of agents that briefly go offline at random (per minute)

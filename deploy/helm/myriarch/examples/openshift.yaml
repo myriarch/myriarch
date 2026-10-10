@@ -1,0 +1,40 @@
+# OpenShift: the OpenShift profile with a Route (edge TLS at the router), on top of the production example.
+#
+#   helm upgrade --install myriarch <chart> -n myriarch \
+#     -f deploy/examples/production/myriarch-values.yaml -f deploy/helm/myriarch/examples/openshift.yaml
+#
+# The profile (openshift.enabled=true; "auto" detects the API security.openshift.io/v1 on the cluster, but
+# "helm template" without --api-versions security.openshift.io/v1 renders the standard profile):
+#   * drops runAsUser, runAsGroup and fsGroup (restricted-v2 assigns them from the project range; runAsNonRoot and the
+#     seccomp profile stay),
+#   * creates a Route with edge TLS and the router timeouts for the long-lived OpAMP WebSockets,
+#   * adds the router namespaces as source of port 8080 and uses the OpenShift DNS pods (port 5353) for the DNS rule.
+# CHECK before use:
+#   (1) the Route host (openshift.route.host; empty = host of config.server.publicUrl) and its certificate
+#       (openshift.route.tls.externalCertificateSecret, or the default certificate of the router),
+#   (2) config.server.trustedProxies = the pod CIDR of the router (OpenShift default pod network: 10.128.0.0/14).
+#       The Route works without it, but then all clients share the address of the router (login rate limit, audit
+#       source address). trustedProxies is safe only with allowSameNamespace=false (below),
+#   (3) project quotas and LimitRanges: the chart sets requests and limits for cpu, memory and ephemeral-storage.
+openshift:
+  enabled: true
+  route:
+    enabled: true
+    host: fleet.example.com
+    timeout: 3600s
+    tls:
+      insecureEdgeTerminationPolicy: Redirect
+ingress:
+  enabled: false
+config:
+  server:
+    publicUrl: https://fleet.example.com
+    # PLACEHOLDER: pod CIDR of the router pods (OpenShift default pod network)
+    trustedProxies:
+      - 10.128.0.0/14
+networkPolicy:
+  ingress:
+    # with trustedProxies the pods of the namespace must not reach port 8080; the router is added by the profile
+    allowSameNamespace: false
+    # replaces the ingress controller namespace of the production values (Helm replaces lists)
+    from: []

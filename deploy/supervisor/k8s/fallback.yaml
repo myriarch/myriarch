@@ -1,0 +1,21 @@
+# Myriarch - fallback collector configuration (Kubernetes)
+# Active only if, at startup, neither a stored remote config nor myriarchd is available.
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+receivers:
+  nop:
+exporters:
+  nop:
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [nop]
+      exporters: [nop]
+    metrics:
+      receivers: [nop]
+      exporters: [nop]
+    logs:
+      receivers: [nop]
+      exporters: [nop]

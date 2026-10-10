@@ -1,0 +1,27 @@
+# OPTIONAL: version updates of Linux hosts through an existing Ansible AWX job template (used by the fleet
+# fleets/linux-hosts-awx.yaml). Delete both files if you do not use AWX.
+# The token is NOT stored in Git: myriarchd reads it from the environment variable MYRIARCH_EXEC_AWX_TOKEN (key
+# awx-token of the myriarchd Secret); the myriarchd configuration binds it to awx.example.com (executors.secretEnvHosts)
+# and allows the target (executors.allowedWebhookHosts). The host of url MUST be listed in
+# executors.allowedWebhookHosts: an empty list refuses every webhook and AWX target (fail closed).
+# jobTemplateId is a placeholder: replace it with the ID of your real job template.
+# The template receives otelcol_version as an extra variable and the AWX "limit" (host names from host.name).
+# A plain webhook works the same way: use "type: webhook" instead (see docs/reference/gitops-schema.md of the myriarch repository).
+apiVersion: myriarch.dev/v1alpha1
+kind: Executor
+metadata:
+  name: awx-linux
+  description: Ansible AWX job template for collector updates (optional)
+spec:
+  type: awx
+  awx:
+    url: https://awx.example.com
+    jobTemplateId: 1
+    # apiPrefix: /api/controller/v2/   # default /api/v2/; Ansible Automation Platform 2.5 and later uses /api/controller/v2/
+    tokenEnv: MYRIARCH_EXEC_AWX_TOKEN
+    limitAttribute: host.name
+    extraVars:
+      otelcol_version: "[[ .toVersion ]]"
+      myriarch_rollout: "[[ .rolloutId ]]"
+    timeout: 30s
+    batchSize: 10

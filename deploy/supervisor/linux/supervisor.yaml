@@ -1,0 +1,51 @@
+# Myriarch - OpAMP supervisor configuration (Linux, systemd)
+#
+# Template for deploy/scripts/install-linux.sh. Placeholders in double at-signs (for example OPAMP_ENDPOINT) are
+# replaced by the script (no Go templates, so that ${env:...} stays untouched).
+# Lines with an empty placeholder value are removed; without --ca-file,
+# "tls:" and "ca_file:" are dropped.
+#
+# Keys exactly as in opampsupervisor v0.162.0.
+# The token comes from the service environment (/etc/myriarch/myriarch.env), never
+# from this file.
+server:
+  endpoint: "@@OPAMP_ENDPOINT@@"
+  headers:
+    Authorization: "Bearer ${env:MYRIARCH_ENROLLMENT_TOKEN}"
+  tls:
+    ca_file: "@@CA_FILE@@"
+capabilities:
+  accepts_remote_config: true
+  accepts_restart_command: true
+  reports_effective_config: true
+  reports_health: true
+  reports_available_components: true
+  reports_heartbeat: true
+  reports_own_metrics: false
+  # deliberately off: the supervisor keeps OpAMP connection settings in memory only
+  # and disables TLS verification when a certificate is missing
+  accepts_opamp_connection_settings: false
+agent:
+  # Symlink to the active version; myriarch-updater swaps it atomically.
+  executable: /opt/myriarch/collector/current/otelcol-contrib
+  config_apply_timeout: 30s
+  bootstrap_timeout: 15s
+  validate_config: true
+  automatic_config_rollback: true
+  startup_fallback_configs: [/etc/myriarch/fallback.yaml]
+  description:
+    non_identifying_attributes:
+      site.type: "@@SITE_TYPE@@"
+      site.id: "@@SITE_ID@@"
+      site.name: "@@SITE_NAME@@"
+      site.country: "@@SITE_COUNTRY@@"
+      site.region: "@@SITE_REGION@@"
+      site.timezone: "@@SITE_TIMEZONE@@"
+      deployment.environment.name: "@@ENVIRONMENT@@"
+# Do not pre-populate (golden images!): persistent_state.yaml holds the instance UID.
+storage:
+  directory: /var/lib/otelcol/supervisor
+healthcheck:
+  endpoint: localhost:13134
+telemetry:
+  logs: {level: info}

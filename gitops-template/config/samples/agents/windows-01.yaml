@@ -1,0 +1,15 @@
+# Sample agent for "myrctl validate/render" (not a myriarchd object): a Windows host with a local time zone.
+name: windows-01
+attributes:
+  service.name: otelcol-contrib
+  service.version: 0.161.0
+  os.type: windows
+  host.name: WIN-01
+  host.arch: amd64
+  deployment.environment.name: production
+  site.type: branch
+  site.id: site-101
+  site.name: Example branch (host 1)
+  site.country: US
+  site.timezone: America/New_York
+labels: {}

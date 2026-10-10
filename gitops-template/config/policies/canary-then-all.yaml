@@ -1,0 +1,30 @@
+# Config rollouts: first the wave "canary" (hosts with the inventory label wave=canary, see inventory/waves.yaml),
+# then - after manual approval in the UI - all remaining hosts.
+# A broken config rolls back automatically (onFailure: rollback). A single failure triggers it.
+#
+# No maintenance windows, so changes become visible immediately. Production variant (local time zone of the site;
+# the time zone comes from the attribute site.timezone, the default is rollouts.defaultTimezone of myriarchd):
+#   maintenanceWindows:
+#     - {days: [Mon, Tue, Wed, Thu, Fri, Sat], start: "21:30", end: "06:30"}
+#     - {days: [Sun], start: "00:00", end: "00:00"}
+# Note: with windows, targets stay in "waiting_window" during the day - tests then take until the evening.
+apiVersion: myriarch.dev/v1alpha1
+kind: RolloutPolicy
+metadata:
+  name: canary-then-all
+  description: Config rollout canary -> approval -> rest, rollback on failure, no maintenance windows
+spec:
+  waves:
+    - name: canary
+      selector:
+        matchAttributes:
+          labels.wave: canary
+    - name: rest
+      percent: 100
+      requireApproval: true
+  maxConcurrent: 5
+  healthWait: 2m
+  applyTimeout: 10m
+  failureThreshold:
+    maxFailed: 1
+  onFailure: rollback

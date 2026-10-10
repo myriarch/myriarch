@@ -1,0 +1,46 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- if .Values.ingress.enabled }}
+{{- $_ := include "myriarch.checkIngressSources" . }}
+{{- if and (not .Values.config.server.trustedProxies) (not .Values.ingress.allowWithoutTrustedProxies) }}
+{{- fail "config.server.trustedProxies: must not be empty when ingress.enabled is true; without the CIDR of the ingress controller myriarchd sees all clients as one address (login rate limit, audit source address). Set the CIDR, or set ingress.allowWithoutTrustedProxies=true if the client address is deliberately not evaluated" }}
+{{- end }}
+{{- if and (hasPrefix "https://" (.Values.config.server.publicUrl | default "")) (not .Values.ingress.tls) (not .Values.ingress.allowWithoutTls) }}
+{{- fail "ingress.tls: must not be empty when config.server.publicUrl uses https; add the TLS secret, or set ingress.allowWithoutTls=true when TLS terminates outside the Ingress" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "myriarch.fullname" . }}
+  labels:
+    {{- include "myriarch.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ include "myriarch.fullname" $ }}
+                port:
+                  name: http
+          {{- end }}
+    {{- end }}
+{{- end }}

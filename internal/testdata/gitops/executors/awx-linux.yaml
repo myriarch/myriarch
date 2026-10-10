@@ -1,0 +1,19 @@
+# Version update of the Linux servers through an existing AWX job template.
+# The token is NOT stored in Git: myriarchd reads it from the environment variable.
+apiVersion: myriarch.dev/v1alpha1
+kind: Executor
+metadata:
+  name: awx-linux
+  description: Ansible AWX job template "otelcol-upgrade"
+spec:
+  type: awx
+  awx:
+    url: https://awx.example.internal
+    jobTemplateId: 42
+    tokenEnv: MYRIARCH_EXEC_AWX_TOKEN
+    limitAttribute: host.name
+    extraVars:
+      otelcol_version: "[[ .toVersion ]]"
+      myriarch_rollout: "[[ .rolloutId ]]"
+    timeout: 30s
+    batchSize: 50

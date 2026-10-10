@@ -1,0 +1,81 @@
+# Local, container-based development: PostgreSQL 17 + myriarchd (+ optional myriarch-sim).
+#
+#   docker compose -f deploy/compose/docker-compose.yaml up --build            # PostgreSQL + myriarchd
+#   docker compose -f deploy/compose/docker-compose.yaml --profile sim up      # additionally 200 simulated agents
+#
+# UI/REST: http://localhost:8080 (dev login admin/admin, operator/operator, viewer/viewer)
+# OpAMP:   ws://localhost:8080/v1/opamp (in dev mode without a mandatory enrollment token)
+#
+# FOR DEVELOPMENT ONLY: myriarchd runs in "dev" mode (dev login, insecure cookies, test token).
+# Production: deploy/helm/myriarch with "myriarchd serve". In dev mode without the embedded database
+# (--dsn) myriarchd runs against the PostgreSQL container (no PgBouncer transaction pools!).
+name: myriarch-dev
+
+services:
+  postgres:
+    image: postgres:17@sha256:ae69c452f483507a6b99fb654cf93aad7fe156ffd2c56247707eef4e36d3c12b
+    environment:
+      POSTGRES_USER: myriarch
+      POSTGRES_PASSWORD: myriarch-dev-password
+      POSTGRES_DB: myriarch
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myriarch -d myriarch"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:54329:5432"
+
+  myriarchd:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/myriarchd.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - dev
+      - --dsn=postgres://myriarch:myriarch-dev-password@postgres:5432/myriarch?sslmode=disable
+      - --gitops-dir=/gitops
+      - --data-dir=/var/lib/myriarchd
+      - --listen=:8080
+      # inside the container myriarchd listens on all interfaces and talks to the Postgres container: dev mode
+      # requires an explicit confirmation for that (the ports below are bound to 127.0.0.1 only)
+      - --allow-nonlocal
+      - --releases-fixtures=/fixtures
+    volumes:
+      # example GitOps repository (read-only); mount your own repository here or set gitops.repoUrl
+      - ../../examples/quickstart:/gitops:ro
+      # recorded releases/changelogs: release tracker without network access
+      - ../../internal/release/testdata/fixtures:/fixtures:ro
+      - myriarchd-data:/var/lib/myriarchd
+    ports:
+      # local only: dev mode has fixed logins (admin/admin) and OpAMP without an enrollment token
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9090:9090"
+
+  myriarch-sim:
+    profiles: ["sim"]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/myriarch-sim.Dockerfile
+    depends_on:
+      - myriarchd
+    command:
+      - run
+      - --server=ws://myriarchd:8080/v1/opamp
+      - --token=myre_devtoken_insecure_do_not_use_in_prod
+      - --agents=200
+      - --updaters=true
+      - --profile=/examples/sim/mixed-fleet.yaml
+      - --metrics-listen=:9464
+      - --control-listen=0.0.0.0:9465
+    ports:
+      - "127.0.0.1:9464:9464"
+      - "127.0.0.1:9465:9465"
+
+volumes:
+  pgdata:
+  myriarchd-data:

@@ -1,0 +1,174 @@
+# Myriarch - standalone myriarchd configuration of the production example (fallback operation on a VM, configuration check).
+#
+# Content IDENTICAL to the config: block of myriarch-values.yaml plus the chart defaults
+# (deploy/helm/myriarch/values.yaml); deploy/examples/production/verify.sh compares this file with the rendered
+# ConfigMap content (keys sorted). Change BOTH files together.
+#
+#   myriarchd config validate --config deploy/examples/production/myriarchd.yaml --skip-files
+#   myriarchd serve --config /etc/myriarchd/myriarchd.yaml
+#
+# Fallback operation on a VM (chart not usable): use the same paths as in the pod - secrets as files under
+# /etc/myriarchd/secrets/<key>, CA bundle under /etc/myriarchd/ca/ca.crt, data under /var/lib/myriarchd; set proxy variables
+# (HTTPS_PROXY, NO_PROXY), if you need them, in the environment of the systemd unit (deploy/systemd). The comments on
+# the individual values are in myriarch-values.yaml. Replace the PLACEHOLDERS (example.com hosts, address ranges).
+
+server:
+  listenAddr: ":8080"
+  metricsListenAddr: ":9090"
+  shutdownTimeout: 30s
+  # exactly the Ingress host: OIDC redirect URI, "Secure" cookies, download URLs, notification links
+  publicUrl: https://fleet.example.com
+  # PLACEHOLDER: addresses myriarchd SEES the connection from = the pods of the ingress controller (not the address
+  # of the load balancer). X-Forwarded-For/-Proto are honoured only from there; this is safe ONLY together with
+  # the NetworkPolicy (port 8080 is open to the ingress controller only). Find them with:
+  #   kubectl -n ingress-nginx get pods -o wide                  # pod IPs of the controller
+  #   kubectl -n ingress-nginx get pods -o jsonpath='{.items[*].status.podIP}'
+  # and enter the pod CIDR of the cluster or of the controller nodes. 10.244.0.0/16 is the kubeadm default pod CIDR.
+  # The real client address arrives only if the load balancer passes it on
+  # (externalTrafficPolicy: Local or PROXY protocol); otherwise all clients look like the load balancer or node.
+  trustedProxies:
+    - 10.244.0.0/16
+  tls:
+    # TLS terminates at the Ingress; in this chart myriarchd listens without TLS (mandatory confirmation in production)
+    terminatedUpstream: true
+opamp:
+  path: /v1/opamp
+  # Agents must enroll with an enrollment token (myre_...)
+  requireEnrollmentToken: true
+  maxConnectionsPerReplica: 10000
+  # New (authenticated) connections per second and replica (token bucket, burst = 2x).
+  connectRateLimit: 200
+  # New connections per second and client ADDRESS (burst = 2x). Behind a central NAT/SNAT all clients of a site
+  # appear behind one address. Rule of thumb:
+  #   connectRatePerIp >= (connections behind the largest NAT address) / (acceptable reconnect time in s)
+  # Example: 1,000 collectors behind one address that should all be back within 10 s after a restart => 100.
+  # Tune with a load test from behind the NAT (myriarch-sim); rejections show up in
+  # myriarch_opamp_connect_rejected_total{reason="rate_limited_ip"}.
+  connectRatePerIp: 100
+database:
+  # DSN file = key "database-dsn" of the Secret, for example
+  #   postgres://myriarch:<password>@pg.example.com:5432/myriarch?sslmode=verify-full&sslrootcert=/etc/myriarchd/ca/ca.crt
+  # (sslrootcert = the same CA bundle as below, mounted into the pod)
+  dsnFile: /etc/myriarchd/secrets/database-dsn
+  # 2 replicas x (20 + 2 dedicated connections for event bus/leader election) + migrations => >= 60 free connections
+  maxConns: 20
+  migrateOnStart: true
+auth:
+  oidc:
+    enabled: true
+    # Generic OpenID Connect provider. The issuer must match the "issuer" of the discovery document exactly.
+    # Provider-specific issuer forms, claims and role mapping: docs/operations/authentication.md
+    issuerUrl: https://idp.example.com/realms/example
+    # PLACEHOLDER: client ID of the application registered at the identity provider
+    clientId: myriarch
+    # Variant A: client secret as a file (key "oidc-client-secret")
+    clientSecretFile: /etc/myriarchd/secrets/oidc-client-secret
+    # Variant B (certificate instead of secret, private_key_jwt; excludes clientSecretFile). Keys
+    # "oidc-client-cert" and "oidc-client-key" in the Secret; upload the public part to the identity provider:
+    # clientCertificateFile: /etc/myriarchd/secrets/oidc-client-cert
+    # clientKeyFile: /etc/myriarchd/secrets/oidc-client-key
+    scopes: [openid, profile, email]
+    # Claim that carries the roles or groups of the user
+    groupsClaim: groups
+    roleMapping:
+      admin: [myriarch-admin]
+      operator: [myriarch-operator]
+      viewer: [myriarch-viewer]
+    displayName: Single sign-on
+    # defaultRole stays empty: users without a mapped role get no access (access_denied, in the audit log)
+  cookieSecure: true
+  # Sessions: idle timeout (sliding) and absolute maximum age (chart defaults)
+  sessionTtl: 2h
+  sessionMaxAge: 12h
+  # HMAC key of the artifact download tokens (key "download-token-secret", >= 32 random bytes)
+  downloadTokenSecretFile: /etc/myriarchd/secrets/download-token-secret
+gitops:
+  enabled: true
+  repoUrl: https://git.example.com/platform/myriarch-gitops.git
+  branch: main
+  # Objects live under config/ (the CI files in the repository root must not be read as GitOps objects)
+  path: config
+  pollInterval: 60s
+  cloneDir: /var/lib/myriarchd/gitops
+  auth:
+    # PLACEHOLDER: user name of the read-only deploy token (scope read_repository)
+    username: git-deploy-user
+    tokenFile: /etc/myriarchd/secrets/git-token
+  # Webhook secret = "secret token" of the Git server's webhook for POST /api/v1/gitops/webhook
+  webhookSecretFile: /etc/myriarchd/secrets/gitops-webhook-secret
+  uiRepoWebUrl: https://git.example.com/platform/myriarch-gitops/-/blob/{commit}/{path}
+releases:
+  # Release tracker (informational only): GitHub API, no API mirror. The token (fine-grained, read access to
+  # public repositories only) raises the limit from 60 to 5,000 requests per hour; without a token everything
+  # behind the same egress address shares 60 requests per hour.
+  enabled: true
+  tokenFile: /etc/myriarchd/secrets/github-token
+artifacts:
+  dir: /var/lib/myriarchd/artifacts
+  # Generic artifact mirror that copies the GitHub release downloads 1:1 (layout <base>/<tag>/<asset>, including
+  # .sha256 and .sigstore.json; supervisor tags with raw slashes). Any HTTPS server or artifact repository works.
+  sourceBaseUrl: https://mirror.example.com/otelcol-github-releases
+  # Credentials are sent ONLY to the origin of sourceBaseUrl (never to redirect targets on other hosts).
+  sourceAuth:
+    # Bearer access token (key "mirror-token")
+    tokenFile: /etc/myriarchd/secrets/mirror-token
+    # Alternative: user + password or user token (Basic, key "mirror-password"); excludes tokenFile
+    # username: svc-myriarch
+    # passwordFile: /etc/myriarchd/secrets/mirror-password
+  # Hosts the mirror may redirect to (for example a blob store or CDN); https, at most 5 redirects.
+  # A custom list replaces the default (GitHub hosts + host of sourceBaseUrl).
+  allowedRedirectHosts:
+    - mirror.example.com
+  # Set explicitly so the standalone file and the rendered chart agree whatever the chart defaults are.
+  prefetchPlatforms: [linux/amd64]
+  # Stay below emptyDir.sizeLimit (10Gi): one slot (contrib + supervisor per version/platform) is about 112 MB
+  maxCacheBytes: 8589934592
+  verify:
+    # Keep the mandatory checks on: SHA-256 against <asset>.sha256 AND Sigstore bundle <asset>.sigstore.json.
+    requireChecksum: true
+    requireSignature: true
+    # Sigstore trust root (TUF): default = tuf-repo-cdn.sigstore.dev. Optionally a 1:1 mirror with a very short
+    # cache duration for timestamp.json/*.root.json (a mirror that caches "forever" breaks TUF), or a fixed
+    # trusted_root.json from a file (emergency, offline):
+    # tufRepositoryUrl: https://mirror.example.com/sigstore-tuf
+    # trustedRootFile: /etc/myriarchd/ca/trusted_root.json   # add the file as another key of the ConfigMap internal-ca
+    #                                                     # and list it under extraVolumes[].configMap.items
+outbound:
+  # Additional trusted CA bundle (on top of the system roots) for ALL outbound TLS connections of myriarchd:
+  # OIDC, Git, GitHub, mirror, TUF, executors, notifications. The ConfigMap internal-ca is mounted below
+  # (ca.crt of your PKI). Remove caFile, extraVolumes and extraVolumeMounts if your services use public CAs.
+  caFile: /etc/myriarchd/ca/ca.crt
+  # Internal targets are blocked by default (private addresses). PLACEHOLDER: addresses of the mirror, the Git
+  # server and AWX after DNS resolution (all of them if there are several addresses or load balancers). A proxy
+  # needs NO entry (it is exempt automatically). Find them with: nslookup <host>. The ranges below are RFC 5737
+  # documentation addresses.
+  allowedCidrs:
+    - 192.0.2.10/32   # mirror (mirror.example.com)
+    - 192.0.2.20/32   # Git server (git.example.com)
+    - 192.0.2.30/32   # AWX (awx.example.com), only if the AWX executor is used
+executors:
+  # Allowed targets of the webhook/AWX executors (an empty list refuses every target: fail closed)
+  allowedWebhookHosts: [awx.example.com]
+  secretEnvPrefix: MYRIARCH_EXEC_
+  # Target binding of the executor secrets (environment variable -> allowed hosts); the variable comes from secretEnv in the values
+  secretEnvHosts:
+    MYRIARCH_EXEC_AWX_TOKEN: [awx.example.com]
+notifications:
+  channels:
+    # Slack incoming webhook (key "slack-webhook-url"); the URL is a secret. For a generic receiver use
+    # type: webhook with a signed payload instead (secretFile: HMAC secret, header X-Myriarch-Signature).
+    - name: slack-fleet-alerts
+      type: slack
+      urlFile: /etc/myriarchd/secrets/slack-webhook-url
+      events: ["release.*", "rollout.*", "gitops.sync_failed"]
+      minSeverity: info
+rollouts:
+  # Set explicitly so the standalone file and the rendered chart agree whatever the chart defaults are.
+  defaultTimezone: UTC
+retention:
+  # Agents that have not reported for 7 days are cleaned up. Go duration syntax: there is no unit "d", hence 168h.
+  offlineAgents: 168h
+telemetry:
+  logLevel: info
+  logFormat: json
+  metrics: true

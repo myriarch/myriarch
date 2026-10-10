@@ -1,0 +1,40 @@
+{
+  "fleet": "k8s-gateway",
+  "blueprint": "k8s-gateway",
+  "layers": [
+    "base",
+    "base#gateway-auth",
+    "k8s-gateway",
+    "k8s-gateway#drop-health-checks"
+  ],
+  "parameters": {
+    "backendEndpoint": "https://otlp.observability.example.com",
+    "dropHealthChecks": true,
+    "environment": "prod",
+    "gatewayAuth": true,
+    "gatewayEndpoint": "unused",
+    "gatewayInsecure": false,
+    "logLevel": "info",
+    "memoryLimitPercent": 75,
+    "siteCountry": "NL",
+    "siteId": "k8s-prod",
+    "siteType": "k8s-gateway",
+    "storageDir": "/var/lib/otelcol/storage"
+  },
+  "parameterSources": {
+    "backendEndpoint": "fleet",
+    "dropHealthChecks": "default",
+    "environment": "default",
+    "gatewayAuth": "default",
+    "gatewayEndpoint": "default",
+    "gatewayInsecure": "default",
+    "logLevel": "default",
+    "memoryLimitPercent": "default",
+    "siteCountry": "attribute",
+    "siteId": "attribute",
+    "siteType": "attribute",
+    "storageDir": "default"
+  },
+  "hash": "f936372c8f71a2249c9521b029abfa59c247089b1794eb5e45ba12b2a6b8d44e",
+  "issues": []
+}

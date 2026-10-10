@@ -1,0 +1,88 @@
+# Supervisor and fallback configuration. The content is identical to deploy/supervisor/k8s/*.yaml
+# (a test checks the match); everything dynamic comes from environment variables of the pod.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-supervisor-config
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: otel-supervisor-config
+    app.kubernetes.io/part-of: myriarch
+data:
+  supervisor.yaml: |
+    # Myriarch - OpAMP supervisor configuration (Kubernetes, supervisor + collector in the same pod)
+    #
+    # Mounted unchanged as a ConfigMap (deploy/k8s/collector/supervisor-configmap.yaml
+    # contains the same keys). Everything dynamic comes from environment variables
+    # of the pod (${env:...}, resolved by the supervisor when it loads the config):
+    #   MYRIARCH_OPAMP_ENDPOINT, MYRIARCH_ENROLLMENT_TOKEN (Secret),
+    #   SITE_TYPE, SITE_ID, SITE_NAME, SITE_COUNTRY, SITE_REGION, SITE_TIMEZONE, ENVIRONMENT,
+    #   K8S_CLUSTER_NAME, K8S_NAMESPACE_NAME, K8S_POD_NAME, K8S_NODE_NAME (Downward API).
+    # The collector inherits the same environment (secrets such as BACKEND_API_TOKEN).
+    server:
+      endpoint: "${env:MYRIARCH_OPAMP_ENDPOINT}"
+      headers:
+        Authorization: "Bearer ${env:MYRIARCH_ENROLLMENT_TOKEN}"
+      # Own CA (optional): mount a ConfigMap/Secret and add it here:
+      # tls:
+      #   ca_file: /etc/myriarch/ca/ca.pem
+    capabilities:
+      accepts_remote_config: true
+      accepts_restart_command: true
+      reports_effective_config: true
+      reports_health: true
+      reports_available_components: true
+      reports_heartbeat: true
+      reports_own_metrics: false
+      accepts_opamp_connection_settings: false
+    agent:
+      executable: /usr/local/bin/otelcol-contrib
+      config_apply_timeout: 30s
+      bootstrap_timeout: 15s
+      validate_config: true
+      automatic_config_rollback: true
+      # Collector logs to stdout instead of <storage>/agent.log (container logging)
+      passthrough_logs: true
+      startup_fallback_configs: [/etc/myriarch/fallback.yaml]
+      description:
+        non_identifying_attributes:
+          site.type: "${env:SITE_TYPE}"
+          site.id: "${env:SITE_ID}"
+          site.name: "${env:SITE_NAME}"
+          site.country: "${env:SITE_COUNTRY}"
+          site.region: "${env:SITE_REGION}"
+          site.timezone: "${env:SITE_TIMEZONE}"
+          deployment.environment.name: "${env:ENVIRONMENT}"
+          k8s.cluster.name: "${env:K8S_CLUSTER_NAME}"
+          k8s.namespace.name: "${env:K8S_NAMESPACE_NAME}"
+          k8s.pod.name: "${env:K8S_POD_NAME}"
+          k8s.node.name: "${env:K8S_NODE_NAME}"
+    # DaemonSet: hostPath, gateway: PVC - otherwise the instance UID changes on every pod start.
+    storage:
+      directory: /var/lib/otelcol/supervisor
+    healthcheck:
+      endpoint: 0.0.0.0:13134
+    telemetry:
+      logs: {level: info}
+  fallback.yaml: |
+    # Myriarch - fallback collector configuration (Kubernetes)
+    # Active only if, at startup, neither a stored remote config nor myriarchd is available.
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    receivers:
+      nop:
+    exporters:
+      nop:
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [nop]
+          exporters: [nop]
+        metrics:
+          receivers: [nop]
+          exporters: [nop]
+        logs:
+          receivers: [nop]
+          exporters: [nop]

@@ -1,0 +1,5 @@
+# lychee configuration of the website gate (ci/website.sh check). The built pages are checked offline and with fragments: only links
+# inside the site are verified, external links are not requested (no network access in the gate, nothing is sent to third parties).
+offline = true
+include_fragments = "anchor-only"
+no_progress = true

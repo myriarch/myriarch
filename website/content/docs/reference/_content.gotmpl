@@ -1,0 +1,6 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /* Content adapter: repository files as pages below /docs/reference/ (website/data/repo_pages.yaml, section "reference"). */ -}}
+{{ partial "repo/add-pages.html" (dict "adapter" . "section" "reference") }}

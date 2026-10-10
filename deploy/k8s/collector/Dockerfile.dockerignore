@@ -1,0 +1,32 @@
+# Build context of the Docker builds that copy the whole context: everything that .gitignore excludes (local state,
+# caches, editors, local binaries) plus the repository metadata. ci/check-dockerignore.sh keeps this list in step with .gitignore.
+.git
+web/dist-mock
+bin
+dist
+**/*.test
+**/*.out
+**/coverage.*
+.cache
+ci-out
+reports
+.dev
+.e2e
+web/node_modules
+web/coverage
+internal/webui/dist
+**/.idea
+**/.vscode
+**/.DS_Store
+myriarchd
+myrctl
+myriarch-updater
+myriarch-sim
+**/CLAUDE.local.md
+.claude
+**/__pycache__
+**/*.pyc
+website/node_modules
+website/public
+website/resources
+website/.hugo_build.lock

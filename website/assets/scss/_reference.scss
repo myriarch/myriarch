@@ -1,0 +1,83 @@
+/*
+ * Copyright The Myriarch Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+// Styles of the reference pages (API reference, placeholders; owned by the documentation package).
+
+// ---- API reference (docs/reference/api, generated from api/openapi.yaml) -----------------------------------------
+// The pages are plain documentation pages (layouts/docs/api-reference.html adds the facts row to the index). The body class
+// api-reference comes from the cascade in config/_default/hugo.yaml.
+.api-reference {
+  // Every operation has the sub-sections Parameters, Request body and Responses. They stay in the page, but the table of contents on
+  // the right lists the operations (and the data types) only, so it stays short enough to scan.
+  .td-toc #TableOfContents ul ul {
+    display: none;
+  }
+
+  // The tables are wide (the types page has three columns of prose). Docsy lets a table scroll inside itself. From the md breakpoint on,
+  // the first column keeps its words together so that a field name or a status stays readable; on a phone it wraps, so that the second
+  // column is in view without scrolling. A first column of links is the summary at the top of a tag page (operation, request,
+  // permission): its summaries are long sentences and always wrap, so that the link is in view on a phone.
+  @include media-breakpoint-up(md) {
+    .td-content table td:first-child:not(:has(> a)) {
+      white-space: nowrap;
+    }
+  }
+
+  // On a phone the code of a request (POST /rollouts/{id}/actions/retry-failed) breaks instead of pushing the table out of view.
+  @include media-breakpoint-down(md) {
+    .td-content table td code {
+      overflow-wrap: anywhere;
+    }
+  }
+
+  // Type names such as ClearFleetVersionSelectionRequest are one long word: let them break instead of widening the page on a phone.
+  .td-content h2,
+  .td-content h3 {
+    overflow-wrap: anywhere;
+  }
+
+  &__facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    margin-block: 1rem 1.5rem;
+    padding: 0;
+    font-size: 0.9375rem;
+    color: var(--bs-secondary-color);
+  }
+}
+
+// ---- placeholder notice (layouts/_shortcodes/placeholder.html) ---------------------------------------------
+.td-placeholder {
+  margin-block: 1.5rem;
+}
+
+// Brand colours instead of Bootstrap's cyan info alert (assets/brand/README.md): Blush with a Tyrian edge on light backgrounds,
+// Night-blue with an Orchid edge on dark ones.
+.td-placeholder {
+  background-color: #fbf6f9;
+  border: 1px solid #d9cfd6;
+  border-left: 0.35rem solid #b3338a;
+  color: #2b0a1f;
+
+  .alert-heading {
+    color: #2b0a1f;
+  }
+
+  a {
+    color: #b3338a;
+  }
+}
+
+[data-bs-theme='dark'] .td-placeholder {
+  background-color: #1e293b;
+  border-color: #334155;
+  border-left-color: #f28ccb;
+  color: #f1f5f9;
+
+  .alert-heading {
+    color: #f1f5f9;
+  }
+}

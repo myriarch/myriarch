@@ -1,0 +1,19 @@
+# Site values of the cluster (via envFrom in the gateway). Overrides ALL six keys of the base ConfigMap
+# myriarch-site (merge) so that no sample value of the base is left over; verify.sh checks that.
+# PLACEHOLDER: endpoint = publicUrl of myriarchd with wss://.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: myriarch-site
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: myriarch-site
+    app.kubernetes.io/part-of: myriarch
+data:
+  MYRIARCH_OPAMP_ENDPOINT: wss://fleet.example.com/v1/opamp
+  K8S_CLUSTER_NAME: example-cluster
+  ENVIRONMENT: production
+  # ISO 3166 user-assigned code "ZZ" = not specified; set your own country code
+  SITE_COUNTRY: ZZ
+  SITE_REGION: example-region
+  SITE_TIMEZONE: UTC

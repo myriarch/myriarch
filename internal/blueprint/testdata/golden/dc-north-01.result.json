@@ -1,0 +1,42 @@
+{
+  "fleet": "datacenter",
+  "blueprint": "datacenter-linux",
+  "layers": [
+    "base",
+    "base#gateway-auth",
+    "datacenter-linux",
+    "datacenter-linux#app-prometheus"
+  ],
+  "parameters": {
+    "appLogPaths": [
+      "/opt/app/logs/*.log"
+    ],
+    "appMetricsTarget": "localhost:9464",
+    "environment": "prod",
+    "gatewayAuth": true,
+    "gatewayEndpoint": "otel-gw-1.example.internal:4317",
+    "gatewayInsecure": false,
+    "logLevel": "info",
+    "memoryLimitPercent": 75,
+    "siteCountry": "NL",
+    "siteId": "DC-NORTH",
+    "siteType": "datacenter",
+    "storageDir": "/var/lib/otelcol/storage"
+  },
+  "parameterSources": {
+    "appLogPaths": "default",
+    "appMetricsTarget": "fleet",
+    "environment": "default",
+    "gatewayAuth": "default",
+    "gatewayEndpoint": "fleet",
+    "gatewayInsecure": "default",
+    "logLevel": "default",
+    "memoryLimitPercent": "default",
+    "siteCountry": "attribute",
+    "siteId": "attribute",
+    "siteType": "attribute",
+    "storageDir": "default"
+  },
+  "hash": "4b9e5354c63a10731d66a70e4b4127c575e3b21a6bc6d1484305b01988577cee",
+  "issues": []
+}

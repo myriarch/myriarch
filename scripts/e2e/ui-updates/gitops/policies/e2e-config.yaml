@@ -1,0 +1,16 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: RolloutPolicy
+metadata:
+  name: e2e-config
+  description: config rollout of the E2E test (one wave, short)
+spec:
+  waves:
+    - name: all
+      percent: 100
+  maxConcurrent: 1
+  healthWait: 5s
+  applyTimeout: 5m
+  offlineGracePeriod: 2m
+  failureThreshold:
+    maxFailed: 1
+  onFailure: pause

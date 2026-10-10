@@ -1,0 +1,16 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Landing page (home). The text is in data/landing.yaml and content/_index.md; every section is a partial in _partials/landing/.
+  The page needs no JavaScript of its own; the dark appearance follows [data-bs-theme] (assets/scss/_landing.scss).
+*/ -}}
+{{ define "main" -}}
+{{ partial "landing/hero.html" . }}
+{{ partial "landing/features.html" . }}
+{{ partial "landing/architecture.html" . }}
+{{ partial "landing/screenshots.html" . }}
+{{ partial "landing/quickstart.html" . }}
+{{ partial "landing/community.html" . }}
+{{- end }}

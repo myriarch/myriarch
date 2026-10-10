@@ -1,0 +1,17 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# myriarchd overlay of the local E2E test (dev mode; scripts/e2e-ui-updates.sh replaces the @@NAME@@ placeholders).
+dev:
+  postgresPort: @@PORT_PG@@
+rollouts:
+  tickInterval: 1s
+artifacts:
+  # Mini mirror (python http.server) in the release layout; verification offline with trusted_root.json, as in a cluster
+  sourceBaseUrl: http://127.0.0.1:@@PORT_MIRROR@@
+  prefetchPlatforms: [@@PLATFORM@@]
+  verify:
+    requireChecksum: true
+    requireSignature: true
+    trustedRootFile: @@TRUSTED_ROOT@@
+@@AGENT_BASE_URLS@@

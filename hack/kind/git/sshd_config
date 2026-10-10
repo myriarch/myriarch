@@ -1,0 +1,16 @@
+# sshd of the in-cluster Git server of the probe: key authentication only, user "git" (git-shell), nothing else.
+Port 2222
+HostKey /etc/ssh/ssh_host_ed25519_key
+PidFile /run/sshd.pid
+AllowUsers git
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+# root-owned, not writable by the user: sshd's StrictModes accepts it
+AuthorizedKeysFile /etc/ssh/authorized/%u
+UsePAM no
+X11Forwarding no
+AllowTcpForwarding no
+PrintMotd no
+LogLevel INFO

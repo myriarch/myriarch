@@ -1,0 +1,26 @@
+# Myriarch - fallback collector configuration (Windows)
+#
+# Used by the supervisor only when, at startup, there is neither a stored remote
+# config nor a reachable myriarchd (agent.startup_fallback_configs).
+# It collects nothing but keeps the health endpoint available so that the service
+# stays healthy and myriarch-updater/myriarchd can keep managing the host.
+# Locally customizable: install-windows.ps1 does not overwrite an existing file.
+extensions:
+  health_check:
+    endpoint: localhost:13133
+receivers:
+  nop:
+exporters:
+  nop:
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [nop]
+      exporters: [nop]
+    metrics:
+      receivers: [nop]
+      exporters: [nop]
+    logs:
+      receivers: [nop]
+      exporters: [nop]

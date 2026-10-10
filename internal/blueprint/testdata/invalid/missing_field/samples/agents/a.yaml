@@ -1,0 +1,4 @@
+name: a
+attributes:
+  os.type: linux
+  host.name: host-a

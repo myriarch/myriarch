@@ -1,0 +1,15 @@
+# Overlay of the Dex stage on top of deploy/helm/myriarch/examples/quickstart-dex.yaml: one replica and the CA of the
+# self-signed Dex certificate (the commented block of the example).
+replicaCount: 1
+config:
+  outbound:
+    allowedCidrs: [10.96.0.0/16]
+    caFile: /etc/myriarchd/ca/ca.crt
+extraVolumes:
+  - name: dex-ca
+    configMap:
+      name: dex-ca
+extraVolumeMounts:
+  - name: dex-ca
+    mountPath: /etc/myriarchd/ca
+    readOnly: true

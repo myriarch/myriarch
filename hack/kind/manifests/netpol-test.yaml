@@ -1,0 +1,81 @@
+# NetworkPolicy checks of the probe. First a self-test in the namespace probe-outside proves that the CNI enforces policies at
+# all (a file server and a client; a deny-ingress policy must block the client), then the clients test the policy of the chart:
+#   probe-outside/np-client    outside the release namespace: must not reach myriarch:8080
+#   myriarch/np-client         inside the release namespace (Pod Security restricted): reaches :8080, not :9090
+apiVersion: v1
+kind: Pod
+metadata:
+  name: np-target
+  namespace: probe-outside
+  labels:
+    app.kubernetes.io/name: np-target
+spec:
+  containers:
+    - name: httpd
+      image: "@@BUSYBOX_IMAGE@@"
+      command: ["sh", "-c", "mkdir -p /www && echo ok > /www/index.html && exec httpd -f -p 8080 -h /www"]
+      ports:
+        - {name: http, containerPort: 8080}
+      readinessProbe:
+        tcpSocket: {port: http}
+        periodSeconds: 2
+      resources:
+        requests: {cpu: 10m, memory: 16Mi, ephemeral-storage: 10Mi}
+        limits: {memory: 64Mi, ephemeral-storage: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: np-target
+  namespace: probe-outside
+spec:
+  selector:
+    app.kubernetes.io/name: np-target
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: np-client
+  namespace: probe-outside
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 100
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: curl
+      image: "@@CURL_IMAGE@@"
+      command: ["sleep", "3600"]
+      resources:
+        requests: {cpu: 10m, memory: 16Mi, ephemeral-storage: 10Mi}
+        limits: {memory: 64Mi, ephemeral-storage: 64Mi}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: np-client
+  namespace: myriarch
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 100
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: curl
+      image: "@@CURL_IMAGE@@"
+      command: ["sleep", "3600"]
+      resources:
+        requests: {cpu: 50m, memory: 50Mi, ephemeral-storage: 10Mi}
+        limits: {cpu: 100m, memory: 64Mi, ephemeral-storage: 64Mi}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: {drop: [ALL]}

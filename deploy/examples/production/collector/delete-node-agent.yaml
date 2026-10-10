@@ -1,0 +1,16 @@
+# Removes the node agent (DaemonSet otel-agent with hostPath and a root init container) and its NetworkPolicy from
+# the base. This example runs only the gateway; on nodes with restrictive Pod Security Standards the node agent
+# would be rejected anyway (hostPath, runAsUser 0).
+$patch: delete
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: otel-agent
+  namespace: observability
+---
+$patch: delete
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: otel-agent
+  namespace: observability

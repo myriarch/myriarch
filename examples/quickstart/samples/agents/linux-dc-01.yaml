@@ -1,0 +1,15 @@
+# Sample agent for "myrctl validate/render" (not a myriarchd object): the first Linux host of the data center.
+name: linux-dc-01
+attributes:
+  service.name: otelcol-contrib
+  service.version: 0.162.0
+  os.type: linux
+  host.name: linux-dc-01.example.com
+  host.arch: arm64
+  deployment.environment.name: production
+  site.type: datacenter
+  site.id: dc-01
+  site.name: Data center 1
+  site.country: NL
+  site.timezone: UTC
+labels: {}

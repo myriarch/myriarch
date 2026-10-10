@@ -1,0 +1,6 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: other
+spec:
+  blueprint: base

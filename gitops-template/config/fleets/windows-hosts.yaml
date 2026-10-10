@@ -1,0 +1,23 @@
+# Windows hosts, collector updates through the myriarch-updater (Windows service "myriarch-updater", LocalSystem).
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: windows-hosts
+  description: Windows hosts, updates through the myriarch-updater
+spec:
+  displayName: Windows hosts
+  priority: 100
+  selector:
+    matchAttributes:
+      os.type: windows
+  blueprint: windows-host
+  parameters:
+    gatewayEndpoint: gateway.example.com:4317
+  collector:
+    distribution: otelcol-contrib
+    version: 0.161.0
+  update:
+    executor: updater
+  rollout:
+    configPolicy: canary-then-all
+    versionPolicy: version-canary-then-all

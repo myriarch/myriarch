@@ -1,0 +1,14 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: all
+spec:
+  blueprint: base
+  collector:
+    version: 0.161.0
+  update:
+    executor: updater
+    selection:
+      enabled: true
+      versionRange: ">=0.161.0"
+      versions: [0.161.0, 0.162.0]

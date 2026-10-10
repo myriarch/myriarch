@@ -1,0 +1,26 @@
+# Config rollouts: first the wave "canary" (hosts with the inventory label wave=canary, see inventory/waves.yaml),
+# then - after manual approval in the UI - all remaining hosts.
+# A broken config rolls back automatically (onFailure: rollback). A single failure triggers it.
+#
+# No maintenance windows, so configuration changes become visible immediately in the dev environment. For a
+# production variant with windows in local time and UTC see policies/canary-then-all.yaml.
+apiVersion: myriarch.dev/v1alpha1
+kind: RolloutPolicy
+metadata:
+  name: config-canary
+  description: Config rollout canary -> approval -> rest, rollback on failure, no maintenance windows
+spec:
+  waves:
+    - name: canary
+      selector:
+        matchAttributes:
+          labels.wave: canary
+    - name: rest
+      percent: 100
+      requireApproval: true
+  maxConcurrent: 5
+  healthWait: 2m
+  applyTimeout: 10m
+  failureThreshold:
+    maxFailed: 1
+  onFailure: rollback

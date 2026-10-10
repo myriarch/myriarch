@@ -1,0 +1,49 @@
+# myriarch-sim profile "chaos": failure scenarios for rollout tests (failure thresholds, pauses, rollback), using the
+# groups of the quickstart GitOps repository (examples/quickstart).
+# About 5 % of the config applies fail, 3 % of the hosts become unhealthy after the apply, 10 % of the updates fail
+# (INSTALL_FAILED after a simulated rollback), and 2 % of the agents briefly go offline per minute.
+seed: 7
+components: components-otelcol-contrib-0.162.0.json
+groups:
+  - name: windows-edge
+    weight: 70
+    os: windows
+    arch: amd64
+    version: 0.161.0
+    updater: true
+    hostnamePattern: "WIN-EDGE-%02d"
+    siteIdPattern: "edge-%03d"
+    attributes: {site.type: edge, site.country: NL, site.timezone: Europe/Amsterdam, deployment.environment.name: prod}
+  - name: linux-datacenter
+    weight: 20
+    os: linux
+    arch: arm64
+    version: 0.161.0
+    updater: true
+    hostnamePattern: "linux-dc-%02d.example.com"
+    siteIdPattern: "dc-%02d"
+    attributes: {site.type: datacenter, site.country: NL, site.timezone: UTC}
+  - name: linux-edge
+    weight: 10
+    os: linux
+    arch: amd64
+    version: 0.162.0
+    updater: false
+    hostnamePattern: "linux-edge-%02d.example.com"
+    siteIdPattern: "edge-%03d"
+    attributes: {site.type: edge, site.country: NL, site.timezone: Europe/Amsterdam}
+behavior:
+  connectRate: 100
+  heartbeatInterval: 30s
+  configApplyDelay: 1s-8s
+  configFailureRate: 0.05
+  failConfigsContaining: "simulate-config-failure"
+  unhealthyAfterApplyRate: 0.03
+  restartDuration: 3s-10s
+  startupDuration: 1s-2s     # after a restart the supervisor reports {healthy:false}, then StatusStarting, then StatusOK
+  reconnectOnUpgrade: true   # a version change restarts the supervisor: the connection drops, a new client connects
+  validateConfig: true       # like validate_config in the supervisor: FAILED, then the old config keeps running (no APPLIED)
+  updaterInstallDuration: 10s-60s
+  updateFailureRate: 0.10
+  versionAfterUpdate: offered
+  offlineChurnRate: 0.02

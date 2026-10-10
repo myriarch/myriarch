@@ -1,0 +1,46 @@
+/*
+ * Copyright The Myriarch Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+// Brand tokens of the myriarch website (assets/brand/README.md). Loaded by Docsy before Bootstrap's variables, so the values below
+// replace the defaults (every Bootstrap variable is !default).
+//
+// Rules of the brand: Tyrian is the colour on light backgrounds and Orchid the colour on dark ones. Orchid never appears on a light
+// background and Tyrian never as text on a dark one (Tyrian reaches 3.19:1 on Night, enough for graphics only).
+$myr-tyrian: #b3338a;
+$myr-orchid: #f28ccb;
+$myr-plum: #2b0a1f;
+$myr-mist: #f1f5f9;
+$myr-night: #0f172a;
+$myr-mauve: #5c4656;
+
+// No web fonts from a third party (privacy): the system font stack. The only web font of the site is the self-hosted Font Awesome.
+$td-enable-google-fonts: false;
+$font-family-sans-serif:
+  system-ui,
+  -apple-system,
+  'Segoe UI',
+  Roboto,
+  'Helvetica Neue',
+  Arial,
+  'Noto Sans',
+  'Liberation Sans',
+  sans-serif;
+
+// Light mode
+$primary: $myr-tyrian;
+$secondary: $myr-mauve;
+$body-color: $myr-plum;
+$body-bg: #fff;
+$link-color: $myr-tyrian;
+$link-hover-color: #8a2569;
+$headings-color: $myr-plum;
+
+// Dark mode (Bootstrap 5.3 color modes, data-bs-theme="dark")
+$body-color-dark: $myr-mist;
+$body-bg-dark: $myr-night;
+$link-color-dark: $myr-orchid;
+$link-hover-color-dark: #f8b9df;
+$primary-text-emphasis-dark: $myr-orchid;
+$headings-color-dark: $myr-mist;

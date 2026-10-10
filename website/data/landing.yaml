@@ -1,0 +1,131 @@
+# Text of the landing page (layouts/home.html and layouts/_partials/landing/*). Sources: README.md, ROADMAP.md and the decision records;
+# nothing here claims more than the README status (alpha, no release yet). Links that start with "/" must name a page of the site
+# (with or without the .md suffix); the build fails when a page does not exist.
+hero:
+  status: Alpha
+  status_note: No release has been published yet
+  title: A GitOps-governed fleet manager for OpenTelemetry Collectors, built on OpAMP
+  subline: Git sets the frame, the UI operates within it, every action is audited.
+  ctas:
+    - label: Get started
+      link: /docs/getting-started/
+      primary: true
+    - label: Documentation
+      link: /docs/
+    - label: GitHub
+      link: https://github.com/myriarch/myriarch
+      icon: fa-solid fa-code-branch
+
+features:
+  title: What it does
+  lead: Designed for around 1,000 collectors, with headroom up to 5,000, spread over edge sites, data centers, cloud and Kubernetes.
+  items:
+    - icon: fa-solid fa-server
+      title: Inventory and health
+      text: Every collector with its version, health, effective configuration, components and host attributes, updated live.
+      link: /docs/concepts/inventory.md
+      link_label: Inventory
+    - icon: fa-solid fa-code-branch
+      title: A GitOps frame, operated from the UI
+      text: Blueprints, fleets, rollout policies and the allowed collector versions live in Git. The UI chooses within that frame, and every action is audited.
+      link: /docs/concepts/gitops.md
+      link_label: Git as the source of truth
+    - icon: fa-solid fa-rocket
+      title: Wave rollouts with approvals and rollback
+      text: Canary groups, percentage steps, approvals, health gates, failure thresholds, pause, abort, rollback and maintenance windows in the local time zone of each site.
+      link: /docs/concepts/rollouts.md
+      link_label: Rollouts
+    - icon: fa-solid fa-arrows-rotate
+      title: Binary updates on Linux, Windows and containers
+      text: The host agent myriarch-updater replaces the collector binary, or a webhook or AWX call hands the update to your own tooling. Linux hosts and container mode are beta, Windows hosts are experimental.
+      link: /docs/tasks/roll-out-a-collector-version.md
+      link_label: Roll out a collector version
+    - icon: fa-solid fa-bell
+      title: Release tracking and notifications
+      text: New upstream releases are detected, breaking changes are extracted from the changelogs, outdated collectors are flagged, and notifications go to Teams, Slack or a webhook.
+      link: /docs/tasks/track-releases-and-notify.md
+      link_label: Track releases and notify
+    - icon: fa-solid fa-shield-halved
+      title: Signed artifacts
+      text: The updater verifies the Sigstore bundle of a collector package before it installs it, offline if needed. Keyless Sigstore signing of the project's own releases is planned for v0.1.0.
+      link: /docs/adr/0007-package-offers-in-upstream-format-with-sigstore-bundles.md
+      link_label: Package offers and Sigstore bundles
+    - icon: fa-solid fa-layer-group
+      title: High availability on PostgreSQL
+      text: Run several replicas of the server on one PostgreSQL database. State, events and the leader election for singleton jobs live there.
+      link: /docs/tasks/run-two-replicas-locally.md
+      link_label: Run two replicas locally
+
+architecture:
+  title: How it fits together
+  lead: Collectors keep running under the upstream OpAMP Supervisor. myriarchd manages their configuration over OpAMP, and an exchangeable executor changes the collector binary, which the Supervisor cannot do.
+  caption: Git feeds the GitOps syncer of myriarchd. Operators work in the web UI and the REST API. The OpAMP endpoint talks to the Supervisor and Collector at every site. The rollout engine starts binary updates through the executors updater, webhook or AWX. myrctl checks the Git repository in CI, and several replicas share one PostgreSQL database.
+  more_link: /docs/architecture.md
+  more_label: Read the architecture
+
+screenshots:
+  title: The web UI
+  lead: One interface for every installation, in a light and a dark appearance.
+  note: Screenshots of the web UI in its mock mode, with generated sample data.
+  items:
+    - name: dashboard
+      title: Overview
+      text: Agents, version distribution, configuration sync and the active rollouts of the whole fleet.
+      alt_light: Overview page of the myriarch web UI in the light appearance, with agent counts, the version distribution, the configuration sync state and an active rollout.
+      alt_dark: Overview page of the myriarch web UI in the dark appearance, with agent counts, the version distribution, the configuration sync state and an active rollout.
+    - name: agents
+      title: Agents
+      text: Every collector with its version, status, health and configuration state, filtered by facets.
+      alt_light: Agents page of the myriarch web UI in the light appearance, a filterable table of collectors with version, status, health and configuration sync state.
+      alt_dark: Agents page of the myriarch web UI in the dark appearance, a filterable table of collectors with version, status, health and configuration sync state.
+    - name: fleet-version
+      title: Target version within the Git frame
+      text: Git declares the range of allowed versions; the UI offers the update inside it and records who chose it.
+      alt_light: Fleet page of the myriarch web UI in the light appearance. The target version card shows the version range that Git allows and a button to update to a version inside that range.
+      alt_dark: Fleet page of the myriarch web UI in the dark appearance. The target version card shows the version range that Git allows and a button to update to a version inside that range.
+    - name: rollout
+      title: A running rollout
+      text: Waves with their progress, targets per collector, and pause, abort and rollback actions.
+      alt_light: Rollout page of the myriarch web UI in the light appearance. The canary wave is complete, the second wave is running, and the page offers pause and more actions.
+      alt_dark: Rollout page of the myriarch web UI in the dark appearance. The canary wave is complete, the second wave is running, and the page offers pause and more actions.
+
+quickstart:
+  title: Try it on your machine
+  lead: The development mode runs the server with an embedded PostgreSQL, the example GitOps repository and 1,000 simulated collectors. It needs no container runtime.
+  commands: |
+    git clone https://github.com/myriarch/myriarch && cd myriarch
+    make web-build   # once: build the web UI
+    ulimit -n 65536  # macOS only: the default of 256 open files is too low
+    make dev         # server on http://localhost:8080
+    # second terminal (macOS: ulimit -n 65536 first):
+    make sim         # 1,000 simulated collectors
+  after: Open http://localhost:8080 and sign in as admin with the password admin (operator and viewer work the same way). The first start downloads the PostgreSQL binaries once, about 30 MB.
+  warning: Development mode uses well-known logins and tokens. It is never a production setup.
+  link: /docs/getting-started/local-dev.md
+  link_label: Local development walkthrough
+
+community:
+  title: Project and community
+  lead: Myriarch is developed in the open. The roadmap and the decision records explain where it goes and why.
+  items:
+    - label: GitHub repository
+      link: https://github.com/myriarch/myriarch
+      icon: fa-solid fa-code-branch
+    - label: Releases
+      link: https://github.com/myriarch/myriarch/releases
+      icon: fa-solid fa-tag
+    - label: Roadmap
+      link: /project/roadmap/
+      icon: fa-solid fa-route
+    - label: Contributing
+      link: /project/contributing/
+      icon: fa-solid fa-hand-holding-heart
+    - label: Governance
+      link: /project/governance/
+      icon: fa-solid fa-scale-balanced
+    - label: Code of conduct
+      link: /project/code-of-conduct/
+      icon: fa-solid fa-handshake
+    - label: Security policy
+      link: /project/security/
+      icon: fa-solid fa-shield-halved

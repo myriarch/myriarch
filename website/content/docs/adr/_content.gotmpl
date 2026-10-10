@@ -1,0 +1,35 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Content adapter: one page per decision record docs/adr/NNNN-*.md (ADR-0031). The records keep their MADR layout and are not edited.
+  The title is the H1 line (without it in the body), the weight is the record number, and the "- Status:" line becomes the parameter
+  status (as written) and, with its Markdown links reduced to their labels, the description (it is shown as plain text in section lists, meta tags
+  and the search index, where a relative link would resolve against the wrong page). The template 0000 is not a decision. The files reach this adapter as assets/repo/docs/adr/ (config/_default/module.yaml).
+*/ -}}
+{{ $adapter := . -}}
+{{ range resources.Match "repo/docs/adr/[0-9][0-9][0-9][0-9]-*.md" -}}
+  {{ $file := path.Base .Name -}}
+  {{ if hasPrefix $file "0000-" }}{{ continue }}{{ end -}}
+  {{ $text := .Content -}}
+  {{ $num := int (strings.TrimLeft "0" (substr $file 0 4)) -}}
+  {{ $h1 := index (findRESubmatch `(?m)\A# ([^\n]+)` $text) 0 -}}
+  {{ if not $h1 }}{{ errorf "docs/adr/%s: the first line must be the H1 title" $file }}{{ end -}}
+  {{ $title := strings.TrimSpace (index $h1 1) -}}
+  {{ $status := "" -}}
+  {{ with findRESubmatch `(?m)^- Status: ([^\n]+)$` $text -}}
+    {{ $status = strings.TrimSpace (index (index . 0) 1) -}}
+  {{ end -}}
+  {{ if not $status }}{{ errorf "docs/adr/%s: no '- Status:' line" $file }}{{ end -}}
+  {{ $plainStatus := replaceRE `\[([^\]]+)\]\([^)]*\)` "$1" $status -}}
+  {{ $body := replaceRE `\A# [^\n]*\n` "" $text 1 -}}
+  {{ $adapter.AddPage (dict
+      "path" (strings.TrimSuffix ".md" $file)
+      "title" $title
+      "weight" $num
+      "description" (printf "Decision record %04d (%s)." $num $plainStatus)
+      "params" (dict "sourcePath" (printf "docs/adr/%s" $file) "status" $status "adr" $num)
+      "content" (dict "mediaType" "text/markdown" "value" $body)
+  ) -}}
+{{ end -}}

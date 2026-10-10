@@ -1,0 +1,56 @@
+# Data centers (Linux): host metrics, application logs, optional Prometheus
+# scraping of the application metrics.
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: datacenter-linux
+  description: Data center - Linux with application logs and optional Prometheus scrape
+spec:
+  extends: base
+  parameters:
+    - name: appLogPaths
+      type: list
+      default: [/opt/app/logs/*.log]
+    - name: appMetricsTarget
+      type: string
+      default: ""
+      description: host:port of the application Prometheus endpoint (empty = no scraping)
+  config:
+    receivers:
+      host_metrics:
+        collection_interval: 30s
+        scrapers:
+          cpu: {}
+          load: {}
+          memory: {}
+          disk: {}
+          filesystem: {}
+          network: {}
+      file_log/app:
+        include: "[[ .params.appLogPaths ]]"
+        start_at: end
+        storage: file_storage/queue
+        multiline:
+          line_start_pattern: '^\d{4}-\d{2}-\d{2}'
+    service:
+      pipelines:
+        metrics:
+          receivers: [otlp, host_metrics]
+        logs:
+          receivers: [otlp, file_log/app]
+  fragments:
+    - name: app-prometheus
+      when: '[[ ne .params.appMetricsTarget "" ]]'
+      config:
+        receivers:
+          prometheus/app:
+            config:
+              scrape_configs:
+                - job_name: app
+                  scrape_interval: 30s
+                  static_configs:
+                    - targets: ["[[ .params.appMetricsTarget ]]"]
+        service:
+          pipelines:
+            metrics:
+              receivers: [otlp, host_metrics, prometheus/app]

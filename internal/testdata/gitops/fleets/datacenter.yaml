@@ -1,0 +1,22 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: datacenter
+  description: Linux data center hosts with the myriarch-updater
+spec:
+  displayName: Data centers
+  priority: 50
+  selector:
+    matchAttributes:
+      site.type: datacenter
+  blueprint: datacenter-linux
+  parameters:
+    gatewayEndpoint: otel-gw-1.example.internal:4317
+    appMetricsTarget: localhost:9464
+  collector:
+    version: 0.162.0
+  update:
+    executor: updater
+  rollout:
+    configPolicy: standard
+    versionPolicy: standard

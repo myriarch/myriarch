@@ -1,0 +1,27 @@
+# The real collector of the probe (StatefulSet kind-gw, myriarch-updater in container mode). Git sets the frame (both
+# versions of the probe); the probe picks the target like an operator in the UI.
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: kind-gw
+  description: real collector in the kind cluster, updates through the myriarch-updater in container mode
+spec:
+  displayName: kind gateway
+  priority: 100
+  selector:
+    matchAttributes:
+      site.id: kind-gw
+  blueprint: kind-gw
+  collector:
+    distribution: otelcol-contrib
+    version: 0.161.0
+  update:
+    executor: updater
+    selection:
+      enabled: true
+      versions: ["0.161.0", "0.162.0"]
+      allowDowngrade: false
+      requireReason: false
+  rollout:
+    configPolicy: probe-config
+    versionPolicy: probe-version

@@ -1,0 +1,29 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Layout of the index page of the REST API reference (docs/reference/api/_index.md; hugo.yaml cascades layout: api-reference to it, ADR-0031).
+  The pages below it are generated from api/openapi.yaml by "make docs-gen" and render with the normal documentation layout. This
+  layout is the layout of the section list plus a facts row: the contract version and the download of the committed contract, which
+  config/_default/module.yaml mounts as assets/api/openapi.yaml and which is published as a fingerprinted file of the site.
+  website/scripts/check-api-spec.py checks the built pages against api/openapi.yaml.
+*/ -}}
+{{ define "main" -}}
+{{ $specRes := resources.Get "api/openapi.yaml" -}}
+{{ if not $specRes }}{{ errorf "api-reference: assets/api/openapi.yaml is not mounted (config/_default/module.yaml)" }}{{ end -}}
+{{ $spec := $specRes | fingerprint "sha256" -}}
+{{ $info := ($specRes | transform.Unmarshal).info -}}
+<div class="td-content">
+  <h1>{{ .Title }}</h1>
+  {{ with .Params.description }}<div class="lead">{{ . | markdownify }}</div>{{ end }}
+  <ul class="api-reference__facts list-unstyled">
+    <li>Contract version <strong>{{ $info.version }}</strong></li>
+    <li><a class="api-reference__download" href="{{ $spec.RelPermalink }}" download="openapi.yaml"><i class="fa-solid fa-download" aria-hidden="true"></i> Download openapi.yaml</a></li>
+    <li>OpenAPI 3.1. The pages only describe the API; they send no request to it.</li>
+  </ul>
+  {{ .Content }}
+  {{ partial "feedback.html" . -}}
+  {{ partial "page-meta-lastmod.html" . -}}
+</div>
+{{- end }}

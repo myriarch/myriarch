@@ -1,0 +1,17 @@
+# Values of the kind probe on top of the "required values only" installation (publicUrl, image and the Secret
+# myriarch-secrets with database-dsn are set separately): the GitOps source (in-cluster Git server over SSH), the service
+# range as an allowed outbound destination and the agent download URL inside the cluster.
+config:
+  gitops:
+    enabled: true
+    repoUrl: ssh://git@git.probe-infra.svc:2222/srv/git/fleet.git
+    auth:
+      sshKeyFile: /etc/myriarchd/secrets/git-ssh-key
+      knownHostsFile: /etc/myriarchd/secrets/git-known-hosts
+  outbound:
+    # the service range of hack/kind/cluster.yaml (the Git server is reached through its Service address)
+    allowedCidrs: [10.96.0.0/16]
+  artifacts:
+    # agents in the cluster download through the Service, not through the public URL
+    agentBaseUrls: ["http://myriarch:8080"]
+    allowInsecureAgentBaseUrls: true

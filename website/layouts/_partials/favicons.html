@@ -1,0 +1,14 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+Override of the Docsy v0.18.0 partial layouts/_partials/favicons.html (Apache-2.0, derived work; see website/overrides.txt).
+Docsy looks for the favicon files with os.FileExists on static/, which does not see files that module.yaml mounts from
+assets/brand. This partial emits the block of assets/brand/README.md ("Embedding") unconditionally; the files are mounted
+at the root of the site and the build fails in the link check if one is missing.
+*/ -}}
+<link rel="icon" href="{{ "favicon.ico" | relURL }}" sizes="32x32">
+<link rel="icon" href="{{ "favicon.svg" | relURL }}" type="image/svg+xml">
+<link rel="apple-touch-icon" href="{{ "apple-touch-icon.png" | relURL }}">
+<link rel="manifest" href="{{ "site.webmanifest" | relURL }}">

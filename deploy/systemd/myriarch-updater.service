@@ -1,0 +1,44 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+[Unit]
+Description=Myriarch updater: installs OpenTelemetry Collector updates offered via OpAMP
+After=network-online.target
+Wants=network-online.target
+ConditionFileIsExecutable=/opt/myriarch/updater/myriarch-updater
+
+[Service]
+Type=simple
+ExecStart=/opt/myriarch/updater/myriarch-updater run --config /etc/myriarch/updater.yaml
+# Root: replaces binaries and restarts the supervisor service
+User=root
+Restart=always
+RestartSec=10
+# A running installation (download, health check, rollback) may finish
+TimeoutStopSec=300
+LimitNOFILE=4096
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+# Sandbox: the updater parses network data (OpAMP, archives, Sigstore) and runs as root; it may only write the
+# collector installation tree and its own state (different install directory -> drop-in).
+ProtectSystem=strict
+ReadWritePaths=-/opt/myriarch/collector
+StateDirectory=myriarch-updater
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+# DAC_*: read supervisor files; SETUID/SETGID/KILL: run the preflight as the supervisor's account and kill it on timeout
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_CHOWN CAP_SETUID CAP_SETGID CAP_KILL
+
+[Install]
+WantedBy=multi-user.target

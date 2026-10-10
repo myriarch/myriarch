@@ -1,0 +1,83 @@
+# Hugo configuration of the myriarch website (ADR-0031). The site is built from website/ plus the Markdown files of the repository that
+# module.yaml mounts (docs/, ADRs, selected root files). Static output only; see README.md.
+baseURL: https://myriarch.dev/
+title: myriarch
+# `locale` replaces the deprecated languageCode.
+locale: en
+defaultContentLanguage: en
+timeZone: UTC
+
+# No taxonomies (nothing uses tags) and no RSS feeds. The sitemap, robots.txt and 404.html are generated.
+disableKinds: [taxonomy, term, rss]
+enableRobotsTXT: true
+# The output must not depend on the Git history (reproducible builds, mounted files); "last modified" is not shown.
+enableGitInfo: false
+enableEmoji: false
+pluralizeListTitles: false
+canonifyURLs: false
+# Heading anchors follow the GitHub rules, so the #fragment links of the Markdown files work unchanged
+# (scripts/check-docs.py checks the same slugs).
+markup:
+  goldmark:
+    parser:
+      autoHeadingIDType: github
+      attribute:
+        block: false
+        title: true
+    renderer:
+      # The documentation contains no raw HTML; if it did, the build would drop it instead of passing it on.
+      unsafe: false
+  highlight:
+    noClasses: false
+    style: tango
+    lineNos: false
+    guessSyntax: false
+  tableOfContents:
+    startLevel: 2
+    endLevel: 3
+    ordered: false
+
+# No network access at build time except for the module download (GOPROXY) that `hugo mod` performs: resources.GetRemote and every
+# http function match no URL. The default exec allowlist stays (Dart Sass is allowed, nothing else is needed).
+security:
+  http:
+    urls: ['^$']
+    methods: ['(?i)GET|POST']
+
+outputs:
+  home: [HTML]
+  section: [HTML]
+  page: [HTML]
+
+sitemap:
+  changefreq: weekly
+  priority: 0.5
+  filename: sitemap.xml
+
+# Pages below /project/ and /legal/ use the documentation layout. The generated references are flagged, so that the page meta links
+# point to the generator instead of an edit link (params.generated and params.generated_from are read by
+# layouts/_partials/page-meta-links.html). The REST API reference is generated from api/openapi.yaml: its pages are plain files of docs/
+# (their front matter holds title, weight and description only), so the cascade adds what the site needs - the repository file that a
+# page is edited in (edit_source), the body class of the styles and, for the index, the layout with the contract download and the
+# list of files that the page stands for (represents), which the link hook resolves.
+cascade:
+  - target:
+      path: '{/project,/project/**,/legal,/legal/**}'
+    type: docs
+  - target:
+      path: '{/docs/reference/cli,/docs/reference/cli/**}'
+    params:
+      generated: true
+  - target:
+      path: '{/docs/reference/api,/docs/reference/api/**}'
+    params:
+      generated: true
+      generated_from: the OpenAPI contract
+      edit_source: api/openapi.yaml
+      body_class: api-reference
+  - target:
+      path: '/docs/reference/api'
+    layout: api-reference
+    params:
+      no_list: true
+      represents: ['api/openapi.yaml']

@@ -1,0 +1,18 @@
+# Kubernetes gateways: myriarchd calls a webhook that raises the image tag in the
+# deployment pipeline (for example a merge request in the deployment repo).
+# myriarchd detects completion from the reported version.
+apiVersion: myriarch.dev/v1alpha1
+kind: Executor
+metadata:
+  name: k8s-image-bump
+  description: Webhook to the deployment pipeline (image tag bump)
+spec:
+  type: webhook
+  webhook:
+    url: https://ci-hooks.example.internal/myriarch/k8s-image-bump
+    method: POST
+    secretEnv: MYRIARCH_EXEC_WEBHOOK_SECRET_K8S
+    headers:
+      X-Team: observability
+    timeout: 30s
+    batchSize: 10

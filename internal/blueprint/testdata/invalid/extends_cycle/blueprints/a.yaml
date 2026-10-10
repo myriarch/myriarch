@@ -1,0 +1,6 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: a
+spec:
+  extends: b

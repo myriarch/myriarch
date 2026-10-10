@@ -1,0 +1,4 @@
+# Environment "preview" (hugo --environment preview, ci/website.sh with WEBSITE_ENV=preview): deployments for review. Search engines are
+# told to stay away (robots.txt disallows everything, the pages carry noindex); layouts/robots.txt and Docsy's head.html read the environment.
+params:
+  preview: true

@@ -1,0 +1,24 @@
+# NetworkPolicies are additive: in addition to the policy otel-gateway of the base, this rule allows access to port
+# 4317 from the networks of the host collectors. Whether the CNI/load balancer preserves the source address for
+# ipBlock (externalTrafficPolicy: Local) has to be verified with a connection attempt from one of those hosts.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: otel-gateway-external
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: otel-gateway
+    app.kubernetes.io/part-of: myriarch
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: otel-gateway
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        # PLACEHOLDER: networks of the host collectors (same as loadBalancerSourceRanges in the Service);
+        # RFC 5737 documentation ranges
+        - ipBlock: {cidr: 198.51.100.0/24}
+        - ipBlock: {cidr: 203.0.113.0/24}
+      ports:
+        - {port: otlp-grpc, protocol: TCP}

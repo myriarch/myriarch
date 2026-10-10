@@ -1,0 +1,549 @@
+# Helm chart for myriarchd (OpAMP server, REST API and web UI in one binary).
+#
+# Minimal installation: the chart installs with its defaults once two things exist:
+#   1. a Secret (existingSecret, default myriarch-secrets) with the key database-dsn, and
+#   2. config.server.publicUrl set to the external URL (--set config.server.publicUrl=https://fleet.example.com).
+# The defaults start a production server (never the dev mode) whose only login is the one-time token of the bootstrap
+# admin (see bootstrapAdmin below). Without Ingress, HTTPRoute or Route use "kubectl port-forward" to reach it.
+#
+# Prerequisites
+#   * External PostgreSQL (>= 14) with a direct connection or session pooling.
+#     NOT behind PgBouncer in transaction pooling mode: myriarchd uses LISTEN/NOTIFY and session advisory
+#     locks (leader election), and both break under transaction pooling.
+#   * An existing Secret (existingSecret) with the keys listed under "existingSecret" below.
+#   * For access from outside the cluster: a Gateway API implementation (httpRoute, recommended), an ingress
+#     controller (ingress) or OpenShift (openshift.route). OpAMP connections stay open permanently (heartbeat 30 s),
+#     so WebSocket support and long timeouts are required.
+#   * Kubernetes >= 1.30 for the native preStop "sleep" action (the distroless image has no sleep).
+
+# Number of myriarchd replicas. All replicas serve agents and the API; the singleton jobs run on the leader.
+replicaCount: 2
+
+image:
+  # Image repository.
+  repository: ghcr.io/myriarch/myriarch
+  # Image tag. Empty = appVersion of the chart.
+  tag: ""
+  # Optional image digest (sha256:<64 hex>). When set, the image is referenced as repository@digest
+  # and tag is ignored (immutable; the image build prints the digest as IMAGE_MANIFEST_DIGEST).
+  digest: ""
+  # Image pull policy.
+  pullPolicy: IfNotPresent
+# Secrets for pulling the image from a private registry.
+imagePullSecrets: []
+
+# Overrides the chart name in resource names.
+nameOverride: ""
+# Overrides the complete resource name.
+fullnameOverride: ""
+
+serviceAccount:
+  # Create a ServiceAccount.
+  create: true
+  # Name of the ServiceAccount. Empty = generated from the release name.
+  name: ""
+  # Annotations of the ServiceAccount.
+  annotations: {}
+
+# --- myriarchd.yaml -----------------------------------------------------------------------------
+# Rendered as /etc/myriarchd/myriarchd.yaml (for the keys see internal/config). Never put secrets inline; use the
+# *File fields that point to the files of the mounted Secrets (/etc/myriarchd/secrets/<key>). For the file keys see
+# "existingSecret". The chart transforms this block when rendering:
+#   * *File fields of a disabled feature are dropped (auth.oidc.*File while OIDC is off; gitops tokens, keys and the
+#     webhook secret while gitops is off; releases.tokenFile while releases is off), and empty *File values are dropped.
+#   * auth.bootstrapAdmin and opamp.enrollmentTokens are generated from the top-level bootstrapAdmin and
+#     enrollmentTokens values below; setting them here fails the rendering.
+#   * The dev login and the dev mode do not exist in this chart (the server always starts with "serve").
+config:
+  server:
+    # Listen address of the HTTP server (UI, REST, OpAMP).
+    listenAddr: ":8080"
+    # Externally reachable URL (OIDC redirects, artifact download URLs, notification links). Replace the
+    # placeholder; with the OpenShift Route the host of the Route is derived from it.
+    publicUrl: https://fleet.example.com
+    # Listen address of the metrics endpoint.
+    metricsListenAddr: ":9090"
+    # CIDRs of the ingress controller / Gateway data plane / OpenShift router (X-Forwarded-For/-Proto are honored
+    # only from there). MANDATORY while ingress or httpRoute is enabled (otherwise rendering fails): without them all
+    # clients share one address (login rate limit, audit source address). Replace the placeholder, for example
+    # ["10.244.0.0/16"]. On OpenShift the Route does not require it, but the router CIDR is recommended.
+    # Safe ONLY together with the NetworkPolicy (networkPolicy.enabled) and networkPolicy.ingress.allowSameNamespace
+    # set to false: otherwise any pod in the cluster could set these headers itself (and, with
+    # opamp.clientCertHeader, a forwarded client certificate).
+    trustedProxies: []
+    # Time allowed for a graceful shutdown.
+    shutdownTimeout: 30s
+    tls:
+      # In this chart myriarchd listens without TLS and TLS ends at the ingress, Gateway or router (mandatory
+      # confirmation, otherwise myriarchd does not start in production). Port 8080 must be reachable only from the
+      # permitted sources (networkPolicy).
+      terminatedUpstream: true
+  opamp:
+    # Path of the OpAMP WebSocket endpoint.
+    path: /v1/opamp
+    # An enrollment token is required even with a client certificate (token AND certificate).
+    requireEnrollmentToken: true
+    # Maximum number of simultaneous OpAMP connections per replica.
+    maxConnectionsPerReplica: 10000
+    # Authenticated new connections per second and replica; connectRatePerIp applies per client IP
+    # (only meaningful behind the ingress when trustedProxies is set).
+    connectRateLimit: 200
+    # New connections per second and client IP.
+    connectRatePerIp: 50
+    # maxMessageSize: 4194304      # 4 MiB (default); WebSocket compression is off by default
+    # Enrollment tokens are declared with the top-level "enrollmentTokens" values, not here.
+  database:
+    # File with the PostgreSQL DSN (key database-dsn of the Secret).
+    dsnFile: /etc/myriarchd/secrets/database-dsn
+    # Maximum number of database connections per replica.
+    maxConns: 20
+    # Run the database migrations at startup (protected by an advisory lock).
+    migrateOnStart: true
+  auth:
+    oidc:
+      # Single sign-on with any OpenID Connect provider (Dex, Keycloak, Okta, Entra ID, Google, authentik, Zitadel,
+      # ...); see docs/operations/authentication.md. Default off: the login is then the bootstrap admin (top-level
+      # bootstrapAdmin). With OIDC enabled fill roleMapping (deny by default) and the issuer.
+      enabled: false
+      # Issuer URL of the identity provider (neutral placeholder; it must match the issuer of the discovery document
+      # exactly). Not used while OIDC is disabled.
+      issuerUrl: https://idp.example.com
+      # OIDC client ID.
+      clientId: ""
+      # File with the OIDC client secret (key oidc-client-secret of the Secret). Rendered only while OIDC is enabled.
+      clientSecretFile: /etc/myriarchd/secrets/oidc-client-secret
+      # Label of the login button.
+      displayName: SSO
+      # nameClaim: name              # claim with the display name (fallback: preferred_username)
+      # emailClaim: email            # claim with the e-mail address (email: user entries need "email")
+      # Deny by default: users without a mapped group or user get no access (defaultRole is empty).
+      # Enter group names or IDs of the identity provider (at least one role is needed).
+      roleMapping:
+        admin: []
+        operator: []
+        viewer: []
+        # Mapping of single users (no groups needed), highest role wins:
+        # users:
+        #   admin: ["email:admin@example.com"]       # "email:<address>" (needs email_verified and emailClaim "email") or "sub:<subject>"
+      # defaultRole: ""             # set deliberately only (for example viewer); myriarchd warns at startup
+    # Mark the session cookie as Secure.
+    cookieSecure: true
+    # Sessions: idle timeout (sliding) ...
+    sessionTtl: 2h
+    # ... and absolute maximum age.
+    sessionMaxAge: 12h
+    # OPTIONAL file with the HMAC secret for artifact download tokens (key download-token-secret of the Secret,
+    # at least 32 random bytes). Empty = myriarchd generates a random key, stores it in the database and shares it
+    # between all replicas. Set it only if you want to manage the key yourself.
+    downloadTokenSecretFile: ""
+  gitops:
+    # Enable the GitOps syncer. While disabled no GitOps secret is loaded and the webhook endpoint answers 404.
+    enabled: false
+    # URL of the GitOps repository (https://..., ssh://[user@]host[:port]/path or user@host:path). An SSH URL adds the
+    # SSH port (22 or the one in the URL) to the NetworkPolicy egress rule.
+    repoUrl: ""
+    # Branch to follow.
+    branch: main
+    # Subdirectory of the repository that holds the GitOps tree. Empty = repository root.
+    path: ""
+    # How often the repository is polled.
+    pollInterval: 60s
+    # Directory of the local clone.
+    cloneDir: /var/lib/myriarchd/gitops
+    auth:
+      # User name for the HTTPS token.
+      username: oauth2
+      # File with the HTTPS token (key git-token of the Secret); empty = anonymous access.
+      tokenFile: ""
+      # Alternatives: sshKeyFile and knownHostsFile (keys of the Secret), caFile for a private Git CA.
+    # File with the webhook secret of the Git server (key gitops-webhook-secret of the Secret); empty = no webhook.
+    webhookSecretFile: ""
+  releases:
+    # Enable the release tracker (informational; polls the GitHub API over HTTPS).
+    enabled: true
+    # File with the GitHub token (key github-token; raises the GitHub rate limit); empty = anonymous.
+    tokenFile: ""
+  artifacts:
+    # Directory of the artifact cache.
+    dir: /var/lib/myriarchd/artifacts
+    # Maximum size of the artifact cache in bytes (3 GiB). Keep it below emptyDir.sizeLimit.
+    maxCacheBytes: 3221225472
+  # Outbound connections (executors, notifications, releases, artifacts, OIDC, Git) are checked against the resolved
+  # address: loopback, private (RFC 1918), link-local/metadata and ULA ranges are blocked. Allow internal targets
+  # (Git server, AWX, mirror, IdP) here, for example ["192.0.2.0/24"].
+  outbound:
+    allowedCidrs: []
+    # caFile: /etc/myriarchd/ca/ca.crt     # additional CA bundle for all outbound TLS (mount it with extraVolumes)
+  executors:
+    # Allowed targets of the webhook/AWX executors (host, host:port, *.example.com; "http://host" explicitly allows
+    # plain HTTP). EMPTY MEANS FAIL CLOSED: every webhook and AWX target is refused (myriarchd still starts).
+    allowedWebhookHosts: []
+    # Executor secrets: environment variables with this prefix (see secretEnv below) or named entries
+    # under executors.secrets (with allowedHosts per secret).
+    secretEnvPrefix: MYRIARCH_EXEC_
+    # Target binding for every secret an executor references by name in Git: the secret is sent only to the hosts
+    # listed here; without an entry myriarchd rejects the reference (fail closed). Key = name of the environment
+    # variable (secretEnvHosts) or relative file name under executors.secretDir (secretFileHosts).
+    # Alternatively use named entries under executors.secrets ({env|file, allowedHosts}). Examples:
+    secretEnvHosts: {}
+    # secretEnvHosts:
+    #   MYRIARCH_EXEC_AWX_TOKEN: [awx.example.com]
+    #   MYRIARCH_EXEC_WEBHOOK_SECRET_K8S: [ci-hooks.example.com]
+    # secretFileHosts:
+    #   awx-token: [awx.example.com]
+  telemetry:
+    # Log level (debug, info, warn, error).
+    logLevel: info
+    # Log format (json or text).
+    logFormat: json
+    # Expose Prometheus metrics.
+    metrics: true
+  notifications:
+    # Notification channels. Example entry below.
+    channels: []
+    # - name: teams-ops
+    #   type: teams
+    #   urlFile: /etc/myriarchd/secrets/notify-teams-url
+    #   events: ["release.*", "rollout.*"]
+
+# --- Single sign-on that is switched on outside of "config" ---------------------------------------------
+# The chart decides on the bootstrap admin (Secret, mount, login path check) from config.auth.oidc.enabled. When OIDC
+# is switched on by environment variables instead (MYRIARCH_AUTH_OIDC_ENABLED=true in extraEnv, or from a ConfigMap or
+# Secret), the chart cannot see it: set this to true so that it treats OIDC as enabled. Then
+#   * rendering does not fail with "no login path" while bootstrapAdmin.enabled is false,
+#   * the bootstrap Secret is mounted only with bootstrapAdmin.keepWithOidc (as the server decides at runtime), and
+#   * the auth.oidc.*File fields stay in the rendered configuration (set an empty value to drop one, for example
+#     clientSecretFile when the client secret comes from MYRIARCH_AUTH_OIDC_CLIENTSECRET).
+# The value only declares; the server reads the environment. Without OIDC in the environment myriarchd refuses to start
+# when no login path remains. Example (with bootstrapAdmin.enabled=false):
+#   oidcFromEnvironment: true
+#   extraEnv:
+#     - {name: MYRIARCH_AUTH_OIDC_ENABLED, value: "true"}
+#     - {name: MYRIARCH_AUTH_OIDC_CLIENTID, value: myriarch}
+oidcFromEnvironment: false
+
+# --- Login without an enterprise IdP: bootstrap admin ---------------------------------------------------
+# A break-glass administrator that is configured declaratively. The account is active (its Secret, generated by the
+# chart or named by bootstrapAdmin.existingSecret, is mounted) while enabled is true AND (OIDC is off OR keepWithOidc is
+# true). OIDC counts as on when config.auth.oidc.enabled is true or oidcFromEnvironment is true. Otherwise (enabled,
+# OIDC on, keepWithOidc false) auth.bootstrapAdmin is still rendered, the Secret is not mounted, and the server
+# deactivates the account at start: its sessions and API tokens are removed. Enable OIDC and disable the bootstrap admin
+# after the initial setup.
+#
+# NETWORK ACCESS: the account has an account-wide backoff, so anyone who can reach POST /api/v1/auth/bootstrap-login
+# can keep the break-glass login in delays of up to 15 minutes with wrong credentials. Restrict network access to
+# that path (ingress allow list for the path, WAF, or block it at the edge and use "kubectl port-forward"). The counter
+# is in memory per replica: restarting the pods clears it. See docs/operations/authentication.md section 2.7.
+bootstrapAdmin:
+  enabled: true
+  # User name of the account (letters, digits, ".", "_", "@", "-"; 1 to 64 characters).
+  username: admin
+  # Secret that holds the credentials. Empty = the chart generates the Secret <fullname>-bootstrap with a random
+  # one-time token (48 characters) in the key "token". The value survives upgrades (lookup); read it with the
+  # command printed in the NOTES. The token works for ONE sign-in; delete the Secret and run helm upgrade for a
+  # new one. GitOps tools that render without cluster access (helm template, Argo CD) cannot see existing Secrets
+  # and would generate a new value on every render: use existingSecret there.
+  existingSecret: ""
+  # Key of the one-time token in the Secret (mounted at /etc/myriarchd/bootstrap/token). Set it to "" to
+  # use only a password hash together with existingSecret.
+  tokenKey: token
+  # Key of a bcrypt password hash in existingSecret (mounted at /etc/myriarchd/bootstrap/password-hash). Create the
+  # hash with: printf '%s' "$PASSWORD" | myriarchd auth hash-password. Needs existingSecret. A password stays valid
+  # until the hash is replaced (use it for a durable break-glass account, kept in a vault).
+  passwordHashKey: ""
+  # Keep the bootstrap admin active next to OIDC (break-glass). Every sign-in is audited; monitor these events.
+  keepWithOidc: false
+
+# --- Declarative enrollment tokens -------------------------------------------------------------------------
+# Tokens for agents (collectors) that exist from the first start, without the UI. The chart renders
+# opamp.enrollmentTokens and mounts the tokens as files at /etc/myriarchd/enrollment/<name>. Entries:
+#   name           DNS label, unique (also the file name)
+#   existingSecret Secret with the token (myre_ followed by 32 to 120 letters, digits, "_" or "-"). Empty = the chart
+#                  generates the Secret <fullname>-enrollment-<name> with a random token (kept across upgrades);
+#                  agents in the cluster mount the same Secret. See the GitOps note at bootstrapAdmin.
+#   key            key of the token in the Secret (default token)
+#   labels         labels copied to the agents at registration
+#   expiresAt      RFC 3339 timestamp, empty = no expiry
+enrollmentTokens: []
+# - name: gateway
+#   existingSecret: ""
+#   key: token
+#   labels: {site: hq}
+#   expiresAt: ""
+
+# --- Secrets -------------------------------------------------------------------------------
+# Name of an existing Secret. It is mounted completely at /etc/myriarchd/secrets (every key becomes a
+# file, mode 0440). Mandatory key: database-dsn. Optional keys (depending on the configuration):
+#   database-dsn              postgres://myriarch:...@db:5432/myriarch?sslmode=verify-full   (mandatory)
+#   oidc-client-secret        when config.auth.oidc.enabled (alternatively oidc-client-cert and oidc-client-key)
+#   download-token-secret     >= 32 random bytes, only if config.auth.downloadTokenSecretFile is set
+#   git-token                 HTTPS token for the GitOps repository
+#   gitops-webhook-secret     webhook secret of the Git server
+#   github-token              raises the GitHub rate limit (release tracker)
+#   mirror-token / mirror-password   credentials of the artifact mirror
+#   notify-*-url / -secret    notification channels (config.notifications.channels[].urlFile/secretFile)
+existingSecret: myriarch-secrets
+
+# Roll the pods when a mounted Secret changes (checksum/secret annotation): the SHA-256 over the uid and resourceVersion
+# of every Secret the pod mounts (existingSecret, the bootstrap Secret, the enrollment Secrets) as seen through lookup
+# (never a digest of the secret data). It is constant
+# under "helm template" (no cluster access) and changes on "helm upgrade" after a Secret change. The first upgrade
+# after an installation with generated Secrets restarts the pods once. An upgrade that creates a generated Secret
+# (an enrollment token added to the list, or a generated Secret deleted to rotate it) restarts the pods as well.
+secretChecksum:
+  enabled: true
+
+# Secrets that GitOps executors expect as environment variables (secretEnv/tokenEnv in
+# executors/*.yaml), each taken from one key of the Secret. "optional: true" binds the key as
+# secretKeyRef.optional: if it is missing from the Secret the pod starts anyway (without this variable); without
+# "optional" a missing key blocks the pod (CreateContainerConfigError).
+secretEnv: []
+# - name: MYRIARCH_EXEC_WEBHOOK_SECRET_K8S   # names must start with executors.secretEnvPrefix
+#   key: webhook-secret-k8s
+# - name: MYRIARCH_EXEC_AWX_TOKEN
+#   key: awx-token
+#   optional: true
+# Additional environment variables of the myriarchd container (for example HTTPS_PROXY, NO_PROXY).
+extraEnv: []
+# Additional volumes of the pod (for example a ConfigMap with an internal CA).
+extraVolumes: []
+# Additional volume mounts of the myriarchd container.
+extraVolumeMounts: []
+
+# --- OpenShift -----------------------------------------------------------------------------
+# Profile for OpenShift (Security Context Constraints restricted-v2, Route, OpenShift DNS):
+#   true   OpenShift profile
+#   false  standard Kubernetes profile
+#   auto   OpenShift profile when the cluster offers the API security.openshift.io/v1 (.Capabilities)
+# CAVEAT for auto: "helm template" has no cluster access and renders the STANDARD profile unless you pass
+# --api-versions security.openshift.io/v1. GitOps tools that template offline need the same flag (or true/false).
+# The OpenShift profile
+#   * drops runAsUser, runAsGroup and fsGroup from podSecurityContext (the SCC assigns them from the project range;
+#     runAsNonRoot and the seccomp profile stay),
+#   * creates a Route (route.enabled) with edge TLS instead of an Ingress,
+#   * allows the router to reach port 8080 (routerNamespaceSelector) and uses the OpenShift DNS rule (dns).
+openshift:
+  enabled: false
+  route:
+    # Create the Route in the OpenShift profile.
+    enabled: true
+    # Host of the Route. Empty = host of config.server.publicUrl (without port).
+    host: ""
+    # Further annotations of the Route (the timeout annotations below are always set, unless you override them here).
+    annotations: {}
+    # Router timeouts. OpAMP connections are long-lived WebSockets: without long timeouts the router drops them.
+    timeout: 3600s
+    tls:
+      # What the router does with plain HTTP requests (Redirect, Allow, None).
+      insecureEdgeTerminationPolicy: Redirect
+      # Secret (kubernetes.io/tls, same namespace) with a certificate for the Route host; the router reads it
+      # through the Route (spec.tls.externalCertificate). Empty = the default certificate of the router.
+      externalCertificateSecret: ""
+  # Namespace selector of the OpenShift router pods (source of port 8080 while the Route is rendered). The default
+  # matches the namespaces of the default and the "openshift-ingress" router.
+  routerNamespaceSelector:
+    matchLabels:
+      policy-group.network.openshift.io/ingress: ""
+  # Destination of the DNS egress rule in the OpenShift profile (the NetworkPolicy is evaluated after the service
+  # translation: service port 53 becomes pod port 5353).
+  dns:
+    to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: openshift-dns
+        podSelector:
+          matchLabels:
+            dns.operator.openshift.io/daemonset-dns: default
+    ports: [5353, 53]
+
+# --- Network -------------------------------------------------------------------------------
+service:
+  # Service type.
+  type: ClusterIP
+  # Port of the HTTP service (UI, REST, OpAMP).
+  port: 8080
+  # Port of the metrics endpoint.
+  metricsPort: 9090
+  # Annotations of the Service.
+  annotations: {}
+
+# Network segmentation (default: on). Port 8080 is reachable from the listed sources only, port 9090 from the
+# monitoring instance; egress only DNS, PostgreSQL/HTTPS ports (and Git over SSH). trustedProxies and
+# opamp.clientCertHeader are safe only if this policy (or an equivalent one) is in force.
+# A CNI with NetworkPolicy support is a prerequisite (otherwise the policy has no effect).
+networkPolicy:
+  enabled: true
+  ingress:
+    # Sources for port 8080 (UI/REST/OpAMP) in NetworkPolicy "from" format, for example the namespace of the ingress
+    # controller or Gateway, and collector gateways in the cluster that talk to myriarchd directly. MANDATORY (rendering
+    # fails otherwise) while ingress or httpRoute is enabled. Example:
+    #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: <ingress-namespace>}}
+    # In the OpenShift profile with a Route the router is added automatically (openshift.routerNamespaceSelector).
+    from: []
+    # Allow every pod of the release namespace to reach port 8080 (agents and a port-forward next to the pods).
+    # MUST be false when config.server.trustedProxies or config.opamp.clientCertHeader is set (rendering fails
+    # otherwise): any pod of the namespace could forge the forwarded headers. With false and an empty "from" no pod
+    # reaches port 8080 (kubectl port-forward still works).
+    allowSameNamespace: true
+  metrics:
+    # Sources for port 9090 (/metrics, unauthenticated) in NetworkPolicy "from" format; empty = nobody. Example:
+    #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+    from: []
+  egress:
+    # Restrict egress (DNS plus the ports below).
+    enabled: true
+    # Allowed destination ports (TCP) for all destinations: 5432 PostgreSQL, 443 HTTPS (OIDC, Git, GitHub, mirror,
+    # webhooks). The destinations are every address outside exceptCidrs and every pod/namespace of the cluster
+    # (PostgreSQL or an IdP such as Dex inside the cluster).
+    ports: [5432, 443]
+    # Further ports (TCP) merged into the rule above, for example [5556] for an IdP in the cluster.
+    # The Git SSH port (22 or the port of an ssh:// URL) is added automatically while config.gitops is enabled.
+    extraPorts: []
+    # Destinations excluded from the egress rule (cloud metadata service).
+    exceptCidrs: [169.254.0.0/16]
+    # DNS rule of the standard profile (the OpenShift profile uses openshift.dns).
+    dns:
+      to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports: [53]
+    # Further egress rules in NetworkPolicy format (for example a stricter rule for webhook/AWX executors).
+    extraRules: []
+
+# Ingress (optional, off by default; the Gateway API below is the recommended way). ingress-nginx is no longer
+# maintained since March 2026; the examples for maintained controllers (and the legacy ingress-nginx annotations)
+# live in examples/ingress-*.yaml.
+ingress:
+  # Create an Ingress.
+  enabled: false
+  # Ingress class.
+  className: ""
+  # Controller annotations. OpAMP connections are long-lived WebSockets: configure long timeouts for your
+  # controller (see examples/). No session affinity needed.
+  annotations: {}
+  # Host names and paths of the Ingress.
+  hosts:
+    - host: fleet.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  # Mandatory while config.server.publicUrl is https (otherwise rendering fails): the enrollment token
+  # and the sessions must never travel in clear text. If TLS terminates outside the ingress (load balancer
+  # with its own certificate), set allowWithoutTls=true and leave tls empty. Example:
+  #   - secretName: fleet-example-com-tls
+  #     hosts: [fleet.example.com]
+  tls: []
+  # Allow an https publicUrl without ingress.tls (TLS terminates outside the ingress).
+  allowWithoutTls: false
+  # Only if config.server.trustedProxies is deliberately left empty (all clients then appear with the address of
+  # the ingress controller): set allowWithoutTrustedProxies=true, otherwise rendering fails.
+  allowWithoutTrustedProxies: false
+
+# Gateway API instead of Ingress (optional, off by default, RECOMMENDED for new installations). The same mandatory
+# checks apply as for the ingress: trustedProxies (CIDR of the Gateway data plane, safe ONLY together with the
+# NetworkPolicy) and TLS at the Gateway. The chart creates only the HTTPRoute, not the Gateway. WebSocket (OpAMP) and
+# long timeouts are a matter of the Gateway implementation (check per product); networkPolicy.ingress.from must name
+# its pods.
+httpRoute:
+  # Create an HTTPRoute.
+  enabled: false
+  # Mandatory when enabled: Gateways the route is bound to, for example
+  #   - {name: edge, namespace: gateway-system, sectionName: https}
+  parentRefs: []
+  # Mandatory when enabled (host names of the route, for example [fleet.example.com]).
+  hostnames: []
+  # Annotations of the HTTPRoute.
+  annotations: {}
+  # Confirms that the Gateway listener terminates TLS (mandatory with an https publicUrl; the chart cannot check
+  # the Gateway).
+  tlsTerminatedAtGateway: false
+  # Only if config.server.trustedProxies is deliberately left empty: set allowWithoutTrustedProxies=true.
+  allowWithoutTrustedProxies: false
+  # Optional: timeouts of the rule (Gateway API >= 1.1), for example {request: 0s} - check support per implementation.
+  timeouts: {}
+
+# --- Operation -----------------------------------------------------------------------------
+# Resource requests and limits of the myriarchd container. Many clusters (OpenShift LimitRanges, ResourceQuotas)
+# require ephemeral-storage. Keep the relations: artifacts.maxCacheBytes below emptyDir.sizeLimit, and
+# limits.ephemeral-storage above emptyDir.sizeLimit plus the 256Mi tmp volume plus the container logs.
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+    ephemeral-storage: 512Mi
+  limits:
+    memory: 1Gi
+    ephemeral-storage: 5Gi
+
+# Graceful shutdown: preStop pause so that the endpoint disappears from the load balancers before
+# the connections are closed (agents reconnect with backoff through other replicas).
+preStopSleepSeconds: 10
+# Grace period of the pod on termination.
+terminationGracePeriodSeconds: 60
+
+# Startup, liveness and readiness probes.
+probes:
+  startup: {path: /healthz, failureThreshold: 30, periodSeconds: 2}
+  liveness: {path: /healthz, periodSeconds: 10, timeoutSeconds: 3, failureThreshold: 3}
+  readiness: {path: /readyz, periodSeconds: 5, timeoutSeconds: 3, failureThreshold: 3}
+
+# PodDisruptionBudget (rendered only while replicaCount is greater than 1, otherwise it would block node drains).
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Annotations of the pods.
+podAnnotations: {}
+# Additional labels of the pods.
+podLabels: {}
+# Priority class of the pods.
+priorityClassName: ""
+
+# Security context of the pod (standard profile). The OpenShift profile drops runAsUser, runAsGroup and fsGroup.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# Security context of the myriarchd container.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# Data per replica (GitOps clone, artifact cache). Default: emptyDir (the cache is refilled on demand,
+# the clone is cloned again). With persistence.enabled a shared PVC is mounted
+# (ReadWriteMany is needed while replicaCount > 1; otherwise an existingClaim per replica is not possible).
+persistence:
+  enabled: false
+  existingClaim: ""
+  storageClass: ""
+  accessModes: [ReadWriteMany]
+  size: 10Gi
+# Size limit of the emptyDir volume used when persistence is disabled (above artifacts.maxCacheBytes).
+emptyDir:
+  sizeLimit: 4Gi
+
+# Spreads the replicas across nodes.
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+# Node selector of the pods.
+nodeSelector: {}
+# Tolerations of the pods.
+tolerations: []
+# Affinity of the pods.
+affinity: {}
+
+# Prometheus Operator ServiceMonitor.
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  labels: {}

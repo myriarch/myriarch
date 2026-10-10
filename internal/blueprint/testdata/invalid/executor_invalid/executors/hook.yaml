@@ -1,0 +1,8 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: Executor
+metadata:
+  name: hook
+spec:
+  type: webhook
+  webhook:
+    url: https://ci.example.com/hook

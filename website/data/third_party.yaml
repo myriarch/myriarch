@@ -1,0 +1,46 @@
+# Third-party components that the website ships. The page /legal/third-party/ renders this file (layouts/_partials/third-party-table.html).
+# website/scripts/check-notices.py checks that every dependency of package.json and the Docsy module of go.mod appears here with the
+# same version: "package" is the npm package or the Go module, "source" the file that pins it. The licenses are SPDX expressions of
+# the packages. "license_file" is the site path of the published license text (static/licenses, mounted in config/_default/module.yaml;
+# check-notices.py fails when the built site lacks the file). Build tools that are not shipped (Hugo, Dart Sass, lychee,
+# markdownlint-cli2) are named in the page text instead.
+- name: Docsy
+  package: "github.com/docsy/docsy/theme"
+  version: 0.18.0
+  license: Apache-2.0
+  url: https://github.com/docsy/docsy
+  use: Hugo theme module (layouts, styles and scripts of the documentation pages; some partials are overridden, see website/overrides.txt)
+  source: go.mod
+  license_file: /licenses/docsy/LICENSE.txt
+- name: Bootstrap
+  package: "bootstrap"
+  version: 5.3.8
+  license: MIT
+  url: https://getbootstrap.com
+  use: CSS framework and scripts of the theme
+  source: package.json
+  license_file: /licenses/bootstrap/LICENSE.txt
+- name: Font Awesome Free
+  package: "@fortawesome/fontawesome-free"
+  version: 7.3.1
+  license: CC-BY-4.0 AND OFL-1.1 AND MIT
+  url: https://fontawesome.com
+  use: icons and the icon web font (icons CC BY 4.0, fonts SIL OFL 1.1, code MIT)
+  source: package.json
+  license_file: /licenses/fontawesome-free/LICENSE.txt
+- name: lunr
+  package: "lunr"
+  version: 2.3.9
+  license: MIT
+  url: https://lunrjs.com
+  use: search in the browser (the index is a file of this site)
+  source: package.json
+  license_file: /licenses/lunr/LICENSE.txt
+- name: Mermaid
+  package: "mermaid"
+  version: 11.17.2
+  license: MIT
+  url: https://mermaid.js.org
+  use: diagrams in the documentation
+  source: package.json
+  license_file: /licenses/mermaid/LICENSE.txt

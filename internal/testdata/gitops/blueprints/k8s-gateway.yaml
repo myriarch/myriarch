@@ -1,0 +1,83 @@
+# Regional gateway in Kubernetes: accepts OTLP from edge sites and the office
+# and exports to the observability backend. Replaces the gateway export of the base.
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: k8s-gateway
+  description: OTLP gateway in Kubernetes (deployment, supervisor in the pod)
+spec:
+  extends: base
+  parameters:
+    - name: gatewayEndpoint
+      type: string
+      default: unused
+      description: Not used in the gateway (export goes directly to the backend)
+    - name: backendEndpoint
+      type: string
+      required: true
+      description: OTLP/HTTP endpoint of the backend (https://...)
+    - name: storageDir
+      type: string
+      default: /var/lib/otelcol/storage
+    - name: dropHealthChecks
+      type: bool
+      default: true
+  # The gateway only forwards telemetry: the site enrichment and the
+  # gateway export of the base are dropped.
+  remove:
+    - exporters::otlp_grpc/gateway
+    - extensions::file_storage/queue
+    - processors::resource/site
+    - processors::resource_detection
+  config:
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+            max_recv_msg_size_mib: 16
+          http:
+            endpoint: 0.0.0.0:4318
+    exporters:
+      otlp_http/backend:
+        endpoint: "[[ .params.backendEndpoint ]]"
+        headers:
+          authorization: "Bearer ${env:BACKEND_API_TOKEN}"
+        sending_queue:
+          enabled: true
+          queue_size: 5000
+        retry_on_failure:
+          enabled: true
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlp_http/backend]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlp_http/backend]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlp_http/backend]
+  fragments:
+    - name: drop-health-checks
+      when: "[[ .params.dropHealthChecks ]]"
+      config:
+        processors:
+          filter/healthchecks:
+            error_mode: ignore
+            traces:
+              span:
+                - 'attributes["url.path"] == "/health"'
+                - 'attributes["url.path"] == "/healthz"'
+        service:
+          pipelines:
+            traces:
+              processors: [memory_limiter, filter/healthchecks, batch]

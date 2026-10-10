@@ -1,0 +1,20 @@
+# Sample agent for "myrctl validate/render" (not a myriarchd object): gateway, pod otel-gateway-0.
+# In the container host.name is the pod name; k8s.* come from the Downward API (supervisor.yaml of the overlay).
+name: k8s-gateway-0
+attributes:
+  service.name: otelcol-contrib
+  service.version: 0.162.0
+  os.type: linux
+  host.name: otel-gateway-0
+  host.arch: amd64
+  deployment.environment.name: production
+  site.type: k8s-gateway
+  site.id: example-cluster
+  site.name: Example gateway
+  site.country: ZZ
+  site.timezone: UTC
+  k8s.cluster.name: example-cluster
+  k8s.namespace.name: observability
+  k8s.pod.name: otel-gateway-0
+  k8s.node.name: example-cluster-worker-1
+labels: {}

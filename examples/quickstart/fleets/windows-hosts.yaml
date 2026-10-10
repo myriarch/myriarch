@@ -1,0 +1,32 @@
+# Windows hosts. Collector updates go through the myriarch-updater (Windows service "myriarch-updater", LocalSystem).
+# Assignment: os.type=windows AND site.type is edge or datacenter (disjoint from linux-hosts and k8s-gateway).
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: windows-hosts
+  description: Windows hosts, updates through the myriarch-updater
+spec:
+  displayName: Windows hosts
+  priority: 100
+  selector:
+    matchAttributes:
+      os.type: windows
+    matchExpressions:
+      - key: site.type
+        operator: In
+        values: [edge, datacenter]
+  blueprint: windows-host
+  parameters:
+    gatewayEndpoint: gateway.example.com:4317
+  collector:
+    distribution: otelcol-contrib
+    version: 0.162.0
+  update:
+    executor: updater
+    # Frame for the version choice in the UI: the repository defines which versions are selectable.
+    selection:
+      enabled: true
+      versionRange: ">=0.161.0, <=0.162.0"
+  rollout:
+    configPolicy: config-canary
+    versionPolicy: canary-then-all

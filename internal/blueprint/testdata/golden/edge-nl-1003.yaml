@@ -1,0 +1,109 @@
+exporters:
+  otlp_grpc/gateway:
+    endpoint: otel-gw-3.example.internal:4317
+    headers:
+      authorization: Bearer ${env:OTEL_GATEWAY_TOKEN}
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 0s
+    sending_queue:
+      enabled: true
+      storage: file_storage/queue
+    tls:
+      insecure: false
+extensions:
+  file_storage/queue:
+    create_directory: true
+    directory: C:\ProgramData\Myriarch\storage
+  health_check:
+    endpoint: localhost:13133
+processors:
+  batch:
+    send_batch_size: 2048
+    timeout: 5s
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 15
+  resource/site:
+    attributes:
+      - action: upsert
+        key: site.id
+        value: "1003"
+      - action: upsert
+        key: site.type
+        value: edge
+      - action: upsert
+        key: site.country
+        value: NL
+      - action: upsert
+        key: deployment.environment.name
+        value: prod
+  resource_detection:
+    detectors:
+      - env
+      - system
+    system:
+      hostname_sources:
+        - os
+receivers:
+  file_log/app:
+    include:
+      - C:\ProgramData\EdgeApp\logs\*.log
+    start_at: end
+    storage: file_storage/queue
+  host_metrics:
+    collection_interval: 60s
+    scrapers:
+      cpu: {}
+      disk: {}
+      filesystem: {}
+      memory: {}
+      network: {}
+      paging: {}
+  otlp:
+    protocols:
+      grpc:
+        endpoint: localhost:4317
+      http:
+        endpoint: localhost:4318
+service:
+  extensions:
+    - health_check
+    - file_storage/queue
+  pipelines:
+    logs:
+      exporters:
+        - otlp_grpc/gateway
+      processors:
+        - memory_limiter
+        - resource_detection
+        - resource/site
+        - batch
+      receivers:
+        - otlp
+        - file_log/app
+    metrics:
+      exporters:
+        - otlp_grpc/gateway
+      processors:
+        - memory_limiter
+        - resource_detection
+        - resource/site
+        - batch
+      receivers:
+        - otlp
+        - host_metrics
+    traces:
+      exporters:
+        - otlp_grpc/gateway
+      processors:
+        - memory_limiter
+        - resource_detection
+        - resource/site
+        - batch
+      receivers:
+        - otlp
+  telemetry:
+    logs:
+      level: info

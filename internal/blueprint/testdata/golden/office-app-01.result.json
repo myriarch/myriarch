@@ -1,0 +1,46 @@
+{
+  "fleet": "office",
+  "blueprint": "office-linux",
+  "layers": [
+    "base",
+    "base#gateway-auth",
+    "office-linux"
+  ],
+  "parameters": {
+    "environment": "prod",
+    "gatewayAuth": true,
+    "gatewayEndpoint": "otel-gw-1.example.internal:4317",
+    "gatewayInsecure": false,
+    "journaldUnits": [
+      "sshd.service",
+      "nginx.service",
+      "postgresql.service"
+    ],
+    "logLevel": "info",
+    "memoryLimitPercent": 75,
+    "siteCountry": "NL",
+    "siteId": "OFFICE1",
+    "siteType": "office",
+    "storageDir": "/var/lib/otelcol/storage",
+    "syslogPaths": [
+      "/var/log/syslog",
+      "/var/log/messages"
+    ]
+  },
+  "parameterSources": {
+    "environment": "default",
+    "gatewayAuth": "default",
+    "gatewayEndpoint": "fleet",
+    "gatewayInsecure": "default",
+    "journaldUnits": "fleet",
+    "logLevel": "default",
+    "memoryLimitPercent": "default",
+    "siteCountry": "attribute",
+    "siteId": "attribute",
+    "siteType": "attribute",
+    "storageDir": "default",
+    "syslogPaths": "default"
+  },
+  "hash": "eaf298a70f128e43ec9e0b5e72a26b096a36c5ed6c2cebb4412dbece28b7ee01",
+  "issues": []
+}

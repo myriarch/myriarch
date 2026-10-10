@@ -1,0 +1,93 @@
+/*
+ * Copyright The Myriarch Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+// Project styles, loaded last by Docsy. The landing page and the reference pages have their own files.
+@import 'landing';
+@import 'reference';
+
+// ---- navbar logo ----------------------------------------------------------------------------------------
+// The wordmark is the supplied SVG (assets/brand), never live text: the CSS background switches between the light and the dark file.
+// Minimum width 120 px, clear space 1u (a quarter of the mark's height) on every side. The title stays in the DOM for screen readers.
+.td-navbar .navbar-brand {
+  padding-block: 0.625rem;
+  padding-inline: 0.625rem;
+
+  &__logo {
+    display: block;
+    flex: none;
+    width: 8.5rem;
+    height: 2.125rem;
+    background: url('/brand/myriarch-horizontal.svg') no-repeat left center / contain;
+  }
+
+  &__name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+[data-bs-theme='dark'] .td-navbar .navbar-brand__logo {
+  background-image: url('/brand/myriarch-horizontal-dark.svg');
+}
+
+// ---- navbar at phone width -----------------------------------------------------------------------------
+// Docsy keeps the main menu on one scrolling row below md, so the light/dark switch sat behind the external entries (Releases, GitHub)
+// and was out of sight. Those two entries open another site and are repeated in the footer, so below md they are hidden, which leaves
+// the pages of the site and the switch in view. Docs pages show the search box in the sidebar at this width; the 404 page offers it too.
+@include media-breakpoint-down(md) {
+  .td-navbar .navbar-nav .nav-item:has(> .nav-link[target='_blank']) {
+    display: none;
+  }
+}
+
+// ---- dark mode: Orchid and Mist on Night ----------------------------------------------------------------
+[data-bs-theme='dark'] {
+  --bs-primary-text-emphasis: #{$myr-orchid};
+  --td-pre-bg: #1e293b;
+}
+
+// ---- interim home page ----------------------------------------------------------------------------------
+// The placeholder home page (params.body_class: interim-home) is plain text under the fixed navbar. The landing page replaces it
+// and does not set the class.
+.interim-home .td-main {
+  max-width: 52rem;
+  margin-inline: auto;
+  padding: 7rem 1rem 3rem;
+}
+
+// ---- footer ---------------------------------------------------------------------------------------------
+// Night with Mist text and Orchid links in both modes (the brand pairing for dark backgrounds).
+.td-footer {
+  background-color: $myr-night;
+  color: $myr-mist;
+
+  a {
+    color: $myr-orchid;
+  }
+
+  .td-footer__trademark {
+    display: block;
+    margin-top: 0.5rem;
+    font-size: 0.8125rem;
+    color: inherit;
+    opacity: 0.8;
+  }
+
+  .td-footer__legal a {
+    margin-inline-start: 0.25rem;
+  }
+}
+
+// ---- placeholders and generated pages ----------------------------------------------------------------------
+.td-page-meta__generated {
+  color: var(--bs-secondary-color);
+}

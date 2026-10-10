@@ -1,0 +1,11 @@
+name: office-app-01
+attributes:
+  service.name: otelcol-contrib
+  service.version: 0.162.0
+  os.type: linux
+  host.name: office-app-01.example.internal
+  host.arch: amd64
+  site.type: office
+  site.id: OFFICE1
+  site.country: NL
+  site.timezone: Europe/Amsterdam

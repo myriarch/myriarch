@@ -1,0 +1,20 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /* Table of the third-party components of the website (data/third_party.yaml), used by the shortcode third-party-table. */ -}}
+<table>
+  <thead>
+    <tr><th>Component</th><th>Version</th><th>License</th><th>Used for</th></tr>
+  </thead>
+  <tbody>
+    {{ range hugo.Data.third_party -}}
+    <tr>
+      <td><a href="{{ .url }}" rel="noopener">{{ .name }}</a></td>
+      <td>{{ .version }}</td>
+      <td>{{ .license }}{{ with .license_file }} (<a href="{{ . | relURL }}">text</a>){{ end }}</td>
+      <td>{{ .use }}</td>
+    </tr>
+    {{ end -}}
+  </tbody>
+</table>

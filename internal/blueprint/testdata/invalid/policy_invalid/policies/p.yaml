@@ -1,0 +1,7 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: RolloutPolicy
+metadata:
+  name: p
+spec:
+  onFailure: explode
+  maxConcurrent: -1

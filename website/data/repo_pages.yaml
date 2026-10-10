@@ -1,0 +1,71 @@
+# Repository Markdown files that the website renders through content adapters (website/content/**/_content.gotmpl) instead of copying
+# them. Each section is a list: source (path in the repository, mounted by config/_default/module.yaml as assets/repo/<source>),
+# slug (the last element of the URL), title, weight, description and an optional linkTitle (the label in the sidebar). The leading H1 of
+# the file is dropped (the title replaces it); everything else is rendered as it is, relative links are resolved by the link render hook.
+project:
+  - source: ROADMAP.md
+    slug: roadmap
+    title: Roadmap
+    weight: 10
+    description: What myriarch contains in its first release, what comes next and what is deliberately not planned.
+  - source: CHANGELOG.md
+    slug: changelog
+    title: Release notes
+    weight: 20
+    description: Notable changes of every release, in the Keep a Changelog format.
+  - source: CONTRIBUTING.md
+    slug: contributing
+    title: Contributing
+    weight: 30
+    description: How to report problems, propose changes and send contributions.
+  - source: GOVERNANCE.md
+    slug: governance
+    title: Governance
+    weight: 40
+    description: How decisions are made in the myriarch project and who makes them.
+  - source: SECURITY.md
+    slug: security
+    title: Security policy
+    weight: 50
+    description: How to report a vulnerability privately and which versions receive fixes.
+  - source: CODE_OF_CONDUCT.md
+    slug: code-of-conduct
+    title: Code of conduct
+    weight: 60
+    description: The standards of behavior in the myriarch community.
+  - source: MAINTAINERS.md
+    slug: maintainers
+    title: Maintainers
+    weight: 70
+    description: The people who maintain the project.
+  - source: ADOPTERS.md
+    slug: adopters
+    title: Adopters
+    weight: 80
+    description: Organizations that use myriarch, and how to add yours.
+  - source: CONTRIBUTOR_LADDER.md
+    slug: contributor-ladder
+    title: Contributor ladder
+    weight: 90
+    description: The roles in the project and how a contributor moves between them.
+  - source: assets/brand/README.md
+    slug: brand
+    title: Brand and trademark use
+    weight: 100
+    description: The mark, colors, clear space and the rules for using the name and logo of myriarch.
+
+# Pages below /docs/reference/ (website/content/docs/reference/_content.gotmpl).
+reference:
+  - source: deploy/helm/myriarch/README.md
+    slug: helm-chart
+    title: Helm chart and values
+    weight: 40
+    description: Installation, profiles, network policy, storage and the configuration values of the myriarch Helm chart.
+
+# Pages below /docs/tasks/ (website/content/docs/tasks/_content.gotmpl).
+tasks:
+  - source: gitops-template/README.md
+    slug: gitops-repository-template
+    title: Set up a GitOps repository
+    weight: 15
+    description: Start your own GitOps repository from the generic template, with fleets, blueprints and rollout policies.

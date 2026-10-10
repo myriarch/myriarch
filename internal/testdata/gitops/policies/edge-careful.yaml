@@ -1,0 +1,37 @@
+# Careful rollouts for edge nodes: pilot sites first, approval before the broad
+# rollout, only outside business hours (local time zone of the site).
+apiVersion: myriarch.dev/v1alpha1
+kind: RolloutPolicy
+metadata:
+  name: edge-careful
+  description: Pilot sites -> approval -> 10 % -> 50 % -> all; nights and Sundays only
+spec:
+  waves:
+    - name: pilot
+      selector:
+        matchAttributes:
+          labels.pilot: "true"
+    - name: early
+      percent: 10
+      requireApproval: true
+    - name: half
+      percent: 50
+    - name: all
+      percent: 100
+  maxConcurrent: 50
+  healthWait: 10m
+  applyTimeout: 30m
+  offlineGracePeriod: 2h
+  failureThreshold:
+    maxFailed: 3
+    maxFailedPercent: 5
+  onFailure: pause
+  timezoneAttribute: site.timezone
+  defaultTimezone: Europe/Amsterdam
+  maintenanceWindows:
+    - days: [Mon, Tue, Wed, Thu, Fri, Sat]
+      start: "21:30"
+      end: "06:30"
+    - days: [Sun]
+      start: "00:00"
+      end: "00:00"

@@ -1,0 +1,30 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Image render hook (ADR-0031). A relative image is resolved to a page resource or a global resource of the site, never to a GitHub
+  raw URL: that would be a request to a third party when the page loads (privacy rule of the website). An image that cannot be
+  resolved fails the build. Absolute URLs (https://...) are refused for the same reason, data: URIs stay (the CSP allows them).
+*/ -}}
+{{ $dest := .Destination -}}
+{{ $src := partial "repo/source-path.html" .Page -}}
+{{ $where := $src | default .Page.Path -}}
+{{ $u := urls.Parse $dest -}}
+{{ if or $u.Scheme (hasPrefix $dest "//") -}}
+  {{ if eq $u.Scheme "data" -}}
+    <img src="{{ $dest | safeURL }}" alt="{{ .PlainText }}"{{ with .Title }} title="{{ . }}"{{ end }}>
+  {{- else -}}
+    {{ errorf "%s: image %q is not self-hosted; the website makes no third-party requests" $where $dest -}}
+  {{- end -}}
+{{ else -}}
+  {{ $img := "" -}}
+  {{ with .PageInner.Resources.Get $u.Path }}{{ $img = . }}{{ end -}}
+  {{ if not $img }}{{ with resources.Get (strings.TrimPrefix "/" $u.Path) }}{{ $img = . }}{{ end }}{{ end -}}
+  {{ if not $img }}{{ with resources.Get (path.Join "images" (path.Base $u.Path)) }}{{ $img = . }}{{ end }}{{ end -}}
+  {{ with $img -}}
+    <img src="{{ .RelPermalink }}" alt="{{ $.PlainText }}"{{ with $.Title }} title="{{ . }}"{{ end }} loading="lazy">
+  {{- else -}}
+    {{ errorf "%s: image %q is not a resource of the page or of the site (assets/ or the page bundle)" $where $dest -}}
+  {{- end -}}
+{{ end -}}{{- /* no trailing whitespace: the hook is inline */ -}}

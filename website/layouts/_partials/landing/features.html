@@ -1,0 +1,24 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /* The seven feature cards (data/landing.yaml, key features). Every card links to a page of the site; a missing page fails the build. */ -}}
+{{ $features := hugo.Data.landing.features -}}
+<section class="landing-section" id="features" aria-labelledby="landing-features-title">
+  <div class="landing-container">
+    <h2 id="landing-features-title" class="landing-h2">{{ $features.title }}</h2>
+    <p class="landing-lead">{{ $features.lead }}</p>
+    <ul class="landing-cards">
+      {{ range $features.items -}}
+        {{ $page := site.GetPage (path.Clean (strings.TrimSuffix ".md" .link)) -}}
+        {{ if not $page }}{{ errorf "landing: the link %q of the card %q names no page of the site" .link .title }}{{ end -}}
+        <li class="landing-card">
+          <i class="landing-card__icon {{ .icon }}" aria-hidden="true"></i>
+          <h3 class="landing-card__title">{{ .title }}</h3>
+          <p class="landing-card__text">{{ .text }}</p>
+          <a class="landing-card__link" href="{{ $page.RelPermalink }}">{{ .link_label }} <span aria-hidden="true">&rarr;</span></a>
+        </li>
+      {{ end -}}
+    </ul>
+  </div>
+</section>

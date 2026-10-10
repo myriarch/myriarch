@@ -1,0 +1,11 @@
+# Optional component: makes the OTLP/gRPC port 4317 of the gateway reachable from outside the cluster so that host
+# collectors (Linux VMs, Windows hosts) can send their data to the gateway. This example has no TLS on that port
+# (installer parameter gatewayInsecure) and no backend: the gateway exports with the debug exporter. Without this
+# component fleet management stays fully testable; only the data path to the gateway is missing.
+#
+# Enable it: uncomment the "components:" block in ../../kustomization.yaml.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - service.yaml
+  - networkpolicy.yaml

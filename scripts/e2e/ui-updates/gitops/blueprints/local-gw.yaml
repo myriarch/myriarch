@@ -1,0 +1,36 @@
+# Blueprint of the local E2E test (scripts/e2e-ui-updates.sh): a real otelcol-contrib on this machine.
+# All ports are in the range 2313x/2431x so that the test does not disturb anything on the developer machine.
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: local-gw
+  description: local test collector (OTLP, debug exporter, health_check on 127.0.0.1:23133)
+spec:
+  config:
+    extensions:
+      # queried by the myriarch-updater as the health check after the binary swap (collector.healthUrl)
+      health_check:
+        endpoint: 127.0.0.1:23133
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 127.0.0.1:24317
+          http:
+            endpoint: 127.0.0.1:24318
+    processors:
+      batch:
+        timeout: 5s
+    exporters:
+      debug:
+        verbosity: basic
+    service:
+      extensions: [health_check]
+      telemetry:
+        metrics:
+          level: none      # no Prometheus endpoint (port 8888)
+      pipelines:
+        logs:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug]

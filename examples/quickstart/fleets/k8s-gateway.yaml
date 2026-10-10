@@ -1,0 +1,25 @@
+# Gateway collectors in a Kubernetes cluster (selected by site.type=cloud).
+# Executor "none": myriarchd manages only the configuration. The version changes through the container image;
+# collector.version must match it and serves display and outdated detection. No version rollouts are created.
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: k8s-gateway
+  description: Gateway collectors in Kubernetes, version through the image
+spec:
+  displayName: Kubernetes gateway
+  priority: 100
+  selector:
+    matchAttributes:
+      site.type: cloud
+  blueprint: k8s-gateway
+  parameters:
+    # backendEndpoint stays empty: without a backend the gateway only uses the debug exporter
+    debugVerbosity: basic
+  collector:
+    distribution: otelcol-contrib
+    version: 0.162.0
+  update:
+    executor: none
+  rollout:
+    configPolicy: config-canary

@@ -1,0 +1,24 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Returns the repository path of the file that a page was written in (docs/concepts/gitops.md, website/content/legal/privacy.md, ROADMAP.md),
+  or "" when there is none. Adapter pages and pages that represent another file carry params.sourcePath; every other page comes from a
+  file whose absolute name starts with the repository root (the parent of Hugo's working directory, which is website/). The absolute
+  path is only used to compute the relative one and is never printed.
+  Call: partial "repo/source-path.html" $page
+*/ -}}
+{{ $page := . -}}
+{{ $path := "" -}}
+{{ with $page.Params.sourcePath -}}
+  {{ $path = . -}}
+{{ else -}}
+  {{ with $page.File -}}
+    {{ $root := printf "%s/" (path.Dir hugo.WorkingDir) -}}
+    {{ if hasPrefix .Filename $root -}}
+      {{ $path = strings.TrimPrefix $root .Filename -}}
+    {{ end -}}
+  {{ end -}}
+{{ end -}}
+{{ return $path -}}

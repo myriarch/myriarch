@@ -1,0 +1,23 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /* Community links: repository, releases and the project pages (data/landing.yaml, key community). No third-party logos (ADR-0016). */ -}}
+{{ $c := hugo.Data.landing.community -}}
+<section class="landing-section" id="community" aria-labelledby="landing-community-title">
+  <div class="landing-container">
+    <h2 id="landing-community-title" class="landing-h2">{{ $c.title }}</h2>
+    <p class="landing-lead">{{ $c.lead }}</p>
+    <ul class="landing-links">
+      {{ range $c.items -}}
+        {{ $href := .link -}}
+        {{ $external := not (hasPrefix $href "/") -}}
+        {{ if not $external -}}
+          {{ $page := site.GetPage (path.Clean (strings.TrimSuffix ".md" $href)) -}}
+          {{ with $page }}{{ $href = .RelPermalink }}{{ else }}{{ errorf "landing: the link %q of the community section names no page of the site" $href }}{{ end -}}
+        {{ end -}}
+        <li><a class="landing-link" href="{{ $href }}"{{ if $external }} rel="noopener"{{ end }}><i class="{{ .icon }}" aria-hidden="true"></i> {{ .label }}</a></li>
+      {{ end -}}
+    </ul>
+  </div>
+</section>

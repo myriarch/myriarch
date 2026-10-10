@@ -1,0 +1,598 @@
+/*
+ * Copyright The Myriarch Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+// Styles of the landing page (layouts/home.html, layouts/_partials/landing/*).
+//
+// Brand rules (assets/brand/README.md): Tyrian with Plum ink on light backgrounds, Orchid with Mist on dark ones (Night). Orchid never
+// appears on a light background and Tyrian never as text on a dark one. Contrast of every text pairing (WCAG 2.2, computed):
+//   light  Plum ink on white 18.0, on Blush 16.9; Mauve on white 8.5, on Blush 7.97; Tyrian on white 5.59, on Blush 5.23;
+//          white on Tyrian 5.59, white on the hover colour #8a2569 8.2
+//   dark   Mist on Night 16.3, on #1e293b 13.4; #cbd5e1 on Night 12.0, on #1e293b 9.9; Orchid on Night 7.98, on #1e293b 6.5;
+//          Night on Orchid 7.98, on the hover colour #f8b9df 11.0
+// No web fonts (system stack, see _variables_project.scss). Motion only when the visitor has not asked for less; the animation of
+// the mark ends on the unchanged mark.
+
+// Blush, the background of the brand's social images (assets/brand/README.md); it has no variable in _variables_project.scss.
+$landing-blush: #fbf6f9;
+
+:root {
+  --landing-surface: #{$landing-blush};
+  --landing-card: #fff;
+  --landing-line: #e3d2dd;
+  --landing-text: #{$myr-plum};
+  --landing-muted: #{$myr-mauve};
+  --landing-accent: #{$myr-tyrian};
+  --landing-accent-hover: #8a2569;
+  --landing-accent-tint: rgba(179, 51, 138, 0.08);
+  --landing-on-accent: #fff;
+  --landing-hero-from: #{$landing-blush};
+  --landing-hero-to: #fff;
+  // Diagram (inlined SVG, assets/images/architecture.svg)
+  --arch-text: #{$myr-plum};
+  --arch-muted: #{$myr-mauve};
+  --arch-box: #fff;
+  --arch-core: #f6ebf2;
+  --arch-line: #{$myr-tyrian};
+  --arch-soft: #9a7a8e;
+}
+
+[data-bs-theme='dark'] {
+  --landing-surface: #121b2f;
+  --landing-card: #1e293b;
+  --landing-line: #334155;
+  --landing-text: #{$myr-mist};
+  --landing-muted: #cbd5e1;
+  --landing-accent: #{$myr-orchid};
+  --landing-accent-hover: #f8b9df;
+  --landing-accent-tint: rgba(242, 140, 203, 0.12);
+  --landing-on-accent: #{$myr-night};
+  --landing-hero-from: #172036;
+  --landing-hero-to: #{$myr-night};
+  --arch-text: #{$myr-mist};
+  --arch-muted: #cbd5e1;
+  --arch-box: #1e293b;
+  --arch-core: #18233b;
+  --arch-line: #{$myr-orchid};
+  --arch-soft: #64748b;
+}
+
+// ---- page frame ------------------------------------------------------------------------------------------
+// Docsy pads <main> for the fixed navbar and gives every <section> its block padding; the landing page sets its own.
+.td-home {
+  .td-outer {
+    padding-inline: 0;
+  }
+
+  .td-main main {
+    padding: 0;
+  }
+
+  // The footer is a Bootstrap .row, whose negative margins compensated the padding of .td-outer that is gone.
+  .td-footer {
+    margin-inline: 0;
+  }
+
+  .td-default main section.landing-hero,
+  .td-default main section.landing-section {
+    padding-inline: 0;
+  }
+}
+
+.landing-container {
+  width: 100%;
+  max-width: 72rem;
+  margin-inline: auto;
+  padding-inline: 1rem;
+}
+
+.td-home .td-default main section.landing-section {
+  padding-block: 3.5rem;
+  color: var(--landing-text);
+  background: var(--bs-body-bg);
+
+  @include media-breakpoint-up(md) {
+    padding-block: 5rem;
+  }
+
+  &--alt {
+    background: var(--landing-surface);
+  }
+}
+
+.landing-h2 {
+  margin: 0 0 0.75rem;
+  font-size: clamp(1.6rem, 3.2vw, 2.1rem);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--landing-text);
+}
+
+.landing-lead {
+  max-width: 46rem;
+  margin: 0 0 2rem;
+  font-size: 1.125rem;
+  line-height: 1.55;
+  color: var(--landing-muted);
+}
+
+.landing-more {
+  margin: 1.5rem 0 0;
+  font-weight: 600;
+}
+
+.landing-note {
+  margin: 1.5rem 0 0;
+  font-size: 0.875rem;
+  color: var(--landing-muted);
+}
+
+.landing-section a:not(.landing-btn),
+.landing-hero a:not(.landing-btn) {
+  color: var(--landing-accent);
+}
+
+.landing-section a:focus-visible,
+.landing-hero a:focus-visible,
+.landing-diagram__scroll:focus-visible {
+  outline: 3px solid var(--landing-accent);
+  outline-offset: 3px;
+  border-radius: 0.25rem;
+}
+
+// ---- hero ------------------------------------------------------------------------------------------------
+.td-home .td-default main section.landing-hero {
+  // 4rem is the height of the fixed navbar.
+  padding-block: 7rem 3.5rem;
+  color: var(--landing-text);
+  background: linear-gradient(180deg, var(--landing-hero-from) 0%, var(--landing-hero-to) 100%);
+
+  @include media-breakpoint-up(md) {
+    padding-block: 8.5rem 5.5rem;
+  }
+}
+
+.landing-hero__grid {
+  display: grid;
+  gap: 2.5rem;
+  align-items: center;
+
+  @include media-breakpoint-up(lg) {
+    grid-template-columns: minmax(0, 1fr) 15rem;
+    gap: 4rem;
+  }
+}
+
+.landing-chip {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0 0 1.25rem;
+  font-size: 0.9375rem;
+  color: var(--landing-muted);
+
+  &__level {
+    padding: 0.2rem 0.7rem;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--landing-on-accent);
+    background: var(--landing-accent);
+    border-radius: 999px;
+  }
+}
+
+.landing-hero__title {
+  max-width: 24ch;
+  margin: 0 0 1rem;
+  font-size: clamp(1.9rem, 4.6vw, 3rem);
+  font-weight: 750;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  color: var(--landing-text);
+}
+
+.landing-hero__subline {
+  max-width: 38rem;
+  margin: 0 0 1.75rem;
+  font-size: clamp(1.05rem, 2vw, 1.3rem);
+  line-height: 1.5;
+  color: var(--landing-muted);
+}
+
+.landing-hero__ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.landing-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.55rem 1.25rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--landing-accent);
+  text-decoration: none;
+  background: transparent;
+  border: 2px solid var(--landing-accent);
+  border-radius: 0.5rem;
+
+  &:hover {
+    color: var(--landing-accent);
+    background: var(--landing-accent-tint);
+  }
+
+  &:focus-visible {
+    outline: 3px solid var(--landing-accent);
+    outline-offset: 3px;
+  }
+
+  &--primary {
+    color: var(--landing-on-accent);
+    background: var(--landing-accent);
+
+    &:hover {
+      color: var(--landing-on-accent);
+      background: var(--landing-accent-hover);
+      border-color: var(--landing-accent-hover);
+    }
+  }
+}
+
+// The mark: the inline SVG of assets/brand/myriarch-icon-parts.svg (layouts/_partials/landing/hero.html), hidden on narrow screens.
+// Shown at 15 rem; the clear space of 1u is far exceeded. Its parts take the colour of the element (currentColor), so the mark is
+// Tyrian on the light page and Orchid on the dark one, and follows the manual switch of the theme.
+//
+// Motion (assets/brand/README.md, "Motion"): the mark plays the rollout once and ends on the unchanged mark. The control plane (the
+// ring) grows first. Then the fleet connects: every collector appears as a small seed dot, because it is present but not yet on the
+// new revision. Then the rollout updates the fleet row by row: the canary (2 dots) grows to full size, then the 3-dot wave, then the
+// 4-dot wave, which is the whole fleet. Only the size of the parts moves (transform: scale): no transparency, no second colour, no
+// rotation and no overshoot (an overshoot would close the gaps of 3 units), so every frame obeys the brand rules, not only the last.
+// The static mark is the base style; the animation is added only for visitors who have not asked for less motion, so with reduced
+// motion, in print and wherever CSS animations are unsupported the unchanged mark shows. The rows share one clock of 2.2 s; the
+// dots of a row start 60 ms apart from left to right.
+.landing-hero__mark {
+  display: none;
+  width: 15rem;
+  height: auto;
+  color: var(--landing-accent);
+
+  @include media-breakpoint-up(lg) {
+    display: block;
+  }
+
+  .ring,
+  .dot {
+    fill: currentColor;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes myr-ring {
+    from {
+      transform: scale(0);
+    }
+
+    to {
+      transform: none;
+    }
+  }
+
+  // Row 1, the canary: seeds at 25 %, full size from 50 % of 2.2 s.
+  @keyframes myr-canary {
+    0%,
+    16% {
+      transform: scale(0);
+    }
+
+    25%,
+    34% {
+      transform: scale(0.3);
+    }
+
+    50%,
+    100% {
+      transform: none;
+    }
+  }
+
+  // Row 2, the first wave: full size from 75 %.
+  @keyframes myr-wave1 {
+    0%,
+    16% {
+      transform: scale(0);
+    }
+
+    25%,
+    59% {
+      transform: scale(0.3);
+    }
+
+    75%,
+    100% {
+      transform: none;
+    }
+  }
+
+  // Row 3, the full fleet: full size at 100 %.
+  @keyframes myr-wave2 {
+    0%,
+    16% {
+      transform: scale(0);
+    }
+
+    25%,
+    84% {
+      transform: scale(0.3);
+    }
+
+    100% {
+      transform: none;
+    }
+  }
+
+  .landing-hero__mark {
+    .ring,
+    .dot {
+      transform-box: fill-box;
+      transform-origin: 50% 50%;
+      animation-timing-function: cubic-bezier(0.2, 0.7, 0.2, 1);
+      animation-iteration-count: 1;
+      animation-fill-mode: both;
+    }
+
+    .ring {
+      animation-name: myr-ring;
+      animation-duration: 0.45s;
+    }
+
+    .dot {
+      animation-duration: 2.2s;
+    }
+
+    .r1 {
+      animation-name: myr-canary;
+    }
+
+    .r2 {
+      animation-name: myr-wave1;
+    }
+
+    .r3 {
+      animation-name: myr-wave2;
+    }
+
+    .c1 {
+      animation-delay: 0.06s;
+    }
+
+    .c2 {
+      animation-delay: 0.12s;
+    }
+
+    .c3 {
+      animation-delay: 0.18s;
+    }
+  }
+}
+
+// ---- feature cards ---------------------------------------------------------------------------------------
+.landing-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17.5rem), 1fr));
+  gap: 1.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landing-card {
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem;
+  background: var(--landing-card);
+  border: 1px solid var(--landing-line);
+  border-radius: 0.75rem;
+
+  &__icon {
+    margin-bottom: 0.9rem;
+    font-size: 1.5rem;
+    color: var(--landing-accent);
+  }
+
+  &__title {
+    margin: 0 0 0.5rem;
+    font-size: 1.15rem;
+    font-weight: 650;
+    line-height: 1.3;
+    color: var(--landing-text);
+  }
+
+  &__text {
+    flex: 1;
+    margin: 0 0 1rem;
+    line-height: 1.55;
+    color: var(--landing-muted);
+  }
+
+  &__link {
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+}
+
+// ---- architecture ----------------------------------------------------------------------------------------
+.landing-diagram {
+  margin: 0;
+
+  &__scroll {
+    padding: 1rem;
+    overflow-x: auto;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--landing-line);
+    border-radius: 0.75rem;
+
+    svg {
+      display: block;
+      // Below this width the 15-unit text would drop under 12 px: the figure scrolls instead of shrinking.
+      min-width: 52rem;
+      width: 100%;
+      height: auto;
+    }
+  }
+
+  &__caption {
+    max-width: 52rem;
+    margin-top: 1rem;
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    color: var(--landing-muted);
+  }
+}
+
+// ---- screenshots -----------------------------------------------------------------------------------------
+.landing-shots {
+  display: grid;
+  gap: 2rem 1.5rem;
+
+  @include media-breakpoint-up(md) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.landing-shot {
+  margin: 0;
+
+  &__img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--landing-line);
+    border-radius: 0.5rem;
+
+    &--dark {
+      display: none;
+    }
+  }
+
+  &__caption {
+    margin-top: 0.75rem;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    color: var(--landing-muted);
+
+    strong {
+      color: var(--landing-text);
+    }
+  }
+}
+
+[data-bs-theme='dark'] .landing-shot__img {
+  &--light {
+    display: none;
+  }
+
+  &--dark {
+    display: block;
+  }
+}
+
+// ---- quickstart ------------------------------------------------------------------------------------------
+.landing-quickstart {
+  display: grid;
+  gap: 2rem;
+  align-items: start;
+
+  @include media-breakpoint-up(lg) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+    gap: 3rem;
+  }
+
+  p {
+    line-height: 1.55;
+  }
+}
+
+.landing-code {
+  min-width: 0;
+
+  .highlight {
+    margin: 0;
+  }
+
+  pre {
+    margin: 0;
+    padding: 1.1rem 1.25rem;
+    overflow-x: auto;
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: var(--landing-text);
+    background: var(--landing-card);
+    border: 1px solid var(--landing-line);
+    border-radius: 0.75rem;
+  }
+
+  // One colour scheme for the command block instead of the syntax colours of the theme (they are tuned for other backgrounds).
+  .chroma span {
+    color: inherit;
+    font-weight: inherit;
+  }
+
+  .chroma .c,
+  .chroma .c1,
+  .chroma .cp {
+    color: var(--landing-muted);
+  }
+}
+
+.landing-warning {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin: 1.25rem 0 0;
+  padding: 0.85rem 1rem;
+  background: var(--landing-card);
+  border: 1px solid var(--landing-line);
+  border-left: 4px solid var(--landing-accent);
+  border-radius: 0.5rem;
+
+  i {
+    margin-top: 0.2rem;
+    color: var(--landing-accent);
+  }
+}
+
+// ---- community -------------------------------------------------------------------------------------------
+.landing-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landing-link {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+  text-decoration: none;
+  background: var(--landing-card);
+  border: 1px solid var(--landing-line);
+  border-radius: 0.5rem;
+
+  &:hover {
+    background: var(--landing-accent-tint);
+  }
+}

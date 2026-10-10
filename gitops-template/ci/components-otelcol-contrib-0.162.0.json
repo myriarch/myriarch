@@ -1,0 +1,742 @@
+{
+  "collectorVersion": "0.162.0",
+  "components": {
+    "connectors": {
+      "count": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector v0.162.0"
+      },
+      "datadog": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/connector/datadogconnector v0.162.0"
+      },
+      "exceptions": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/connector/exceptionsconnector v0.162.0"
+      },
+      "failover": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/connector/failoverconnector v0.162.0"
+      },
+      "forward": {
+        "module": "go.opentelemetry.io/collector/connector/forwardconnector v0.162.0"
+      },
+      "grafana_cloud": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/connector/grafanacloudconnector v0.162.0"
+      },
+      "otlp_json": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/connector/otlpjsonconnector v0.162.0"
+      },
+      "round_robin": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/connector/roundrobinconnector v0.162.0"
+      },
+      "routing": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/connector/routingconnector v0.162.0"
+      },
+      "service_graph": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/connector/servicegraphconnector v0.162.0"
+      },
+      "signal_to_metrics": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/connector/signaltometricsconnector v0.162.0"
+      },
+      "span_metrics": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/connector/spanmetricsconnector v0.162.0"
+      },
+      "sum": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/connector/sumconnector v0.162.0"
+      }
+    },
+    "exporters": {
+      "alibabacloud_logservice": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/alibabacloudlogserviceexporter v0.162.0"
+      },
+      "awscloudwatchlogs": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter v0.162.0"
+      },
+      "awsemf": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awsemfexporter v0.162.0"
+      },
+      "awskinesis": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awskinesisexporter v0.162.0"
+      },
+      "awss3": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awss3exporter v0.162.0"
+      },
+      "awsxray": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awsxrayexporter v0.162.0"
+      },
+      "azure_blob": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/azureblobexporter v0.162.0"
+      },
+      "azure_monitor": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/azuremonitorexporter v0.162.0"
+      },
+      "azuredataexplorer": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/azuredataexplorerexporter v0.162.0"
+      },
+      "bmc_helix": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/bmchelixexporter v0.162.0"
+      },
+      "cassandra": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/cassandraexporter v0.162.0"
+      },
+      "clickhouse": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/clickhouseexporter v0.162.0"
+      },
+      "coralogix": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/coralogixexporter v0.162.0"
+      },
+      "datadog": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/datadogexporter v0.162.0"
+      },
+      "dataset": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/datasetexporter v0.162.0"
+      },
+      "debug": {
+        "module": "go.opentelemetry.io/collector/exporter/debugexporter v0.162.0"
+      },
+      "doris": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/dorisexporter v0.162.0"
+      },
+      "elasticsearch": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/elasticsearchexporter v0.162.0"
+      },
+      "faro": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/faroexporter v0.162.0"
+      },
+      "file": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/fileexporter v0.162.0"
+      },
+      "google_cloud_storage": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/googlecloudstorageexporter v0.162.0"
+      },
+      "googlecloud": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/googlecloudexporter v0.162.0"
+      },
+      "googlecloudpubsub": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/googlecloudpubsubexporter v0.162.0"
+      },
+      "googlemanagedprometheus": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/googlemanagedprometheusexporter v0.162.0"
+      },
+      "honeycomb_marker": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/honeycombmarkerexporter v0.162.0"
+      },
+      "influxdb": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/influxdbexporter v0.162.0"
+      },
+      "kafka": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter v0.162.0"
+      },
+      "load_balancing": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/loadbalancingexporter v0.162.0"
+      },
+      "logicmonitor": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/logicmonitorexporter v0.162.0"
+      },
+      "logzio": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/logzioexporter v0.162.0"
+      },
+      "nop": {
+        "module": "go.opentelemetry.io/collector/exporter/nopexporter v0.162.0"
+      },
+      "opensearch": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter v0.162.0"
+      },
+      "otelarrow": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/otelarrowexporter v0.162.0"
+      },
+      "otlp_grpc": {
+        "module": "go.opentelemetry.io/collector/exporter/otlpexporter v0.162.0"
+      },
+      "otlp_http": {
+        "module": "go.opentelemetry.io/collector/exporter/otlphttpexporter v0.162.0"
+      },
+      "prometheus": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusexporter v0.162.0"
+      },
+      "prometheus_remote_write": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusremotewriteexporter v0.162.0"
+      },
+      "pulsar": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/pulsarexporter v0.162.0"
+      },
+      "rabbitmq": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/rabbitmqexporter v0.162.0"
+      },
+      "sentry": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/sentryexporter v0.162.0"
+      },
+      "signalfx": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter v0.162.0"
+      },
+      "splunk_hec": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/splunkhecexporter v0.162.0"
+      },
+      "stef": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/stefexporter v0.162.0"
+      },
+      "sumologic": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/sumologicexporter v0.162.0"
+      },
+      "syslog": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/syslogexporter v0.162.0"
+      },
+      "tencentcloud_logservice": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/tencentcloudlogserviceexporter v0.162.0"
+      },
+      "tinybird": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/tinybirdexporter v0.162.0"
+      },
+      "zipkin": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/zipkinexporter v0.162.0"
+      }
+    },
+    "extensions": {
+      "ack": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/ackextension v0.162.0"
+      },
+      "asapclient": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/asapauthextension v0.162.0"
+      },
+      "aws_iam_db_auth": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/dbauth/awsiamdbauthextension v0.162.0"
+      },
+      "aws_logs_encoding": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/awslogsencodingextension v0.162.0"
+      },
+      "awscloudwatchmetricstreams_encoding": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/awscloudwatchmetricstreamsencodingextension v0.162.0"
+      },
+      "awsproxy": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/awsproxy v0.162.0"
+      },
+      "azure_auth": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/azureauthextension v0.162.0"
+      },
+      "azure_encoding": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/azureencodingextension v0.162.0"
+      },
+      "basicauth": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/basicauthextension v0.162.0"
+      },
+      "bearertokenauth": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/bearertokenauthextension v0.162.0"
+      },
+      "cgroup_runtime": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/cgroupruntimeextension v0.162.0"
+      },
+      "datadog": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/datadogextension v0.162.0"
+      },
+      "db_storage": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/dbstorage v0.162.0"
+      },
+      "docker_observer": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/observer/dockerobserver v0.162.0"
+      },
+      "ecs_observer": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/observer/ecsobserver v0.162.0"
+      },
+      "file_storage": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/filestorage v0.162.0"
+      },
+      "google_cloud_logentry_encoding": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/googlecloudlogentryencodingextension v0.162.0"
+      },
+      "googleclientauth": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/googleclientauthextension v0.162.0"
+      },
+      "headers_setter": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/headerssetterextension v0.162.0"
+      },
+      "health_check": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.162.0"
+      },
+      "host_observer": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/observer/hostobserver v0.162.0"
+      },
+      "http_forwarder": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/httpforwarderextension v0.162.0"
+      },
+      "jaeger_encoding": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/jaegerencodingextension v0.162.0"
+      },
+      "jaegerremotesampling": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/jaegerremotesampling v0.162.0"
+      },
+      "json_log_encoding": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/jsonlogencodingextension v0.162.0"
+      },
+      "k8s_leader_elector": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/k8sleaderelector v0.162.0"
+      },
+      "k8s_observer": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/observer/k8sobserver v0.162.0"
+      },
+      "oauth2client": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/oauth2clientauthextension v0.162.0"
+      },
+      "oidc": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/oidcauthextension v0.162.0"
+      },
+      "opamp": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/opampextension v0.162.0"
+      },
+      "otlp_encoding": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/otlpencodingextension v0.162.0"
+      },
+      "pebble_tail_storage": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/tailstorage/pebbletailstorageextension v0.162.0"
+      },
+      "pprof": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/pprofextension v0.162.0"
+      },
+      "redis_storage": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/redisstorageextension v0.162.0"
+      },
+      "sd_notify": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/sdnotifyextension v0.162.0"
+      },
+      "sigv4auth": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/sigv4authextension v0.162.0"
+      },
+      "skywalking_encoding": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/skywalkingencodingextension v0.162.0"
+      },
+      "sumologic": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/sumologicextension v0.162.0"
+      },
+      "text_encoding": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/textencodingextension v0.162.0"
+      },
+      "zipkin_encoding": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/zipkinencodingextension v0.162.0"
+      },
+      "zpages": {
+        "module": "go.opentelemetry.io/collector/extension/zpagesextension v0.162.0"
+      }
+    },
+    "processors": {
+      "attributes": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/attributesprocessor v0.162.0"
+      },
+      "batch": {
+        "module": "go.opentelemetry.io/collector/processor/batchprocessor v0.162.0"
+      },
+      "cardinality_guardian": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/cardinalityguardianprocessor v0.162.0"
+      },
+      "coralogix": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/coralogixprocessor v0.162.0"
+      },
+      "cumulative_to_delta": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/cumulativetodeltaprocessor v0.162.0"
+      },
+      "delta_to_cumulative": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/deltatocumulativeprocessor v0.162.0"
+      },
+      "delta_to_rate": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/deltatorateprocessor v0.162.0"
+      },
+      "drain": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/drainprocessor v0.162.0"
+      },
+      "filter": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor v0.162.0"
+      },
+      "gen_ai_normalizer": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/genainormalizerprocessor v0.162.0"
+      },
+      "geoip": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/geoipprocessor v0.162.0"
+      },
+      "groupbyattrs": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/groupbyattrsprocessor v0.162.0"
+      },
+      "groupbytrace": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/groupbytraceprocessor v0.162.0"
+      },
+      "interval": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/intervalprocessor v0.162.0"
+      },
+      "isolationforest": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/isolationforestprocessor v0.162.0"
+      },
+      "k8s_attributes": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/k8sattributesprocessor v1.1.0"
+      },
+      "log_dedup": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/logdedupprocessor v0.162.0"
+      },
+      "memory_limiter": {
+        "module": "go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.162.0"
+      },
+      "metric_start_time": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/metricstarttimeprocessor v0.162.0"
+      },
+      "metrics_transform": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/metricstransformprocessor v0.162.0"
+      },
+      "metricsgeneration": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/metricsgenerationprocessor v0.162.0"
+      },
+      "probabilistic_sampler": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/probabilisticsamplerprocessor v0.162.0"
+      },
+      "redaction": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/redactionprocessor v0.162.0"
+      },
+      "remotetap": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/remotetapprocessor v0.162.0"
+      },
+      "resource": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor v0.162.0"
+      },
+      "resource_detection": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourcedetectionprocessor v0.162.0"
+      },
+      "schema": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/schemaprocessor v0.162.0"
+      },
+      "span": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/spanprocessor v0.162.0"
+      },
+      "span_pruning": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/spanpruningprocessor v0.162.0"
+      },
+      "sumologic": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/sumologicprocessor v0.162.0"
+      },
+      "tail_sampling": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/tailsamplingprocessor v0.162.0"
+      },
+      "transform": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor v0.162.0"
+      },
+      "unroll": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/processor/unrollprocessor v0.162.0"
+      }
+    },
+    "receivers": {
+      "active_directory_ds": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/activedirectorydsreceiver v0.162.0"
+      },
+      "aerospike": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/aerospikereceiver v0.162.0"
+      },
+      "apache": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/apachereceiver v0.162.0"
+      },
+      "apache_spark": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/apachesparkreceiver v0.162.0"
+      },
+      "aws_cloudwatch": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awscloudwatchreceiver v0.162.0"
+      },
+      "aws_lambda": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awslambdareceiver v0.162.0"
+      },
+      "aws_s3": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awss3receiver v0.162.0"
+      },
+      "awscontainerinsightreceiver": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awscontainerinsightreceiver v0.162.0"
+      },
+      "awsecscontainermetrics": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awsecscontainermetricsreceiver v0.162.0"
+      },
+      "awsfirehose": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awsfirehosereceiver v0.162.0"
+      },
+      "awsxray": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/awsxrayreceiver v0.162.0"
+      },
+      "azure_blob": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/azureblobreceiver v0.162.0"
+      },
+      "azure_event_hub": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/azureeventhubreceiver v0.162.0"
+      },
+      "azure_monitor": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/azuremonitorreceiver v0.162.0"
+      },
+      "carbon": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/carbonreceiver v0.162.0"
+      },
+      "chrony": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/chronyreceiver v0.162.0"
+      },
+      "cisco_os": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/ciscoosreceiver v0.162.0"
+      },
+      "cloud_foundry": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/cloudfoundryreceiver v0.162.0"
+      },
+      "cloudflare": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/cloudflarereceiver v0.162.0"
+      },
+      "collectd": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/collectdreceiver v0.162.0"
+      },
+      "couchdb": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/couchdbreceiver v0.162.0"
+      },
+      "datadog": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/datadogreceiver v0.162.0"
+      },
+      "docker_stats": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/dockerstatsreceiver v0.162.0"
+      },
+      "elasticsearch": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/elasticsearchreceiver v0.162.0"
+      },
+      "envoy_als": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/envoyalsreceiver v0.162.0"
+      },
+      "expvar": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/expvarreceiver v0.162.0"
+      },
+      "faro": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/faroreceiver v0.162.0"
+      },
+      "file_log": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/filelogreceiver v0.162.0"
+      },
+      "file_stats": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/filestatsreceiver v0.162.0"
+      },
+      "flink_metrics": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/flinkmetricsreceiver v0.162.0"
+      },
+      "fluent_forward": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/fluentforwardreceiver v0.162.0"
+      },
+      "github": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/githubreceiver v0.162.0"
+      },
+      "gitlab": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/gitlabreceiver v0.162.0"
+      },
+      "google_cloud_spanner": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/googlecloudspannerreceiver v0.162.0"
+      },
+      "googlecloudmonitoring": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/googlecloudmonitoringreceiver v0.162.0"
+      },
+      "googlecloudpubsub": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/googlecloudpubsubreceiver v0.162.0"
+      },
+      "haproxy": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/haproxyreceiver v0.162.0"
+      },
+      "host_metrics": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/hostmetricsreceiver v0.162.0"
+      },
+      "http_check": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/httpcheckreceiver v0.162.0"
+      },
+      "icmp_check": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/icmpcheckreceiver v0.162.0"
+      },
+      "iis": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/iisreceiver v0.162.0"
+      },
+      "influxdb": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/influxdbreceiver v0.162.0"
+      },
+      "jaeger": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/jaegerreceiver v0.162.0"
+      },
+      "journald": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/journaldreceiver v0.162.0"
+      },
+      "k8s_cluster": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver v0.162.0"
+      },
+      "k8s_events": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8seventsreceiver v0.162.0"
+      },
+      "k8s_objects": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sobjectsreceiver v0.162.0"
+      },
+      "kafka": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkareceiver v0.162.0"
+      },
+      "kafka_metrics": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkametricsreceiver v0.162.0"
+      },
+      "kubelet_stats": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kubeletstatsreceiver v0.162.0"
+      },
+      "libhoney": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/libhoneyreceiver v0.162.0"
+      },
+      "loki": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/lokireceiver v0.162.0"
+      },
+      "macos_unified_logging": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/macosunifiedloggingreceiver v0.162.0"
+      },
+      "memcached": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/memcachedreceiver v0.162.0"
+      },
+      "mongodb": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/mongodbreceiver v0.162.0"
+      },
+      "mongodb_atlas": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/mongodbatlasreceiver v0.162.0"
+      },
+      "mysql": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/mysqlreceiver v0.162.0"
+      },
+      "named_pipe": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/namedpipereceiver v0.162.0"
+      },
+      "netflow": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/netflowreceiver v0.162.0"
+      },
+      "nginx": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/nginxreceiver v0.162.0"
+      },
+      "nop": {
+        "module": "go.opentelemetry.io/collector/receiver/nopreceiver v0.162.0"
+      },
+      "nsxt": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/nsxtreceiver v0.162.0"
+      },
+      "ntp": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/ntpreceiver v0.162.0"
+      },
+      "obi": {
+        "module": "go.opentelemetry.io/obi v0.13.0"
+      },
+      "oracledb": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/oracledbreceiver v0.162.0"
+      },
+      "otelarrow": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/otelarrowreceiver v0.162.0"
+      },
+      "otlp": {
+        "module": "go.opentelemetry.io/collector/receiver/otlpreceiver v0.162.0"
+      },
+      "otlp_json_file": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/otlpjsonfilereceiver v0.162.0"
+      },
+      "podman_stats": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/podmanreceiver v0.162.0"
+      },
+      "postgresql": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/postgresqlreceiver v0.162.0"
+      },
+      "pprof": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/pprofreceiver v0.162.0"
+      },
+      "prometheus": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver v0.162.0"
+      },
+      "prometheus_remote_write": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusremotewritereceiver v0.162.0"
+      },
+      "prometheus_simple": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/simpleprometheusreceiver v0.162.0"
+      },
+      "pulsar": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/pulsarreceiver v0.162.0"
+      },
+      "purefa": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/purefareceiver v0.162.0"
+      },
+      "purefb": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/purefbreceiver v0.162.0"
+      },
+      "rabbitmq": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/rabbitmqreceiver v0.162.0"
+      },
+      "receiver_creator": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/receivercreator v0.162.0"
+      },
+      "redis": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/redisreceiver v0.162.0"
+      },
+      "riak": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/riakreceiver v0.162.0"
+      },
+      "saphana": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/saphanareceiver v0.162.0"
+      },
+      "skywalking": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/skywalkingreceiver v0.162.0"
+      },
+      "snmp": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/snmpreceiver v0.162.0"
+      },
+      "snowflake": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/snowflakereceiver v0.162.0"
+      },
+      "solace": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/solacereceiver v0.162.0"
+      },
+      "splunk_enterprise": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/splunkenterprisereceiver v0.162.0"
+      },
+      "splunk_hec": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/splunkhecreceiver v0.162.0"
+      },
+      "sql_query": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sqlqueryreceiver v0.162.0"
+      },
+      "sqlserver": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sqlserverreceiver v0.162.0"
+      },
+      "ssh_check": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sshcheckreceiver v0.162.0"
+      },
+      "statsd": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/statsdreceiver v0.162.0"
+      },
+      "stef": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/stefreceiver v0.162.0"
+      },
+      "syslog": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/syslogreceiver v0.162.0"
+      },
+      "systemd": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/systemdreceiver v0.162.0"
+      },
+      "tcp_check": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/tcpcheckreceiver v0.162.0"
+      },
+      "tcp_log": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/tcplogreceiver v0.162.0"
+      },
+      "tls_check": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/tlscheckreceiver v0.162.0"
+      },
+      "udp_log": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/udplogreceiver v0.162.0"
+      },
+      "vcenter": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/vcenterreceiver v0.162.0"
+      },
+      "webhook_event": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/webhookeventreceiver v0.162.0"
+      },
+      "windows_event_log": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/windowseventlogreceiver v0.162.0"
+      },
+      "windows_perf_counters": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/windowsperfcountersreceiver v0.162.0"
+      },
+      "windows_service": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/windowsservicereceiver v0.162.0"
+      },
+      "yang_grpc": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/yanggrpcreceiver v0.162.0"
+      },
+      "zipkin": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/zipkinreceiver v0.162.0"
+      },
+      "zookeeper": {
+        "module": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/zookeeperreceiver v0.162.0"
+      }
+    }
+  },
+  "source": "otelcol-contrib components (darwin/arm64 build, 2026-10-06); lists only current names - the opamp extension additionally reports deprecated aliases (e.g. hostmetrics)"
+}

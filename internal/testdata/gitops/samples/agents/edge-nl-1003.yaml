@@ -1,0 +1,13 @@
+name: edge-nl-1003
+attributes:
+  service.name: otelcol-contrib
+  service.version: 0.162.0
+  os.type: windows
+  host.name: EDGE-1003-02
+  host.arch: amd64
+  site.type: edge
+  site.id: "1003"
+  site.name: Site 1003
+  site.country: NL
+  site.region: west
+  site.timezone: Europe/Amsterdam

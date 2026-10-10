@@ -1,0 +1,11 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: RolloutPolicy
+metadata:
+  name: p
+spec:
+  waves:
+    - name: both
+      percent: 10
+      selector: {matchAttributes: {a: b}}
+    - name: later
+      percent: 5

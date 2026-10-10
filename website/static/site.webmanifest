@@ -1,0 +1,13 @@
+{
+  "name": "myriarch",
+  "short_name": "myriarch",
+  "description": "Fleet manager for OpenTelemetry Collectors, built on OpAMP.",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#ffffff",
+  "theme_color": "#b3338a",
+  "icons": [
+    { "src": "/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,20 @@
+# Simulated edge collectors (myriarch-sim, group windows-edge of examples/sim/small.yaml): configuration only.
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: sim-edge
+  description: simulated edge collectors, configuration only
+spec:
+  displayName: Simulated edge
+  priority: 100
+  selector:
+    matchAttributes:
+      site.type: edge
+  blueprint: sim
+  collector:
+    distribution: otelcol-contrib
+    version: 0.161.0
+  update:
+    executor: none
+  rollout:
+    configPolicy: probe-config

@@ -1,0 +1,201 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "myriarch.fullname" . }}
+  labels:
+    {{- include "myriarch.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "myriarch.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.secretChecksum.enabled }}
+        checksum/secret: {{ include "myriarch.secretChecksum" . }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "myriarch.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "myriarch.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName | quote }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- include "myriarch.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: myriarchd
+          image: {{ include "myriarch.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve", "--config", "/etc/myriarchd/myriarchd.yaml"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          env:
+            # unique replica ID (replica registry, leader election, fan-out)
+            - name: MYRIARCH_HA_REPLICAID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- range .Values.secretEnv }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.existingSecret }}
+                  key: {{ .key }}
+                  {{- if .optional }}
+                  optional: true
+                  {{- end }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.probes.startup.path }}
+              port: http
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: {{ .Values.preStopSleepSeconds }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/myriarchd/myriarchd.yaml
+              subPath: myriarchd.yaml
+              readOnly: true
+            - name: secrets
+              mountPath: /etc/myriarchd/secrets
+              readOnly: true
+            {{- if include "myriarch.bootstrap.active" . }}
+            - name: bootstrap
+              mountPath: /etc/myriarchd/bootstrap
+              readOnly: true
+            {{- end }}
+            {{- if .Values.enrollmentTokens }}
+            - name: enrollment-tokens
+              mountPath: /etc/myriarchd/enrollment
+              readOnly: true
+            {{- end }}
+            - name: data
+              mountPath: /var/lib/myriarchd
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "myriarch.fullname" . }}
+        - name: secrets
+          secret:
+            secretName: {{ .Values.existingSecret }}
+            defaultMode: 288 # 0440
+        {{- if include "myriarch.bootstrap.active" . }}
+        - name: bootstrap
+          secret:
+            secretName: {{ include "myriarch.bootstrap.secretName" . }}
+            defaultMode: 288 # 0440
+            items:
+              {{- with include "myriarch.bootstrap.tokenKey" . }}
+              - key: {{ . }}
+                path: token
+              {{- end }}
+              {{- with .Values.bootstrapAdmin.passwordHashKey }}
+              - key: {{ . }}
+                path: password-hash
+              {{- end }}
+        {{- end }}
+        {{- if .Values.enrollmentTokens }}
+        - name: enrollment-tokens
+          projected:
+            defaultMode: 288 # 0440
+            sources:
+              {{- range .Values.enrollmentTokens }}
+              - secret:
+                  name: {{ include "myriarch.enrollment.secretName" (dict "root" $ "entry" .) }}
+                  items:
+                    - key: {{ .key | default "token" }}
+                      path: {{ .name }}
+              {{- end }}
+        {{- end }}
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ default (include "myriarch.fullname" .) .Values.persistence.existingClaim }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.emptyDir.sizeLimit }}
+          {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- range . }}
+        - {{ toYaml (merge (dict "labelSelector" (dict "matchLabels" (include "myriarch.selectorLabels" $ | fromYaml))) .) | nindent 10 | trim }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,54 @@
+# Network segmentation of the collector workloads (ingress). Prerequisite: a CNI with NetworkPolicy support.
+#
+# Gateway: OTLP (4317/4318) only from its own namespace and from namespaces with the label
+#   myriarch.dev/otlp-client=true; health ports only from its own namespace (kubelet probes are not
+#   affected by this in the usual CNIs).
+# Node agent: accepts no connections (health only from its own namespace).
+# Egress stays open (backends, myriarchd and DNS differ per environment): add rules if needed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: otel-gateway
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: otel-gateway
+    app.kubernetes.io/part-of: myriarch
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: otel-gateway
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              myriarch.dev/otlp-client: "true"
+      ports:
+        - {port: otlp-grpc, protocol: TCP}
+        - {port: otlp-http, protocol: TCP}
+    - from:
+        - podSelector: {}
+      ports:
+        - {port: health, protocol: TCP}
+        - {port: sup-health, protocol: TCP}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: otel-agent
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: otel-agent
+    app.kubernetes.io/part-of: myriarch
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: otel-agent
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - {port: health, protocol: TCP}
+        - {port: sup-health, protocol: TCP}

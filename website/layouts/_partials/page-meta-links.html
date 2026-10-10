@@ -1,0 +1,25 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+Override of the Docsy v0.18.0 partial layouts/_partials/page-meta-links.html (Apache-2.0, derived work; see website/overrides.txt).
+Docsy computes the edit links from File.Filename relative to the website directory. For files that module.yaml mounts from
+the repository that yields the absolute path of the local checkout (a privacy leak) and wrong links. This partial uses the
+repository path of the page instead (layouts/_partials/repo/source-path.html), params.edit_source when the page is edited
+elsewhere (the API reference views api/openapi.yaml), and links to the web editor and to a new issue. It prints no
+"create child page" link. The pages of the generated references (command line, REST API) link to their generator instead of an editor.
+*/ -}}
+{{ $src := partial "repo/source-path.html" . -}}
+{{ with $src -}}
+{{ $edit := $.Params.edit_source | default $src -}}
+<div class="td-page-meta ms-2 pb-1 pt-2 mb-0">
+  <a href="{{ partial "repo/github-url.html" (dict "kind" "blob" "path" $edit) }}" class="td-page-meta__view" target="_blank" rel="noopener"><i class="fa-solid fa-file-lines"></i> {{ T "post_view_this" }}</a>
+  {{ if $.Params.generated -}}
+  <span class="td-page-meta__generated"><i class="fa-solid fa-gears"></i> Generated from {{ $.Params.generated_from | default "the command definitions" }} (<code>make docs-gen</code>, see the {{ with site.GetPage "/docs/development" }}<a href="{{ .RelPermalink }}#documentation">development guide</a>{{ else }}development guide{{ end }}).</span>
+  {{ else -}}
+  <a href="{{ partial "repo/github-url.html" (dict "kind" "edit" "path" $edit) }}" class="td-page-meta__edit" target="_blank" rel="noopener"><i class="fa-solid fa-pen-to-square"></i> {{ T "post_edit_this" }}</a>
+  {{ end -}}
+  <a href="{{ partial "repo/github-url.html" (dict "kind" "issues" "title" (printf "Docs: %s" $.Title) "body" $.Permalink) }}" class="td-page-meta__issue" target="_blank" rel="noopener"><i class="fa-solid fa-list-check"></i> Report a documentation issue</a>
+</div>
+{{ end -}}

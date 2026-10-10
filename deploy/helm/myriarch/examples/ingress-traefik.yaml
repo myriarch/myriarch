@@ -1,0 +1,28 @@
+# Ingress variant: Traefik (Kubernetes Ingress provider).
+#
+#   helm upgrade --install myriarch <chart> -n myriarch \
+#     -f deploy/examples/production/myriarch-values.yaml -f deploy/helm/myriarch/examples/ingress-traefik.yaml
+#
+# Traefik recognises WebSocket upgrades without an annotation. CHECK:
+#  (1) Timeouts of the entry point (static Traefik configuration, not settable on the Ingress): for hijacked
+#      WebSocket connections readTimeout/writeTimeout normally no longer apply after the upgrade; the idleTimeout of
+#      the entry point (transport.respondingTimeouts.idleTimeout) affects keep-alive connections.
+#      Confirm with a connection test longer than 5 minutes (myriarch-sim or a collector) that connections stay up.
+#  (2) Name of the entry points (websecure) and of the IngressClass (traefik).
+#  (3) Traefik trusts X-Forwarded-For only if the upstream addresses are listed in forwardedHeaders.trustedIPs;
+#      myriarchd in turn evaluates the headers only from server.trustedProxies.
+# The ingress-nginx annotations from the production values are removed (null).
+ingress:
+  className: traefik
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: null
+    nginx.ingress.kubernetes.io/proxy-send-timeout: null
+    nginx.ingress.kubernetes.io/proxy-body-size: null
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+networkPolicy:
+  ingress:
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: traefik

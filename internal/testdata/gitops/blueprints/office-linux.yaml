@@ -1,0 +1,44 @@
+# Office (Linux servers): host metrics incl. processes, journald, syslog files.
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: office-linux
+  description: Office - Linux servers with journald and syslog
+spec:
+  extends: base
+  parameters:
+    - name: journaldUnits
+      type: list
+      default: []
+      description: Read only these systemd units (empty = all)
+    - name: syslogPaths
+      type: list
+      default: [/var/log/syslog, /var/log/messages]
+  config:
+    receivers:
+      host_metrics:
+        collection_interval: 30s
+        scrapers:
+          cpu: {}
+          load: {}
+          memory: {}
+          disk: {}
+          filesystem: {}
+          network: {}
+          paging: {}
+          processes: {}
+      journald:
+        directory: /var/log/journal
+        units: "[[ .params.journaldUnits ]]"
+        start_at: end
+        priority: info
+      file_log/syslog:
+        include: "[[ .params.syslogPaths ]]"
+        start_at: end
+        storage: file_storage/queue
+    service:
+      pipelines:
+        metrics:
+          receivers: [otlp, host_metrics]
+        logs:
+          receivers: [otlp, journald, file_log/syslog]

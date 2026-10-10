@@ -1,0 +1,11 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: all
+spec:
+  blueprint: base
+  collector:
+    version: 0.162.0
+  update:
+    executor: webhook
+    executorRef: nope

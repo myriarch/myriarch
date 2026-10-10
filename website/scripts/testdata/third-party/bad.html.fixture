@@ -1,0 +1,15 @@
+<!doctype html><html lang=en><head><meta charset=utf-8>
+<script src="https://unpkg.com/lunr@2.3.9/lunr.min.js"></script>
+<link rel="stylesheet" href="//cdn.example.com/site.css">
+<link rel="preload" as="font" href="https://fonts.gstatic.com/x.woff2" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="icon" href="HTTP://example.com/favicon.ico">
+<link rel="manifest" href="https://example.com/site.webmanifest">
+<style>@import url("https://fonts.googleapis.com/css?family=Open+Sans"); .a{background:url(https://example.com/x.png)}</style>
+</head><body style="background:url('https://example.com/bg.png')">
+<img src="https://example.com/a.png" srcset="/local.png 1x, https://example.com/b.png 2x">
+<iframe src="https://example.com/embed"></iframe>
+<video poster="https://example.com/p.png" src="/ok.mp4"></video>
+<script>import("https://cdn.example.com/m.mjs"); importScripts('https://cdn.example.com/w.js')</script>
+<script type="module">import x from "https://cdn.example.com/x.js"; new Worker("https://cdn.example.com/worker.js")</script>
+</body></html>

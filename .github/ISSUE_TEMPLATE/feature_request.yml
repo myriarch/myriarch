@@ -1,0 +1,56 @@
+name: Feature request
+description: Suggest an improvement or a new capability
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for your idea. Describe the problem first; the best solution often becomes clearer from there.
+
+        Changes to the architecture, the public interfaces, the security model or the governance may need a decision record, see the contributing guide.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way? Describe your situation (for example the size and kind of your fleet), not the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How could myriarch solve it? Sketch the behavior, the configuration or the API you would expect.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other ways to solve the problem, including workarounds you use today.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - myriarchd
+        - myriarch-updater
+        - myrctl
+        - myriarch-sim
+        - Helm chart
+        - web UI
+        - documentation
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you like to contribute this?
+      options:
+        - "Yes, I can work on it"
+        - "Yes, with guidance"
+        - "No, I can test it"
+        - "No"
+    validations:
+      required: true

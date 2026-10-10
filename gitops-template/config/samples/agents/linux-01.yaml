@@ -1,0 +1,16 @@
+# Sample agent for "myrctl validate/render" (not a myriarchd object). Attributes as the supervisor and installer
+# really report them; labels as they would come from the enrollment token (NOT from the host).
+name: linux-01
+attributes:
+  service.name: otelcol-contrib
+  service.version: 0.161.0
+  os.type: linux
+  host.name: linux-01.example.com
+  host.arch: amd64
+  deployment.environment.name: production
+  site.type: datacenter
+  site.id: site-001
+  site.name: Example data center (host 1)
+  site.country: ZZ
+  site.timezone: UTC
+labels: {}
