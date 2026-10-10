@@ -50,9 +50,10 @@ Windows is experimental in the first release ([ADR-0021](0021-publication-gates-
 2. **Our own client, no further third-party action.** The submission to SignPath is a short `curl` client in a job that is
    bound to the GitHub environment `release`. It does not use `signpath/github-action-submit-signing-request`: the action is
    not owned by GitHub, its repository holds only a bundled `index.js`, and using it would need an exception in the
-   organization's action allowlist and a change of rule R1 of `ci/check-workflows.py` (only `actions/*` and `github/*`), and
-   rule R10 forbids the way the action takes its token (a `with:` input). It would be a second exception next to the
-   Scorecard action. A narrow exception for exactly one workflow and job is possible only by an amendment of this record.
+   organization's action allowlist and a change of rule R1 of `ci/check-workflows.py` (only `actions/*` and `github/*`
+   besides the one exception of [ADR-0033](0033-openssf-scorecard-as-the-only-third-party-action.md)), and rule R10
+   forbids the way the action takes its token (a `with:` input). It would be a second exception next to the Scorecard
+   action. A narrow exception for exactly one workflow and job is possible only by an amendment of this record.
 3. **No long-lived signing secret.** The only secret of the SignPath route is the API token of a CI user that can only submit
    signing requests. It is an environment secret of `release`, listed in `ci/workflow-secrets.txt` for exactly the signing job,
    and the job has read scopes only (`contents: read`, `actions: read`). For the fallback route (point 4) the job has
