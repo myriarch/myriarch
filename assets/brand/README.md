@@ -208,9 +208,16 @@ PNGs are rendered with resvg. To change the logo, change the construction in `so
 assets/brand/source/make_assets.sh
 ```
 
-The script needs `python3`, Node.js with `npm`, `curl` and `unzip`. On its first run it sets up its tools in
-`.cache/brand/`: a Python venv with the packages pinned in `source/requirements.txt`, the Node packages locked in
-`source/package-lock.json`, and the Inter 4.1 fonts from the release archive, checked against a pinned SHA-256.
-With these versions a rerun reproduces the committed files byte for byte (checked on macOS arm64). The script
-also writes `contact-sheet.png`, an overview of every variant on white and on `#0f172a`, to `.cache/brand/work/`
-for review; it is not committed.
+The script needs Python 3.10 or newer (`python3`, or the interpreter that `BRAND_PYTHON` names, for example
+`BRAND_PYTHON=python3.12`), Node.js with `npm`, `curl` and `unzip`. On its first run it sets up its tools in
+`.cache/brand/`: a Python venv with the packages pinned in `source/requirements.txt` (recreated whenever the pins
+change), the Node packages locked in `source/package-lock.json`, and the Inter 4.1 fonts from the release archive,
+checked against a pinned SHA-256. With these versions a rerun reproduces the committed files byte for byte (checked
+on macOS arm64), except `favicon.ico`: Pillow compresses its three PNG entries, and Pillow 12.3.0 writes one byte
+more than the 11.3.0 that wrote the committed file. The pixels are identical, and `finish_rasters.py` checks every
+entry against its source bitmap after writing. The script also writes `contact-sheet.png`, an overview of every
+variant on white and on `#0f172a`, to `.cache/brand/work/` for review; it is not committed.
+
+No gate runs the script. Dependabot proposes updates of the pinned packages (`source/requirements.txt`,
+`source/package.json`), and such an update can change the output, so run the script into an empty directory
+(`assets/brand/source/make_assets.sh <empty-dir>`) and compare the files with the committed ones before you merge it.

@@ -8,11 +8,13 @@
 #
 # <out-dir> defaults to assets/brand. The tools live in BRAND_TOOLS_DIR (default: .cache/brand in the
 # repository root) and are set up on the first run, so nothing is installed system-wide:
-#   venv/   Python venv with the packages pinned in requirements.txt
+#   venv/   Python venv with the packages pinned in requirements.txt (recreated when the pins change)
 #   node/   npm ci of package.json and package-lock.json (@resvg/resvg-js, svgo)
 #   fonts/  Inter TTFs from the pinned release archive, checked against its SHA-256
 #   work/   unoptimized SVGs, raster sources, geometry.log and contact-sheet.png (review only)
-# Needs python3, node with npm, curl and unzip.
+# Needs Python 3.10 or newer (Pillow 12), node with npm, curl and unzip. The venv is created by python3;
+# BRAND_PYTHON selects another interpreter when the python3 in PATH is older (the macOS Command Line Tools
+# ship 3.9), for example BRAND_PYTHON=python3.12.
 set -euo pipefail
 
 INTER_VERSION=4.1
@@ -34,8 +36,17 @@ sha256() {
 }
 
 if [ ! -x "$T/venv/bin/python" ] || ! cmp -s "$SRC/requirements.txt" "$T/venv/requirements.txt"; then
+  BRAND_PYTHON="${BRAND_PYTHON:-python3}"
+  # The pinned Pillow needs Python 3.10 or newer; an older interpreter only fails later with "No matching distribution".
+  "$BRAND_PYTHON" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1 || {
+    echo "make_assets.sh: $BRAND_PYTHON is missing or older than Python 3.10 (needed by the packages in requirements.txt)." >&2
+    echo "Set BRAND_PYTHON to another interpreter, for example BRAND_PYTHON=python3.12." >&2
+    exit 1
+  }
   echo "== set up Python venv"
-  [ -x "$T/venv/bin/python" ] || python3 -m venv "$T/venv"
+  # --clear starts from an empty venv: an existing one may come from an interpreter that is too old, and it must not keep
+  # packages that requirements.txt no longer pins.
+  "$BRAND_PYTHON" -m venv --clear "$T/venv"
   "$T/venv/bin/python" -m pip install --quiet --disable-pip-version-check -r "$SRC/requirements.txt"
   cp "$SRC/requirements.txt" "$T/venv/requirements.txt"
 fi
