@@ -812,7 +812,7 @@ See source code for license details.
 License text: [T53]
 
 --------------------------------------------------------------------------------
-Component: github.com/prometheus/client_model v0.6.2
+Component: github.com/prometheus/client_model v0.6.3
 License: Apache-2.0
 Used by: myriarchd, myrctl, myriarch-sim
 
@@ -891,7 +891,7 @@ Used by: myriarchd, myriarch-updater
 License text: [T13]
 
 --------------------------------------------------------------------------------
-Component: github.com/sigstore/protobuf-specs v0.5.1
+Component: github.com/sigstore/protobuf-specs v0.5.2
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
@@ -1154,7 +1154,7 @@ Used by: myriarchd
 License text: [T1]
 
 --------------------------------------------------------------------------------
-Component: golang.org/x/sync v0.23.0
+Component: golang.org/x/sync v0.24.0
 License: BSD-3-Clause
 Used by: myriarchd, myriarch-updater
 
@@ -1162,7 +1162,7 @@ Used by: myriarchd, myriarch-updater
 License text: [T1]
 
 --------------------------------------------------------------------------------
-Component: golang.org/x/sys v0.48.0
+Component: golang.org/x/sys v0.49.0
 License: BSD-3-Clause
 Used by: myriarchd, myrctl, myriarch-updater, myriarch-sim
 
