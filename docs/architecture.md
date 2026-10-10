@@ -303,37 +303,7 @@ Housekeeping runs hourly on the leader. A retention of 0 disables the matching j
 - **Health.** `/healthz` (the process is alive) and `/readyz` (the database answers, migrations are finished and the bus listener is connected; the answer says only "ready" or "not ready", the cause is in the log). The metrics listener also serves `/healthz`. `/licenses` serves the project license and the third-party notices as plain text, without login.
 - **Later.** OTLP traces of `myriarchd` through its own collector are possible future work.
 
-| Metric | Labels | Producer |
-|---|---|---|
-| `myriarch_opamp_connections` | `transport` | opamp |
-| `myriarch_opamp_messages_total` | `direction` | opamp |
-| `myriarch_opamp_connect_rejected_total` | `reason` | opamp |
-| `myriarch_opamp_push_errors_total` | | opamp |
-| `myriarch_opamp_message_duration_seconds` | | opamp |
-| `myriarch_opamp_dropped_total` | `queue` | opamp |
-| `myriarch_agents` | `status`, `kind` | opamp (leader) |
-| `myriarch_config_sync` | `state` | opamp (leader) |
-| `myriarch_eventbus_dropped_total` | `subscriber` | pgbus |
-| `myriarch_leader` | | pglock |
-| `myriarch_http_requests_total` | `route`, `method`, `code` | httpserver |
-| `myriarch_http_request_duration_seconds` | `route`, `method` | httpserver |
-| `myriarch_auth_logins_total` | `method`, `result` | authn |
-| `myriarch_auth_agent_requests_total` | `result` | authn |
-| `myriarch_auth_token_failures_total` | `reason` | authn |
-| `myriarch_assignment_duration_seconds` | `result` | assignment |
-| `myriarch_rollouts_active` | `kind` | rollout |
-| `myriarch_rollout_targets` | `status` | rollout |
-| `myriarch_rollout_transitions_total` | `to` | rollout |
-| `myriarch_gitops_sync_total` | `result` | gitops |
-| `myriarch_gitops_last_success_timestamp_seconds` | | gitops |
-| `myriarch_release_polls_total` | `result` | release |
-| `myriarch_release_latest_info` | `distribution`, `version` | release |
-| `myriarch_artifact_downloads_total` | `result` | artifact |
-| `myriarch_notifications_total` | `channel`, `result` | notify |
-| `myriarch_housekeeping_deleted_total` | `job` | housekeeping |
-| `myriarch_housekeeping_failures_total` | `job` | housekeeping |
-| `myriarch_housekeeping_last_run_timestamp_seconds` | | housekeeping |
-| `myriarch_job_cycle_duration_seconds` | `job` | shared by the leader jobs |
+The [metrics reference](reference/metrics.md) lists every metric with its type, labels and help text. It is generated from the metric definitions in the sources.
 
 The gauges `myriarch_agents` and `myriarch_config_sync` are computed by the leader only; aggregate them in Prometheus with `max()`. The simulator exposes its own metrics under the prefix `myriarch_sim_`.
 

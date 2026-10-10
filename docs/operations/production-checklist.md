@@ -80,7 +80,8 @@ The command loads the configuration exactly like `myriarchd serve`: defaults, th
 database or the network. Nothing is started and no connection is made. On success it prints `OK: <file> is valid` and one
 `WARNING: <text>` line per warning on standard output; each problem is a line `ERROR: <path>: <message>` on standard error.
 `config print` shows the effective configuration as YAML, with the DSN, client secrets, webhook secrets, notification URLs
-and development passwords replaced by `<redacted>`; it validates first.
+and development passwords replaced by `<redacted>`; it validates first. The [server configuration](../reference/configuration.md)
+reference lists every key with its type, default and effect.
 
 Exit codes: `0` valid (warnings are allowed), `1` invalid (YAML syntax, an unknown key, a failed check), `2` wrong usage (no
 `--config`, a file that cannot be read, an unknown option). An example:

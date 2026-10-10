@@ -39,7 +39,9 @@ the components, the data flows and the rollout engine, and the [security model](
 ## Reference: look something up
 
 [Reference](reference/_index.md) holds the exact definitions: the [GitOps schema](reference/gitops-schema.md) with every kind,
-field, template function and issue code, the generated [command-line reference](reference/cli/_index.md), the REST contract in
+field, template function and issue code, the generated [command-line reference](reference/cli/_index.md), the generated
+references for the [server configuration](reference/configuration.md), the
+[environment variables](reference/environment-variables.md) and the [metrics](reference/metrics.md), the REST contract in
 [api/openapi.yaml](../api/openapi.yaml), and the values of the [Helm chart](../deploy/helm/myriarch/README.md). The design
 contracts in [design/](design/README.md) pin down protocols and behavior that code and tests follow.
 
