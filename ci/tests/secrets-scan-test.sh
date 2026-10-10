@@ -43,6 +43,20 @@ r="$(newrepo uncommitted)"; commit "${r}"; printf '%s\n' "${generic}" > "${r}/do
 expect_ok   "the scan covers the committed state" scan "${r}"
 expect_fail "SECRETS_SCAN_WORKTREE=1 covers the work tree" 'generic-api-key' env SECRETS_SCAN_WORKTREE=1 "${CI_DIR}/secrets-scan.sh" "${r}"
 
+# SECRETS_SCAN_RANGE: the commits of a range, including a secret that a later commit removed again
+r="$(newrepo range)"; commit "${r}"; base="$(git -C "${r}" rev-parse HEAD)"
+printf '%s\n' "${generic}" > "${r}/docs/notes.txt"; commit "${r}"; mid="$(git -C "${r}" rev-parse HEAD)"
+git -C "${r}" rm -q docs/notes.txt; commit "${r}"; head="$(git -C "${r}" rev-parse HEAD)"
+echo "more text" >> "${r}/docs/readme.md"; commit "${r}"; tip="$(git -C "${r}" rev-parse HEAD)"
+rscan() { env SECRETS_SCAN_RANGE="$2" "${CI_DIR}/secrets-scan.sh" "$1"; }
+expect_ok   "the committed state is clean although the history is not (no range)" scan "${r}"
+expect_fail "a range that contains a secret fails although a later commit removed it" 'generic-api-key' rscan "${r}" "${base}..${head}"
+expect_fail "the finding of a range is redacted" 'REDACTED' rscan "${r}" "${base}..${mid}"
+expect_ok   "a range after the secret and its removal passes" rscan "${r}" "${head}..${tip}"
+expect_ok   "an empty range passes" rscan "${r}" "${tip}..${tip}"
+expect_fail "a range with an option is refused" 'SECRETS_SCAN_RANGE must be' rscan "${r}" "--all"
+expect_fail "a range with a branch name is refused" 'SECRETS_SCAN_RANGE must be' rscan "${r}" "main..main"
+
 expect_ok   "the current tree passes" scan "${ROOT}"
 
 finish_tests "secrets-scan-test"
