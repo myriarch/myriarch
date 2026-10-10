@@ -43,7 +43,7 @@ cosign generate-key-pair                              # writes cosign.key (encry
    them (not the test jobs, which run third-party code such as npm packages, and not jobs on ordinary branches):
    * `COSIGN_KEY` - the content or path of `cosign.key` (the alias `COSIGN_PRIVATE_KEY` is accepted too)
    * `COSIGN_PASSWORD` - the passphrase, masked
-   * `AUTHENTICODE_PFX` and `AUTHENTICODE_PFX_PASSWORD_FILE` (see below)
+   * for a private PKI only: `AUTHENTICODE_PFX` and `AUTHENTICODE_PFX_PASSWORD_FILE` (see "Authenticode" below)
 3. Back up `cosign.key` offline (safe, stored separately from the passphrase) and delete it from the machine. Protect the tags
    `v*` (maintainers only), otherwise the secrets are not available to the release job. The tagged commit must be on the
    release branch (`ci/build-release.sh` checks this, see `RELEASE_BRANCH` in `ci/lib.sh`): a protected tag only restricts who
@@ -82,11 +82,36 @@ not depend on a single vendor.
 
 ## Authenticode (Windows)
 
-The Windows binaries (`myriarch-updater.exe`) are additionally signed with Authenticode (`authenticode.sh`, `osslsigncode`).
-Secrets of the release job: `AUTHENTICODE_PFX` (file), `AUTHENTICODE_PFX_PASSWORD_FILE` (file) and optionally
-`AUTHENTICODE_TIMESTAMP_URL` (a timestamp service, possibly through a proxy). `AUTHENTICODE_CA_FILE` / `AUTHENTICODE_TSA_CA_FILE`
-(default: `EXTRA_CA_FILE`) name the trust anchors for the verification step. The installer can enforce the signature
-(`-UpdaterSignerThumbprint`).
+Authenticode is the signature that Windows evaluates (App Control for Business and AppLocker publisher rules, Smart App
+Control, the execution policy for PowerShell scripts). It adds to the Sigstore signature of a release and never replaces it;
+installers and the updater trust the Sigstore identity of the release workflow. The decision is
+[ADR-0034](../../docs/adr/0034-authenticode-signing-of-windows-release-artifacts.md).
+
+**Target design.**
+
+* Signed: `myriarch-updater.exe` and `myrctl.exe` for amd64 and arm64, `install-windows.ps1` and `Set-ServiceEnvironment.ps1`,
+  with SHA-256 and an RFC 3161 timestamp, and a Windows version resource (product name, file and product version) on both
+  executables.
+* The signer is the SignPath Foundation (free for open source). The release workflow submits the unsigned files with a short
+  `curl` client from one job of the `release` environment; SignPath fetches them from the run and a person approves every
+  release there. The only secret is a SignPath API token that can only submit requests. If SignPath declines or does not decide
+  within four weeks, the fallback is an individual-validation certificate with its key in a Google Cloud KMS HSM, used through
+  GitHub OIDC and `jsign` (no secret); the maintainer decides before anything is bought, within a budget of US$700 for the
+  first year, and the legal name and locality appear in every signature.
+* No PFX file and no long-lived signing secret in the release workflow.
+
+**v0.1.0 is unsigned.** The Windows files of `v0.1.0` carry no Authenticode signature, under a reviewed exception for exactly
+that tag (`WINDOWS_UNSIGNED_FINAL_TAG` in `deploy/release/windows-signing.env`). Verify them with cosign before you run
+them; the release notes say so.
+
+**Status of this tree.** The settings file, the signing hook contract, the version resources and the acceptance check arrive
+with the release build change. Until then `authenticode.sh` signs with a PFX file and a password file, and
+`ci/build-release.sh` still requires `AUTHENTICODE_PFX` in release mode. A public certificate authority cannot deliver such a
+file, so this path is for private PKIs only (see `contrib/enterprise-mirror/`), with these settings: `AUTHENTICODE_PFX` (file),
+`AUTHENTICODE_PFX_PASSWORD_FILE` (file) and optionally `AUTHENTICODE_TIMESTAMP_URL`. `AUTHENTICODE_CA_FILE` and
+`AUTHENTICODE_TSA_CA_FILE` (default: `EXTRA_CA_FILE`) name the trust anchors of the verification step. The installer option
+`-UpdaterSignerThumbprint` pins the leaf certificate of the updater for operators with a private PKI; it breaks at every
+certificate renewal (at most every 460 days).
 
 ## Outlook: keyless signing
 
