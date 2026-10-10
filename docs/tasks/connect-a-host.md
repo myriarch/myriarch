@@ -33,6 +33,10 @@ history, and the script warns about it.
 
 ## 2. Install on Linux
 
+The script runs as root and needs these tools on the host: `systemctl`, `useradd` or `adduser`, `curl`, `tar` together with
+`gzip` (GNU `tar` runs `gzip` to unpack the `.tar.gz` archives), `install`, `cmp` and `sha256sum` or `shasum`. A missing
+tool stops the script with the error code `tool_missing` and the name of the tool.
+
 ```bash
 sudo ./deploy/scripts/install-linux.sh \
   --opamp-endpoint wss://fleet.example.com/v1/opamp \

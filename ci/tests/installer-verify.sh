@@ -5,8 +5,8 @@
 
 # Tests the signature verification of our binaries in deploy/scripts/install-linux.sh (and, when pwsh is available,
 # install-windows.ps1) in staging mode (--root) against a fake release with file:// URLs. Needs only bash, openssl,
-# tar, awk; with cosign in PATH it additionally covers a real cosign signature (format contract) and the cosign fallback.
-# Failures are asserted on the stable error codes of the installer ("[<code>]"), never on message prose.
+# tar, gzip, awk; with cosign in PATH it additionally covers a real cosign signature (format contract) and the cosign
+# fallback. Failures are asserted on the stable error codes of the installer ("[<code>]"), never on message prose.
 #
 #   ci/tests/installer-verify.sh          exit 0 = all cases as expected
 set -uo pipefail
@@ -15,7 +15,7 @@ set -uo pipefail
 
 INSTALLER="${ROOT}/deploy/scripts/install-linux.sh"
 TEMPLATES="${ROOT}/deploy"
-need_cmd openssl tar awk
+need_cmd openssl tar gzip awk
 
 W="${TEST_TMP}"
 REL="${W}/release"            # our myriarch release (updater, checksums.txt, .sig)
@@ -184,11 +184,22 @@ t_identity_regex() {
 }
 expect_ok "the identity pattern matches only the requested tag" t_identity_regex
 
+# Restricted PATH directories: symlinks to the listed tools only, so that the installer finds nothing else. INSTALLER_TOOLS is
+# what the installer needs besides a download tool; a case adds what it needs on top and leaves out what it tests the absence
+# of. Keep the list complete: with a tool missing, a case fails for another reason than the one under test (GNU tar -z runs
+# the external gzip, and without it a valid archive looks like one without its binary).
+INSTALLER_TOOLS=(bash sh tar gzip install cmp awk sed tr cut grep mktemp date id uname sha256sum shasum mv cp ln rm mkdir dirname basename cat head readlink chmod sort wc sleep seq env)
+path_dir() { # dir [tool...]: INSTALLER_TOOLS and the given tools (those the host has), without the ones named in $WITHOUT
+  local dir="$1" c p; shift
+  mkdir -p "${dir}"
+  for c in "${INSTALLER_TOOLS[@]}" "$@"; do
+    case " ${WITHOUT:-} " in *" ${c} "*) continue ;; esac
+    p="$(command -v "${c}" 2>/dev/null || true)"; [ -n "${p}" ] && ln -sf "${p}" "${dir}/${c}"
+  done
+}
+
 # wget cannot restrict redirects to https: without --insecure curl is required
-NOCURL="${W}/bin-no-curl"; mkdir -p "${NOCURL}"
-for c in bash sh tar install cmp awk sed tr cut grep mktemp date id uname sha256sum shasum mv cp ln rm mkdir dirname basename cat head readlink chmod sort wc sleep seq env timeout openssl; do
-  p="$(command -v "${c}" 2>/dev/null || true)"; [ -n "${p}" ] && ln -sf "${p}" "${NOCURL}/${c}"
-done
+NOCURL="${W}/bin-no-curl"; path_dir "${NOCURL}" timeout openssl
 cat > "${NOCURL}/wget" <<'STUB'
 #!/bin/sh
 printf '%s\n' "$@" >> "${WGET_LOG}"
@@ -197,10 +208,18 @@ STUB
 chmod 0755 "${NOCURL}/wget"
 t_wget_refused() { PATH="${NOCURL}" bash "${INSTALLER}" --root "$(fresh)" --arch amd64 --templates-dir "${TEMPLATES}" --verify-signatures require \
   --release-base-url "https://mirror.example.com/r" --opamp-endpoint wss://x/v1/opamp --token myre_x --site-type office --site-id 1 --collector-version 0.161.0; }
-expect_fail "wget without curl is refused without --insecure" '\[tool_missing\]' t_wget_refused
+expect_fail "wget without curl is refused without --insecure" '\[tool_missing\].*curl' t_wget_refused
 t_wget_lab() { : > "${W}/wget.log"; WGET_LOG="${W}/wget.log" PATH="${NOCURL}" bash "${INSTALLER}" --root "$(fresh)" "${plain_args[@]}" --verify-signatures skip; }
 expect_fail "with --insecure wget is used for labs" '\[download_failed\]' t_wget_lab
 grep -Fxq -- '--secure-protocol=TLSv1_2' "${W}/wget.log" && ok "  ... with a minimum TLS version" || fail "wget was not called with --secure-protocol=TLSv1_2"
+
+# GNU tar runs the external gzip for .tar.gz archives (bsdtar has zlib built in): without gzip the installer names the missing
+# tool before it touches the host, instead of reporting the binary as missing from the archive
+NOGZIP="${W}/bin-no-gzip"; WITHOUT=gzip path_dir "${NOGZIP}" curl wget openssl
+NOGZIP_ROOT="$(fresh)"
+t_no_gzip() { PATH="${NOGZIP}" bash "${INSTALLER}" --root "${NOGZIP_ROOT}" "${plain_args[@]}" --verify-signatures skip; }
+expect_fail "without gzip the installer stops with tool_missing and names gzip" '\[tool_missing\].*gzip' t_no_gzip
+if [ -z "$(ls -A "${NOGZIP_ROOT}")" ]; then ok "  ... before anything was created"; else fail "the installer created files before it noticed that gzip is missing"; fi
 
 # extraction: owner and mode never come from the archive
 TARSTUB="${W}/tarstub"; mkdir -p "${TARSTUB}"
@@ -255,10 +274,7 @@ if have cosign; then
   expect_ok "a .sig produced by cosign is accepted by the installer (openssl)" t_cosign_sig
 
   # PATH without openssl: the installer falls back to cosign verify-blob
-  nossl="${W}/bin-no-openssl"; mkdir -p "${nossl}"
-  for c in bash sh curl wget tar install cmp awk sed tr cut grep mktemp date id uname sha256sum shasum mv cp ln rm mkdir dirname basename cat head readlink chmod sort wc sleep seq env cosign; do
-    p="$(command -v "${c}" 2>/dev/null || true)"; [ -n "${p}" ] && ln -sf "${p}" "${nossl}/${c}"
-  done
+  nossl="${W}/bin-no-openssl"; path_dir "${nossl}" curl wget cosign
   t_cosign_fallback() { PATH="${nossl}" run_install "$(fresh)" --updater-checksums-url "file://${C}/checksums.txt" --signing-key "${W}/cosign-keys/cosign.pub"; }
   expect_ok "without openssl the installer verifies with cosign verify-blob" t_cosign_fallback
   t_cosign_fallback_bad() { PATH="${nossl}" run_install "$(fresh)" --updater-checksums-url "file://${REL}/checksums.txt" --signing-key "${W}/cosign-keys/cosign.pub"; }
