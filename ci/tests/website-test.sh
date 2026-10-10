@@ -33,6 +33,7 @@ for port in 8080 18080 18081 54339 19464 19469 19998 19999; do
   expect_fail "website.sh: port ${port} is reserved" 'reserved' env WEBSITE_PORT="${port}" ci/website.sh serve
 done
 expect_fail "website.sh: a port must be a number" 'must be a number' env WEBSITE_PORT=abc ci/website.sh serve
+expect_fail "website.sh: an unknown environment is refused" 'must be production or preview' env WEBSITE_ENV=staging ci/website.sh build
 
 # the Node scripts parse, and the origin test of the request check does what it says
 if have node; then

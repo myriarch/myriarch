@@ -133,6 +133,7 @@ to the project header of each of these files, so that the derivation is machine-
 | `check-local-paths.py` | the repository root, `/Users/...` or `/home/...` in the built site |
 | `check-repo-links.py` | a link into the GitHub repository (blob, tree, edit) whose path does not exist in the working tree |
 | `check-overrides.py` | a changed upstream file, a missing or an unlisted override |
+| `check-indexing.py` | a preview that can be indexed (no `Disallow: /`, a sitemap line, a page without `noindex`) or a production site that hides itself; the mode comes from `WEBSITE_ENV` |
 | `check-placeholders.py` | a placeholder whose page now exists, or a malformed placeholder |
 | `check-api-spec.py` | a missing API reference page, a download that is not exactly one fingerprinted copy of `api/openapi.yaml`, a page that loads a script of an API viewer, or a number of operation sections that differs from the contract |
 | `check-notices.py` | a shipped dependency without a notice, with another version in `data/third_party.yaml`, or without a published license text |

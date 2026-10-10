@@ -19,6 +19,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TESTDATA = os.path.join(HERE, "testdata")
@@ -447,6 +448,87 @@ class LighthouseTest(TempCase):
         rc, out, _ = run_main(self.mod, [self.path("does-not-exist.json")])
         self.assertEqual(rc, 1)
         self.assertIn("cannot read the report", out)
+
+
+class IndexingTest(TempCase):
+    mod = load("check-indexing")
+    PAGE = '<!doctype html><title>x</title><meta name=robots content="%s"><p>The directive noindex in text is no finding.</p>'
+
+    def setUp(self):
+        super().setUp()
+        self.env = mock.patch.dict(os.environ, {"WEBSITE_ENV": "production", "WEBSITE_BASEURL": "https://example.test/"})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+
+    def site(self, robots, content):
+        write(self.path("public", "index.html"), self.PAGE % content)
+        write(self.path("public", "docs", "index.html"), self.PAGE % content)
+        if robots is not None:
+            write(self.path("public", "robots.txt"), robots)
+
+    PROD_ROBOTS = "User-agent: *\nDisallow:\n\nSitemap: https://example.test/sitemap.xml\n"
+    PREVIEW_ROBOTS = "User-agent: *\nDisallow: /\n"
+
+    def test_production_site_passes(self):
+        self.site(self.PROD_ROBOTS, "index, follow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("mode production, 2 pages scanned, 0 findings", out)
+
+    def test_preview_site_passes(self):
+        os.environ["WEBSITE_ENV"] = "preview"
+        self.site(self.PREVIEW_ROBOTS, "noindex, nofollow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("mode preview", out)
+
+    def test_a_preview_that_can_be_indexed_fails(self):
+        self.site(self.PROD_ROBOTS, "index, follow")
+        os.environ["WEBSITE_ENV"] = "preview"
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 1)
+        self.assertIn('does not contain the line "Disallow: /"', out)
+        self.assertIn("names a sitemap", out)
+        self.assertIn("index.html: the preview page has no robots meta tag with noindex", out)
+        self.assertIn("docs/index.html", out)
+
+    def test_a_production_site_that_hides_itself_fails(self):
+        self.site(self.PREVIEW_ROBOTS, "noindex, nofollow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 1)
+        self.assertIn('production contains the line "Disallow: /"', out)
+        self.assertIn("does not contain the line 'Sitemap: https://example.test/sitemap.xml'", out)
+        self.assertIn("index.html: the production page carries a robots meta tag with noindex", out)
+
+    def test_the_sitemap_must_use_the_base_url(self):
+        self.site("User-agent: *\nDisallow:\n\nSitemap: https://other.test/sitemap.xml\n", "index, follow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 1)
+        self.assertIn("https://example.test/sitemap.xml", out)
+
+    def test_a_missing_robots_txt_fails(self):
+        self.site(None, "index, follow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 1)
+        self.assertIn("robots.txt: missing", out)
+
+    def test_the_base_url_defaults_to_the_site_configuration(self):
+        del os.environ["WEBSITE_BASEURL"]
+        self.site("User-agent: *\nDisallow:\n\nSitemap: https://myriarch.dev/sitemap.xml\n", "index, follow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 0, out)
+
+    def test_usage_and_environment_errors(self):
+        for argv in (["--bogus"], ["a", "b"]):
+            rc, _, _ = run_main(self.mod, argv)
+            self.assertEqual(rc, 2, argv)
+        rc, _, _ = run_main(self.mod, [self.path("does-not-exist")])
+        self.assertEqual(rc, 2)
+        os.environ["WEBSITE_ENV"] = "staging"
+        self.site(self.PROD_ROBOTS, "index, follow")
+        rc, _, err = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 2)
+        self.assertIn("production or preview", err)
 
 
 if __name__ == "__main__":

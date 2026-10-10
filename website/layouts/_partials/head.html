@@ -9,6 +9,8 @@ Changes against the upstream file:
      (privacy rule of the website: no third-party request when a page loads).
   2. The theme color and the first paint of the dark mode use the brand color Night (#0f172a) instead of black.
   3. The Content Security Policy (layouts/_partials/csp.html) is emitted first, so that it covers every resource of the page.
+  4. A preview (site parameter preview, set by ci/website.sh with WEBSITE_ENV=preview) always gets the robots meta "noindex, nofollow".
+     A preview is built with the production environment, so that it ships the same assets as production.
 Re-check this file against the upstream one whenever Docsy is updated (website/scripts/check-overrides.py).
 */ -}}
 {{/* cSpell:ignore docsearch opengraph outputformat */ -}}
@@ -62,7 +64,7 @@ Re-check this file against the upstream one whenever Docsy is updated (website/s
 {{ end -}}
 
 {{ $outputFormat := partial "outputformat.html" . -}}
-{{ if and hugo.IsProduction (ne $outputFormat "print") (ne .Site.Language.Name "xx") -}}
+{{ if and hugo.IsProduction (ne (string .Site.Params.preview) "true") (ne $outputFormat "print") (ne .Site.Language.Name "xx") -}}
 <meta name="robots" content="index, follow">
 {{ else -}}
 <meta name="robots" content="noindex, nofollow">
