@@ -188,7 +188,13 @@ renders, the two mounted README files, the build scripts and the workflow itself
 | `build` | installs the pinned tools, runs `make website-check` (with `WEBSITE_ENV=preview` and `WEBSITE_BASEURL=/` for a pull request) and uploads `website/public` | none |
 | `deploy` | installs the pinned Vercel CLI from `pnpm-lock.yaml` without lifecycle scripts, assembles `.vercel/output` from the uploaded site and runs `vercel deploy --prebuilt` | the environments `website-preview` and `website-production` |
 
-- **Production** on every push to `main` (and on a manual run from `main`): `vercel deploy --prebuilt --prod`.
+- **Production** on every push to `main` (and on a manual run from `main`): `vercel deploy --prebuilt --target=production`.
+  Previews run `vercel deploy --prebuilt --target=preview`.
+- **The first deployment is production.** Vercel makes the first deployment of a project a production deployment, whatever the
+  CLI asks for, and assigns the production domains to it
+  ([Vercel documentation](https://vercel.com/docs/deployments/environments)). The deploy job therefore refuses a preview while the
+  project has no production deployment (`targets.production` of the project is empty); the first deployment of a new project comes
+  from `main`, for example by a manual run.
 - **Previews** for pull requests from branches of this repository, never for forks. The `deploy` job does not run for a fork, and
   not for a Dependabot pull request either (it has no Actions secrets); both get the build and the gate only. Previews are
   protected by Vercel Authentication, built with `WEBSITE_ENV=preview` and marked `noindex`.
@@ -198,8 +204,9 @@ renders, the two mounted README files, the build scripts and the workflow itself
 - **Output:** the job summary lists the deployment URL, the commit and, for production, the site address. The workflow writes no pull
   request comment and needs no write permission (`contents: read`).
 - **Guards:** the deploy job fails when `index.html`, `404.html` or `robots.txt` is missing, when a preview lacks `Disallow: /`, when
-  production has it or lacks the absolute sitemap line, when a secret is empty, and when the CLI does not print a
-  `https://<name>.vercel.app` URL.
+  production has it or lacks the absolute sitemap line, when a secret is empty, when the CLI does not print a
+  `https://<name>.vercel.app` URL, when a preview would be the first deployment of the project, and when the target that Vercel
+  recorded for the deployment (read back through the API) is not the requested one.
 - **`404.html` and trailing slashes:** the Build Output API serves neither `404.html` nor the redirect from `/docs` to `/docs/` by
   itself. The deploy job writes `.vercel/output/config.json` with three routes: a `308` redirect for every path without a final slash
   and without a dot (the route that `vercel build` generates for `trailingSlash`), `{"handle":"filesystem"}`, and a catch-all that

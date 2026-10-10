@@ -230,12 +230,36 @@ jobs:
               exit 1
             fi
           done
-          args=(deploy --prebuilt)
-          if [ "${TARGET}" = production ]; then args+=(--prod); fi
-          output="$(website/node_modules/.bin/vercel "${args[@]}")"
+          # GET on the Vercel API; the header goes through stdin, so the token stays out of the process list. Fails on an HTTP error.
+          vercel_get() {
+            printf 'Authorization: Bearer %s\n' "${VERCEL_TOKEN}" | curl -fsS --max-time 30 -H @- "https://api.vercel.com$1"
+          }
+          # Prints a dotted field of the JSON on stdin, or nothing when it is missing or null.
+          json_field() {
+            python3 -I -c 'import functools, json, sys; v = functools.reduce(lambda o, k: o.get(k) if isinstance(o, dict) else None, sys.argv[1].split("."), json.load(sys.stdin)); print("" if v is None else v)' "$1"
+          }
+          # Vercel makes the first deployment of a project a production deployment, whatever the CLI asks for, and gives it the
+          # production domains (https://vercel.com/docs/deployments/environments). So a preview needs an existing production
+          # deployment; the first one comes from main.
+          if [ "${TARGET}" = preview ]; then
+            project="$(vercel_get "/v9/projects/${VERCEL_PROJECT_ID}?teamId=${VERCEL_ORG_ID}")"
+            if [ -z "$(printf '%s' "${project}" | json_field targets.production.id)" ]; then
+              echo "::error::the Vercel project has no production deployment yet, and Vercel would turn this preview into the production site; deploy production from main first (workflow_dispatch)"
+              exit 1
+            fi
+          fi
+          output="$(website/node_modules/.bin/vercel deploy --prebuilt --target="${TARGET}")"
           url="$(printf '%s\n' "${output}" | tail -n 1)"
           if ! printf '%s' "${url}" | grep -Eq '^https://[a-z0-9-]+\.vercel\.app$'; then
             echo "::error::the Vercel CLI did not print a deployment URL on its last line"
+            exit 1
+          fi
+          # Read back the target that Vercel recorded (null for a preview): a preview must never end as production, and a
+          # production run never as a preview.
+          deployment="$(vercel_get "/v13/deployments/${url#https://}?teamId=${VERCEL_ORG_ID}")"
+          recorded="$(printf '%s' "${deployment}" | json_field target)"
+          if [ "${recorded:-preview}" != "${TARGET}" ]; then
+            echo "::error::Vercel recorded ${url} as a ${recorded:-preview} deployment, expected ${TARGET}"
             exit 1
           fi
           echo "url=${url}" >> "${GITHUB_OUTPUT}"
