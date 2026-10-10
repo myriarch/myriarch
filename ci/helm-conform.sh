@@ -10,7 +10,7 @@
 #   ci/helm-conform.sh [--out DIR]       default DIR: .cache/helm-render (wiped and recreated)
 #
 # Cases: default, openshift (openshift.enabled=true), openshift-auto (auto with --api-versions security.openshift.io/v1),
-# auto-standard (auto without it: standard profile), quickstart-dex, prod, prod-<variant> for each
+# auto-standard (auto without it: standard profile), quickstart-dex, install-guide (the values of the Helm guide), prod, prod-<variant> for each
 # deploy/helm/myriarch/examples/ingress-*.yaml, prod-openshift (examples/openshift.yaml), plus option cases
 # (single replica, SSH Git URL, extra ports, DNS override, enrollment tokens, OIDC, OIDC from the environment).
 #
@@ -324,6 +324,24 @@ if run_case quickstart-dex -f "${examples}/quickstart-dex.yaml"; then
     "$(yq '.config.issuer' "${examples}/dex/dex.yaml")"
   expect "${c}" "Dex port in the issuer" "5554" "$(qc ${c} '.auth.oidc.issuerUrl' | sed -E 's|^https://[^:/]+:([0-9]+)/.*|\1|')"
   expect "${c}" "Dex port in the egress rule" "5432,443,5554" "$(np_ports ${c})"
+fi
+
+# ---------------------------------------------------------------------------------------------------------------------
+# values of the guide docs/operations/install-helm.md: minimal installation, GitOps over HTTPS, HTTPRoute, declared token
+# ---------------------------------------------------------------------------------------------------------------------
+if run_case install-guide -f "${examples}/install-guide.yaml"; then
+  c=install-guide
+  expect "${c}" "HTTPRoute" "HTTPRoute" "$(q ${c} 'select(.kind == "HTTPRoute") | .kind')"
+  expect "${c}" "HTTPRoute host" "fleet.example.com" "$(q ${c} 'select(.kind == "HTTPRoute") | .spec.hostnames[0]')"
+  expect "${c}" "no Ingress" "" "$(q ${c} 'select(.kind == "Ingress") | .kind')"
+  expect "${c}" "GitOps is enabled" "true" "$(qc ${c} '.gitops.enabled')"
+  expect "${c}" "GitOps token file" "/etc/myriarchd/secrets/git-token" "$(qc ${c} '.gitops.auth.tokenFile')"
+  expect "${c}" "declared enrollment token Secret" "myriarch-enrollment-linux-hosts" \
+    "$(q ${c} 'select(.kind == "Secret" and .metadata.name == "myriarch-enrollment-linux-hosts") | .metadata.name')"
+  expect "${c}" "enrollment token label" "production" "$(qc ${c} '.opamp.enrollmentTokens[0].labels.environment')"
+  np='select(.kind == "NetworkPolicy") | '
+  expect "${c}" "allowSameNamespace=false: the only source of port 8080 is the Gateway namespace" "false 1 gateway-system" \
+    "$(q ${c} "${np}.spec.ingress[0].from[0] | has(\"podSelector\")") $(q ${c} "${np}.spec.ingress[0].from | length") $(q ${c} "${np}.spec.ingress[0].from[0].namespaceSelector.matchLabels[\"kubernetes.io/metadata.name\"]")"
 fi
 
 # ---------------------------------------------------------------------------------------------------------------------

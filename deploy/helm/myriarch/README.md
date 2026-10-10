@@ -277,7 +277,9 @@ paths:
 
 A complete, neutral example (HA values with OIDC, gateway collector overlay, secrets script and an offline verification
 script) lives in `deploy/examples/production/`; see its README. The overlays in `deploy/helm/myriarch/examples/`
-(`ingress-*.yaml`, `openshift.yaml`, `quickstart-dex.yaml`, `dex/dex.yaml`) are not part of the packaged chart.
+(`ingress-*.yaml`, `openshift.yaml`, `quickstart-dex.yaml`, `dex/dex.yaml`, `install-guide.yaml`) are not part of the packaged
+chart. `install-guide.yaml` is the values file of the guide [Install with Helm](../../../docs/operations/install-helm.md): minimal
+installation, GitOps over HTTPS, an `HTTPRoute` and one declared enrollment token.
 
 ## Verification
 

@@ -12,7 +12,7 @@ Go or Node.js toolchain when you use the release images.
 > well known, the cookies are not marked `Secure`, and the GitOps source is a directory without Git. The port is published
 > on `127.0.0.1` only. `myriarchd serve` refuses exactly these settings, so a single-machine setup without TLS and without
 > a Git server can only use dev mode. This is never a production setup. For production, read
-> the [production checklist](../operations/production-checklist.md).
+> [Install with Helm](../operations/install-helm.md) and the [production checklist](../operations/production-checklist.md).
 
 ## What you get
 
@@ -157,4 +157,5 @@ artifact cache lives on a temporary file system and is rebuilt on demand.
 
 - [Your first fleet and rollout](first-fleet-and-rollout.md): write a fleet and a rollout policy yourself and roll out a
   change in waves.
+- [Install with Helm](../operations/install-helm.md): the chart for a real installation on Kubernetes.
 - [Production checklist](../operations/production-checklist.md): the settings that matter once you leave a laptop.
