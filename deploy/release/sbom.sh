@@ -59,9 +59,30 @@ case "${mode}" in
   *) die "usage: sbom.sh archive <artifact> <document> | webui <version> <document>" ;;
 esac
 
+# Syft lists its own temporary extraction directory of an archive as a file (".../syft-archive-contents-<random>", with the build
+# host's TMPDIR in the path). It is not in the archive: it is dropped with the relationships that name it, the rest of the document
+# (documentNamespace and creationInfo.created included) stays as syft wrote it. Then the sanity check.
 python3 -I - "${document}" <<'PY' || die "[sbom_empty] ${document} is not an SPDX 2.3 JSON document with at least one package"
 import json, sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     doc = json.load(f)
 assert doc.get("spdxVersion") == "SPDX-2.3" and len(doc.get("packages") or []) >= 1
+files = doc.get("files")
+if files:
+    dropped = {f.get("SPDXID") for f in files if "syft-archive-contents-" in str(f.get("fileName"))}
+    if dropped:
+        kept = [f for f in files if f.get("SPDXID") not in dropped]
+        if kept:
+            doc["files"] = kept
+        else:
+            del doc["files"]
+        if "relationships" in doc:
+            doc["relationships"] = [r for r in doc["relationships"]
+                                    if r.get("spdxElementId") not in dropped and r.get("relatedSpdxElement") not in dropped]
+        for p in doc["packages"]:
+            if "hasFiles" in p:
+                p["hasFiles"] = [x for x in p["hasFiles"] if x not in dropped]
+        with open(sys.argv[1], "w", encoding="utf-8") as f:
+            json.dump(doc, f, separators=(",", ":"))
+            f.write("\n")
 PY

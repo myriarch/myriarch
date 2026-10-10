@@ -81,7 +81,10 @@ cat > "${STUBS}/syft" <<'STUB'
 if [ "${1:-}" = version ]; then printf 'Application: syft\nVersion:     %s\n' "${STUB_SYFT_VERSION}"; exit 0; fi
 { printf 'argv=%s\n' "$*"; printf 'enrich=%s\n' "${SYFT_ENRICH:-unset}"; printf 'update=%s\n' "${SYFT_CHECK_FOR_APP_UPDATE:-unset}"; } >> "${STUB_RECORD}"
 for a in "$@"; do case "${a}" in spdx-json=*) out="${a#spdx-json=}" ;; esac; done
-if [ "${STUB_EMPTY:-0}" = 1 ]; then echo '{"spdxVersion":"SPDX-2.3","packages":[]}' > "${out}"; else echo '{"spdxVersion":"SPDX-2.3","packages":[{"name":"p"}]}' > "${out}"; fi
+if [ "${STUB_EMPTY:-0}" = 1 ]; then echo '{"spdxVersion":"SPDX-2.3","packages":[]}' > "${out}"
+elif [ "${STUB_TMPDIR_ENTRY:-0}" = 1 ]; then
+  echo '{"spdxVersion":"SPDX-2.3","documentNamespace":"urn:x","packages":[{"name":"p","SPDXID":"SPDXRef-p"}],"files":[{"SPDXID":"SPDXRef-f1","fileName":"a.txt"},{"SPDXID":"SPDXRef-f2","fileName":"private/var/T/syft-archive-contents-123"}],"relationships":[{"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-p","relationshipType":"DESCRIBES"},{"spdxElementId":"SPDXRef-p","relatedSpdxElement":"SPDXRef-f2","relationshipType":"CONTAINS"}]}' > "${out}"
+else echo '{"spdxVersion":"SPDX-2.3","packages":[{"name":"p"}]}' > "${out}"; fi
 STUB
 cat > "${STUBS}/yq" <<'STUB'
 #!/usr/bin/env bash
@@ -108,6 +111,15 @@ grep -q "^argv=scan -q -c ${ROOT}/deploy/release/syft.yaml --from file ${TEST_TM
 grep -q -- '--enrich' "${STUB_RECORD}" && fail "syft was called with --enrich" || ok "syft is not called with --enrich"
 grep -q '^enrich=unset$' "${STUB_RECORD}" && ok "SYFT_ENRICH of the caller is not visible to syft" || fail "SYFT_ENRICH reached syft"
 grep -q '^update=false$' "${STUB_RECORD}" && ok "SYFT_CHECK_FOR_APP_UPDATE=false" || fail "SYFT_CHECK_FOR_APP_UPDATE is not false"
+expect_ok "sbom.sh: a document with the temporary extraction directory of syft" stub_sbom STUB_TMPDIR_ENTRY=1 "${SBOM}" archive "${TEST_TMP}/art/a.tar.gz" "${TEST_TMP}/tmpdir.json"
+python3 -I - "${TEST_TMP}/tmpdir.json" <<'PY' && ok "... the entry and its relationships are dropped, the rest is unchanged" || fail "the temporary extraction directory is still in the SBOM"
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert [f["fileName"] for f in d["files"]] == ["a.txt"], d["files"]
+assert [r["relationshipType"] for r in d["relationships"]] == ["DESCRIBES"], d["relationships"]
+assert d["documentNamespace"] == "urn:x" and d["packages"] == [{"name": "p", "SPDXID": "SPDXRef-p"}]
+assert "syft-archive-contents-" not in open(sys.argv[1]).read()
+PY
 if [ -n "${REAL_YQ}" ]; then
   : > "${STUB_RECORD}"
   expect_ok "sbom.sh: the web UI is scanned" stub_sbom "${SBOM}" webui 0.1.0-rc.1 "${TEST_TMP}/w.json"
@@ -127,6 +139,21 @@ if [ "${have_real}" = 0 ]; then
   if [ "${CI:-}" = true ]; then fail "syft or yq at the pinned version missing in ${TOOLS_BIN}: ci/install-tools.sh syft yq"
   else echo "  skipped: syft or yq at the pinned version missing in ${TOOLS_BIN} (the web UI SBOM cases)"; fi
 else
+  python3 -I -c 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1], "w"); z.writestr("hello.txt", "hello\n"); z.close()' "${TEST_TMP}/real.zip"
+  if PATH="${TOOLS_BIN}:${PATH}" "${SBOM}" archive "${TEST_TMP}/real.zip" "${TEST_TMP}/real-archive.json" 2>"${TEST_TMP}/real-archive.err"; then
+    python3 -I - "${TEST_TMP}/real-archive.json" <<'PY' && ok "the SBOM of a real archive names no temporary extraction directory" || fail "the SBOM of a real archive holds a temporary path"
+import json, sys
+raw = open(sys.argv[1]).read()
+d = json.loads(raw)
+assert "syft-archive-contents-" not in raw, "temporary extraction directory"
+assert d["spdxVersion"] == "SPDX-2.3" and len(d["packages"]) >= 1
+for r in d.get("relationships", []):
+    ids = {f["SPDXID"] for f in d.get("files", [])} | {p["SPDXID"] for p in d["packages"]} | {"SPDXRef-DOCUMENT"}
+    assert r["spdxElementId"] in ids and r["relatedSpdxElement"] in ids, r
+PY
+  else
+    fail "the SBOM of a real archive failed: $(cat "${TEST_TMP}/real-archive.err")"
+  fi
   if PATH="${TOOLS_BIN}:${PATH}" "${SBOM}" webui 0.1.0-rc.1 "${TEST_TMP}/real.json" 2>"${TEST_TMP}/real.err"; then
     ok "the web UI SBOM is made from the real lockfile"
     "${real_yq}" -o=json '.' "${ROOT}/web/pnpm-lock.yaml" | python3 -I "${PRODLOCK}" --package-json "${ROOT}/web/package.json" > "${TEST_TMP}/real-lock.json"
