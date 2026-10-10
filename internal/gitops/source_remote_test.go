@@ -23,17 +23,17 @@ func TestGitCloneFollowsTheConfiguredRepository(t *testing.T) {
 	headB := runGit(t, workB, "rev-parse", "HEAD")
 	cloneDir := filepath.Join(t.TempDir(), "clone")
 
-	fa := gitFixture(t, "file://"+workA, "")
+	fa := gitFixture(t, fileURL(workA), "")
 	fa.cfg.CloneDir = cloneDir
 	require.NoError(t, fa.build(t).SyncNow(context.Background(), "startup"))
 	assert.Equal(t, runGit(t, workA, "rev-parse", "HEAD"), fa.status(t).AppliedCommit.SHA)
 
-	fb := gitFixture(t, "file://"+workB, "")
+	fb := gitFixture(t, fileURL(workB), "")
 	fb.cfg.CloneDir = cloneDir
 	require.NoError(t, fb.build(t).SyncNow(context.Background(), "startup"))
 	st := fb.status(t)
 	assert.Equal(t, headB, st.AppliedCommit.SHA, "the configured repository is applied")
-	assert.Equal(t, "file://"+workB, st.Source)
+	assert.Equal(t, fileURL(workB), st.Source)
 }
 
 // A pre-existing clone whose origin differs from gitops.repoUrl is replaced
@@ -43,13 +43,13 @@ func TestGitExistingCloneWithAnotherOriginIsReplaced(t *testing.T) {
 	workA := workRepo(t, "")
 	workB := workRepo(t, "")
 	cloneDir := filepath.Join(t.TempDir(), "clone")
-	runGit(t, filepath.Dir(cloneDir), "clone", "-q", "file://"+workA, cloneDir)
-	require.Equal(t, "file://"+workA, runGit(t, cloneDir, "config", "remote.origin.url"))
+	runGit(t, filepath.Dir(cloneDir), "clone", "-q", fileURL(workA), cloneDir)
+	require.Equal(t, fileURL(workA), runGit(t, cloneDir, "config", "remote.origin.url"))
 	require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "stale.txt"), []byte("x"), 0o644))
 
-	f := gitFixture(t, "file://"+workB, "")
+	f := gitFixture(t, fileURL(workB), "")
 	f.cfg.CloneDir = cloneDir
 	require.NoError(t, f.build(t).SyncNow(context.Background(), "startup"))
 	assert.Equal(t, runGit(t, workB, "rev-parse", "HEAD"), f.status(t).AppliedCommit.SHA)
-	assert.Equal(t, "file://"+workB, runGit(t, cloneDir, "config", "remote.origin.url"))
+	assert.Equal(t, fileURL(workB), runGit(t, cloneDir, "config", "remote.origin.url"))
 }

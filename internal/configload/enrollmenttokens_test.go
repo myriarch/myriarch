@@ -121,7 +121,7 @@ func TestEnrollmentTokenFileChecks(t *testing.T) {
 		}
 	})
 	t.Run("serve does not read the files", func(t *testing.T) {
-		c := tokensConfig(config.EnrollmentTokenConfig{Name: "a", TokenFile: "/does/not/exist"})
+		c := tokensConfig(config.EnrollmentTokenConfig{Name: "a", TokenFile: absPath("/does/not/exist")})
 		if err := ValidateOptions(&c, Options{}); err != nil {
 			t.Errorf("%v", err)
 		}
@@ -130,8 +130,9 @@ func TestEnrollmentTokenFileChecks(t *testing.T) {
 		}
 	})
 	t.Run("missing", func(t *testing.T) {
-		pm := check(config.EnrollmentTokenConfig{Name: "a", TokenFile: "/does/not/exist/token"})
-		if got := pm["opamp.enrollmentTokens[0].tokenFile"]; !strings.HasPrefix(got, "cannot read /does/not/exist/token: ") {
+		file := absPath("/does/not/exist/token")
+		pm := check(config.EnrollmentTokenConfig{Name: "a", TokenFile: file})
+		if got := pm["opamp.enrollmentTokens[0].tokenFile"]; !strings.HasPrefix(got, "cannot read "+file+": ") {
 			t.Errorf("%q", got)
 		}
 	})

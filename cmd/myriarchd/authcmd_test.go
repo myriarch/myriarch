@@ -196,9 +196,10 @@ func TestConfigValidateReportsAMissingLoginPath(t *testing.T) {
 		t.Fatalf("bootstrap admin: exit %d, stdout %q, stderr %q", code, out, errs)
 	}
 	// an unreadable credential file is reported with the setting
-	missing := writeConfig(t, noLoginYAML+"auth:\n  bootstrapAdmin:\n    enabled: true\n    tokenFile: /nonexistent/bootstrap/token\n")
+	missingToken := absPath("/nonexistent/bootstrap/token")
+	missing := writeConfig(t, noLoginYAML+"auth:\n  bootstrapAdmin:\n    enabled: true\n    tokenFile: "+missingToken+"\n")
 	code, out, errs = runMyriarchd(t, "config", "validate", "--config", missing)
-	if code != 1 || out != "" || !strings.HasPrefix(errs, "ERROR: auth.bootstrapAdmin.tokenFile: cannot read /nonexistent/bootstrap/token") {
+	if code != 1 || out != "" || !strings.HasPrefix(errs, "ERROR: auth.bootstrapAdmin.tokenFile: cannot read "+missingToken) {
 		t.Fatalf("missing token file: exit %d, stdout %q, stderr %q", code, out, errs)
 	}
 	if code, _, _ := runMyriarchd(t, "config", "validate", "--config", missing, "--skip-files"); code != 0 {

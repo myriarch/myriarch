@@ -137,10 +137,11 @@ func TestBootstrapAdminNextToOIDC(t *testing.T) {
 
 // Enabled but replaced by single sign-on: no warning, and its files are not read.
 func TestBootstrapAdminInactiveBehindOIDC(t *testing.T) {
+	hashFile, tokenFile := absPath("/does/not/exist/hash"), absPath("/does/not/exist/token")
 	c := prodConfig()
 	c.Server.TrustedProxies = []string{"10.0.0.0/8"}
 	c.Auth.BootstrapAdmin = config.BootstrapAdminConfig{Enabled: true, Username: "admin",
-		PasswordHashFile: "/does/not/exist/hash", TokenFile: "/does/not/exist/token"}
+		PasswordHashFile: hashFile, TokenFile: tokenFile}
 	if c.Auth.BootstrapActive() {
 		t.Fatal("OIDC without keepWithOidc replaces the bootstrap admin")
 	}
@@ -154,8 +155,8 @@ func TestBootstrapAdminInactiveBehindOIDC(t *testing.T) {
 	c.Auth.BootstrapAdmin.KeepWithOIDC = true
 	err := ValidateOptions(&c, Options{CheckFiles: true})
 	pm := problemMap(err)
-	for _, path := range []string{"auth.bootstrapAdmin.passwordHashFile", "auth.bootstrapAdmin.tokenFile"} {
-		if !strings.HasPrefix(pm[path], "cannot read /does/not/exist/") {
+	for path, file := range map[string]string{"auth.bootstrapAdmin.passwordHashFile": hashFile, "auth.bootstrapAdmin.tokenFile": tokenFile} {
+		if !strings.HasPrefix(pm[path], "cannot read "+file+": ") {
 			t.Errorf("%s: %q", path, pm[path])
 		}
 	}
@@ -232,12 +233,12 @@ func TestBootstrapAdminFileChecks(t *testing.T) {
 	}
 
 	t.Run("missing", func(t *testing.T) {
-		pm := check(t, func(b *config.BootstrapAdminConfig) {
-			b.PasswordHashFile, b.TokenFile = filepath.Join(t.TempDir(), "nope"), filepath.Join(t.TempDir(), "nope")
-		})
-		for _, p := range []string{hashPath, tokenPath} {
-			if !strings.HasPrefix(pm[p], "cannot read ") || !strings.Contains(pm[p], "no such file") {
-				t.Errorf("%s: %q", p, pm[p])
+		hash, token := filepath.Join(t.TempDir(), "nope"), filepath.Join(t.TempDir(), "nope")
+		pm := check(t, func(b *config.BootstrapAdminConfig) { b.PasswordHashFile, b.TokenFile = hash, token })
+		for p, file := range map[string]string{hashPath: hash, tokenPath: token} {
+			// the reason is the text of the operating system for the same failure
+			if want := "cannot read " + file + ": " + missingFileReason(t, file); pm[p] != want {
+				t.Errorf("%s: %q, want %q", p, pm[p], want)
 			}
 		}
 	})
@@ -402,12 +403,13 @@ func TestOIDCClaimsAndUserMappings(t *testing.T) {
 
 // The new settings can be overridden by environment variables (lists with commas).
 func TestEnvOverridesForTheLoginSettings(t *testing.T) {
+	hashFile, tokenFile := absPath("/etc/myriarchd/bootstrap/password-hash"), absPath("/etc/myriarchd/bootstrap/token")
 	p := writeFile(t, "c.yaml", prodMinimal)
 	cfg, err := load(p, false, env(map[string]string{
 		"MYRIARCH_AUTH_BOOTSTRAPADMIN_ENABLED":           "true",
 		"MYRIARCH_AUTH_BOOTSTRAPADMIN_USERNAME":          "ops",
-		"MYRIARCH_AUTH_BOOTSTRAPADMIN_PASSWORDHASHFILE":  "/etc/myriarchd/bootstrap/password-hash",
-		"MYRIARCH_AUTH_BOOTSTRAPADMIN_TOKENFILE":         "/etc/myriarchd/bootstrap/token",
+		"MYRIARCH_AUTH_BOOTSTRAPADMIN_PASSWORDHASHFILE":  hashFile,
+		"MYRIARCH_AUTH_BOOTSTRAPADMIN_TOKENFILE":         tokenFile,
 		"MYRIARCH_AUTH_BOOTSTRAPADMIN_KEEPWITHOIDC":      "true",
 		"MYRIARCH_AUTH_OIDC_NAMECLAIM":                   "display_name",
 		"MYRIARCH_AUTH_OIDC_EMAILCLAIM":                  "mail",
@@ -423,7 +425,7 @@ func TestEnvOverridesForTheLoginSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := cfg.Auth.BootstrapAdmin
-	if !b.Enabled || b.Username != "ops" || b.PasswordHashFile != "/etc/myriarchd/bootstrap/password-hash" || b.TokenFile != "/etc/myriarchd/bootstrap/token" || !b.KeepWithOIDC {
+	if !b.Enabled || b.Username != "ops" || b.PasswordHashFile != hashFile || b.TokenFile != tokenFile || !b.KeepWithOIDC {
 		t.Errorf("bootstrap admin: %+v", b)
 	}
 	o := cfg.Auth.OIDC
