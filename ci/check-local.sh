@@ -9,7 +9,7 @@
 #   ONLY=web,helm ci/check-local.sh         only these gates (ONLY is applied first, then SKIP removes)
 #   ci/check-local.sh --list                list the gates
 #
-# Gates (in this order): go go-test web build examples shellcheck helm language docs website licenses vulncheck secrets e2e
+# Gates (in this order): go go-test web build examples shellcheck workflows helm language docs website licenses vulncheck secrets e2e
 #
 # Environment:
 #   SKIP, ONLY               comma-separated gate names
@@ -18,6 +18,11 @@
 #   LANGUAGE_GUARD_PATHS     space-separated pathspecs of the strict scope (default: the code, scripts, deploy files,
 #                            examples, docs/, .github/ and the root Markdown files; the default excludes of
 #                            scripts/check-language.exclude apply)
+#   GO_TEST_RACE             go-test: 1 (default) runs go test with -race, 0 without (Windows CI)
+#   GO_TEST_DEVPG            go-test: 1 (default) also runs the devpg tests (embedded PostgreSQL), 0 leaves them out
+#   HELM_KUBERNETES_VERSIONS helm: Kubernetes versions of the kubeconform schemas (default: 1.30.0 1.34.12)
+#   CHECK_LOCAL_STREAM       1 streams every gate to the console in a ::group:: block (the default when GITHUB_ACTIONS=true,
+#                            the log file is written as well), 0 writes the log file only (the default elsewhere)
 #   E2E_*                    passed through to scripts/e2e.sh
 #
 # Logs: .cache/check-local/<gate>.log, summary: .cache/check-local/summary.txt. Missing tools: `make tools`.
@@ -26,7 +31,7 @@ set -uo pipefail
 # shellcheck source=ci/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-GATES="go go-test web build examples shellcheck helm language docs website licenses vulncheck secrets e2e"
+GATES="go go-test web build examples shellcheck workflows helm language docs website licenses vulncheck secrets e2e"
 OUT_REL=".cache/check-local"
 
 usage() {
@@ -34,6 +39,8 @@ usage() {
 usage: ci/check-local.sh [--list] [-h]
   SKIP=g1,g2   skip gates          ONLY=g1,g2   run only these gates
   LANGUAGE_GUARD=strict|warn|off   LANGUAGE_GUARD_PATHS="pathspec ..."
+  GO_TEST_RACE=0|1  GO_TEST_DEVPG=0|1  HELM_KUBERNETES_VERSIONS="1.30.0 ..."
+  CHECK_LOCAL_STREAM=0|1           stream gates as ::group:: blocks (default 1 in GitHub Actions)
 gates: ${GATES}
 USAGE
 }
@@ -76,6 +83,15 @@ SKIP_LIST="${SKIP:-}"
 ONLY_LIST="${ONLY:-}"
 check_names "${SKIP_LIST}"
 check_names "${ONLY_LIST}"
+# In GitHub Actions every gate streams into a log group (the console is the log); elsewhere the log file is all there is.
+if [ -n "${CHECK_LOCAL_STREAM:-}" ]; then
+  STREAM="${CHECK_LOCAL_STREAM}"
+elif [ "${GITHUB_ACTIONS:-}" = true ]; then
+  STREAM=1
+else
+  STREAM=0
+fi
+case "${STREAM}" in 0|1) ;; *) echo "check-local: CHECK_LOCAL_STREAM must be 0 or 1 (got '${STREAM}')" >&2; exit 2 ;; esac
 GUARD="${LANGUAGE_GUARD:-strict}"
 case "${GUARD}" in warn|strict|off) ;; *) echo "check-local: LANGUAGE_GUARD must be strict, warn or off (got '${GUARD}')" >&2; exit 2 ;; esac
 # Scope of the strict language run: English is the project language (ADR-0020) in the code, scripts, deploy files,
@@ -90,6 +106,7 @@ gate_go() {
   # the host updater and its tests also build for Windows (it runs as SYSTEM there): vet everything, compile the tests
   GOOS=windows GOARCH=amd64 go vet ./...
   GOOS=windows GOARCH=amd64 go test -c -o /dev/null ./internal/updater
+  GOOS=darwin GOARCH=arm64 go vet ./...
   ci/lint-go.sh
   ci/check-release-deps.sh
   ci/install-tools.sh go-licenses
@@ -98,9 +115,13 @@ gate_go() {
 
 gate_go_test() {
   ulimit -n 10240 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
+  local race="-race"
+  [ "${GO_TEST_RACE:-1}" = 0 ] && race=""
   # untagged: covers the devpg stub and TestDevCommandAgainstExternalPostgres (myriarchd dev --dsn without the tag)
-  go test -race -count=1 ./...
-  go test -race -count=1 -tags devpg ./internal/devpg/...
+  # shellcheck disable=SC2086  # race is empty or one flag
+  go test ${race} -count=1 ./...
+  # shellcheck disable=SC2086
+  if [ "${GO_TEST_DEVPG:-1}" != 0 ]; then go test ${race} -count=1 -tags devpg ./internal/devpg/...; fi
 }
 
 # Not ci/test-web.sh: it may run corepack or a global npm install, which changes the system.
@@ -119,6 +140,7 @@ gate_web() {
   fi
   pnpm typecheck
   pnpm lint
+  pnpm format:check
   pnpm test
   pnpm build
   cd "${ROOT}"
@@ -138,9 +160,22 @@ gate_shellcheck() {
   ci/lint-shell.sh
 }
 
+# The chart is checked against the schemas of its floor (kubeVersion >=1.30.0) and of a recent Kubernetes release (1.34.12 is
+# the newest standalone-strict schema set that kubeconform fetches by default); HELM_KUBERNETES_VERSIONS overrides the list.
 gate_helm() {
+  local v
   ci/lint-helm.sh
-  ci/helm-conform.sh --out "${OUT_REL}/helm"
+  for v in ${HELM_KUBERNETES_VERSIONS:-1.30.0 1.34.12}; do
+    echo "== helm-conform: Kubernetes ${v}"
+    KUBERNETES_VERSION="${v}" ci/helm-conform.sh --out "${OUT_REL}/helm/${v}"
+  done
+}
+
+# GitHub Actions workflows: actionlint (with ShellCheck over the run: blocks) and the policy check ci/check-workflows.py (pinned
+# actions, read-only token, forbidden triggers, gate parity with ci.yml). No network after the tools are installed.
+gate_workflows() {
+  ci/install-tools.sh actionlint shellcheck
+  ci/lint-workflows.sh
 }
 
 # Exit codes of this gate are mapped by the runner: 90 = SKIP (guard missing), 91 = WARN, other = FAIL.
@@ -246,6 +281,9 @@ finish() {
   local g i failed=0
   echo
   print_summary | tee "${OUT_REL}/summary.txt"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ -w "${GITHUB_STEP_SUMMARY}" ]; then
+    { echo '```'; cat "${OUT_REL}/summary.txt"; echo '```'; } >> "${GITHUB_STEP_SUMMARY}"
+  fi
   for g in ${GATES}; do
     i="$(idx_of "${g}")"
     [ "${ST[i]:-}" = FAIL ] && failed=1
@@ -288,6 +326,7 @@ PIN=KIND_VERSION ver kind kind version
 PIN=KUBECTL_VERSION ver kubectl kubectl version --client
 PIN=REUSE_VERSION ver reuse reuse --version
 PIN=HUGO_VERSION ver hugo hugo version
+PIN=ACTIONLINT_VERSION ver actionlint actionlint -version
 if have shellcheck; then printf '  %-12s %s\n' shellcheck "$(shellcheck --version | sed -n 's/^version: //p')"; else ver shellcheck shellcheck --version; fi
 echo
 
@@ -314,8 +353,15 @@ for g in ${GATES}; do
   log="${OUT_REL}/${g}.log"
   echo "==> ${g}"
   CURRENT="${g}"; CUR_START=${SECONDS}
-  ( set -euo pipefail; "${fn}" ) >"${log}" 2>&1
-  rc=$?
+  if [ "${STREAM}" = 1 ]; then
+    echo "::group::${g}"
+    ( set -euo pipefail; "${fn}" ) 2>&1 | tee "${log}"
+    rc=${PIPESTATUS[0]}
+    echo "::endgroup::"
+  else
+    ( set -euo pipefail; "${fn}" ) >"${log}" 2>&1
+    rc=$?
+  fi
   d="$(fmt_dur $((SECONDS - CUR_START)))"
   CURRENT=""
   case "${rc}" in
@@ -328,7 +374,13 @@ for g in ${GATES}; do
   esac
   set_result "${g}" "${st}" "${d}" "${note}"
   echo "<- ${g} ${st} (${d})"
-  if [ "${st}" = FAIL ]; then tail -n 25 "${log}" | sed 's/^/    /'; fi
+  if [ "${st}" = FAIL ]; then
+    if [ "${STREAM}" = 1 ]; then
+      echo "::error title=gate ${g}::${note}"
+    else
+      tail -n 25 "${log}" | sed 's/^/    /'
+    fi
+  fi
 done
 
 finish
