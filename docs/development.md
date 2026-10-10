@@ -152,9 +152,11 @@ therefore needs network access; later starts work offline. The data directory is
 ## Local tools
 
 `make tools` (`ci/install-tools.sh`) puts every tool the gates need into `.cache/bin`. `TOOLS="helm shellcheck"` limits the
-set. The Go tools are built from the pinned modules in `ci/tools/`. shellcheck and PowerShell 7 (`pwsh`) are release
-downloads, verified against the SHA-256 values in `ci/versions.env`; `pwsh` is unpacked into `.cache/pwsh/<version>` and
-linked as `.cache/bin/pwsh`. Put `.cache/bin` on your `PATH` to use the pinned versions:
+set. The Go tools are built from the pinned modules in `ci/tools/`. A stamp file next to each binary names the version and a
+digest of the `go.mod` and `go.sum` of its module, so a new pin or a raised requirement rebuilds the tool, also from a tool cache
+that CI restored from an older run; `TOOLS_NO_CACHE=1` ignores the stamps and installs everything again. shellcheck and PowerShell 7
+(`pwsh`) are release downloads, verified against the SHA-256 values in `ci/versions.env`; `pwsh` is unpacked into
+`.cache/pwsh/<version>` and linked as `.cache/bin/pwsh`. Put `.cache/bin` on your `PATH` to use the pinned versions:
 
 ```bash
 make tools
@@ -375,11 +377,9 @@ To let a deployment job read a secret:
 
 ### Update an action pin
 
-Dependabot (`.github/dependabot.yml`) proposes the updates weekly in one pull request and keeps the comment in step. Its commits
-carry no `Signed-off-by` line, so the DCO check stays red until a maintainer signs off (for example `git rebase --signoff` on the
-branch, or a squash merge whose commit message carries the maintainer's sign-off). By hand: look up
-the commit of the release tag and replace the SHA and the comment in every place the action is used (`ci/check-workflows.py` fails
-when the pins differ):
+Dependabot proposes the updates weekly in one pull request and keeps the comment in step with the SHA ([Dependency
+updates](#dependency-updates)). By hand: look up the commit of the release tag and replace the SHA and the comment in every place
+the action is used (`ci/check-workflows.py` fails when the pins differ):
 
 ```bash
 git ls-remote --tags https://github.com/actions/checkout.git 'refs/tags/v7.0.1' 'refs/tags/v7.0.1^{}'   # the ^{} line, if present, is the commit
@@ -388,6 +388,63 @@ python3 -I ci/check-workflows.py --remote        # compares every pin with its t
 
 Moving `.node-version` to a Node.js release without corepack (Node.js 25 and later) needs a pinned `npm install -g corepack@<version>`
 step in `.github/actions/setup/action.yml`. Move it to the next LTS line only after its first LTS release.
+
+## Dependency updates
+
+Dependabot (`.github/dependabot.yml`) proposes version updates every Monday, as one grouped pull request per directory, and
+security updates as soon as an advisory has a fix. The pull requests go through the same checks as any other change, and several
+of them need a follow-up commit on the same branch:
+
+| Ecosystem and directory | Group | What else the update has to change |
+|---|---|---|
+| GitHub Actions: `/` and `/.github/actions/setup` | `github-actions` | Nothing: Dependabot rewrites the SHA and the version comment ([Update an action pin](#update-an-action-pin)) |
+| Go: `/`, the product | `go-modules` | `make notices`: `THIRD_PARTY_NOTICES` lists the version of every linked package, and the `licenses` gate fails on a drift |
+| pnpm: `/web` | `web-ui` | `make notices` for the bundled packages |
+| pnpm: `/website` | `website` | `website/data/third_party.yaml` for a shipped package and the Mermaid version in `website/config/_default/params.yaml` (`website/scripts/check-notices.py` checks both) |
+| pip: `/assets/brand/source` | `brand-python` | Compare the output of the brand generator (below) |
+| npm: `/assets/brand/source` | `brand-node` | Compare the output of the brand generator (below) |
+| Go: `/ci/tools/*`, the CI tools | none | Security updates only (below) |
+
+**Sign-off.** DCO is a required check next to `ci-ok`. The DCO app (DCO-2) passes the commits that a bot authored without a
+sign-off, so a Dependabot pull request is green as Dependabot made it. Leave its commits alone: `git rebase --signoff` and a force
+push would replace the commits that GitHub signed for Dependabot with local ones, and Dependabot could no longer rebase or update
+the pull request. A commit that you add to the branch, such as a follow-up of the table, is yours and carries your sign-off
+(`git commit -s`, section "Sign-off" of [CONTRIBUTING.md](../CONTRIBUTING.md)). Dependabot stops rebasing a pull request once
+someone has pushed to its branch, so push the follow-ups last. Merge by squash or rebase, and read the release notes before you
+merge a major version.
+
+**Security updates** need the repository setting "Dependabot security updates". They do not wait for Monday, and they ignore the
+groups and the limit of open pull requests. The setting is not limited to the entries of `dependabot.yml`, so an update can also
+arrive for a file that "Updated by hand" below lists. A pull request for `ci/tools/reuse` needs a look at the Python 3.9 floor: the
+requirements are hash-pinned for Python 3.9 and newer, and CI runs a newer Python, so it cannot see a break of the floor. Compare
+the pull request with the output of the `uv pip compile --python-version 3.9` commands in `ci/versions.env`, and build the tool once
+with a Python 3.9 interpreter (`REUSE_PYTHON`).
+
+**Website overrides.** The Vercel CLI and markdownlint-cli2 pin some of their own dependencies to vulnerable versions, and
+`website/package.json` replaces those through `pnpm.overrides` (`website/README.md`, section "Node dependency overrides", gives the
+reason for each entry). After an update of one of the two tools, run `pnpm install` and `pnpm audit` in `website/` and drop an entry
+whose removal changes nothing in `pnpm-lock.yaml` but the `overrides:` block. `pnpm audit` still lists a few accepted findings, which
+the README names with their reasons; any other finding needs a decision.
+
+**CI tools.** The module of a tool (`ci/tools/<tool>`) names the tool only in a `tool` directive, so every requirement in it is
+marked `// indirect`, and Dependabot proposes version updates for direct requirements only. The tool versions are the pins of
+`ci/versions.env`, and `ci/check.sh` fails when a `go.mod` names another version. The entry therefore sets
+`open-pull-requests-limit: 0` and exists for security updates only. Dependabot runs `go mod tidy` on every Go module it updates, so
+such a pull request carries more than the vulnerable requirement: the tidy run adds `go.sum` lines for modules that have nothing to
+do with the advisory (from under ten to a few hundred, depending on the tool), while `ci/tools/update.sh` does not run it. Read the
+`go.mod` diff against the advisory. A change of either file rebuilds the tool (see "Local tools"), so CI builds and uses the raised
+tool in the pull request. A security update of the tool itself fails `ci/check.sh` until `ci/versions.env` names the new version;
+then run `ci/tools/update.sh <tool>`. That script builds `go.mod` and `go.sum` again from the pin, which drops a raised requirement
+that the new release of the tool does not require itself, so look at the Dependabot alerts of the module after such an update.
+
+**Brand generator.** No gate runs `assets/brand/source/make_assets.sh`, and the committed files depend on the versions of its
+packages. After an update of one of them, run the script into an empty directory and compare its files with `assets/brand/`
+(`assets/brand/README.md` says what to expect).
+
+**Updated by hand.** The digests of the container images (`ci/pin-images.sh`; `ci/check.sh` keeps the Dockerfiles, the compose
+file and `ci/versions.env` in step), `reuse` (`ci/tools/reuse`, hash-pinned for the Python 3.9 floor; see the security updates
+above), the Docsy theme (`website/go.mod`; after an update `website/scripts/check-overrides.py` shows which upstream file changed)
+and the pins of `ci/versions.env`: the tool versions and the downloads with a SHA-256, such as Hugo, Dart Sass and lychee.
 
 ## Licenses, headers and third-party notices
 
