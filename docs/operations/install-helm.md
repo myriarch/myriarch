@@ -150,8 +150,8 @@ you want to check a repository before it reaches the server, use `myrctl validat
 ## Make the server reachable for agents
 
 Collectors and users reach the server through the Gateway. The chart creates the `HTTPRoute`, not the Gateway. Ingress
-controllers and OpenShift work too: the overlays in
-[`deploy/helm/myriarch/examples/`](../../deploy/helm/myriarch/examples) (`ingress-nginx.yaml`, `ingress-f5-nginx.yaml`,
+controllers and OpenShift work too: the overlays in `deploy/helm/myriarch/examples/` (for example
+[`ingress-nginx.yaml`](../../deploy/helm/myriarch/examples/ingress-nginx.yaml); there are also `ingress-f5-nginx.yaml`,
 `ingress-haproxy.yaml`, `ingress-traefik.yaml` and `openshift.yaml` with a Route) replace the `httpRoute` block. In all
 cases the chart insists on three settings, because the server must trust the forwarded headers of the proxy only:
 

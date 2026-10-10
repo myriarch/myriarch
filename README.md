@@ -114,8 +114,14 @@ bin/myrctl render --dir examples/quickstart --fleet windows-hosts --sample windo
 
 `make kind-probe` builds a local [kind](https://kind.sigs.k8s.io/) cluster from zero, installs the Helm chart and runs
 numbered checks of the whole flow, including a collector version update. It needs Docker. See
-[hack/kind/README.md](hack/kind/README.md). A Docker Compose development stack is in
-[deploy/compose/docker-compose.yaml](deploy/compose/docker-compose.yaml); it is meant for development only.
+[hack/kind/README.md](hack/kind/README.md). To install the Helm chart on your own cluster, follow
+[Install with Helm](docs/operations/install-helm.md).
+
+With Docker Compose, [docs/getting-started/docker-compose.md](docs/getting-started/docker-compose.md) starts the server,
+PostgreSQL and 200 simulated collectors from the release images (available from v0.1.0); the Compose files in
+`deploy/compose/` are meant for evaluation and development only. For a guided first session from source, with
+a fleet and a rollout policy of your own, read
+[docs/getting-started/first-fleet-and-rollout.md](docs/getting-started/first-fleet-and-rollout.md).
 
 ### Connect a real collector
 
@@ -184,10 +190,10 @@ parallel. Details: [docs/architecture.md](docs/architecture.md).
 ## Documentation
 
 - [Documentation home](docs/_index.md): map of all sections
-- [Getting started](docs/getting-started/_index.md): from source to a running system
+- [Getting started](docs/getting-started/_index.md): from source or with Docker Compose to a running system
 - [Concepts](docs/concepts/_index.md): GitOps, agents, blueprints, fleets, inventory, rollouts, executors
 - [Tasks](docs/tasks/_index.md): connect a host, roll out a change, simulate a fleet
-- [Operations](docs/operations/_index.md): authentication, production checklist, troubleshooting
+- [Operations](docs/operations/_index.md): installation with Helm, authentication, production checklist, troubleshooting
 - [Reference](docs/reference/_index.md): GitOps schema, command-line reference, [REST API](api/openapi.yaml)
 - [Security model](docs/security/_index.md)
 - [Architecture](docs/architecture.md), [design contracts](docs/design/README.md) and [decision records](docs/adr/README.md)
