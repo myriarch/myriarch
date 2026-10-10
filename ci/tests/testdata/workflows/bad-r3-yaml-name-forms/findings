@@ -1,2 +1,2 @@
 .github/workflows/.nightly.yml:1: R3: the workflow has no top-level permissions: (contents: read)
-.github/workflows/Release.YAML:1: R3: the workflow has no top-level permissions: (contents: read)
+.github/workflows/Nightly.YAML:1: R3: the workflow has no top-level permissions: (contents: read)

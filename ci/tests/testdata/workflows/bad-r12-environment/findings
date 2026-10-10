@@ -1,0 +1,1 @@
+.github/workflows/scorecard.yml:17: R12: job analysis: environment: is not allowed (the Scorecard API rejects it or the job would get more than it needs)

@@ -1,0 +1,1 @@
+.github/workflows/release.yml:5: R13: on: must be a block mapping with push of tags only

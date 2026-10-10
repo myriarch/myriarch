@@ -1,0 +1,1 @@
+.github/workflows/release.yml:79: R13: job finalize (contents: write): it must run after a job that uses environment release (needs:), so that the approval gates it

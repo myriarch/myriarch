@@ -1,0 +1,1 @@
+.github/workflows/scorecard.yml:12: R12: the workflow has no top-level defaults: (the Scorecard API rejects the results)

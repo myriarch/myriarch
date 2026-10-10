@@ -1,0 +1,1 @@
+.github/workflows/release.yml:91: R13: job finalize (contents: write): the command make must not run in a job with these privileges (build code runs only in jobs with contents: read)

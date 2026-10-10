@@ -1,0 +1,1 @@
+.github/workflows/release.yml:8: R13: the trigger 'workflow_dispatch' is not allowed: the release workflow runs only for a pushed tag

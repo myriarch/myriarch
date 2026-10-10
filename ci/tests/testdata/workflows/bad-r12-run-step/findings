@@ -1,0 +1,1 @@
+.github/workflows/scorecard.yml:31: R12: job analysis: a step may only use an action (run: is not allowed)

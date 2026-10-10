@@ -1,0 +1,1 @@
+.github/workflows/scorecard.yml:26: R1: uses: ossf/scorecard-action@v2.4.4 is not a local path or an actions/* or github/* action pinned to a full commit SHA

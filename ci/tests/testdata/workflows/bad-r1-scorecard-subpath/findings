@@ -1,0 +1,3 @@
+.github/workflows/scorecard.yml:13: R12: job analysis: a step must use ossf/scorecard-action
+.github/workflows/scorecard.yml:26: R1: uses: ossf/scorecard-action/extra@2d1146689b8cda280b9bc96326124645441f03bc is not a local path or an actions/* or github/* action pinned to a full commit SHA
+.github/workflows/scorecard.yml:26: R12: job analysis: the action ossf/scorecard-action/extra is not allowed (only actions/checkout, ossf/scorecard-action, github/codeql-action/upload-sarif, actions/upload-artifact)

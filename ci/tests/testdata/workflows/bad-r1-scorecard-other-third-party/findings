@@ -1,0 +1,2 @@
+.github/workflows/scorecard.yml:31: R1: uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 is not a local path or an actions/* or github/* action pinned to a full commit SHA
+.github/workflows/scorecard.yml:31: R12: job analysis: the action step-security/harden-runner is not allowed (only actions/checkout, ossf/scorecard-action, github/codeql-action/upload-sarif, actions/upload-artifact)

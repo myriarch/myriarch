@@ -1,0 +1,1 @@
+.github/workflows/scorecard.yml:31: R12: job analysis: the action actions/cache is not allowed (only actions/checkout, ossf/scorecard-action, github/codeql-action/upload-sarif, actions/upload-artifact)

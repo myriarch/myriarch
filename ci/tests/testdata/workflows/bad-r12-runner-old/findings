@@ -1,0 +1,1 @@
+.github/workflows/scorecard.yml:15: R12: job analysis: runs-on must be one GitHub-hosted Ubuntu runner, ubuntu-NN.NN with 22.04 or later
