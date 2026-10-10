@@ -36,10 +36,11 @@ make dev                                                    # http://localhost:8
 
 ## Checks before you open a pull request
 
-Run `make check-local`. It runs the gates that CI runs (CI is being set up; until then a maintainer runs `make check-local` on your pull request) and the end-to-end test: Go build, vet and gofmt, `go test -race`,
-the web checks, the example repositories, shellcheck, the Helm chart checks, the language guard and the documentation
-checks. `make check-local SKIP=e2e` leaves out the long end-to-end test, and `make tools` installs the pinned tools.
-The details and the variables are in the [development guide](docs/development.md#gates).
+Run `make check-local`. It runs the gates that CI runs and the end-to-end test: Go build, vet and gofmt, `go test -race`,
+the web checks, the example repositories, shellcheck, the workflow checks, the Helm chart checks, the language guard and the
+documentation checks. `make check-local SKIP=e2e` leaves out the long end-to-end test, and `make tools` installs the pinned tools.
+The details and the variables are in the [development guide](docs/development.md#gates); how CI runs the same gates, and how to
+reproduce a job, is in [Continuous integration](docs/development.md#continuous-integration).
 
 Please also make sure that:
 
@@ -57,7 +58,8 @@ Please also make sure that:
 3. Open a pull request against `main`. Fill in the template: what changes and why, the linked issue, and the checklist.
 4. A maintainer reviews it. Reviews are about correctness, security, maintainability and fit; expect questions and
    requests for changes. Push follow-up commits to the same branch.
-5. The required checks must pass: the DCO check and, once CI is set up, the CI checks.
+5. The required checks must pass: the DCO check and `ci-ok`, the aggregate of all CI jobs. CI runs automatically for
+   maintainers; the first workflow run of a pull request from a new contributor starts after a maintainer approves it.
 6. A maintainer merges, by squash or rebase. [CODEOWNERS](.github/CODEOWNERS) lists who is requested for review.
 
 ## Commit messages

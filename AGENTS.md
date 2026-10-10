@@ -35,7 +35,7 @@ website/                  project website (Hugo + Docsy), built from docs/ and t
 
 ## Toolchain
 
-Go (the version in `go.mod`), Node.js 20.19 or newer and pnpm (the version in `web/package.json`). No container runtime is
+Go (the version in `go.mod`), Node.js (the version in `.node-version`; 22.12 or newer works) and pnpm (the version in `web/package.json`, through corepack). No container runtime is
 needed for development or tests. `make tools` installs the pinned CI tools into `.cache/bin`.
 
 ## Commands and gates
@@ -53,7 +53,7 @@ make licenses-check                                # SPDX headers, reuse lint an
 make license-headers                               # insert missing SPDX headers into new source files
 make notices                                       # regenerate THIRD_PARTY_NOTICES after a dependency change
 make vulncheck && make secrets-scan               # govulncheck (needs network; SKIP=vulncheck offline) and gitleaks (gates `vulncheck`, `secrets`)
-make check-local                                   # all gates in one run (SKIP=e2e leaves out the end-to-end test)
+make check-local                                   # all gates in one run (SKIP=e2e leaves out the end-to-end test); CI runs the same gates (required check: `ci-ok`)
 scripts/e2e.sh                                     # end-to-end test (fixed ports, about 6 minutes)
 ```
 

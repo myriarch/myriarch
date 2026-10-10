@@ -54,5 +54,6 @@ Some early operational decisions were not kept as separate records. They are des
 | [0029](0029-host-under-the-myriarch-organization.md) | Host the project in the GitHub organization "myriarch" from the start | Accepted |
 | [0030](0030-reuse-compliance-and-third-party-notices.md) | REUSE compliance and third-party notices | Accepted |
 | [0031](0031-website-with-hugo-and-docsy.md) | Project website myriarch.dev with Hugo and Docsy, built from the repository and served as static files | Accepted |
+| [0032](0032-continuous-integration-on-github-actions.md) | Continuous integration on GitHub Actions with GitHub-owned, SHA-pinned actions and one aggregate check | Accepted |
 
 Two later records change earlier decisions: [ADR-0024](0024-container-registry-and-image-set.md) supersedes the "own combined image" aspect of [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) for published artifacts, and [ADR-0026](0026-collector-version-updates-on-kubernetes.md) refines [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) and [ADR-0014](0014-binary-updates-in-the-pod-via-container-mode.md) (gitops-pr as the Kubernetes default, container mode as an opt-in).

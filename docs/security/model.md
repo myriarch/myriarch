@@ -377,6 +377,16 @@ guidance after each item names what to do.
 - **Release signing is key-based for now.** Until the keyless release workflow exists
   ([ADR-0023](../adr/0023-keyless-release-signing.md)), the project's own artifacts are signed with a key and verified
   against the committed `deploy/release/cosign.pub`, without a transparency log.
+- **CI controls.** The GitHub Actions workflows ([ADR-0032](../adr/0032-continuous-integration-on-github-actions.md)) use only
+  GitHub-owned actions, each pinned to a full commit SHA, a read-only token (`permissions: contents: read`), no
+  `pull_request_target` or `workflow_run` trigger, checkouts without persisted credentials, no secrets, and untrusted
+  expressions only through `env:`. Caches that a pull request writes are scoped to it and never restored on `main`; the
+  artifacts of a failed run are an allow-list of log files (no tokens, cookies or database files), because any signed-in
+  user can download the artifacts of a public repository. Tools are built from `ci/tools` with `go.sum` or downloaded with
+  a SHA-256 check, never installed by a third-party action, and the collector binaries of the end-to-end test are checked
+  against the SHA-256 that the upstream release publishes. The `workflows` gate (`ci/check-workflows.py`, `actionlint`)
+  enforces these rules, and the commits of a pull request are scanned for secrets. A change of a workflow is a
+  security-relevant change and is reviewed as one.
 - **Release pipeline controls are pending.** Protected release environments, signing jobs without caches, SBOM and
   provenance attestations and a verification step before publishing belong to the release workflow, which does not
   exist yet. No release has been published.

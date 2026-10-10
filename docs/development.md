@@ -46,9 +46,9 @@ Product identifiers (binary names, cookie names, token prefixes, attribute keys)
 
 | Tool | Version |
 |---|---|
-| Go | the version in `go.mod` (`go 1.26.6` at the time of writing); newer releases work |
-| Node.js | 20.19 or newer (`engines` in `web/package.json`) |
-| pnpm | the version in the `packageManager` field of `web/package.json` (corepack provides it) |
+| Go | the version in `go.mod`; newer releases work, CI uses exactly that version |
+| Node.js | the LTS release in `.node-version` (CI uses exactly that version); at least 22.12 (`engines` in `web/package.json`; the website needs 22 or newer) |
+| pnpm | the version in the `packageManager` field of `web/package.json` and `website/package.json` (`corepack enable` provides it) |
 | `make`, `curl`, `jq`, `python3`, `git` | any recent version |
 
 No container runtime is needed to build, test or run the system locally (see
@@ -170,13 +170,16 @@ The website tools are release downloads as well, verified against the SHA-256 va
 `.cache/dart-sass/<version>`; Hugo compiles the theme's SCSS with it) and lychee (`lychee`, the link checker). They are
 part of the default `TOOLS` and installed on demand by `ci/website.sh` (see [Website](#website)).
 
+actionlint (the linter of the GitHub Actions workflows) is built like the other Go tools; its ShellCheck integration uses the pinned
+shellcheck. It belongs to the `workflows` gate.
+
 PowerShell is only needed for the Windows installer tests: the `pwsh` cases in `internal/updater` and
 `ci/tests/installer-verify.ps1`. Without it these tests are skipped and the report says so. `MYRIARCH_PWSH` points the Go
 tests at a different `pwsh` binary.
 
 ## Gates
 
-Before you open a pull request, run the checks that CI is meant to run (CI is being set up; until then a maintainer runs them on your pull request). The quick version for a code change:
+Before you open a pull request, run the checks that CI runs (see [Continuous integration](#continuous-integration)). The quick version for a code change:
 
 ```bash
 go build ./... && go vet ./... && test -z "$(gofmt -l cmd internal)"
@@ -190,13 +193,14 @@ make docs-check                                   # when you touched documentati
 
 | Gate | What it runs |
 |---|---|
-| `go` | `go build ./...` with and without the `devpg` tag, `ci/lint-go.sh` (go mod verify, vet, gofmt), the release dependency check and the license check |
-| `go-test` | `go test -race -count=1 ./...` and the tagged tests of `internal/devpg` |
-| `web` | `pnpm install --frozen-lockfile`, a check that `web/src/api/schema.d.ts` matches `pnpm gen:api`, typecheck, lint, tests and the production build |
+| `go` | `go build ./...` with and without the `devpg` tag, vet for Windows and macOS, `ci/lint-go.sh` (go mod verify, vet, gofmt), the release dependency check and the license check |
+| `go-test` | `go test -race -count=1 ./...` and the tagged tests of `internal/devpg` (`GO_TEST_RACE=0` drops `-race`, `GO_TEST_DEVPG=0` leaves out the `devpg` tests) |
+| `web` | `pnpm install --frozen-lockfile`, a check that `web/src/api/schema.d.ts` matches `pnpm gen:api`, typecheck, lint, the formatting check (`pnpm format:check`; `pnpm format` fixes it), tests and the production build |
 | `build` | `make build` |
 | `examples` | `make validate-examples` (`myrctl validate --strict` on `examples/quickstart`, `gitops-template/config` and `hack/kind/gitops`) |
 | `shellcheck` | `ci/lint-shell.sh` over all shell scripts we ship or run |
-| `helm` | `ci/lint-helm.sh` and `ci/helm-conform.sh` (renders the chart with the example values) |
+| `workflows` | `ci/lint-workflows.sh`: `actionlint` over `.github/workflows` and the policy check `ci/check-workflows.py` (pinned actions, read-only token, forbidden triggers, a timeout per job, parity with the gates; see [Continuous integration](#continuous-integration)) |
+| `helm` | `ci/lint-helm.sh` and `ci/helm-conform.sh` (renders the chart with the example values and validates it against the schemas of Kubernetes 1.30.0, the chart floor, and 1.34.12) |
 | `language` | the language guard for English (see below) |
 | `docs` | `make docs-check`: generated CLI reference up to date, links, front matter |
 | `website` | `ci/website.sh check`: the production build of the website with `--panicOnWarning`, `hugo mod verify`, lychee over the built pages (offline, with fragments), markdownlint, the site front matter, the checks of `website/scripts` and their unit tests (see [Website](#website)). The first run needs network access for the Go proxy, the npm registry and the tool downloads |
@@ -205,10 +209,10 @@ make docs-check                                   # when you touched documentati
 | `secrets` | `ci/secrets-scan.sh`: `gitleaks` (configuration `.gitleaks.toml`, default rules plus allowlists limited to one file and one rule) over an export of `HEAD`, findings redacted. `SECRETS_SCAN_WORKTREE=1 ci/secrets-scan.sh` scans the work tree instead. Before publication scan the history once: `gitleaks git --redact -c .gitleaks.toml` |
 | `e2e` | `scripts/e2e.sh` |
 
-The `go` gate also vets the code for Windows (`GOOS=windows go vet ./...`) and compiles the tests of `internal/updater` for it,
-because the updater runs as SYSTEM there.
+The `go` gate also vets the code for Windows and macOS (`GOOS=windows go vet ./...`, `GOOS=darwin GOARCH=arm64 go vet ./...`) and
+compiles the tests of `internal/updater` for Windows, because the updater runs as SYSTEM there.
 
-The gates run in the order `go go-test web build examples shellcheck helm language docs website licenses vulncheck secrets e2e`. `ci/check-local.sh --list` prints them.
+The gates run in the order `go go-test web build examples shellcheck workflows helm language docs website licenses vulncheck secrets e2e`. `ci/check-local.sh --list` prints them.
 
 | Variable | Effect |
 |---|---|
@@ -216,6 +220,10 @@ The gates run in the order `go go-test web build examples shellcheck helm langua
 | `ONLY=web,helm` | run only these gates (applied first, then `SKIP` removes) |
 | `LANGUAGE_GUARD=strict\|warn\|off` | strict (default): a finding fails the gate; `warn`: the gate only warns; `off`: the gate is skipped |
 | `LANGUAGE_GUARD_PATHS="..."` | space-separated pathspecs of the strict scope |
+| `GO_TEST_RACE=0\|1` | `go-test`: `-race` on (default) or off |
+| `GO_TEST_DEVPG=0\|1` | `go-test`: run the tagged `devpg` tests (default) or leave them out |
+| `HELM_KUBERNETES_VERSIONS="1.30.0 1.34.12"` | `helm`: Kubernetes versions of the schemas that the rendered manifests are validated against |
+| `CHECK_LOCAL_STREAM=0\|1` | print every gate to the console in a `::group::` block as well as to its log (default 1 in GitHub Actions, 0 elsewhere) |
 | `E2E_*` | passed through to `scripts/e2e.sh` |
 
 ```bash
@@ -244,6 +252,96 @@ CONTRIBUTOR_LADDER.md ADOPTERS.md ROADMAP.md AGENTS.md CLAUDE.md`. To check a pa
 ```bash
 scripts/check-language.sh --untracked -- docs README.md
 ```
+
+## Continuous integration
+
+GitHub Actions runs the gates of `ci/check-local.sh` on every pull request, on every push to `main`, in a merge queue and
+nightly ([ADR-0032](adr/0032-continuous-integration-on-github-actions.md)). There are two workflows:
+
+- `.github/workflows/ci.yml` has one job per gate group, the platform matrix of the Go tests, the script tests, the end-to-end
+  smoke test (by calling `e2e.yml`) and the aggregate job `ci-ok`.
+- `.github/workflows/e2e.yml` runs `scripts/e2e.sh` (the smoke test, called from `ci.yml`), and nightly the load run with
+  1,000 simulated collectors and `make e2e-ui-updates`. A manual run (`workflow_dispatch`) picks the mode.
+
+The local composite action `.github/actions/setup` installs Go (from `go.mod`), optionally Node.js (from `.node-version`) and pnpm
+(through corepack), restores the caches and installs the pinned tools of `ci/install-tools.sh`.
+
+### Jobs and gates
+
+Every job runs `ci/check-local.sh` with `ONLY=<gates>`, so CI and your machine run the same commands. In GitHub Actions each gate
+is a collapsible log group; a failed job uploads `.cache/check-local/` (the gate logs) for seven days.
+
+| Job | Gates and commands | Runner |
+|---|---|---|
+| `go` | `go` | ubuntu-24.04 |
+| `go-test-linux` | `go-test` with `-race` against a PostgreSQL 17 service (`PGTEST_DSN`, `max_connections` 300) | ubuntu-24.04 and ubuntu-24.04-arm |
+| `go-test-native` | `go-test`: macOS with `-race` and the embedded PostgreSQL; Windows without `-race` and with `PGTEST_SKIP=1` | macos-latest, windows-latest |
+| `web` | `web` | ubuntu-24.04 |
+| `build` | `build`, `examples`, then `make release-snapshot` (the full release matrix, unsigned, nothing published) | ubuntu-24.04 |
+| `shell-helm` | `shellcheck`, `helm` | ubuntu-24.04 |
+| `workflows` | `workflows` | ubuntu-24.04 |
+| `docs` | `language`, `docs` | ubuntu-24.04 |
+| `website` | `website` (build and checks, never a deployment) | ubuntu-24.04 |
+| `compliance` | `licenses`, `vulncheck`, `secrets`; on pull requests also the commits of the pull request (`SECRETS_SCAN_RANGE=<base>..<head> ci/secrets-scan.sh`), because a secret that one commit adds and a later one removes stays in the history | ubuntu-24.04 |
+| `scripts` | `make ci-test` (the script tests under `ci/` and `contrib/`; not a `check-local` gate) | ubuntu-24.04 |
+| `e2e` | `e2e` gate: `scripts/e2e.sh` with the real supervisor and the UI smoke test (`e2e.yml`, mode `smoke`) | ubuntu-24.04 |
+| `ci-ok` | succeeds only when every job above succeeded | ubuntu-24.04 |
+
+`ci-ok` is the only required check of the branch ruleset (next to the DCO check). Job names can change without touching the ruleset,
+and a skipped or cancelled job fails `ci-ok`. The workflows have no path filters, so `ci-ok` always reports. The policy check
+fails when a gate of `ci/check-local.sh` has no job in `ci.yml`.
+
+Nightly (`ci.yml` at 04:41 UTC and `e2e.yml` at 03:17 UTC) the full pipeline runs against the current vulnerability database and
+upstream downloads, together with the load run and the UI version update test. GitHub disables scheduled workflows of a public
+repository after 60 days without repository activity.
+
+### Reproduce a job locally
+
+```bash
+make tools                                  # once: the pinned tools in .cache/bin
+make check-local ONLY=web                   # the job "web"
+make check-local ONLY=licenses,vulncheck,secrets      # the job "compliance"
+GO_TEST_RACE=0 GO_TEST_DEVPG=0 PGTEST_SKIP=1 make check-local ONLY=go-test    # the Windows variant of "go-test"
+make ci-test                                # the job "scripts"
+CHECK_LOCAL_STREAM=1 make check-local ONLY=docs       # with the log groups of GitHub Actions
+```
+
+For the Linux database tests against an external PostgreSQL see [Database tests against an existing PostgreSQL](#database-tests-against-an-existing-postgresql).
+The Windows and macOS runners are the only place where `go test` runs on those systems; `GOOS=windows go vet ./...` and
+`GOOS=windows go test -c -o /dev/null ./internal/updater` show compile errors earlier.
+
+### Security rules of the workflows
+
+The rules are enforced by `ci/check-workflows.py` (part of the `workflows` gate) and recorded in
+[ADR-0032](adr/0032-continuous-integration-on-github-actions.md):
+
+- **Only GitHub-owned actions** (`actions/*`, `github/*`), each pinned to a full commit SHA with the release in a comment:
+  `uses: actions/checkout@<40 hex> # v7.0.1`. The same action has the same pin everywhere. Everything else comes from the
+  repository's own installer (`ci/install-tools.sh`) or corepack.
+- **A read-only token**: `permissions: contents: read` at the top of every workflow. A job-level write scope needs a line in
+  `ci/workflow-permissions.txt` (`<workflow file> <job> <scope>`) and a review of the job.
+- **No `pull_request_target` and no `workflow_run`**, no secrets, `persist-credentials: false` on every checkout, a timeout on
+  every job, and no `github.event.*`, `github.head_ref` or `inputs.*` expression inside a `run:` block (pass it through `env:`).
+- **Toolchains from the repository**: `go-version-file: go.mod` and `node-version-file: .node-version`, never a literal version.
+- **Caches** come from `actions/cache` and the `setup-*` actions only. A cache written by a pull request is not restored on `main`.
+  A release workflow must not use caches (`TOOLS_NO_CACHE=1`).
+- **Artifacts** of a failed run are an allow-list of log files. Artifacts of a public repository can be downloaded by any signed-in
+  user, so they never contain tokens, cookies or database files.
+- First-time contributors' pull requests wait for a maintainer to approve the workflow run.
+
+### Update an action pin
+
+Dependabot (`.github/dependabot.yml`) proposes the updates weekly in one pull request and keeps the comment in step. By hand: look up
+the commit of the release tag and replace the SHA and the comment in every place the action is used (`ci/check-workflows.py` fails
+when the pins differ):
+
+```bash
+git ls-remote --tags https://github.com/actions/checkout.git 'refs/tags/v7.0.1' 'refs/tags/v7.0.1^{}'   # the ^{} line, if present, is the commit
+python3 -I ci/check-workflows.py --remote        # compares every pin with its tag on GitHub (needs network)
+```
+
+Moving `.node-version` to a Node.js release without corepack (Node.js 25 and later) needs a pinned `npm install -g corepack@<version>`
+step in `.github/actions/setup/action.yml`. Move it to the next LTS line only after its first LTS release.
 
 ## Licenses, headers and third-party notices
 
@@ -441,7 +539,7 @@ receiver replace the outside world):
 
 ```bash
 scripts/e2e.sh                       # smoke run, 32 simulated collectors, about 6 minutes
-E2E_REAL=1 scripts/e2e.sh            # additionally a real supervisor and otelcol-contrib (downloaded once into .e2e/real on darwin/arm64)
+E2E_REAL=1 scripts/e2e.sh            # additionally a real supervisor and otelcol-contrib (downloaded into .e2e/real/dl and verified, darwin and linux)
 E2E_AGENTS=1000 scripts/e2e.sh       # load run with 1,000 collectors
 E2E_KEEP=1 scripts/e2e.sh            # leave myriarchd and the simulator running; clean up with: scripts/e2e.sh --stop
 ```
@@ -460,9 +558,10 @@ started is stopped again (myriarchd, simulators, supervisor, collector, embedded
 | `E2E_AGENTS` | number of simulated collectors (default 32) |
 | `E2E_PROFILE` | simulator profile (default `e2e`) |
 | `E2E_HA=0` | skip the two-replica step |
-| `E2E_UI=0` | skip the UI smoke test (default: run when the prerequisites are found) |
-| `E2E_REAL=0\|1` | switch the real supervisor step off or on (default `auto`: it runs only when `opampsupervisor` and `otelcol-contrib` are already in `E2E_REAL_DIR`; the automatic download exists for darwin/arm64 only, on other platforms place both binaries there yourself) |
-| `E2E_REAL_DIR` | directory of the downloaded supervisor and collector (default `.e2e/real`) |
+| `E2E_UI=0\|1` | `0` skips the UI smoke test; `1` makes a missing browser or `playwright-core` a failure (default `auto`: run when the prerequisites are found, else skip) |
+| `E2E_REAL=0\|1` | `0` switches the real supervisor step off; `1` downloads, verifies and runs it and turns an unsupported platform or a failed download or check into a failure (default `auto`: it runs only when `opampsupervisor` and `otelcol-contrib` are already in `E2E_REAL_DIR`, and then verifies them as well) |
+| `E2E_REAL_DIR` | directory of the supervisor and collector (default `.e2e/real`; the verified downloads stay in its `dl/` subdirectory) |
+| `E2E_REAL_BASE_URL` | download location of the upstream release files (default: the GitHub releases of `opentelemetry-collector-releases`; `file://` is accepted for tests) |
 | `NO_BUILD=1` | use the existing binaries in `bin/` |
 | `E2E_KEEP=1` | leave everything running at the end |
 | `E2E_STEP_TIMEOUT` | seconds per rollout phase (default 600) |
@@ -475,15 +574,22 @@ the same ports.
 
 **UI smoke test** (`scripts/e2e/ui-smoke.mjs`): signs in through the login form, visits every page in the light and dark
 color scheme, checks console errors, failed API calls and the pagination of the agent list, and checks that the `viewer`
-role sees no rollout actions. It needs `playwright-core` and a Chromium-based browser, installed locally and not part of the
-repository:
+role sees no rollout actions. It needs `playwright-core` and a Chromium-based browser. `playwright-core` is a development dependency
+of `web/` (no browser download; `cd web && pnpm install --frozen-lockfile` provides it), the browser is one that is already
+installed (Chrome on the GitHub runner images):
 
 ```bash
-mkdir -p .e2e && (cd .e2e && npm i playwright-core)    # or set E2E_PLAYWRIGHT_NODE_PATH to a folder with node_modules
+(cd web && pnpm install --frozen-lockfile)                # playwright-core; or set E2E_PLAYWRIGHT_NODE_PATH to a folder with node_modules
 E2E_BROWSER="/path/to/chromium-based-browser" scripts/e2e.sh
 ```
 
-Without the prerequisites the step is skipped with a note.
+Without the prerequisites the step is skipped with a note (with `E2E_UI=1`, it fails).
+
+**Real supervisor** (`E2E_REAL`): the upstream OpAMP Supervisor and `otelcol-contrib` of `OTELCOL_VERSION` (`ci/versions.env`) are
+downloaded for darwin and linux on amd64 and arm64 (`scripts/lib/real-binaries.sh`). Each asset is compared with the SHA-256
+that the release publishes next to it, on the download and again on every later run; a mismatch deletes the file and fails the
+step. The check detects corrupt or changed files, not a compromised release. Test it without network access with
+`ci/tests/e2e-real-download-test.sh`.
 
 **UI-triggered version updates** (`make e2e-ui-updates`, `scripts/e2e-ui-updates.sh`) test the operator path of the version
 update on your machine: `myriarchd dev`, a local mirror with the real release files of two collector versions, a real
