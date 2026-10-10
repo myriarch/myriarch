@@ -3,10 +3,12 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Tests the signature verification of our binaries in deploy/scripts/install-linux.sh (and, when pwsh is available,
-# install-windows.ps1) in staging mode (--root) against a fake release with file:// URLs. Needs only bash, openssl,
-# tar, gzip, awk; with cosign in PATH it additionally covers a real cosign signature (format contract) and the cosign
-# fallback. Failures are asserted on the stable error codes of the installer ("[<code>]"), never on message prose.
+# Tests the verification of the keyless release bundle (updater) and of the upstream bundles (collector, supervisor) in
+# deploy/scripts/install-linux.sh and, when pwsh is available, install-windows.ps1, in staging mode (--root) against a
+# fake release with file:// URLs. Needs only bash, tar, gzip, awk. The verifier is a stub that emulates what matters
+# (identity regexp against the certificate identity of the bundle, digest of the signed file, version of cosign); with
+# cosign in PATH the real cosign is additionally run offline against the committed upstream fixtures. Failures are
+# asserted on the stable error codes of the installer ("[<code>]"), never on message prose.
 #
 #   ci/tests/installer-verify.sh          exit 0 = all cases as expected
 set -uo pipefail
@@ -15,22 +17,12 @@ set -uo pipefail
 
 INSTALLER="${ROOT}/deploy/scripts/install-linux.sh"
 TEMPLATES="${ROOT}/deploy"
-need_cmd openssl tar gzip awk
+need_cmd tar gzip awk
 
 W="${TEST_TMP}"
 REL="${W}/release"            # our myriarch release (updater, checksums.txt, .sig)
 MIRROR="${W}/mirror"          # collector mirror in the layout <base>/<tag>/<asset>
 mkdir -p "${REL}" "${MIRROR}/v0.161.0" "${MIRROR}/cmd/opampsupervisor/v0.161.0"
-
-# ---- Key pair (test only) ----------------------------------------------------------------------
-openssl ecparam -name prime256v1 -genkey -noout -out "${W}/key.pem" 2>/dev/null
-openssl ec -in "${W}/key.pem" -pubout -out "${W}/cosign.pub" 2>/dev/null
-openssl ecparam -name prime256v1 -genkey -noout -out "${W}/other-key.pem" 2>/dev/null
-openssl ec -in "${W}/other-key.pem" -pubout -out "${W}/other.pub" 2>/dev/null
-
-sign_blob() { # file key -> file.sig (base64 of the ASN.1 DER ECDSA signature over SHA-256)
-  openssl dgst -sha256 -sign "$2" -out "$1.der" "$1" && openssl base64 -A -in "$1.der" -out "$1.sig" && rm -f "$1.der"
-}
 
 # ---- Fake collector mirror (like internal/updater/deploy_test.go) --------------------------------------
 stage="${W}/stage"; mkdir -p "${stage}"
@@ -42,17 +34,21 @@ for f in "${MIRROR}/v0.161.0/otelcol-contrib_0.161.0_linux_amd64.tar.gz" "${MIRR
 done
 
 # ---- Fake release: updater + checksums.txt in goreleaser format ----------------------------------------
-UPDATER_NAME="myriarch-updater_9.9.9_linux_amd64"
-printf '#!/bin/sh\necho fake-updater\n' > "${REL}/${UPDATER_NAME}"; chmod 0755 "${REL}/${UPDATER_NAME}"
+UPDATER_VERSION="9.9.9"
+UPDATER_NAME="myriarch-updater_${UPDATER_VERSION}_linux_amd64"
+UPDATER_RAN="${W}/updater-ran"   # the fake updater leaves a mark when it is executed (that is: used as a verifier)
+printf '#!/bin/sh\necho ran >> "%s"\necho fake-updater\n' "${UPDATER_RAN}" > "${REL}/${UPDATER_NAME}"; chmod 0755 "${REL}/${UPDATER_NAME}"
+cp "${REL}/${UPDATER_NAME}" "${REL}/myriarch-updater-plain-name"
 printf 'fake windows binary\n' > "${REL}/myriarch-updater_9.9.9_windows_amd64.exe"
 printf 'fake archive\n' > "${REL}/myriarch-updater_9.9.9_linux_amd64.tar.gz"
 UPDATER_SHA="$(sha256_of "${REL}/${UPDATER_NAME}")"
 make_checksums() { # target-dir
-  (cd "$1" && for f in myriarch-updater_9.9.9_linux_amd64 myriarch-updater_9.9.9_linux_amd64.tar.gz myriarch-updater_9.9.9_windows_amd64.exe; do
+  (cd "$1" && for f in myriarch-updater_9.9.9_linux_amd64 myriarch-updater_9.9.9_linux_amd64.tar.gz myriarch-updater_9.9.9_windows_amd64.exe myriarch-updater-plain-name; do
     printf '%s  %s\n' "$(sha256_of "${f}")" "${f}"; done > checksums.txt)
 }
 make_checksums "${REL}"
-sign_blob "${REL}/checksums.txt" "${W}/key.pem"
+printf '{"bundle":"checksums.txt"}\n' > "${REL}/checksums.txt.sigstore.json"
+GOOD_SUMS_SHA="$(sha256_of "${REL}/checksums.txt")"
 
 base_args=(--opamp-endpoint wss://fleet.example.com/v1/opamp --token myre_abcDEF123 --site-type office --site-id OFFICE1
   --collector-version 0.161.0 --with-updater)
@@ -61,76 +57,236 @@ run_install() { # root extra-args...   (lab mode for mirror/file://, collector S
   bash "${INSTALLER}" --root "${root}" --arch amd64 --templates-dir "${TEMPLATES}" --insecure --verify-signatures skip \
     --release-base-url "file://${MIRROR}" "${base_args[@]}" --updater-url "file://${REL}/${UPDATER_NAME}" "$@"
 }
+# ---- Test verifier: emulates what matters of cosign verify-blob and myriarch-updater verify-bundle -----------
+# STUB_SAN is the certificate identity of the bundle. The identity regexp that the installer passes must match it (and, for
+# verify-bundle, end with the tag of --version); the issuer must be GitHub's; for checksums.txt the file must hash to
+# STUB_GOOD_SHA, so that a changed file fails like a real signature check. Other files (collector, supervisor) always pass.
+STUBS="${W}/stubs"; mkdir -p "${STUBS}" "${STUBS}/updater"
+cp "${CI_DIR}/tests/stub-verifier.sh" "${STUBS}/verifier"
+chmod 0755 "${STUBS}/verifier"
+cp "${STUBS}/verifier" "${STUBS}/cosign"; cp "${STUBS}/verifier" "${STUBS}/updater/myriarch-updater"
+export STUB_LOG="${W}/verifier.log"
+export STUB_GOOD_SHA="${GOOD_SUMS_SHA}"
+GOOD_SAN="https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/v${UPDATER_VERSION}"
+export STUB_SAN="${GOOD_SAN}"
+
+# upstream bundles for the collector and the supervisor (the stub accepts them)
+for b in "${MIRROR}/v0.161.0/otelcol-contrib_0.161.0_linux_amd64.tar.gz" "${MIRROR}/cmd/opampsupervisor/v0.161.0/opampsupervisor_0.161.0_linux_amd64"; do
+  printf '{}\n' > "${b}.sigstore.json"
+done
+
+# Restricted PATH directories: symlinks to the listed tools only, so that the installer finds nothing else. INSTALLER_TOOLS is
+# what the installer needs besides a download tool; a case adds what it needs on top and leaves out what it tests the absence
+# of. Keep the list complete: with a tool missing, a case fails for another reason than the one under test (GNU tar -z runs
+# the external gzip, and without it a valid archive looks like one without its binary).
+INSTALLER_TOOLS=(bash sh tar gzip install cmp awk sed tr cut grep mktemp date id uname sha256sum shasum mv cp ln rm mkdir dirname basename cat head readlink chmod sort wc sleep seq env)
+path_dir() { # dir [tool...]: INSTALLER_TOOLS and the given tools (those the host has), without the ones named in $WITHOUT
+  local dir="$1" c p; shift
+  mkdir -p "${dir}"
+  for c in "${INSTALLER_TOOLS[@]}" "$@"; do
+    case " ${WITHOUT:-} " in *" ${c} "*) continue ;; esac
+    p="$(command -v "${c}" 2>/dev/null || true)"; [ -n "${p}" ] && ln -sf "${p}" "${dir}/${c}"
+  done
+}
+NOCOSIGN="${W}/bin-no-cosign"; path_dir "${NOCOSIGN}" curl   # a PATH without any Sigstore verifier
+
+# release path: lab mode for file:// URLs, but with the signature check of checksums.txt and of collector and supervisor
+run_release() { # root extra-args...
+  local root="$1"; shift
+  bash "${INSTALLER}" --root "${root}" --arch amd64 --templates-dir "${TEMPLATES}" --insecure --verify-signatures require \
+    --release-base-url "file://${MIRROR}" "${base_args[@]}" --updater-url "file://${REL}/${UPDATER_NAME}" \
+    --updater-checksums-url "file://${REL}/checksums.txt" --verifier "${STUBS}/cosign" "$@"
+}
 fresh() { mktemp -d "${W}/root.XXXXXX"; }
-signed_args() { printf '%s\n' --updater-checksums-url "file://${REL}/checksums.txt" --signing-key "${W}/cosign.pub"; }
-
-echo "install-linux.sh: signature verification of checksums.txt (openssl)"
-t_valid() { local r; r="$(fresh)"; run_install "${r}" --updater-checksums-url "file://${REL}/checksums.txt" --signing-key "${W}/cosign.pub" \
-  && cmp -s "${REL}/${UPDATER_NAME}" "${r}/opt/myriarch/updater/myriarch-updater"; }
-expect_ok "valid signature: updater is installed" t_valid
-
-t_valid_and_sha() { run_install "$(fresh)" --updater-checksums-url "file://${REL}/checksums.txt" --signing-key "${W}/cosign.pub" --updater-sha256 "${UPDATER_SHA}"; }
-expect_ok "signature AND matching --updater-sha256 are allowed" t_valid_and_sha
-
-t_sig_url() { cp "${REL}/checksums.txt.sig" "${W}/elsewhere.sig"; run_install "$(fresh)" --updater-checksums-url "file://${REL}/checksums.txt" \
-  --updater-checksums-sig-url "file://${W}/elsewhere.sig" --signing-key "${W}/cosign.pub"; }
-expect_ok "--updater-checksums-sig-url (signature at a different location)" t_sig_url
-
-t_sha_only() { run_install "$(fresh)" --updater-sha256 "${UPDATER_SHA}"; }
-expect_ok "--updater-sha256 only (previous behavior)" t_sha_only
-
-# Negative cases: never install anything
 no_install() { [ ! -e "$1/etc/myriarch/supervisor.yaml" ] && [ ! -e "$1/opt/myriarch/updater/myriarch-updater" ]; }
 
+echo "install-linux.sh: keyless bundle of checksums.txt (release path)"
+t_valid() { local r; r="$(fresh)"; : > "${STUB_LOG}"; run_release "${r}" \
+  && cmp -s "${REL}/${UPDATER_NAME}" "${r}/opt/myriarch/updater/myriarch-updater" \
+  && [ "$(grep -c '^CALL verify-blob' "${STUB_LOG}")" = 3 ]; }
+expect_ok "valid bundle: updater is installed and checksums.txt, collector and supervisor were verified" t_valid
+
+t_identity_args() { : > "${STUB_LOG}"; run_release "$(fresh)" || return 1
+  local call; call="$(grep -F 'checksums' "${STUB_LOG}" | head -n 1)"
+  case "${call}" in *'--certificate-identity-regexp ^https://github\.com/myriarch/myriarch/\.github/workflows/release\.yml@refs/tags/v9\.9\.9$ --certificate-oidc-issuer https://token.actions.githubusercontent.com'*) ;;
+    *) echo "unexpected cosign call for checksums.txt: ${call}"; return 1 ;; esac
+  case "${call}" in *'--bundle '*'checksums.txt.sigstore.json '*) ;; *) echo "bundle is not <checksums>.sigstore.json: ${call}"; return 1 ;; esac
+  # checksums.txt is verified first, before the updater is downloaded and before collector and supervisor
+  [ "$(grep -c . "${STUB_LOG}")" = 3 ] && [ "$(head -n 1 "${STUB_LOG}" | grep -c 'checksums.txt')" = 1 ]; }
+expect_ok "cosign receives the exact release identity of the updater version with GitHub's issuer, and verifies checksums.txt first" t_identity_args
+
+t_release_regex() {
+  local id; id="$(bash -c 'eval "$(sed -n "/^cert_identity_release()/,/^}/p" "$1")"; RELEASE_REPOSITORY=myriarch/myriarch; cert_identity_release "$2"' _ "${INSTALLER}" 0.1.0-rc.1)"
+  [ "${id}" = '^https://github\.com/myriarch/myriarch/\.github/workflows/release\.yml@refs/tags/v0\.1\.0-rc\.1$' ] || { echo "${id}"; return 1; }
+  local base='https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/'
+  printf '%s\n' "${base}v0.1.0-rc.1" | grep -Eq -- "${id}" || return 1
+  ! printf '%s\n' "${base}v0.1.0-rc.10" | grep -Eq -- "${id}" || return 1
+  ! printf '%s\n' "${base}v0.1.0" | grep -Eq -- "${id}" || return 1
+  ! printf '%s\n' "${base}v0x1x0-rc.1" | grep -Eq -- "${id}"
+}
+expect_ok "the release identity matches exactly the tag of the version (dots escaped, anchored)" t_release_regex
+
+t_valid_and_sha() { run_release "$(fresh)" --updater-sha256 "${UPDATER_SHA}"; }
+expect_ok "verified checksums.txt AND matching --updater-sha256 are allowed" t_valid_and_sha
+
+t_bundle_url() { cp "${REL}/checksums.txt.sigstore.json" "${W}/elsewhere.json"; run_release "$(fresh)" --updater-bundle-url "file://${W}/elsewhere.json"; }
+expect_ok "--updater-bundle-url (bundle at a different location)" t_bundle_url
+
+t_version_flag() { run_release "$(fresh)" --updater-url "file://${REL}/myriarch-updater-plain-name" --updater-version "${UPDATER_VERSION}"; }
+expect_ok "--updater-version for a file name without a version" t_version_flag
+t_version_flag_v() { run_release "$(fresh)" --updater-url "file://${REL}/myriarch-updater-plain-name" --updater-version "v${UPDATER_VERSION}"; }
+expect_ok "--updater-version accepts a leading v" t_version_flag_v
+
+t_version_agree() { run_release "$(fresh)" --updater-version "${UPDATER_VERSION}"; }
+expect_ok "--updater-version agrees with the version in --updater-url" t_version_agree
+
+t_version_mismatch() { run_release "$(fresh)" --updater-version 9.9.8; }
+expect_fail "--updater-version differs from the version in --updater-url" '\[option_conflict\].*9\.9\.8.*9\.9\.9' t_version_mismatch
+
+t_version_case() { run_release "$(fresh)" --updater-version "${UPDATER_VERSION}-RC.1"; }
+expect_fail "--updater-version differing only in case or pre-release is a conflict" '\[option_conflict\]' t_version_case
+t_version_badpre() { run_release "$(fresh)" --updater-version "${UPDATER_VERSION}--x"; }
+expect_fail "--updater-version with a pre-release part that does not start with an alphanumeric is invalid" '\[option_invalid\]' t_version_badpre
+
+t_version_missing() { run_release "$(fresh)" --updater-url "file://${REL}/myriarch-updater-plain-name"; }
+expect_fail "no version in the file name and no --updater-version" '\[option_missing\].*--updater-version' t_version_missing
+
+t_version_invalid() { run_release "$(fresh)" --updater-version latest; }
+expect_fail "--updater-version is not a version" '\[option_invalid\].*--updater-version' t_version_invalid
+
+t_no_updater_run() { rm -f "${UPDATER_RAN}"; run_release "$(fresh)" && [ ! -e "${UPDATER_RAN}" ]; }
+expect_ok "the updater that is being installed is never run as a verifier" t_no_updater_run
+
+# a bundle with another identity must not pass, however genuine it is
+SAN_REL="https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags"
+for c in \
+  "another tag|${SAN_REL}/v9.9.8" \
+  "a longer tag (prefix of the version)|${SAN_REL}/v9.9.9.1" \
+  "an rc of the version|${SAN_REL}/v9.9.9-rc.1" \
+  "a branch instead of a tag|https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/heads/main" \
+  "another workflow|https://github.com/myriarch/myriarch/.github/workflows/ci.yml@refs/tags/v9.9.9" \
+  "another repository|https://github.com/evil/myriarch/.github/workflows/release.yml@refs/tags/v9.9.9" \
+  "a repository that only starts like ours|https://github.com/myriarch/myriarch-fork/.github/workflows/release.yml@refs/tags/v9.9.9" \
+  "the upstream collector workflow|https://github.com/open-telemetry/opentelemetry-collector-releases/.github/workflows/base-release.yaml@refs/tags/v9.9.9"; do
+  title="${c%%|*}"; san="${c#*|}"
+  t_wrong_identity() { local r rc; r="$(fresh)"; STUB_SAN="${san}" run_release "${r}"; rc=$?
+    no_install "${r}" || { echo "the updater was installed"; return 0; }; return "${rc}"; }
+  expect_fail "bundle of ${title} is rejected" '\[sigstore_verification_failed\].*checksums\.txt' t_wrong_identity
+done
+
 TAMPER_ROOT="$(fresh)"
-t_tampered() { local d; d="${W}/tampered"; mkdir -p "${d}"; cp "${REL}"/* "${d}/"
+t_tampered() { local d="${W}/tampered"; mkdir -p "${d}"; cp "${REL}"/* "${d}/"
   sed 's/^./0/' "${REL}/checksums.txt" > "${d}/checksums.txt"   # first character of every line changed
-  run_install "${TAMPER_ROOT}" --updater-checksums-url "file://${d}/checksums.txt" --signing-key "${W}/cosign.pub"; }
-expect_fail "tampered checksums.txt is rejected" '\[signature_invalid\]' t_tampered
+  run_release "${TAMPER_ROOT}" --updater-checksums-url "file://${d}/checksums.txt"; }
+expect_fail "tampered checksums.txt is rejected" '\[sigstore_verification_failed\].*checksums\.txt' t_tampered
 if no_install "${TAMPER_ROOT}"; then ok "  ... and nothing was installed"; else fail "something was installed after a tampered checksums.txt"; fi
 
-t_wrong_key() { run_install "$(fresh)" --updater-checksums-url "file://${REL}/checksums.txt" --signing-key "${W}/other.pub"; }
-expect_fail "wrong key is rejected" '\[signature_invalid\]' t_wrong_key
+t_updater_verifier_args() { local r; r="$(fresh)"; : > "${STUB_LOG}"
+  bash "${INSTALLER}" --root "${r}" --arch amd64 --templates-dir "${TEMPLATES}" --insecure --verify-signatures require --release-base-url "file://${MIRROR}" \
+    "${base_args[@]}" --updater-url "file://${REL}/${UPDATER_NAME}" --updater-checksums-url "file://${REL}/checksums.txt" --verifier "${STUBS}/updater/myriarch-updater" \
+    && grep -F 'verify-bundle' "${STUB_LOG}" | grep -Fq -- '--issuer https://token.actions.githubusercontent.com' \
+    && grep -F 'checksums.txt' "${STUB_LOG}" | grep -Fq -- '--version v9.9.9'; }
+expect_ok "an installed myriarch-updater as --verifier gets the identity, the issuer and the version" t_updater_verifier_args
 
-t_missing_line() { local d="${W}/missing"; mkdir -p "${d}"; grep -v "  ${UPDATER_NAME}\$" "${REL}/checksums.txt" > "${d}/checksums.txt"
-  sign_blob "${d}/checksums.txt" "${W}/key.pem"; run_install "$(fresh)" --updater-checksums-url "file://${d}/checksums.txt" --signing-key "${W}/cosign.pub"; }
-expect_fail "validly signed checksums.txt without a line for the updater" '\[checksum_entry_count\].*\b0\b' t_missing_line
+t_missing_bundle() { local d="${W}/nobundle"; mkdir -p "${d}"; cp "${REL}/checksums.txt" "${d}/"; run_release "$(fresh)" --updater-checksums-url "file://${d}/checksums.txt"; }
+expect_fail "missing bundle file" '\[download_failed\]' t_missing_bundle
 
-t_dup_line() { local d="${W}/dup"; mkdir -p "${d}"; { cat "${REL}/checksums.txt"; grep "  ${UPDATER_NAME}\$" "${REL}/checksums.txt"; } > "${d}/checksums.txt"
-  sign_blob "${d}/checksums.txt" "${W}/key.pem"; run_install "$(fresh)" --updater-checksums-url "file://${d}/checksums.txt" --signing-key "${W}/cosign.pub"; }
+t_missing_line() { local d="${W}/missing"; mkdir -p "${d}"; grep -v "  ${UPDATER_NAME}\$" "${REL}/checksums.txt" > "${d}/checksums.txt"; cp "${REL}/checksums.txt.sigstore.json" "${d}/"
+  STUB_GOOD_SHA="$(sha256_of "${d}/checksums.txt")" run_release "$(fresh)" --updater-checksums-url "file://${d}/checksums.txt"; }
+expect_fail "genuine checksums.txt without a line for the updater" '\[checksum_entry_count\].*\b0\b' t_missing_line
+
+t_dup_line() { local d="${W}/dup"; mkdir -p "${d}"; { cat "${REL}/checksums.txt"; grep "  ${UPDATER_NAME}\$" "${REL}/checksums.txt"; } > "${d}/checksums.txt"; cp "${REL}/checksums.txt.sigstore.json" "${d}/"
+  STUB_GOOD_SHA="$(sha256_of "${d}/checksums.txt")" run_release "$(fresh)" --updater-checksums-url "file://${d}/checksums.txt"; }
 expect_fail "duplicate line for the updater" '\[checksum_entry_count\].*\b2\b' t_dup_line
 
-t_conflict() { run_install "$(fresh)" --updater-checksums-url "file://${REL}/checksums.txt" --signing-key "${W}/cosign.pub" --updater-sha256 "$(printf '0%.0s' $(seq 64))"; }
+t_conflict() { run_release "$(fresh)" --updater-sha256 "$(printf '0%.0s' $(seq 64))"; }
 expect_fail "--updater-sha256 contradicts checksums.txt (hash conflict)" '\[checksum_conflict\]' t_conflict
 
 t_binary_tampered() { local d="${W}/bin-tampered"; mkdir -p "${d}"; cp "${REL}"/* "${d}/"; printf 'evil\n' >> "${d}/${UPDATER_NAME}"
-  bash "${INSTALLER}" --root "$(fresh)" --arch amd64 --templates-dir "${TEMPLATES}" --insecure --verify-signatures skip --release-base-url "file://${MIRROR}" \
-    "${base_args[@]}" --updater-url "file://${d}/${UPDATER_NAME}" --updater-checksums-url "file://${d}/checksums.txt" --signing-key "${W}/cosign.pub"; }
-expect_fail "updater binary does not match the signed checksum" '\[checksum_mismatch\]' t_binary_tampered
+  run_release "$(fresh)" --updater-url "file://${d}/${UPDATER_NAME}"; }
+expect_fail "updater binary does not match the verified checksum" '\[checksum_mismatch\]' t_binary_tampered
 
-t_no_sig() { local d="${W}/nosig"; mkdir -p "${d}"; cp "${REL}/checksums.txt" "${d}/"; run_install "$(fresh)" --updater-checksums-url "file://${d}/checksums.txt" --signing-key "${W}/cosign.pub"; }
-expect_fail "missing signature file" '\[download_failed\]' t_no_sig
+echo "install-linux.sh: verifier (cosign 3.0.4 or newer, or an installed myriarch-updater), never the downloaded updater"
+cosign_stub_dir() { # version -> dir with a cosign stub of that version in front of the restricted PATH
+  local d="${W}/bin-cosign-$1"; path_dir "${d}" curl; cp "${STUBS}/cosign" "${d}/cosign"; printf '%s\n' "${d}"; }
+t_cosign_path() { local d; d="$(cosign_stub_dir "$1")"; PATH="${d}" STUB_COSIGN_VERSION="$1" run_release_nov "$(fresh)"; }
+run_release_nov() { # like run_release, but the verifier comes from PATH
+  local root="$1"; shift
+  bash "${INSTALLER}" --root "${root}" --arch amd64 --templates-dir "${TEMPLATES}" --insecure --verify-signatures require \
+    --release-base-url "file://${MIRROR}" "${base_args[@]}" --updater-url "file://${REL}/${UPDATER_NAME}" \
+    --updater-checksums-url "file://${REL}/checksums.txt" "$@"
+}
+t_cosign_304() { t_cosign_path v3.0.4; };  expect_ok "cosign 3.0.4 from PATH is accepted" t_cosign_304
+t_cosign_313() { t_cosign_path v3.1.3; };  expect_ok "cosign 3.1.3 from PATH is accepted" t_cosign_313
+t_cosign_400() { t_cosign_path v4.0.0; };  expect_ok "cosign 4.0.0 from PATH is accepted" t_cosign_400
+t_cosign_303() { t_cosign_path v3.0.3; };  expect_fail "cosign 3.0.3 is too old" '\[sigstore_verifier_outdated\].*3\.0\.4' t_cosign_303
+t_cosign_241() { t_cosign_path v2.4.1; };  expect_fail "cosign 2.4.1 is too old" '\[sigstore_verifier_outdated\]' t_cosign_241
+t_cosign_dev() { t_cosign_path devel; };   expect_fail "cosign without a usable version is refused" '\[sigstore_verifier_outdated\]' t_cosign_dev
+t_cosign_304rc() { t_cosign_path v3.0.4-rc.1; }; expect_fail "a pre-release of 3.0.4 (v3.0.4-rc.1) is too old" '\[sigstore_verifier_outdated\]' t_cosign_304rc
+t_cosign_305rc() { t_cosign_path v3.0.5-rc.1; }; expect_ok "a pre-release of a newer version (v3.0.5-rc.1) is accepted" t_cosign_305rc
+OLD_ROOT="$(fresh)"
+t_cosign_old_nothing() { local d; d="$(cosign_stub_dir v3.0.3)"; rm -f "${UPDATER_RAN}"; PATH="${d}" STUB_COSIGN_VERSION=v3.0.3 run_release_nov "${OLD_ROOT}"; }
+expect_fail "an old cosign stops the installation before anything is downloaded or installed" '\[sigstore_verifier_outdated\]' t_cosign_old_nothing
+if no_install "${OLD_ROOT}" && [ ! -e "${UPDATER_RAN}" ]; then ok "  ... nothing installed, the updater was not run"; else fail "something was installed or run after an outdated cosign"; fi
+t_verifier_old() { STUB_COSIGN_VERSION=v3.0.3 run_release "$(fresh)"; }
+expect_fail "--verifier pointing to an old cosign is refused" '\[sigstore_verifier_outdated\]' t_verifier_old
+# a cosign under another name (the release asset name) gets the same version check, not a verify-bundle call
+t_verifier_renamed_old() { local d="${W}/bin-renamed"; mkdir -p "${d}"; cp "${STUBS}/cosign" "${d}/cosign-linux-amd64"
+  STUB_COSIGN_VERSION=v3.0.3 run_release "$(fresh)" --verifier "${d}/cosign-linux-amd64"; }
+expect_fail "--verifier cosign-linux-amd64 reporting 3.0.3 is refused with sigstore_verifier_outdated" '\[sigstore_verifier_outdated\]' t_verifier_renamed_old
+t_verifier_renamed_ok() { local d="${W}/bin-renamed"; mkdir -p "${d}"; cp "${STUBS}/cosign" "${d}/cosign-linux-amd64"
+  STUB_COSIGN_VERSION=v3.1.3 run_release "$(fresh)" --verifier "${d}/cosign-linux-amd64"; }
+expect_ok "--verifier cosign-linux-amd64 reporting 3.1.3 is called as cosign verify-blob" t_verifier_renamed_ok
 
-t_bad_b64() { local d="${W}/badb64"; mkdir -p "${d}"; cp "${REL}/checksums.txt" "${d}/"; printf '!!!not-base64!!!\n' > "${d}/checksums.txt.sig"
-  run_install "$(fresh)" --updater-checksums-url "file://${d}/checksums.txt" --signing-key "${W}/cosign.pub"; }
-expect_fail "signature is not base64" '\[signature_malformed\]|\[signature_invalid\]' t_bad_b64
+t_old_cosign_installed_updater() { local r d; r="$(fresh)"; d="$(cosign_stub_dir v3.0.3)"
+  mkdir -p "${r}/opt/myriarch/updater"; cp "${STUBS}/updater/myriarch-updater" "${r}/opt/myriarch/updater/myriarch-updater"
+  PATH="${d}" STUB_COSIGN_VERSION=v3.0.3 run_release_nov "${r}"; }
+expect_ok "an old cosign in PATH does not hide an installed myriarch-updater" t_old_cosign_installed_updater
 
-t_no_key() { run_install "$(fresh)" --updater-checksums-url "file://${REL}/checksums.txt"; }
-expect_fail "--updater-checksums-url without --signing-key" '\[option_conflict\].*--signing-key' t_no_key
+MISSING_ROOT="$(fresh)"
+t_no_verifier() { rm -f "${UPDATER_RAN}"; PATH="${NOCOSIGN}" run_release_nov "${MISSING_ROOT}"; }
+expect_fail "without cosign and without an installed updater: sigstore_verifier_missing" '\[sigstore_verifier_missing\]' t_no_verifier
+if no_install "${MISSING_ROOT}" && [ ! -e "${UPDATER_RAN}" ]; then ok "  ... the downloaded updater was neither installed nor used as a verifier"; else fail "the downloaded updater was used or installed without a verifier"; fi
+t_no_verifier_msg() { local out; out="$(PATH="${NOCOSIGN}" run_release_nov "$(fresh)" 2>&1)" || true; printf '%s' "${out}" | grep -q -- '--updater-sha256'; }
+expect_ok "the message for a missing verifier names the --updater-sha256 alternative" t_no_verifier_msg
 
-t_key_only() { run_install "$(fresh)" --signing-key "${W}/cosign.pub" --updater-sha256 "${UPDATER_SHA}"; }
-expect_fail "--signing-key without --updater-checksums-url" '\[option_conflict\].*--updater-checksums-url' t_key_only
+t_installed_updater() { local r; r="$(fresh)"; mkdir -p "${r}/opt/myriarch/updater"; cp "${STUBS}/updater/myriarch-updater" "${r}/opt/myriarch/updater/myriarch-updater"
+  : > "${STUB_LOG}"; PATH="${NOCOSIGN}" run_release_nov "${r}" && grep -Fq 'verify-bundle' "${STUB_LOG}" \
+    && cmp -s "${REL}/${UPDATER_NAME}" "${r}/opt/myriarch/updater/myriarch-updater"; }
+expect_ok "an installed myriarch-updater verifies the new bundle (upgrade) and is then replaced" t_installed_updater
 
-t_sig_url_only() { run_install "$(fresh)" --updater-checksums-sig-url "file://${REL}/checksums.txt.sig" --updater-sha256 "${UPDATER_SHA}"; }
-expect_fail "--updater-checksums-sig-url without --updater-checksums-url" '\[option_conflict\].*--updater-checksums-url' t_sig_url_only
+t_sha_only_downloaded_verifier() { rm -f "${UPDATER_RAN}"; PATH="${NOCOSIGN}" run_install_require "$(fresh)" --updater-sha256 "${UPDATER_SHA}" && [ -e "${UPDATER_RAN}" ]; }
+run_install_require() { local root="$1"; shift
+  bash "${INSTALLER}" --root "${root}" --arch amd64 --templates-dir "${TEMPLATES}" --insecure --verify-signatures require \
+    --release-base-url "file://${MIRROR}" "${base_args[@]}" --updater-url "file://${REL}/${UPDATER_NAME}" "$@"; }
+expect_ok "hosts without a verifier: --updater-sha256 makes the hash-checked updater the verifier of collector and supervisor" t_sha_only_downloaded_verifier
 
-t_key_unreadable() { run_install "$(fresh)" --updater-checksums-url "file://${REL}/checksums.txt" --signing-key "${W}/does-not-exist.pub"; }
-expect_fail "signing key file is not readable" '\[file_unreadable\]' t_key_unreadable
+t_sha_only() { run_install "$(fresh)" --updater-sha256 "${UPDATER_SHA}"; }
+expect_ok "--updater-sha256 only (lab mode)" t_sha_only
+
+echo "install-linux.sh: removed and conflicting options"
+t_signing_key() { run_release "$(fresh)" --signing-key "${W}/cosign.pub"; }
+expect_fail "--signing-key was removed and names the replacement" '\[option_removed\].*--updater-checksums-url' t_signing_key
+t_signing_key_alone() { run_install "$(fresh)" --signing-key; }
+expect_fail "--signing-key without a value fails with option_removed as well" '\[option_removed\]' t_signing_key_alone
+t_sig_url() { run_release "$(fresh)" --updater-checksums-sig-url "file://${W}/elsewhere.sig"; }
+expect_fail "--updater-checksums-sig-url was removed and names the replacement" '\[option_removed\].*--updater-bundle-url' t_sig_url
+
+t_bundle_only() { run_install "$(fresh)" --updater-bundle-url "file://${REL}/checksums.txt.sigstore.json" --updater-sha256 "${UPDATER_SHA}"; }
+expect_fail "--updater-bundle-url without --updater-checksums-url" '\[option_conflict\].*--updater-checksums-url' t_bundle_only
+
+t_skip_with_checksums() { run_install "$(fresh)" --updater-checksums-url "file://${REL}/checksums.txt"; }
+expect_fail "--updater-checksums-url with --verify-signatures skip" '\[option_conflict\].*--verify-signatures skip' t_skip_with_checksums
 
 t_without_updater() { bash "${INSTALLER}" --root "$(fresh)" --arch amd64 --templates-dir "${TEMPLATES}" --insecure --verify-signatures skip \
   --release-base-url "file://${MIRROR}" --opamp-endpoint wss://x/v1/opamp --token myre_x --site-type office --site-id 1 --collector-version 0.161.0 \
-  --signing-key "${W}/cosign.pub"; }
-expect_fail "--signing-key without --with-updater" '\[option_conflict\].*--with-updater' t_without_updater
+  --updater-checksums-url "file://${REL}/checksums.txt"; }
+expect_fail "--updater-checksums-url without --with-updater" '\[option_conflict\].*--with-updater' t_without_updater
+
+t_version_without_updater() { bash "${INSTALLER}" --root "$(fresh)" --arch amd64 --templates-dir "${TEMPLATES}" --insecure --verify-signatures skip \
+  --release-base-url "file://${MIRROR}" --opamp-endpoint wss://x/v1/opamp --token myre_x --site-type office --site-id 1 --collector-version 0.161.0 \
+  --updater-version 1.0.0; }
+expect_fail "--updater-version without --with-updater" '\[option_conflict\].*--with-updater' t_version_without_updater
 
 # Mandatory without --insecure: neither hash nor checksums URL => abort (the https requirement for the updater URL comes first, hence an https URL)
 t_mandatory() { bash "${INSTALLER}" --root "$(fresh)" --arch amd64 --templates-dir "${TEMPLATES}" --verify-signatures require \
@@ -141,8 +297,14 @@ expect_fail "a hash source is mandatory without --insecure" '\[updater_hash_sour
 t_http_checksums() { bash "${INSTALLER}" --root "$(fresh)" --arch amd64 --templates-dir "${TEMPLATES}" \
   --release-base-url "https://mirror.example.com/r" --opamp-endpoint wss://x/v1/opamp --token myre_x --site-type office --site-id 1 \
   --collector-version 0.161.0 --with-updater --updater-url "https://mirror.example.com/${UPDATER_NAME}" \
-  --updater-checksums-url "http://mirror.example.com/checksums.txt" --signing-key "${W}/cosign.pub"; }
+  --updater-checksums-url "http://mirror.example.com/checksums.txt"; }
 expect_fail "checksums.txt only over https (without --insecure)" '\[https_required\]' t_http_checksums
+t_http_bundle() { bash "${INSTALLER}" --root "$(fresh)" --arch amd64 --templates-dir "${TEMPLATES}" \
+  --release-base-url "https://mirror.example.com/r" --opamp-endpoint wss://x/v1/opamp --token myre_x --site-type office --site-id 1 \
+  --collector-version 0.161.0 --with-updater --updater-url "https://mirror.example.com/${UPDATER_NAME}" \
+  --updater-checksums-url "https://mirror.example.com/checksums.txt" --updater-bundle-url "http://mirror.example.com/checksums.txt.sigstore.json"; }
+expect_fail "the bundle only over https (without --insecure)" '\[https_required\]' t_http_bundle
+
 
 # ---- Identity binding, transport and ownership ---------------------------------------------------------
 echo "install-linux.sh: certificate identity bound to the requested version, https-only transport, ownership"
@@ -155,16 +317,17 @@ done
 plain_args=(--arch amd64 --templates-dir "${TEMPLATES}" --insecure --release-base-url "file://${MIRROR}"
   --opamp-endpoint wss://fleet.example.com/v1/opamp --token myre_abcDEF123 --site-type office --site-id OFFICE1 --collector-version 0.161.0)
 
-STUBS="${W}/stubs"; mkdir -p "${STUBS}"
-cat > "${STUBS}/cosign" <<'STUB'
+cat > "${STUBS}/identity-cosign" <<'STUB'
 #!/bin/sh
+if [ "$1" = version ]; then echo "GitVersion:    v3.1.3"; exit 0; fi
 printf '%s\n' "$@" >> "${COSIGN_LOG}"
 exit 0
 STUB
-chmod 0755 "${STUBS}/cosign"
+chmod 0755 "${STUBS}/identity-cosign"
+mkdir -p "${STUBS}/identity"; cp "${STUBS}/identity-cosign" "${STUBS}/identity/cosign"
 t_identity_binding() {
   local log="${W}/cosign.log" r; r="$(fresh)"; : > "${log}"
-  PATH="${STUBS}:${PATH}" COSIGN_LOG="${log}" bash "${INSTALLER}" --root "${r}" "${plain_args[@]}" --supervisor-version 0.160.0 --verify-signatures require || return 1
+  PATH="${STUBS}/identity:${PATH}" COSIGN_LOG="${log}" bash "${INSTALLER}" --root "${r}" "${plain_args[@]}" --supervisor-version 0.160.0 --verify-signatures require || return 1
   local n; n="$(grep -c -- '^--certificate-identity-regexp$' "${log}")"
   [ "${n}" = 2 ] || { echo "cosign was called ${n} times, want 2"; return 1; }
   # the value after every --certificate-identity-regexp ends with the tag of the requested version
@@ -184,22 +347,8 @@ t_identity_regex() {
 }
 expect_ok "the identity pattern matches only the requested tag" t_identity_regex
 
-# Restricted PATH directories: symlinks to the listed tools only, so that the installer finds nothing else. INSTALLER_TOOLS is
-# what the installer needs besides a download tool; a case adds what it needs on top and leaves out what it tests the absence
-# of. Keep the list complete: with a tool missing, a case fails for another reason than the one under test (GNU tar -z runs
-# the external gzip, and without it a valid archive looks like one without its binary).
-INSTALLER_TOOLS=(bash sh tar gzip install cmp awk sed tr cut grep mktemp date id uname sha256sum shasum mv cp ln rm mkdir dirname basename cat head readlink chmod sort wc sleep seq env)
-path_dir() { # dir [tool...]: INSTALLER_TOOLS and the given tools (those the host has), without the ones named in $WITHOUT
-  local dir="$1" c p; shift
-  mkdir -p "${dir}"
-  for c in "${INSTALLER_TOOLS[@]}" "$@"; do
-    case " ${WITHOUT:-} " in *" ${c} "*) continue ;; esac
-    p="$(command -v "${c}" 2>/dev/null || true)"; [ -n "${p}" ] && ln -sf "${p}" "${dir}/${c}"
-  done
-}
-
 # wget cannot restrict redirects to https: without --insecure curl is required
-NOCURL="${W}/bin-no-curl"; path_dir "${NOCURL}" timeout openssl
+NOCURL="${W}/bin-no-curl"; path_dir "${NOCURL}" timeout
 cat > "${NOCURL}/wget" <<'STUB'
 #!/bin/sh
 printf '%s\n' "$@" >> "${WGET_LOG}"
@@ -215,7 +364,7 @@ grep -Fxq -- '--secure-protocol=TLSv1_2' "${W}/wget.log" && ok "  ... with a min
 
 # GNU tar runs the external gzip for .tar.gz archives (bsdtar has zlib built in): without gzip the installer names the missing
 # tool before it touches the host, instead of reporting the binary as missing from the archive
-NOGZIP="${W}/bin-no-gzip"; WITHOUT=gzip path_dir "${NOGZIP}" curl wget openssl
+NOGZIP="${W}/bin-no-gzip"; WITHOUT=gzip path_dir "${NOGZIP}" curl wget
 NOGZIP_ROOT="$(fresh)"
 t_no_gzip() { PATH="${NOGZIP}" bash "${INSTALLER}" --root "${NOGZIP_ROOT}" "${plain_args[@]}" --verify-signatures skip; }
 expect_fail "without gzip the installer stops with tool_missing and names gzip" '\[tool_missing\].*gzip' t_no_gzip
@@ -261,38 +410,51 @@ expect_ok "--ca-file is copied to /etc/myriarch/ca.pem (0644) and referenced the
 t_ca_relative() { (cd "${W}" && bash "${INSTALLER}" --root "$(fresh)" "${plain_args[@]}" --verify-signatures skip --ca-file ca.pem); }
 expect_fail "a relative --ca-file is refused" '\[option_invalid\]' t_ca_relative
 
-# ---- cosign fallback (no openssl in PATH) + real cosign signature (format contract) -------------------
+# ---- Real cosign, offline, against the committed upstream fixtures ----------------------------------------------
+# The upstream bundles in internal/updater/testdata/sigstore are genuine keyless signatures (of the .sha256 file of a
+# collector release). They cannot carry the Myriarch identity, so they serve as the positive control of cosign itself
+# (offline, with the trusted root) and as a genuine but foreign bundle that the installer must reject.
 if have cosign; then
-  echo "install-linux.sh: real cosign signature (contrib/enterprise-mirror/sign-blob.sh) and cosign fallback"
-  mkdir -p "${W}/cosign-keys"
-  ( cd "${W}/cosign-keys" && COSIGN_PASSWORD=testpw cosign generate-key-pair >/dev/null 2>&1 )
-  cp "${REL}/checksums.txt" "${W}/cosign-checksums.txt"
-  COSIGN_PASSWORD=testpw COSIGN_KEY="${W}/cosign-keys/cosign.key" COSIGN_REPO_PUBLIC_KEY=/nonexistent \
-    "${ROOT}/contrib/enterprise-mirror/sign-blob.sh" "${W}/cosign-checksums.txt" "${W}/cosign-checksums.txt.sig" >/dev/null 2>&1
-  C="${W}/cosign-rel"; mkdir -p "${C}"; cp "${REL}/${UPDATER_NAME}" "${C}/"; cp "${W}/cosign-checksums.txt" "${C}/checksums.txt"; cp "${W}/cosign-checksums.txt.sig" "${C}/checksums.txt.sig"
-  t_cosign_sig() { run_install "$(fresh)" --updater-checksums-url "file://${C}/checksums.txt" --signing-key "${W}/cosign-keys/cosign.pub"; }
-  expect_ok "a .sig produced by cosign is accepted by the installer (openssl)" t_cosign_sig
+  echo "install-linux.sh: real cosign against the upstream fixtures (offline)"
+  FIX="${ROOT}/internal/updater/testdata/sigstore"
+  FIX_BLOB="otelcol-contrib_0.162.0_linux_amd64.tar.gz.sha256"
+  UP_ID='^https://github\.com/open-telemetry/opentelemetry-collector-releases/\.github/workflows/base-release\.yaml@refs/tags/v0\.162\.0$'
+  ISSUER='https://token.actions.githubusercontent.com'
+  real_verify() { # blob identity-regexp
+    cosign verify-blob --bundle "${FIX}/${FIX_BLOB}.sigstore.json" --trusted-root "${FIX}/trusted_root.json" \
+      --certificate-identity-regexp "$2" --certificate-oidc-issuer "${ISSUER}" "$1"; }
+  expect_ok "positive control: cosign verifies the upstream bundle with the upstream identity" real_verify "${FIX}/${FIX_BLOB}" "${UP_ID}"
+  cp "${FIX}/${FIX_BLOB}" "${W}/fixture-tampered"; printf 'x' >> "${W}/fixture-tampered"
+  expect_fail "the same bundle fails for a tampered file" 'error|Error' real_verify "${W}/fixture-tampered" "${UP_ID}"
+  expect_fail "the same bundle fails for the Myriarch release identity" 'expected SAN value' real_verify "${FIX}/${FIX_BLOB}" \
+    "$(bash -c 'eval "$(sed -n "/^cert_identity_release()/,/^}/p" "$1")"; RELEASE_REPOSITORY=myriarch/myriarch; cert_identity_release 0.162.0' _ "${INSTALLER}")"
 
-  # PATH without openssl: the installer falls back to cosign verify-blob
-  nossl="${W}/bin-no-openssl"; path_dir "${nossl}" curl wget cosign
-  t_cosign_fallback() { PATH="${nossl}" run_install "$(fresh)" --updater-checksums-url "file://${C}/checksums.txt" --signing-key "${W}/cosign-keys/cosign.pub"; }
-  expect_ok "without openssl the installer verifies with cosign verify-blob" t_cosign_fallback
-  t_cosign_fallback_bad() { PATH="${nossl}" run_install "$(fresh)" --updater-checksums-url "file://${REL}/checksums.txt" --signing-key "${W}/cosign-keys/cosign.pub"; }
-  expect_fail "cosign fallback rejects a foreign signature" '\[signature_invalid\]' t_cosign_fallback_bad
-
-  # without openssl AND without cosign: abort
-  rm -f "${nossl}/cosign"
-  t_no_verifier() { PATH="${nossl}" run_install "$(fresh)" --updater-checksums-url "file://${REL}/checksums.txt" --signing-key "${W}/cosign.pub"; }
-  expect_fail "neither openssl nor cosign: abort" '\[signature_verifier_missing\]' t_no_verifier
+  # the installer with real cosign: the upstream bundle stands in for checksums.txt.sigstore.json
+  REAL="${W}/real-release"; mkdir -p "${REAL}"
+  cp "${FIX}/${FIX_BLOB}" "${REAL}/checksums.txt"; cp "${FIX}/${FIX_BLOB}.sigstore.json" "${REAL}/checksums.txt.sigstore.json"
+  cp "${REL}/${UPDATER_NAME}" "${REAL}/"
+  real_install() { # root extra-args...
+    local root="$1"; shift
+    bash "${INSTALLER}" --root "${root}" --arch amd64 --templates-dir "${TEMPLATES}" --insecure --verify-signatures require --trusted-root "${FIX}/trusted_root.json" \
+      --release-base-url "file://${MIRROR}" "${base_args[@]}" --updater-url "file://${REL}/${UPDATER_NAME}" \
+      --updater-checksums-url "file://${REAL}/checksums.txt" --verifier "$(command -v cosign)" "$@"; }
+  REAL_ROOT="$(fresh)"
+  t_real_foreign() { real_install "${REAL_ROOT}"; }
+  expect_fail "real cosign: a genuine bundle with another identity is rejected" '\[sigstore_verification_failed\].*checksums\.txt' t_real_foreign
+  if no_install "${REAL_ROOT}"; then ok "  ... and nothing was installed"; else fail "something was installed after a foreign bundle"; fi
+  t_real_foreign_version() { real_install "$(fresh)" --updater-version 0.162.0 --updater-url "file://${REL}/myriarch-updater-plain-name"; }
+  expect_fail "real cosign: also for the version of the fixture (the workflow and repository differ)" '\[sigstore_verification_failed\]' t_real_foreign_version
+  t_real_version() { cosign version 2>&1 | grep -Eq '^GitVersion:[[:space:]]+v[0-9]+\.[0-9]+\.[0-9]+'; }
+  expect_ok "the cosign of this host reports a version that the installer can read" t_real_version
 else
-  echo "(cosign not in PATH: real cosign signature and fallback skipped; ci/install-tools.sh cosign)"
+  echo "(cosign not in PATH: the real-cosign cases are skipped; ci/install-tools.sh cosign)"
 fi
 
 # ---- Windows (PowerShell) ---------------------------------------------------------------------------
 if have pwsh && [ -f "${CI_DIR}/tests/installer-verify.ps1" ]; then
   echo "install-windows.ps1: signature verification (pwsh)"
   expect_ok "install-windows.ps1 (pwsh)" pwsh -NoProfile -NonInteractive -File "${CI_DIR}/tests/installer-verify.ps1" \
-    -Installer "${ROOT}/deploy/scripts/install-windows.ps1" -Templates "${TEMPLATES}" -Work "${W}/win" -SignBlob "${ROOT}/contrib/enterprise-mirror/sign-blob.sh"
+    -Installer "${ROOT}/deploy/scripts/install-windows.ps1" -Templates "${TEMPLATES}" -Work "${W}/win"
 else
   echo "(pwsh not in PATH: install-windows.ps1 skipped)"
 fi

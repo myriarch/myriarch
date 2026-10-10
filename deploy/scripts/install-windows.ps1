@@ -21,16 +21,22 @@
     - optionally the service "myriarch-updater" ("Myriarch Updater", LocalSystem: it replaces binaries)
 
   Trust model: downloads use https only; collector and supervisor are verified with SHA-256 and a Sigstore
-  bundle (-VerifySignatures require, the default; verifier: -Verifier myriarch-updater.exe or cosign.exe or the
-  updater downloaded with -WithUpdater and checked by -UpdaterSha256). With -WithUpdater the myriarch-updater
-  (the project's own binary, runs as SYSTEM) needs a trusted hash source, at least one of
-    -UpdaterSha256 HEX                                      (hash from another trusted source)
-    -UpdaterChecksumsUrl URL + -SigningKey cosign.pub       (checksums.txt of the release; its signature URL.sig - base64 of
-                                                             an ASN.1 DER ECDSA signature (P-256) over SHA-256 - is verified
-                                                             with the public key, without external tools; the hash is the
-                                                             line whose file name matches the one in -UpdaterUrl)
-  Both together are allowed (then both must match); the signature check also applies with -Insecure. Optional
-  -UpdaterSignerThumbprint: the Authenticode signature of the updater must be valid and come from this certificate.
+  bundle (-VerifySignatures require, the default; verifier: -Verifier myriarch-updater.exe or cosign.exe, an
+  already installed myriarch-updater, cosign.exe 3.0.4 or newer from a directory only administrators can write, or - with
+  -UpdaterSha256 and without -UpdaterChecksumsUrl - the updater downloaded with -WithUpdater and checked by that
+  hash). With -WithUpdater the myriarch-updater (the project's own binary, runs as SYSTEM) needs a trusted hash
+  source, at least one of
+    -UpdaterSha256 HEX                      (hash from another trusted source, for example verified on an admin host)
+    -UpdaterChecksumsUrl URL                (checksums.txt of the release; its keyless Sigstore bundle, by default
+                                             URL.sigstore.json or -UpdaterBundleUrl, is verified against the release
+                                             identity of the requested version before the hash is read: the line
+                                             whose file name matches the one in -UpdaterUrl)
+  The version comes from -UpdaterVersion or from the file name myriarch-updater_<version>_windows_<arch>.exe in
+  -UpdaterUrl; when both are given they must agree. The verifier of checksums.txt is never the binary that is being
+  installed. Both hash sources together are allowed (then both must match); the check of checksums.txt also applies
+  with -Insecure, but not with -VerifySignatures skip. Optional -UpdaterSignerThumbprint: the Authenticode signature
+  of the updater must be valid and come from this certificate. A pin of a thumbprint breaks at every certificate
+  renewal; it fits only a private PKI with a certificate that you control.
   -Insecure disables the remaining checks for lab/tests only (http/file, no bundle, ws://).
   The directories under C:\ProgramData\Myriarch are never "adopted": if an existing directory is not owned by
   SYSTEM/Administrators or is a reparse point, the installation aborts; otherwise the ACL of the whole tree is
@@ -69,7 +75,10 @@ param(
   [string]$ReleaseBaseUrl = 'https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download',
   [string]$UpdaterUrl,
   [string]$UpdaterSha256,
+  [string]$UpdaterVersion,
   [string]$UpdaterChecksumsUrl,
+  [string]$UpdaterBundleUrl,
+  # removed (fail with option_removed and name the replacement)
   [string]$UpdaterChecksumsSigUrl,
   [string]$SigningKey,
   [string]$UpdaterSignerThumbprint,
@@ -95,6 +104,9 @@ $script:SupervisorService = 'otelcol-supervisor'
 $script:UpdaterService = 'myriarch-updater'
 $script:CollectorBinary = 'otelcol-contrib.exe'
 $script:StagingMode = $false
+# the parameters that were passed (inside a function $PSBoundParameters is the function's own); the removed options are
+# detected by their presence, not by their value
+$script:BoundParameters = $PSBoundParameters
 # SIDs instead of names (language independent)
 $script:SidSystem = 'S-1-5-18'
 $script:SidAdmins = 'S-1-5-32-544'
@@ -104,20 +116,26 @@ $script:VerifierPath = ''
 $script:UpdaterDownload = ''
 $script:UpdaterDownloadHash = ''
 $script:CaRendered = ''
-$script:UpdaterChecksumsSigUrl = ''
+# (script-scope variables share their names with the parameters: the resolved values use other names)
+$script:UpdaterBundle = ''
+$script:UpdaterResolvedVersion = ''
+# Keyless identity of the Myriarch release workflow (ADR-0029, frozen from v0.1.0 on: release.yml is never renamed).
+# The repository must equal internal/brand.Repository; a Go test compares both.
+$script:ReleaseRepository = 'myriarch/myriarch'
+$script:MinCosignVersion = [Version]'3.0.4'
 
 # ---- Error codes (stable interface) -------------------------------------------------------------------
 # The full catalog with the shared codes (usage_error, option_missing, option_invalid, option_conflict,
 # updater_hash_source_missing, insecure_required, https_required, file_unreadable, tool_missing,
-# sigstore_verifier_missing, signature_verifier_missing, privilege_required, unsupported_platform,
-# download_failed, template_missing, template_placeholder, checksum_invalid, checksum_mismatch,
-# checksum_entry_count, checksum_conflict, signature_malformed, signature_invalid,
-# sigstore_verification_failed, archive_invalid, collector_start_failed, collector_version_mismatch,
-# service_not_running, token_on_command_line, updater_unauthenticated) is at the top of install-linux.sh.
+# sigstore_verifier_missing, sigstore_verifier_outdated, option_removed, privilege_required,
+# unsupported_platform, download_failed, template_missing, template_placeholder, checksum_invalid,
+# checksum_mismatch, checksum_entry_count, checksum_conflict, sigstore_verification_failed, archive_invalid,
+# collector_start_failed, collector_version_mismatch, service_not_running, token_on_command_line,
+# updater_unauthenticated) is at the top of install-linux.sh.
 # Windows-only codes:
-#   signing_key_invalid       the -SigningKey file is not PEM / not an ECDSA P-256 public key
 #   authenticode_invalid      the Authenticode signature of the updater is invalid or from another certificate
-#   directory_unsafe          reparse point, wrong owner, unexpected ACE, or not a directory
+#   directory_unsafe          reparse point, wrong owner, unexpected ACE, or not a directory; also a -Verifier in a directory
+#                             that unprivileged accounts can change
 #   acl_failed                icacls failed
 #   service_config_failed     sc.exe failed
 #   updater_install_failed    "myriarch-updater install" failed
@@ -243,6 +261,14 @@ function Get-CertIdentity {
   return '^https://github\.com/open-telemetry/opentelemetry-collector-releases/\.github/workflows/' + $Workflow + '\.yaml@refs/tags/v' + [regex]::Escape($Version) + '$'
 }
 
+# Certificate identity (SAN) of the Sigstore bundle of checksums.txt of one Myriarch release, bound to the version: the
+# workflow release.yml of this repository, run for the tag v<version>. The tag is escaped and the pattern is anchored at
+# both ends, so that v0.1.0 does not accept v0.1.01, v10.1.0 or another workflow or repository.
+function Get-ReleaseCertIdentity {
+  param([string]$Version)
+  return '^https://github\.com/' + [regex]::Escape($script:ReleaseRepository) + '/\.github/workflows/release\.yml@refs/tags/v' + [regex]::Escape($Version) + '$'
+}
+
 # True when only SYSTEM, Administrators and TrustedInstaller can change what the directory contains: a program
 # found there is not replaceable by an unprivileged account. Anything that cannot be established (no ACL
 # support, errors) counts as not protected.
@@ -271,20 +297,68 @@ function Test-AdminOnlyDirectory {
   }
 }
 
-# Sigstore verifier, in this order: -Verifier, the SHA-256 checked updater (-WithUpdater), an already installed
-# myriarch-updater, cosign.exe from PATH - but only from a directory that unprivileged accounts cannot write
-# (PATH may contain such directories, and this script runs elevated). Without a verifier the installation aborts.
+# True where directory ACLs exist (Windows). Other platforms only run the test suites, which replace this function.
+function Test-AclEnforced {
+  return [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+}
+
+# Returns an empty string when the cosign binary reports MinCosignVersion or newer, otherwise the reason.
+function Get-CosignVersionProblem {
+  param([string]$Path)
+  $r = Invoke-Native -File $Path -Arguments @('version')
+  if ($r.ExitCode -ne 0) { return "cosign `"$Path`" failed to report its version" }
+  $found = $null; $pre = ''
+  foreach ($line in ($r.Output -split "`r?`n")) {
+    if ($line -match '^GitVersion:\s+v?(\d+\.\d+\.\d+)(-[^+\s]+)?') { $found = [Version]$Matches[1]; $pre = $Matches[2]; break }
+  }
+  if (-not $found) { return "cosign `"$Path`" reports no usable version" }
+  # a pre-release of the minimum (3.0.4-rc.1) sorts before it
+  if ($pre -and $found -eq $script:MinCosignVersion) { return "cosign $found$pre at `"$Path`" is too old (a pre-release of the minimum)" }
+  if ($found -lt $script:MinCosignVersion) { return "cosign $found at `"$Path`" is too old" }
+  return ''
+}
+
+function Stop-CosignOutdated {
+  param([string]$Reason)
+  Stop-Install 'sigstore_verifier_outdated' "${Reason}: cosign $($script:MinCosignVersion) or newer is required (older versions have known verification flaws); update cosign, pass -Verifier <installed myriarch-updater.exe>, or verify checksums.txt on an admin host and pass -UpdaterSha256"
+}
+
+# Sigstore verifier, in this order: -Verifier (in a directory only Administrators can write; a cosign must be 3.0.4 or newer), the SHA-256 checked updater from
+# -WithUpdater (only with -UpdaterSha256 and without -UpdaterChecksumsUrl: with a checksums.txt the verifier is resolved
+# BEFORE the updater is downloaded and that updater is never used, because its hash comes from the file that this verifier
+# has to check), an already installed myriarch-updater, cosign.exe 3.0.4 or newer from PATH - but only from a directory that
+# unprivileged accounts cannot write (PATH may contain such directories, and this script runs elevated). Without a verifier
+# the installation aborts.
 function Resolve-Verifier {
   param($L)
   if ($VerifySignatures -eq 'skip') { return }
-  if ($Verifier) { $script:VerifierPath = $Verifier; return }
-  if ($script:UpdaterDownload) { $script:VerifierPath = $script:UpdaterDownload; return }
+  if ($Verifier) {
+    # an elevated installer must not run a verifier that unprivileged accounts can replace (the verifier decides whether
+    # checksums.txt, and with it the SYSTEM updater, is trusted)
+    $verifierDir = Split-Path -Parent ([IO.Path]::GetFullPath($Verifier))
+    if ((Test-AclEnforced) -and -not (Test-AdminOnlyDirectory -Path $verifierDir)) {
+      Stop-Install 'directory_unsafe' "-Verifier is in $verifierDir, which unprivileged accounts can change; copy it into a directory only Administrators can write (for example C:\Program Files\cosign) and pass that path"
+    }
+    if ((Split-Path -Leaf $Verifier) -like 'cosign*') {
+      $problem = Get-CosignVersionProblem -Path $Verifier
+      if ($problem) { Stop-CosignOutdated -Reason $problem }
+    }
+    $script:VerifierPath = $Verifier
+    return
+  }
+  if ($script:UpdaterDownload -and -not $UpdaterChecksumsUrl -and $UpdaterSha256) { $script:VerifierPath = $script:UpdaterDownload; return }
   $installed = Join-Path $L.Updater 'myriarch-updater.exe'
   if (Test-Path -LiteralPath $installed) { $script:VerifierPath = $installed; return }
+  $outdated = ''
   $cosign = Get-Command cosign.exe -ErrorAction SilentlyContinue
-  if ($cosign -and (Test-AdminOnlyDirectory -Path (Split-Path -Parent $cosign.Source))) { $script:VerifierPath = $cosign.Source; return }
-  if ($cosign) { Write-Warn 'sigstore_verifier_missing' "cosign.exe found in $(Split-Path -Parent $cosign.Source) is not used: the directory can be changed by unprivileged accounts; pass -Verifier or use -WithUpdater" }
-  Stop-Install 'sigstore_verifier_missing' 'no Sigstore verifier found: pass -Verifier <myriarch-updater.exe or cosign.exe>, use -WithUpdater with -UpdaterSha256, or install cosign.exe (v3) into a directory only Administrators can write'
+  if ($cosign -and (Test-AdminOnlyDirectory -Path (Split-Path -Parent $cosign.Source))) {
+    $outdated = Get-CosignVersionProblem -Path $cosign.Source
+    if (-not $outdated) { $script:VerifierPath = $cosign.Source; return }
+  } elseif ($cosign) {
+    Write-Warn 'sigstore_verifier_missing' "cosign.exe found in $(Split-Path -Parent $cosign.Source) is not used: the directory can be changed by unprivileged accounts; pass -Verifier or install cosign.exe into a directory only Administrators can write"
+  }
+  if ($outdated) { Stop-CosignOutdated -Reason $outdated }
+  Stop-Install 'sigstore_verifier_missing' 'no Sigstore verifier found: pass -Verifier <installed myriarch-updater.exe or cosign.exe>, install cosign.exe 3.0.4 or newer into a directory only Administrators can write, or use -WithUpdater with -UpdaterSha256 (verify checksums.txt on an admin host first)'
 }
 
 function Confirm-Signature {
@@ -536,7 +610,7 @@ function Test-Inputs {
   if (-not $SiteType) { Stop-Install 'option_missing' '-SiteType is missing' }
   if (-not $SiteId) { Stop-Install 'option_missing' '-SiteId is missing' }
   if (-not $CollectorVersion) { Stop-Install 'option_missing' '-CollectorVersion is missing' }
-  $verRe = '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+  $verRe = '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
   $script:CollectorVersion = $CollectorVersion.TrimStart('v')
   if ($script:CollectorVersion -notmatch $verRe) { Stop-Install 'option_invalid' "invalid -CollectorVersion: $CollectorVersion" }
   $script:SupervisorVersion = $(if ($SupervisorVersion) { $SupervisorVersion.TrimStart('v') } else { $script:CollectorVersion })
@@ -559,24 +633,39 @@ function Test-Inputs {
   if ($TrustedRoot -and -not (Test-Path -LiteralPath $TrustedRoot)) { Stop-Install 'file_unreadable' "trusted_root.json is not readable: $TrustedRoot" }
   if ($VerifySignatures -eq 'skip' -and -not $Insecure) { Stop-Install 'insecure_required' '-VerifySignatures skip is only allowed together with -Insecure (lab/tests)' }
   if ($Verifier -and -not (Test-Path -LiteralPath $Verifier)) { Stop-Install 'file_unreadable' "-Verifier not found: $Verifier" }
-  if (-not $WithUpdater -and ($UpdaterChecksumsUrl -or $UpdaterChecksumsSigUrl -or $SigningKey -or $UpdaterSignerThumbprint)) {
-    Stop-Install 'option_conflict' '-UpdaterChecksumsUrl/-UpdaterChecksumsSigUrl/-SigningKey/-UpdaterSignerThumbprint only apply together with -WithUpdater'
+  if (-not $WithUpdater -and ($UpdaterVersion -or $UpdaterChecksumsUrl -or $UpdaterBundleUrl -or $UpdaterSignerThumbprint)) {
+    Stop-Install 'option_conflict' '-UpdaterVersion/-UpdaterChecksumsUrl/-UpdaterBundleUrl/-UpdaterSignerThumbprint only apply together with -WithUpdater'
   }
   if ($WithUpdater) {
     if (-not $UpdaterUrl) { Stop-Install 'option_missing' '-WithUpdater requires -UpdaterUrl' }
     Assert-TransportAllowed -Url $UpdaterUrl -What '-UpdaterUrl'
-    if ($UpdaterChecksumsSigUrl -and -not $UpdaterChecksumsUrl) { Stop-Install 'option_conflict' '-UpdaterChecksumsSigUrl requires -UpdaterChecksumsUrl' }
-    if ($UpdaterChecksumsUrl) {
-      if (-not $SigningKey) { Stop-Install 'option_conflict' '-UpdaterChecksumsUrl requires -SigningKey (public key cosign.pub): without a signature check checksums.txt is not trustworthy' }
-      Assert-TransportAllowed -Url $UpdaterChecksumsUrl -What '-UpdaterChecksumsUrl'
-      if (-not $UpdaterChecksumsSigUrl) { $script:UpdaterChecksumsSigUrl = "$UpdaterChecksumsUrl.sig" } else { $script:UpdaterChecksumsSigUrl = $UpdaterChecksumsSigUrl }
-      Assert-TransportAllowed -Url $script:UpdaterChecksumsSigUrl -What '-UpdaterChecksumsSigUrl'
-    } elseif ($SigningKey) {
-      Stop-Install 'option_conflict' '-SigningKey requires -UpdaterChecksumsUrl'
+    $asset = (($UpdaterUrl -replace '[?#].*$', '') -split '[/\\]') | Select-Object -Last 1
+    if (-not $asset) { Stop-Install 'option_invalid' "no file name in -UpdaterUrl: $UpdaterUrl" }
+    $urlVersion = ''
+    if ($asset -cmatch '^myriarch-updater_([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?)_windows_(amd64|arm64)\.exe$') { $urlVersion = $Matches[1] }
+    $script:UpdaterResolvedVersion = $urlVersion
+    if ($UpdaterVersion) {
+      $given = $UpdaterVersion.TrimStart('v')
+      if ($given -notmatch $verRe) { Stop-Install 'option_invalid' "invalid -UpdaterVersion: $UpdaterVersion" }
+      if ($urlVersion -and $urlVersion -cne $given) {
+        Stop-Install 'option_conflict' "-UpdaterVersion $given and the version in -UpdaterUrl ($urlVersion) differ"
+      }
+      $script:UpdaterResolvedVersion = $given
     }
-    if ($SigningKey -and -not (Test-Path -LiteralPath $SigningKey)) { Stop-Install 'file_unreadable' "signing key file is not readable: $SigningKey" }
+    if ($UpdaterBundleUrl -and -not $UpdaterChecksumsUrl) { Stop-Install 'option_conflict' '-UpdaterBundleUrl requires -UpdaterChecksumsUrl' }
+    if ($UpdaterChecksumsUrl) {
+      if ($VerifySignatures -ne 'require') {
+        Stop-Install 'option_conflict' '-UpdaterChecksumsUrl cannot be combined with -VerifySignatures skip: checksums.txt would not be authenticated (pass -UpdaterSha256 instead)'
+      }
+      if (-not $script:UpdaterResolvedVersion) {
+        Stop-Install 'option_missing' '-UpdaterVersion is missing: the file name in -UpdaterUrl does not carry the version (myriarch-updater_<version>_windows_<arch>.exe) and the identity of the release is bound to it'
+      }
+      Assert-TransportAllowed -Url $UpdaterChecksumsUrl -What '-UpdaterChecksumsUrl'
+      if ($UpdaterBundleUrl) { $script:UpdaterBundle = $UpdaterBundleUrl } else { $script:UpdaterBundle = "$UpdaterChecksumsUrl.sigstore.json" }
+      Assert-TransportAllowed -Url $script:UpdaterBundle -What '-UpdaterBundleUrl'
+    }
     if (-not $UpdaterSha256 -and -not $UpdaterChecksumsUrl -and -not $Insecure) {
-      Stop-Install 'updater_hash_source_missing' '-WithUpdater requires -UpdaterSha256 or (-UpdaterChecksumsUrl and -SigningKey) - the binary runs as SYSTEM and needs a trusted hash source (signed checksums.txt of the release)'
+      Stop-Install 'updater_hash_source_missing' '-WithUpdater requires -UpdaterSha256 or -UpdaterChecksumsUrl - the binary runs as SYSTEM and needs a trusted hash source (checksums.txt of the release, verified with its Sigstore bundle)'
     }
     if ($UpdaterSha256 -and $UpdaterSha256 -notmatch '^[0-9a-fA-F]{64}$') { Stop-Install 'option_invalid' '-UpdaterSha256 is not a SHA-256 (64 hex characters)' }
     if ($UpdaterSignerThumbprint -and (($UpdaterSignerThumbprint -replace '\s', '') -notmatch '^[0-9a-fA-F]{40}$')) {
@@ -794,85 +883,6 @@ function Install-SupervisorService {
   $null = Invoke-Native -File 'sc.exe' -Arguments @('failureflag', $name, '1')
 }
 
-# --- Signature verification of our releases (ECDSA P-256, without external tools) --------------------------
-# <file>.sig holds the base64 encoding of an ASN.1 DER ECDSA signature over the SHA-256 of the file
-# (cosign sign-blob without transparency log; also verifiable with openssl).
-
-# DER signature (SEQUENCE { INTEGER r, INTEGER s }) -> r||s with 32 bytes each (IEEE P1363), as .NET expects it.
-function ConvertFrom-DerEcdsaSignature {
-  param([byte[]]$Der)
-  $bad = 'the signature is not a valid ASN.1 DER ECDSA signature (P-256)'
-  if ($Der.Length -lt 8 -or $Der[0] -ne 0x30) { Stop-Install 'signature_malformed' $bad }
-  $i = 2
-  if (($Der[1] -band 0x80) -ne 0) { $i = 2 + ($Der[1] -band 0x7f) }
-  $rs = New-Object byte[] 64
-  for ($k = 0; $k -lt 2; $k++) {
-    if ($i + 1 -ge $Der.Length -or $Der[$i] -ne 0x02) { Stop-Install 'signature_malformed' $bad }
-    $l = [int]$Der[$i + 1]
-    $i += 2
-    if ($i + $l -gt $Der.Length) { Stop-Install 'signature_malformed' $bad }
-    $start = $i
-    $count = $l
-    while ($count -gt 0 -and $Der[$start] -eq 0) { $start++; $count-- }
-    if ($count -gt 32 -or $count -lt 1) { Stop-Install 'signature_malformed' $bad }
-    [Array]::Copy($Der, $start, $rs, ($k * 32) + (32 - $count), $count)
-    $i += $l
-  }
-  return , $rs
-}
-
-# PEM "PUBLIC KEY" (P-256, SubjectPublicKeyInfo) -> ECDsa object for verification.
-# .NET Core / .NET Framework >= 4.7: ECDsa.Create(ECParameters); older (Windows PowerShell 5.1 with .NET 4.6.x):
-# ECDsaCng via a CNG public blob (ECS1 magic, length 32, X, Y).
-function New-EcdsaVerifier {
-  param([string]$PemPath)
-  $pem = [System.IO.File]::ReadAllText($PemPath)
-  $b64 = (($pem -split "`r?`n") | Where-Object { $_ -and $_ -notmatch '^-----' }) -join ''
-  try { $spki = [Convert]::FromBase64String($b64) } catch { Stop-Install 'signing_key_invalid' "key file is not PEM: $PemPath" }
-  $prefix = [byte[]](0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00)
-  $ok = ($spki.Length -eq 91) -and ($spki[26] -eq 0x04)
-  if ($ok) { for ($n = 0; $n -lt $prefix.Length; $n++) { if ($spki[$n] -ne $prefix[$n]) { $ok = $false; break } } }
-  if (-not $ok) { Stop-Install 'signing_key_invalid' "the key is not an ECDSA P-256 public key (SubjectPublicKeyInfo): $PemPath" }
-  $x = New-Object byte[] 32
-  $y = New-Object byte[] 32
-  [Array]::Copy($spki, 27, $x, 0, 32)
-  [Array]::Copy($spki, 59, $y, 0, 32)
-  try {
-    $params = New-Object System.Security.Cryptography.ECParameters
-    $params.Curve = [System.Security.Cryptography.ECCurve]::CreateFromValue('1.2.840.10045.3.1.7')  # nistP256
-    $point = New-Object System.Security.Cryptography.ECPoint
-    $point.X = $x
-    $point.Y = $y
-    $params.Q = $point
-    return [System.Security.Cryptography.ECDsa]::Create($params)
-  } catch {
-    $firstError = $_.Exception.Message
-    try {
-      $blob = [byte[]](0x45, 0x43, 0x53, 0x31, 0x20, 0x00, 0x00, 0x00) + $x + $y
-      $cng = [System.Security.Cryptography.CngKey]::Import($blob, [System.Security.Cryptography.CngKeyBlobFormat]::EccPublicBlob)
-      return (New-Object System.Security.Cryptography.ECDsaCng($cng))
-    } catch {
-      Stop-Install 'signature_verifier_missing' "ECDSA verification is not possible on this system: $firstError / $($_.Exception.Message)"
-    }
-  }
-}
-
-function Confirm-BlobSignature {
-  param([string]$File, [string]$SigFile, [string]$KeyFile)
-  $name = Split-Path -Leaf $File
-  $sigText = ([System.IO.File]::ReadAllText($SigFile)).Trim()
-  try { $der = [Convert]::FromBase64String($sigText) } catch { Stop-Install 'signature_malformed' "signature of $name is not valid base64" }
-  $rs = ConvertFrom-DerEcdsaSignature -Der $der
-  $ecdsa = New-EcdsaVerifier -PemPath $KeyFile
-  $sha = [System.Security.Cryptography.SHA256]::Create()
-  $stream = [System.IO.File]::OpenRead($File)
-  try { $hash = $sha.ComputeHash($stream) } finally { $stream.Dispose(); $sha.Dispose() }
-  $valid = $false
-  try { $valid = $ecdsa.VerifyHash($hash, $rs) } finally { $ecdsa.Dispose() }
-  if (-not $valid) { Stop-Install 'signature_invalid' "signature of $name is invalid (wrong key or tampered file)" }
-  Write-Log "signature of $name ok"
-}
-
 # SHA-256 of the line "<hex>  <file name>" in a goreleaser checksums.txt; exactly one match.
 function Get-ChecksumFromFile {
   param([string]$Path, [string]$Name)
@@ -884,16 +894,15 @@ function Get-ChecksumFromFile {
   return [string]$hits[0]
 }
 
-# Downloads and verifies checksums.txt (+ signature) and returns the expected SHA-256 of the updater.
+# Downloads checksums.txt and its keyless Sigstore bundle, verifies the bundle against the release identity of
+# the updater version (the verifier is resolved before) and returns the expected SHA-256 of the updater.
 function Get-UpdaterSha256FromChecksums {
   param([string]$TmpDir)
   $asset = (($UpdaterUrl -replace '[?#].*$', '') -split '[/\\]') | Select-Object -Last 1
   if (-not $asset) { Stop-Install 'option_invalid' "no file name in -UpdaterUrl: $UpdaterUrl" }
   $sums = Join-Path $TmpDir 'checksums.txt'
-  $sig = Join-Path $TmpDir 'checksums.txt.sig'
   Invoke-Download -Url $UpdaterChecksumsUrl -Destination $sums
-  Invoke-Download -Url $script:UpdaterChecksumsSigUrl -Destination $sig
-  Confirm-BlobSignature -File $sums -SigFile $sig -KeyFile $SigningKey
+  Confirm-Signature -File $sums -BundleUrl $script:UpdaterBundle -IdentityRegexp (Get-ReleaseCertIdentity -Version $script:UpdaterResolvedVersion) -Version $script:UpdaterResolvedVersion -TmpDir $TmpDir
   return (Get-ChecksumFromFile -Path $sums -Name $asset)
 }
 
@@ -902,7 +911,7 @@ function Confirm-UpdaterAuthenticode {
   param([string]$Path)
   if (-not $UpdaterSignerThumbprint) { return }
   $cmd = Get-Command Get-AuthenticodeSignature -ErrorAction SilentlyContinue
-  if (-not $cmd) { Stop-Install 'signature_verifier_missing' '-UpdaterSignerThumbprint: Get-AuthenticodeSignature is not available on this system' }
+  if (-not $cmd) { Stop-Install 'tool_missing' '-UpdaterSignerThumbprint: Get-AuthenticodeSignature is not available on this system' }
   $sig = Get-AuthenticodeSignature -FilePath $Path
   if ($sig.Status -ne 'Valid') { Stop-Install 'authenticode_invalid' "the Authenticode signature of myriarch-updater is not valid (status $($sig.Status))" }
   $want = ($UpdaterSignerThumbprint -replace '\s', '').ToUpperInvariant()
@@ -911,9 +920,9 @@ function Confirm-UpdaterAuthenticode {
   Write-Log 'Authenticode signature of myriarch-updater ok'
 }
 
-# Downloads the myriarch-updater and checks its SHA-256 before anything is executed (it also serves as the
-# Sigstore verifier for collector and supervisor). The expected hash comes from -UpdaterSha256 and/or the
-# signed checksums.txt.
+# Downloads the myriarch-updater and checks its SHA-256 before anything is executed (with -UpdaterSha256 and without
+# -UpdaterChecksumsUrl it also serves as the Sigstore verifier for collector and supervisor). The expected hash
+# comes from -UpdaterSha256 and/or the verified checksums.txt.
 function Get-UpdaterDownload {
   param([string]$TmpDir)
   if (-not $WithUpdater) { return }
@@ -994,6 +1003,12 @@ function Invoke-Uninstall {
 }
 
 function Invoke-Main {
+  if ($script:BoundParameters.ContainsKey('SigningKey')) {
+    Stop-Install 'option_removed' '-SigningKey was removed: releases are signed keyless. Pass -UpdaterChecksumsUrl (its Sigstore bundle is verified against the release identity, verifier: cosign 3.0.4 or newer or an installed myriarch-updater) or -UpdaterSha256'
+  }
+  if ($script:BoundParameters.ContainsKey('UpdaterChecksumsSigUrl')) {
+    Stop-Install 'option_removed' '-UpdaterChecksumsSigUrl was removed: use -UpdaterBundleUrl (default: <checksums-url>.sigstore.json) with -UpdaterChecksumsUrl'
+  }
   $staging = [bool]$Root
   $script:StagingMode = $staging
   $L = Get-Layout -Prefix $Root
@@ -1010,9 +1025,15 @@ function Invoke-Main {
   $tmpDir = New-WorkDirectory -Staging $staging
   try {
     Write-Log "installing: collector v$($script:CollectorVersion), supervisor v$($script:SupervisorVersion), windows/$arch, site $SiteType/$SiteId"
-    # Authenticated updater + Sigstore verifier before any download/execution of collector/supervisor
-    Get-UpdaterDownload -TmpDir $tmpDir
-    Resolve-Verifier -L $L
+    # Authenticated updater + Sigstore verifier before any download/execution of collector/supervisor. With a
+    # checksums.txt the verifier comes first (it checks the file that carries the hash of the updater).
+    if ($WithUpdater -and $UpdaterChecksumsUrl) {
+      Resolve-Verifier -L $L
+      Get-UpdaterDownload -TmpDir $tmpDir
+    } else {
+      Get-UpdaterDownload -TmpDir $tmpDir
+      Resolve-Verifier -L $L
+    }
     # Stop a running supervisor before ACLs are reset (it is started again below)
     if (-not $staging) { Stop-ServiceAndWait -Name $script:SupervisorService }
     foreach ($d in @($L.ProgramFiles, $L.Collector, $L.Versions, $L.Bin, $L.Supervisor, $L.Updater)) {

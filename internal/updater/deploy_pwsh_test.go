@@ -249,6 +249,160 @@ func TestInstallWindowsScriptVerifiesSigstoreBundles(t *testing.T) {
 	assert.NoDirExists(t, filepath.Join(root, "ProgramFiles", "Myriarch", "collector", "versions", "0.162.0"))
 }
 
+// addWindowsUpdaterRelease adds the Windows updater, checksums.txt and a placeholder bundle for version to a fake release
+// and returns the updater file name.
+func addWindowsUpdaterRelease(t *testing.T, relDir, version string) (name string, content []byte) {
+	t.Helper()
+	name = "myriarch-updater_" + version + "_windows_amd64.exe"
+	content = []byte("MZ-fake-updater-" + version)
+	require.NoError(t, os.WriteFile(filepath.Join(relDir, name), content, 0o755))
+	other := []byte("fake zip")
+	require.NoError(t, os.WriteFile(filepath.Join(relDir, "myriarch-updater_"+version+"_windows_amd64.zip"), other, 0o644))
+	sums := hex.EncodeToString(sha(content)) + "  " + name + "\n" + hex.EncodeToString(sha(other)) + "  myriarch-updater_" + version + "_windows_amd64.zip\n"
+	require.NoError(t, os.WriteFile(filepath.Join(relDir, "checksums.txt"), []byte(sums), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(relDir, "checksums.txt.sigstore.json"), []byte(`{"bundle":true}`), 0o644))
+	return name, content
+}
+
+func windowsGoodArgs() []string {
+	return []string{"-OpampEndpoint", "wss://x/v1/opamp", "-Token", "myre_x", "-SiteType", "edge", "-SiteId", "1", "-CollectorVersion", "0.162.0"}
+}
+
+func TestInstallWindowsScriptVerifiesTheKeylessBundleOfChecksums(t *testing.T) {
+	skipOnWindowsHost(t)
+	relDir, _, _ := newFakeWindowsRelease(t, "0.162.0")
+	for _, p := range []string{
+		"v0.162.0/otelcol-contrib_0.162.0_windows_amd64.tar.gz",
+		"cmd/opampsupervisor/v0.162.0/opampsupervisor_0.162.0_windows_amd64.exe",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(relDir, p+".sigstore.json"), []byte(`{"bundle":true}`), 0o644))
+	}
+	name, content := addWindowsUpdaterRelease(t, relDir, "0.1.0-rc.1")
+	args := func(verifier string, extra ...string) []string {
+		return append(append(append([]string{}, windowsGoodArgs()...), "-Insecure", "-ReleaseBaseUrl", "file://"+relDir, "-Verifier", verifier,
+			"-WithUpdater", "-UpdaterUrl", "file://"+relDir+"/"+name, "-UpdaterChecksumsUrl", "file://"+relDir+"/checksums.txt"), extra...)
+	}
+
+	verifier, calls := writeFakeVerifier(t, 0)
+	root := t.TempDir()
+	out, err := runPwshInstallRaw(t, root, args(verifier)...)
+	require.NoError(t, err, out)
+	lines := readCalls(t, calls)
+	require.Len(t, lines, 3, "checksums.txt, collector and supervisor: %v", lines)
+	assert.Contains(t, lines[0], "verify-bundle")
+	assert.Contains(t, lines[0], "checksums.txt.sigstore.json")
+	assert.Contains(t, lines[0], "--version v0.1.0-rc.1")
+	assert.Contains(t, lines[0], `--identity-regexp ^https://github\.com/myriarch/myriarch/\.github/workflows/release\.yml@refs/tags/v0\.1\.0-rc\.1$`)
+	assert.Contains(t, lines[0], "--issuer https://token.actions.githubusercontent.com")
+	got, err := os.ReadFile(filepath.Join(root, "ProgramFiles", "Myriarch", "updater", "myriarch-updater.exe"))
+	require.NoError(t, err)
+	assert.Equal(t, content, got)
+
+	// a bundle that does not authenticate checksums.txt: nothing is installed
+	failing, _ := writeFakeVerifier(t, 1)
+	root = t.TempDir()
+	out, err = runPwshInstallRaw(t, root, args(failing)...)
+	require.Error(t, err)
+	assert.Contains(t, out, "[sigstore_verification_failed]")
+	assert.Contains(t, out, "checksums.txt")
+	assert.NoFileExists(t, filepath.Join(root, "ProgramFiles", "Myriarch", "updater", "myriarch-updater.exe"))
+	assert.NoFileExists(t, filepath.Join(root, "ProgramData", "Myriarch", "config", "supervisor.yaml"))
+
+	// the version binding: -UpdaterVersion must agree with the file name; a file name without a version needs it
+	out, err = runPwshInstallRaw(t, t.TempDir(), args(verifier, "-UpdaterVersion", "0.1.0")...)
+	require.Error(t, err)
+	assert.Contains(t, out, "[option_conflict]")
+	plain := "myriarch-updater-plain.exe"
+	require.NoError(t, os.WriteFile(filepath.Join(relDir, plain), content, 0o755))
+	sums, err := os.ReadFile(filepath.Join(relDir, "checksums.txt"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(relDir, "checksums.txt"), append(sums, []byte(hex.EncodeToString(sha(content))+"  "+plain+"\n")...), 0o644))
+	plainArgs := append(append([]string{}, windowsGoodArgs()...), "-Insecure", "-ReleaseBaseUrl", "file://"+relDir, "-Verifier", verifier,
+		"-WithUpdater", "-UpdaterUrl", "file://"+relDir+"/"+plain, "-UpdaterChecksumsUrl", "file://"+relDir+"/checksums.txt")
+	out, err = runPwshInstallRaw(t, t.TempDir(), plainArgs...)
+	require.Error(t, err)
+	assert.Contains(t, out, "[option_missing]")
+	assert.Contains(t, out, "-UpdaterVersion")
+	out, err = runPwshInstallRaw(t, t.TempDir(), append(plainArgs, "-UpdaterVersion", "0.1.0-rc.1")...)
+	require.NoError(t, err, out)
+}
+
+func TestInstallWindowsScriptRequiresCosign304OrNewer(t *testing.T) {
+	skipOnWindowsHost(t)
+	relDir, _, _ := newFakeWindowsRelease(t, "0.162.0")
+	name, _ := addWindowsUpdaterRelease(t, relDir, "0.1.0")
+	for version, ok := range map[string]bool{"v3.0.3": false, "v2.4.1": false, "v3.0.4": true, "v3.1.3": true, "devel": false, "v3.0.4-rc.1": false, "v3.0.5-rc.1": true} {
+		t.Run(version, func(t *testing.T) {
+			cosign, _ := writeFakeCosign(t, version, 0)
+			root := t.TempDir()
+			out, err := runPwshInstallRaw(t, root, append(append([]string{}, windowsGoodArgs()...), "-Insecure", "-ReleaseBaseUrl", "file://"+relDir, "-Verifier", cosign,
+				"-WithUpdater", "-UpdaterUrl", "file://"+relDir+"/"+name, "-UpdaterChecksumsUrl", "file://"+relDir+"/checksums.txt")...)
+			if ok {
+				// the collector bundles are missing in this fake release: the run gets as far as the first download of a bundle
+				assert.NotContains(t, out, "[sigstore_verifier_outdated]")
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, out, "[sigstore_verifier_outdated]")
+			assert.Contains(t, out, "3.0.4")
+			assert.NoFileExists(t, filepath.Join(root, "ProgramFiles", "Myriarch", "updater", "myriarch-updater.exe"))
+		})
+	}
+}
+
+func TestInstallWindowsScriptRemovedKeyOptionsNameTheirReplacement(t *testing.T) {
+	skipOnWindowsHost(t)
+	cases := map[string]struct {
+		args        []string
+		replacement string
+	}{
+		"-SigningKey":             {[]string{"-SigningKey", "cosign.pub"}, "-UpdaterChecksumsUrl"},
+		"-UpdaterChecksumsSigUrl": {[]string{"-UpdaterChecksumsSigUrl", "https://mirror.example.com/checksums.txt.sig"}, "-UpdaterBundleUrl"},
+	}
+	// an empty value is still a use of the removed option
+	cases["-SigningKey empty"] = struct {
+		args        []string
+		replacement string
+	}{[]string{"-SigningKey", ""}, "-UpdaterChecksumsUrl"}
+	cases["-UpdaterChecksumsSigUrl empty"] = struct {
+		args        []string
+		replacement string
+	}{[]string{"-UpdaterChecksumsSigUrl", ""}, "-UpdaterBundleUrl"}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			out, err := runPwshInstallRaw(t, root, append(windowsGoodArgs(), c.args...)...)
+			require.Error(t, err, out)
+			assert.Contains(t, out, "[option_removed]")
+			assert.Contains(t, out, c.replacement)
+			assert.NoFileExists(t, filepath.Join(root, "ProgramData", "Myriarch", "config", "supervisor.yaml"))
+		})
+	}
+}
+
+func TestInstallWindowsScriptRejectsInconsistentUpdaterOptions(t *testing.T) {
+	skipOnWindowsHost(t)
+	relDir, _, updater := newFakeWindowsRelease(t, "0.162.0")
+	name, _ := addWindowsUpdaterRelease(t, relDir, "0.1.0")
+	verifier, _ := writeFakeVerifier(t, 0)
+	url := "file://" + relDir + "/" + name
+	base := append(append([]string{}, windowsGoodArgs()...), "-Insecure", "-ReleaseBaseUrl", "file://"+relDir)
+	cases := map[string][]string{
+		"bundle URL without checksums URL":          append(append([]string{}, base...), "-WithUpdater", "-UpdaterUrl", url, "-UpdaterSha256", hex.EncodeToString(sha(updater)), "-UpdaterBundleUrl", url+".sigstore.json"),
+		"checksums URL with -VerifySignatures skip": append(append([]string{}, base...), "-VerifySignatures", "skip", "-WithUpdater", "-UpdaterUrl", url, "-UpdaterChecksumsUrl", "file://"+relDir+"/checksums.txt"),
+		"checksums URL without -WithUpdater":        append(append([]string{}, base...), "-Verifier", verifier, "-UpdaterChecksumsUrl", "file://"+relDir+"/checksums.txt"),
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			out, err := runPwshInstallRaw(t, root, args...)
+			require.Error(t, err, out)
+			assert.Contains(t, out, "[option_conflict]")
+			assert.NoFileExists(t, filepath.Join(root, "ProgramData", "Myriarch", "config", "supervisor.yaml"))
+		})
+	}
+}
+
 func skipOnWindowsHost(t *testing.T) {
 	t.Helper()
 	if os.PathSeparator == '\\' {

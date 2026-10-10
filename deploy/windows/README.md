@@ -41,9 +41,10 @@ The updater restarts the **supervisor service** (not just the collector) because
 The enrollment token is **not** in `supervisor.yaml` but in the service environment
 (registry `HKLM\SYSTEM\CurrentControlSet\Services\otelcol-supervisor`, `Environment`, REG_MULTI_SZ). The
 ACL of this key is replaced first by a fresh descriptor for SYSTEM/Administrators only and read back; any other allow
-entry stops the installation (`acl_failed`), and only then is the token written. The installer prefers the verified
-updater (or `-Verifier`) over `cosign.exe` from `PATH` (it accepts `cosign.exe` only from a directory that only
-Administrators can write), creates its working directory with a protected DACL, hashes verified files again after they
+entry stops the installation (`acl_failed`), and only then is the token written. The installer takes its Sigstore
+verifier from `-Verifier` (in a directory that only Administrators can write), an already installed `myriarch-updater.exe` or `cosign.exe` 3.0.4 or newer (from `PATH`, but
+only from a directory that only Administrators can write); the updater that it downloads in the same run is never the
+verifier of the `checksums.txt` that carries its own hash. It creates its working directory with a protected DACL, hashes verified files again after they
 were copied, and copies a `-CaFile` bundle to `C:\ProgramData\Myriarch\config\ca.pem`. Collector secrets (for example
 `OTEL_GATEWAY_TOKEN`) are set with [`Set-ServiceEnvironment.ps1`](Set-ServiceEnvironment.ps1):
 
@@ -66,13 +67,28 @@ otherwise all clones report the same instance UID and displace each other on the
 
 ## Verifying the updater binary (the project's own binary, runs as SYSTEM)
 
-With `-WithUpdater` the installer needs a trusted hash source for `myriarch-updater.exe` (at least one of the two):
+Releases are signed keyless (Sigstore, [ADR-0023](../../docs/adr/0023-keyless-release-signing.md)): the release workflow signs
+`checksums.txt` and publishes the bundle `checksums.txt.sigstore.json`. With `-WithUpdater` the installer needs a trusted
+hash source for `myriarch-updater.exe` (at least one of the first two):
 
 | Parameter | Meaning |
 |---|---|
-| `-UpdaterSha256 <hex>` | expected SHA-256 from another trusted source |
-| `-UpdaterChecksumsUrl <URL>` + `-SigningKey <cosign.pub>` | `checksums.txt` of the myriarch release; the signature `<URL>.sig` (or `-UpdaterChecksumsSigUrl`) is verified with the public key, and the hash is the line whose file name matches the one in `-UpdaterUrl` |
-| `-UpdaterSignerThumbprint <hex>` | optional: the Authenticode signature of the updater must be valid (`Get-AuthenticodeSignature`, status `Valid`) and come from this certificate |
+| `-UpdaterSha256 <hex>` | expected SHA-256 from another trusted source, for example verified on an admin host. This is the way for hosts without a verifier |
+| `-UpdaterChecksumsUrl <URL>` | `checksums.txt` of the myriarch release. The installer verifies its bundle (default `<URL>.sigstore.json`, or `-UpdaterBundleUrl`) against the identity `^https://github\.com/myriarch/myriarch/\.github/workflows/release\.yml@refs/tags/v<version>$` with the issuer `https://token.actions.githubusercontent.com`, then takes the hash from the line whose file name matches the one in `-UpdaterUrl` |
+| `-UpdaterVersion <X.Y.Z>` | the release version of the updater. Default: the version in the file name `myriarch-updater_<version>_windows_<arch>.exe` of `-UpdaterUrl`; when both are given they must agree. The identity is bound to this version, so a genuine but older release does not pass |
+| `-UpdaterBundleUrl <URL>` | different location of the bundle (default: `<checksums-url>.sigstore.json`) |
+| `-UpdaterSignerThumbprint <hex>` | optional: the Authenticode signature of the updater must be valid (`Get-AuthenticodeSignature`, status `Valid`) and come from this certificate. A pinned thumbprint breaks at every renewal of the certificate, so use it only with a private PKI whose certificate you control |
+
+The verifier of `checksums.txt` is, in this order: `-Verifier` (an installed `myriarch-updater.exe`, or `cosign.exe`; it must be in
+a directory that only Administrators can write, otherwise the installation stops with `directory_unsafe`. A folder that an
+administrator creates directly under `C:\` usually grants Modify to every authenticated user, so do not use `C:\Tools`), an
+already installed `myriarch-updater.exe`, or `cosign.exe` from `PATH` if its directory can only be written by
+administrators. A `cosign.exe` must be version 3.0.4 or newer; an older one stops the installation with
+`sigstore_verifier_outdated`. The updater that is being installed is never used for this, because its hash comes from the
+file that the verifier has to check. A re-run of the installer therefore verifies a new release with the updater that is
+already installed. A host with neither a verifier nor an installed updater verifies `checksums.txt` on an admin host (see
+[Verify releases](../../docs/security/verify-releases.md)) and passes `-UpdaterSha256`; the updater that was checked by
+that hash then also verifies the collector and supervisor bundles.
 
 Example (mirror `myriarch-releases` with anonymous read access from the site network):
 
@@ -80,20 +96,24 @@ Example (mirror `myriarch-releases` with anonymous read access from the site net
 .\deploy\scripts\install-windows.ps1 -OpampEndpoint wss://fleet.example.com/v1/opamp -TokenFile C:\Temp\enrollment-token.txt `
   -SiteType edge -SiteId 1001 -CollectorVersion 0.161.0 -WithUpdater `
   -UpdaterUrl https://mirror.example.com/myriarch-releases/v<ver>/myriarch-updater_<ver>_windows_amd64.exe `
-  -UpdaterChecksumsUrl https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt -SigningKey .\cosign.pub
+  -UpdaterChecksumsUrl https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt -Verifier 'C:\Program Files\cosign\cosign.exe'
 ```
 
-Both sources together are allowed (then both must match). The signature check also applies with `-Insecure`. For the
-signature format and key management see [`../release/README.md`](../release/README.md).
+Both hash sources together are allowed (then both must match). The check of `checksums.txt` also applies with
+`-Insecure`, but it cannot be combined with `-VerifySignatures skip`. `-SigningKey` and `-UpdaterChecksumsSigUrl` (the
+key-signed `checksums.txt.sig` of earlier builds) were removed and fail with `option_removed`; the message names the
+replacement. For a mirror that re-signs with its own key, see
+[`../../contrib/enterprise-mirror/README.md`](../../contrib/enterprise-mirror/README.md).
 
-Technical details: `<file>.sig` is the base64 encoding of an ASN.1 DER ECDSA signature (P-256) over the SHA-256 of the
-file. The installer verifies it without external tools using .NET: via `ECDsa.Create(ECParameters)` (PowerShell 7,
-.NET Framework >= 4.7), otherwise - Windows PowerShell 5.1 with an older .NET - via `ECDsaCng` with a CNG public
-blob. The first path is tested with PowerShell 7 (`ci/tests/installer-verify.ps1`); the `ECDsaCng` path only runs on
-a real Windows host (pilot: a lab host). Typical errors are `signature_invalid` (wrong key or modified file),
-`checksum_entry_count` with 0 lines (`-UpdaterUrl` does not match the release) and `checksum_conflict`
-(`-UpdaterSha256` differs from the signed checksum). The internal CA of a mirror must be in the Windows certificate
-store (`-CaFile` only applies to the connection to myriarchd).
+Typical errors are `sigstore_verification_failed` (modified `checksums.txt`, another release tag, another workflow or
+repository, or a bundle that does not belong to the file), `sigstore_verifier_missing` and `sigstore_verifier_outdated`,
+`checksum_entry_count` with 0 lines (`-UpdaterUrl` does not match the release) and `checksum_conflict` (`-UpdaterSha256`
+differs from the verified checksum). The internal CA of a mirror must be in the Windows certificate store (`-CaFile` only
+applies to the connection to myriarchd).
+
+Known limitation: with App Control for Business (WDAC) script enforcement a PowerShell script that is not signed runs in
+Constrained Language Mode, and `install-windows.ps1` fails there. Allow the installer by its hash, and allow the binaries
+by a hash rule for each release until the Windows files are Authenticode-signed (then one publisher rule is enough).
 
 ## Error codes
 
@@ -113,16 +133,17 @@ is at the top of that script.
 | Code | Meaning |
 |---|---|
 | `usage_error` | raised by `install-linux.sh` only. On Windows, PowerShell itself rejects unknown or valueless parameters before the script runs (non-zero exit, native PowerShell error, no `[code]`) |
-| `option_missing` | a required option is absent (site type/id, collector version, token or token file, `-UpdaterUrl` with `-WithUpdater`) |
+| `option_missing` | a required option is absent (site type/id, collector version, token or token file, `-UpdaterUrl` with `-WithUpdater`, `-UpdaterVersion` when the file name in `-UpdaterUrl` carries no version and `-UpdaterChecksumsUrl` is given) |
 | `option_invalid` | malformed value: versions, arch, SHA-256 or thumbprint format, control characters, token characters, endpoint scheme (and an unsupported `-ReleaseBaseUrl` scheme), no file name in `-UpdaterUrl`. A plain `http://` or `file://` base URL raises `https_required` instead |
-| `option_conflict` | mutually exclusive or dependent options: `-Token` + `-TokenFile`; checksums/signature/key/thumbprint options without `-WithUpdater`; signature URL without checksums URL; checksums URL without `-SigningKey`; `-SigningKey` without checksums URL |
-| `updater_hash_source_missing` | `-WithUpdater` without `-UpdaterSha256` or a signed `checksums.txt` |
+| `option_removed` | a removed option: `-SigningKey` or `-UpdaterChecksumsSigUrl`; the message names the replacement (`-UpdaterChecksumsUrl` with its bundle, `-UpdaterBundleUrl`) |
+| `option_conflict` | mutually exclusive or dependent options: `-Token` + `-TokenFile`; updater options (`-UpdaterVersion`, `-UpdaterChecksumsUrl`, `-UpdaterBundleUrl`, `-UpdaterSignerThumbprint`) without `-WithUpdater`; `-UpdaterBundleUrl` without `-UpdaterChecksumsUrl`; `-UpdaterVersion` and the version in `-UpdaterUrl` differ; `-UpdaterChecksumsUrl` with `-VerifySignatures skip` |
+| `updater_hash_source_missing` | `-WithUpdater` without `-UpdaterSha256` or `-UpdaterChecksumsUrl` |
 | `insecure_required` | plain `ws://`/`http://` endpoint or `-VerifySignatures skip` without `-Insecure` |
 | `https_required` | non-https download URL or redirect without `-Insecure` |
-| `file_unreadable` | token file, CA file, trusted root, signing key or verifier is not usable |
-| `tool_missing` | a required tool is absent (`tar.exe`); the message names the tool |
-| `sigstore_verifier_missing` | no Sigstore verifier (`-Verifier`, `cosign.exe`, or the SHA-256 checked updater) |
-| `signature_verifier_missing` | ECDSA verification is not possible on this system, or `Get-AuthenticodeSignature` is unavailable |
+| `file_unreadable` | token file, CA file, trusted root or verifier is not usable |
+| `tool_missing` | a required tool is absent (`tar.exe`, or `Get-AuthenticodeSignature` with `-UpdaterSignerThumbprint`); the message names the tool |
+| `sigstore_verifier_missing` | no Sigstore verifier (`-Verifier`, an installed updater, or `cosign.exe` from an administrator-only directory) |
+| `sigstore_verifier_outdated` | `cosign.exe` is older than 3.0.4 or reports no usable version |
 | `privilege_required` | not running as Administrator |
 | `unsupported_platform` | unsupported CPU architecture, or the supervisor on Windows ARM64 (install with `-Arch amd64`) |
 | `download_failed` | a download did not succeed (after retries) |
@@ -131,16 +152,13 @@ is at the top of that script.
 | `checksum_invalid` | malformed `.sha256` file |
 | `checksum_mismatch` | SHA-256 of a downloaded file differs (the message names the file) |
 | `checksum_entry_count` | `checksums.txt` has N != 1 lines for the asset (the message contains N) |
-| `checksum_conflict` | `-UpdaterSha256` contradicts the signed `checksums.txt` |
-| `signing_key_invalid` | the `-SigningKey` file is not PEM or not an ECDSA P-256 public key |
-| `signature_malformed` | the signature is not valid base64 or not a valid DER signature |
-| `signature_invalid` | the signature does not verify (wrong key or tampered file) |
-| `sigstore_verification_failed` | Sigstore bundle verification failed |
+| `checksum_conflict` | `-UpdaterSha256` contradicts the verified `checksums.txt` |
+| `sigstore_verification_failed` | Sigstore bundle verification failed (wrong identity or version, modified file) |
 | `authenticode_invalid` | the Authenticode signature of the updater is invalid or from another certificate |
 | `archive_invalid` | the collector archive has no regular binary in its root |
 | `collector_start_failed` | the new collector binary cannot be started |
 | `collector_version_mismatch` | the collector reports another version than requested |
-| `directory_unsafe` | a data directory is a reparse point, has the wrong owner, has an unexpected ACE, or is not a directory |
+| `directory_unsafe` | a data directory is a reparse point, has the wrong owner, has an unexpected ACE, or is not a directory; or `-Verifier` is in a directory that unprivileged accounts can change |
 | `acl_failed` | `icacls` failed |
 | `service_config_failed` | `sc.exe` failed |
 | `updater_install_failed` | `myriarch-updater install` failed |

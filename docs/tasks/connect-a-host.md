@@ -45,8 +45,11 @@ sudo ./deploy/scripts/install-linux.sh \
   --collector-version 0.162.0 \
   --with-updater \
   --updater-url https://mirror.example.com/myriarch-releases/v<ver>/myriarch-updater_<ver>_linux_amd64 \
-  --updater-sha256 <sha256-of-the-updater-binary>
+  --updater-checksums-url https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt
 ```
+
+The host needs a Sigstore verifier for this command: `cosign` 3.0.4 or newer in `PATH`, or an installed `myriarch-updater`.
+A host without one uses `--updater-sha256 <hex>` instead of `--updater-checksums-url`; see below.
 
 The site options become attributes of the host (`site.type`, `site.id`, `site.name`, `site.country`, `site.region`,
 `site.timezone`, and `deployment.environment.name` from `--environment`, default `prod`). The selectors of your fleets match
@@ -58,13 +61,31 @@ What the script verifies, and why you may be asked for more options:
 - **Downloads use https only**, also after redirects. `--insecure` is for labs and tests: it allows `http://`, `file://` and
   `ws://` to the server and skipping the Sigstore check.
 - **Collector and supervisor** are verified with their **SHA-256** file (`<asset>.sha256`) **and** the **Sigstore bundle**
-  (`<asset>.sigstore.json`) before anything runs (`--verify-signatures require`, the default). The verifier is `cosign` v3, or
-  `myriarch-updater verify-bundle` (`--verifier FILE`, or the updater that `--with-updater` downloads and checks by its
-  SHA-256). Without a verifier the installation stops. `--trusted-root FILE` enables offline verification.
+  (`<asset>.sigstore.json`) before anything runs (`--verify-signatures require`, the default). The verifier is `cosign`
+  3.0.4 or newer (an older one stops the script with `sigstore_verifier_outdated`), or `myriarch-updater verify-bundle`
+  (`--verifier FILE`, or an updater that is already installed). Without a verifier the installation stops.
+  `--trusted-root FILE` enables offline verification.
 - **The updater** is the project's own binary and runs as root, so it needs a trustworthy hash source: either
-  `--updater-sha256 <hex>`, or `--updater-checksums-url <URL>` together with `--signing-key cosign.pub` (the script verifies
-  the signature of `checksums.txt` and takes the hash from the line with the file name of `--updater-url`). Both together are
-  allowed. See [deploy/release/README.md](../../deploy/release/README.md) for the signature format.
+  `--updater-checksums-url <URL>` or `--updater-sha256 <hex>` (both together are allowed, then both must match).
+  - With `--updater-checksums-url` the script downloads `checksums.txt` and its keyless bundle (`<URL>.sigstore.json`, or
+    `--updater-bundle-url`), verifies the bundle against the release identity of the version, and takes the hash from the line
+    with the file name of `--updater-url`. The identity is
+    `https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/v<version>`, so a genuine but older release,
+    another workflow or another repository is refused. The version is `--updater-version`, or the one in the file name
+    `myriarch-updater_<version>_linux_<arch>` of `--updater-url`; if both are given they must agree. The verifier of
+    `checksums.txt` is the file given with `--verifier`, otherwise `cosign` 3.0.4 or newer if it is in `PATH`, otherwise the updater
+    that is already installed on the host; it is never the updater that is being installed.
+  - **Hosts without a verifier** (no `cosign`, no installed updater) verify `checksums.txt` on an admin host, as described in
+    [Verify releases](../security/verify-releases.md), and pass the hash of the updater as `--updater-sha256`. The installer
+    then checks the downloaded updater against that hash and also uses it to verify the collector and supervisor bundles.
+  - **Upgrades:** run the script again with the new version and URLs. On Linux a `cosign` 3.0.4 or newer in `PATH` verifies the
+    bundle of the new release, and the updater that is already installed does so on a host without `cosign` (on Windows the
+    installed updater comes before `cosign.exe`); then the new updater replaces it.
+  - **Removed options:** `--signing-key` and `--updater-checksums-sig-url` (the key-signed `checksums.txt.sig` of earlier
+    builds) fail with the code `option_removed`; the message names the replacement.
+  - **Verify the download first.** The release archive of the updater contains the installation scripts. Verify the archive
+    against `checksums.txt` and its bundle before you run a script from it; see
+    [Verify releases](../security/verify-releases.md).
 - `--release-base-url` points the collector and supervisor downloads to an internal mirror with the layout
   `<base>/<tag>/<asset>`. `--ca-file` is the CA for the connection to `myriarchd`; a mirror with its own CA must be trusted
   by the certificate store of the host.
@@ -85,12 +106,19 @@ blueprint) go into `/etc/myriarch/myriarch.env`. Then restart with `systemctl re
   -SiteType edge -SiteId edge-042 -SiteName "Edge site 42" -SiteCountry NL -SiteTimezone Europe/Amsterdam `
   -CollectorVersion 0.162.0 -WithUpdater `
   -UpdaterUrl https://mirror.example.com/myriarch-releases/v<ver>/myriarch-updater_<ver>_windows_amd64.exe `
-  -UpdaterSha256 <sha256-of-the-updater-binary>
+  -UpdaterChecksumsUrl https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt `
+  -Verifier 'C:\Program Files\cosign\cosign.exe'
 ```
 
-The trust model is the same as on Linux (`-VerifySignatures`, `-Verifier`, `-Insecure`, `-UpdaterChecksumsUrl` with
-`-SigningKey`). In addition `-UpdaterSignerThumbprint` requires the Authenticode signature of the updater to come from one
-certificate. The supervisor runs as the virtual service account `NT SERVICE\otelcol-supervisor`, not as `LocalSystem`; only
+The trust model is the same as on Linux: `-VerifySignatures`, `-Verifier`, `-Insecure`, `-UpdaterChecksumsUrl` with
+`-UpdaterVersion` and `-UpdaterBundleUrl`, or `-UpdaterSha256` for a host without a verifier. `cosign.exe` must be 3.0.4 or
+newer and is only taken from a directory that only administrators can write; a verifier passed with `-Verifier` must be in such a
+directory too (`directory_unsafe` otherwise). `-SigningKey` and
+`-UpdaterChecksumsSigUrl` were removed. Extract the release archive and run `Unblock-File` on the script **only after** you
+verified the archive ([Verify releases](../security/verify-releases.md)). In addition `-UpdaterSignerThumbprint` requires the
+Authenticode signature of the updater to come from one certificate; a pinned thumbprint breaks whenever that certificate is
+renewed, so it fits only a private PKI. Under App Control for Business with script enforcement an unsigned script runs in
+Constrained Language Mode and `install-windows.ps1` fails; allow it by its hash. The supervisor runs as the virtual service account `NT SERVICE\otelcol-supervisor`, not as `LocalSystem`; only
 the `myriarch-updater` service runs as SYSTEM. Services, paths and troubleshooting are in
 [deploy/windows/README.md](../../deploy/windows/README.md). Collector secrets are set with `Set-ServiceEnvironment.ps1`.
 
