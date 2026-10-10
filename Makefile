@@ -14,6 +14,7 @@
 #   make e2e          end-to-end test (scripts/e2e.sh; E2E_REAL=1, load run: E2E_AGENTS=1000 scripts/e2e.sh, ... see docs/development.md)
 #   make release      cross-compiled binaries for all target platforms into ./dist (build tags: embedui only, deliberately WITHOUT devpg; see docs/development.md)
 #   make release-snapshot  goreleaser snapshot of the full release matrix (unsigned, nothing published; local test only; ci/build-release.sh snapshot)
+#   make release-rehearsal  rehearsal of the release build: snapshot in stage collect, one signing pass with a throwaway test CA, snapshot in stage apply, dist and reproducibility checks (ci/release/rehearsal.sh; needs the built UI and a C compiler with the OpenSSL 3 headers for osslsigncode)
 #   make ci-test      script tests of ci/ and contrib/enterprise-mirror/ (ci/tests/run-all.sh)
 #   make image-crane  container image WITHOUT a container runtime (crane) and FROM scratch: build and push to IMAGE_REPO (required), print the digest (scripts/build-image-crane.sh; IMAGE_PLATFORM=linux/arm64 builds for arm64)
 #   make collector-image-crane  collector image (upstream opampsupervisor + otelcol-contrib of the same version + myriarch-updater) WITHOUT a container runtime: build and push to IMAGE_REPO (required); OTELCOL_VERSION=0.162.0 (default: ci/versions.env)
@@ -68,7 +69,7 @@ SIM_UPDATERS ?= true
 SIM_SERVER   ?= ws://localhost:8080/v1/opamp
 SIM_TOKEN    ?= myre_devtoken_insecure_do_not_use_in_prod
 
-.PHONY: all build test test-race lint fmt web-install web-build web-dev web-gen dev sim e2e docs-gen docs-check license-headers notices licenses-check validate-examples release release-snapshot ci-test image-crane collector-image-crane mirror-image-crane e2e-ui-updates website website-serve website-preview website-check tools kind-up kind-down kind-probe check-local vulncheck secrets-scan clean
+.PHONY: all build test test-race lint fmt web-install web-build web-dev web-gen dev sim e2e docs-gen docs-check license-headers notices licenses-check validate-examples release release-snapshot release-rehearsal ci-test image-crane collector-image-crane mirror-image-crane e2e-ui-updates website website-serve website-preview website-check tools kind-up kind-down kind-probe check-local vulncheck secrets-scan clean
 
 all: lint test build
 
@@ -166,6 +167,12 @@ release:
 # UI (make web-build).
 release-snapshot:
 	ci/build-release.sh snapshot
+
+# Rehearsal of the release build (deploy/release/README.md): a snapshot in stage collect, one signing pass with a throwaway test CA (never
+# published), a snapshot in stage apply, then the dist and reproducibility checks. Nothing is published. Needs the built UI (make web-build)
+# and, for osslsigncode, a C compiler with the OpenSSL 3 and zlib headers.
+release-rehearsal:
+	ci/release/rehearsal.sh
 
 # Script tests of ci/ and contrib/enterprise-mirror/ (needs bash, openssl, python3; cosign/helm/crane/pwsh extend the scope)
 ci-test:

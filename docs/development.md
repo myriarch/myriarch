@@ -332,7 +332,7 @@ is a collapsible log group; a failed job uploads `.cache/check-local/` (the gate
 | `go-test-linux` | `go-test` with `-race` against a PostgreSQL 17 service (`PGTEST_DSN`, `max_connections` 300), then the render budget test | ubuntu-24.04 and ubuntu-24.04-arm |
 | `go-test-native` | `go-test`: macOS with `-race`, the embedded PostgreSQL and the render budget test; Windows without `-race`, with `PGTEST_SKIP=1` and without the budget test (`GO_TEST_PERF=0`) | macos-latest, windows-latest |
 | `web` | `web` | ubuntu-24.04 |
-| `build` | `build`, `examples`, then `make release-snapshot` (the full release matrix, unsigned, nothing published) | ubuntu-24.04 |
+| `build` | `build`, `examples`, then `make release-rehearsal` (the full release matrix in stage collect, a signing pass with a throwaway test CA, stage apply, dist and reproducibility checks; nothing is published) | ubuntu-24.04 |
 | `shell-helm` | `shellcheck`, `helm` | ubuntu-24.04 |
 | `workflows` | `workflows` | ubuntu-24.04 |
 | `docs` | `language`, `docs` | ubuntu-24.04 |
