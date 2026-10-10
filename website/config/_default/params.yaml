@@ -36,8 +36,9 @@ docsy:
   plugins:
     # Mermaid is used by docs/architecture.md and docs/design/version-selection.md. The script is the self-hosted copy from
     # node_modules (layouts/_partials/scripts/plugins/mermaid.html); the version equals the one in package.json. Mermaid 12 made the
-    # ELK layout and the "redux"/"neo" look the defaults; the options keep the layout and the look of Mermaid 11 (the ELK layout
-    # shrinks the overview in docs/architecture.md to an unreadable size at the width of the content column).
+    # ELK layout, the redux-color theme and the neo look the defaults; the options keep the layout, the theme and the look of
+    # Mermaid 11 (the ELK layout shrinks the overview in docs/architecture.md to an unreadable size at the width of the content
+    # column).
     # The version stays first in the line: check-notices.py reads it with a pattern.
     mermaid: { enable: true, version: 12.1.0, options: '{"layout": "dagre", "look": "classic", "theme": "default"}' }
     markmap: { enable: false }

@@ -134,11 +134,13 @@ Mermaid is self-hosted: `config/_default/module.yaml` mounts `mermaid.esm.min.mj
 3. A look at every diagram, not only at the build: `check-requests.mjs` stops at the first SVG of a page, and a diagram that fails to
    parse is also an SVG. The diagrams are in `docs/architecture.md` (four) and `docs/design/version-selection.md` (one); open both
    pages in the light and in the dark appearance and compare them with the previous version.
-4. The release notes of the major versions in between. Mermaid 12 made the ELK layout and the "redux"/"neo" look the defaults, so the
+4. The release notes of the major versions in between. Mermaid 12 made the ELK layout, the redux-color theme and the neo look the defaults, so the
    `options` of the plugin in `params.yaml` pin `layout: dagre`, `look: classic` and `theme: default`, which render the diagrams as
    Mermaid 11 did. Drop the options only together with a review of every diagram; the ELK layout of the overview in
    `docs/architecture.md` is too small to read in the width of the content column. Keep the `version:` first in that line, because
    `check-notices.py` reads it with a pattern.
+5. The browser floor. Mermaid 12 needs an ES2024 browser (Safari 17.4 or newer, for example). In an older browser the Docsy plugin
+   only logs "Mermaid failed to render" and the page shows the diagram source instead of the diagram.
 
 ## Node dependency overrides
 
