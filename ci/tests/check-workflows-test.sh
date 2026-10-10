@@ -56,7 +56,9 @@ for a in "$@"; do case "$a" in .github/*) echo "$a" ;; esac; done > "${ACTIONLIN
 EOF
 printf '#!/bin/sh\nexit 0\n' > "${TEST_TMP}/stubs/shellcheck"
 chmod +x "${TEST_TMP}/stubs/actionlint" "${TEST_TMP}/stubs/shellcheck"
-ACTIONLINT_ARGS="${TEST_TMP}/actionlint.args" PATH="${TEST_TMP}/stubs:${PATH}" bash "${lint}/ci/lint-workflows.sh" > /dev/null 2>&1
+# TOOLS_BIN points at the stubs: ci/lib.sh exports the real tool directory, and lint-workflows.sh puts TOOLS_BIN first on the PATH
+ACTIONLINT_ARGS="${TEST_TMP}/actionlint.args" TOOLS_BIN="${TEST_TMP}/stubs" PATH="${TEST_TMP}/stubs:${PATH}" \
+  bash "${lint}/ci/lint-workflows.sh" > /dev/null 2>&1
 want_files=".github/workflows/.hidden.yaml .github/workflows/Release.YML .github/workflows/ci.yml .github/workflows/e2e.yaml"
 got_files="$(LC_ALL=C sort "${TEST_TMP}/actionlint.args" 2> /dev/null | tr '\n' ' ')"
 if [ "${got_files}" = "${want_files} " ]; then
