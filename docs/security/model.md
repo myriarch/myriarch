@@ -403,9 +403,11 @@ guidance after each item names what to do.
 - **Release tag guard.** `ci/release/guard.sh` is meant to run before any other step of a release. It refuses a tag that is
   not `vX.Y.Z` or `vX.Y.Z-rc.N`, a lightweight tag, a tag that points at another commit than the run's, a commit that is
   not on `origin/main`, a `VERSION` or a copy of it that differs from the tag, a final tag without a dated `CHANGELOG.md`
-  heading, an rc tag with an empty "Unreleased" section, and a commit without a successful `ci-ok` check run of GitHub
-  Actions. It takes its inputs from the environment only, sends the token to `curl` through standard input, never prints it,
-  and fails closed on any API error. The Windows signing rule is part of it: `deploy/release/windows-signing.env` names the
+  heading, an rc tag without entries in "Unreleased", and a commit without a successful `ci-ok` check run of GitHub
+  Actions. It takes its inputs from the environment only, matches each value as a whole string and refuses control characters
+  (no value can add a line to a command, a URL or the `curl` configuration), sends the token to `curl` through standard
+  input, never prints it, and fails closed on any API error. A final tag needs list items under its `CHANGELOG.md` heading
+  and none left under "Unreleased"; an rc tag needs list items under "Unreleased". The Windows signing rule is part of it: `deploy/release/windows-signing.env` names the
   mode (`off`, `signpath`, `kms`; anything else fails), and a final tag with `off` passes only when
   `WINDOWS_UNSIGNED_FINAL_TAG` is exactly that tag, so an unsigned final release needs a reviewed change for that one tag.
   Residual risk: the guard is a script of the repository and protects only as far as the release workflow runs it first and

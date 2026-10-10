@@ -13,7 +13,8 @@ err() { printf '[ci] ERROR: %s\n' "$*" >&2; }
 [ -f VERSION ] || { err "VERSION is missing (it holds the next release tag without the leading v, for example 0.1.0-rc.1)"; exit 1; }
 [ "$(wc -l < VERSION | tr -d ' ')" = 1 ] || { err "VERSION must hold exactly one line"; exit 1; }
 version="$(cat VERSION)"
-printf '%s' "${version}" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$' \
+version_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$'
+[[ "${version}" =~ ${version_re} ]] \
   || { err "VERSION '${version}' is not X.Y.Z or X.Y.Z-rc.N (no leading zeros, no leading v)"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { err "python3 not found"; exit 1; }
 

@@ -17,7 +17,9 @@ err() { printf '[set-version] ERROR: %s\n' "$*" >&2; exit 1; }
 
 [ "$#" = 1 ] || err "usage: scripts/set-version.sh <X.Y.Z|X.Y.Z-rc.N>"
 version="$1"
-printf '%s' "${version}" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$' \
+# the whole string is matched ([[ =~ ]]), so a value with a trailing newline or a second line is refused
+version_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$'
+[[ "${version}" =~ ${version_re} ]] \
   || err "invalid version '${version}': expected X.Y.Z or X.Y.Z-rc.N without a leading v and without leading zeros"
 for c in python3 make pnpm; do command -v "${c}" >/dev/null 2>&1 || err "${c} not found"; done
 

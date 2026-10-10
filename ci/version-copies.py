@@ -80,7 +80,7 @@ def main(argv):
 
     if cmd in ("check", "write") and len(rest) == 1:
         version = rest[0]
-        if not VERSION_RE.match(version):
+        if not VERSION_RE.fullmatch(version):
             fail("invalid version %r (expected X.Y.Z or X.Y.Z-rc.N, no leading zeros)" % version, 2)
         for rel, desc, pat in COPIES:   # every copy must be found before anything is written
             locate(read_text(root, rel), rel, desc, pat)

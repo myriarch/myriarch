@@ -2,7 +2,7 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Release tag guard: the first step of the release workflow. It refuses a tag that must not be released and touches
+# Release tag guard, written to run as the first step of the release workflow. It refuses a tag that must not be released and touches
 # nothing else. It reads its inputs from the environment only and never prints the token.
 #
 #   RELEASE_TAG          pushed tag, vX.Y.Z or vX.Y.Z-rc.N (no leading zeros)
@@ -18,8 +18,9 @@
 #   3. the tag points at another commit than RELEASE_COMMIT, or the checkout is not at RELEASE_COMMIT or has changes
 #   4. the commit is not on origin/main
 #   5. VERSION differs from the tag, or a copy of the version differs from VERSION (ci/check-versions.sh)
-#   6. a final tag has no "## [X.Y.Z] - YYYY-MM-DD" heading in CHANGELOG.md
-#   7. an rc tag finds the "Unreleased" section of CHANGELOG.md empty
+#   6. a final tag has no "## [X.Y.Z] - YYYY-MM-DD" heading in CHANGELOG.md (a heading in a code block does not count), the
+#      section under it has no list item, or the "Unreleased" section still has list items
+#   7. an rc tag finds no list item in the "Unreleased" section of CHANGELOG.md (prose and comments are no entries)
 #   8. the signing rule of deploy/release/windows-signing.env is broken: the mode must be off, signpath or kms (anything else
 #      fails closed); a final tag with mode off passes only when WINDOWS_UNSIGNED_FINAL_TAG is exactly that tag; rc tags
 #      may use off
@@ -40,15 +41,25 @@ api="${GITHUB_API_URL:-}"
 token="${GITHUB_TOKEN:-}"
 
 # --- 1. inputs and the tag name -----------------------------------------------------------------------------------------
+# Every value is matched as a whole string ([[ =~ ]]), never line by line, and a control character (a newline, for example)
+# is refused first, so no value can carry a second line into a command, a URL or a curl config.
 tag_re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$'
+sha_re='^[0-9a-f]{40}$'
+repo_re='^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
+api_re='^https://[A-Za-z0-9._:/-]+$'
+token_re='^[A-Za-z0-9_.~+/=-]+$'
+# check_input <value> <regex> <message>
+check_input() {
+  case "$1" in *[[:cntrl:]]*) refuse "$3" ;; esac
+  [[ "$1" =~ $2 ]] || refuse "$3"
+}
 [ -n "${tag}" ] || refuse "RELEASE_TAG is not set"
-printf '%s' "${tag}" | grep -Eq "${tag_re}" \
-  || refuse "tag '${tag}' is not a release tag: expected vX.Y.Z or vX.Y.Z-rc.N (no leading zeros, rc number from 1)"
-printf '%s' "${sha}" | grep -Eq '^[0-9a-f]{40}$' || refuse "RELEASE_COMMIT is not a full commit SHA (40 lower-case hex characters)"
-printf '%s' "${repo}" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || refuse "GITHUB_REPOSITORY is not owner/name"
-printf '%s' "${api}" | grep -Eq '^https://[A-Za-z0-9._:/-]+$' || refuse "GITHUB_API_URL is not an https URL"
+check_input "${tag}" "${tag_re}" "the tag is not a release tag: expected vX.Y.Z or vX.Y.Z-rc.N (no leading zeros, rc number from 1)"
+check_input "${sha}" "${sha_re}" "RELEASE_COMMIT is not a full commit SHA (40 lower-case hex characters)"
+check_input "${repo}" "${repo_re}" "GITHUB_REPOSITORY is not owner/name"
+check_input "${api}" "${api_re}" "GITHUB_API_URL is not an https URL"
 [ -n "${token}" ] || refuse "GITHUB_TOKEN is not set (the check-run lookup needs a token with checks: read)"
-printf '%s' "${token}" | grep -Eq '^[A-Za-z0-9_.~+/=-]+$' || refuse "GITHUB_TOKEN has an unexpected format"
+check_input "${token}" "${token_re}" "GITHUB_TOKEN has an unexpected format"
 for c in git python3 curl; do command -v "${c}" >/dev/null 2>&1 || refuse "${c} not found"; done
 version="${tag#v}"
 final=1; kind=final; case "${version}" in *-rc.*) final=0; kind=rc ;; esac
@@ -89,38 +100,101 @@ pass "VERSION and all copies state ${version}"
 
 # --- 6. and 7. CHANGELOG -------------------------------------------------------------------------------------------------
 [ -f CHANGELOG.md ] || refuse "CHANGELOG.md is missing"
-if [ "${final}" = 1 ]; then
-  python3 -I - "${version}" <<'PY' || refuse "CHANGELOG.md has no heading '## [${version}] - YYYY-MM-DD' with a valid date: move the Unreleased entries under it"
+# changelog_check <final X.Y.Z | rc>: exit 0 ok; 10 no dated heading; 11 release section without list items;
+# 12 Unreleased still has list items; 13 Unreleased missing or without list items. Only list items count as entries; fenced
+# code blocks and HTML comments are skipped, so neither a heading nor an entry can hide there.
+changelog_check() {
+  python3 -I - "$@" <<'PY'
 import datetime, re, sys
-version = sys.argv[1]
+
+mode = sys.argv[1]
+version = sys.argv[2] if len(sys.argv) > 2 else None
+
+def visible_lines(path):
+    """Lines outside fenced code blocks, with HTML comments removed."""
+    fence = None
+    comment = False
+    for raw in open(path, encoding='utf-8'):
+        line = raw.rstrip('\r\n')
+        if fence is None and not comment:
+            m = re.match(r'^ {0,3}(`{3,}|~{3,})', line)
+            if m:
+                fence = m.group(1)[0] * 3
+                continue
+        elif fence is not None:
+            if re.match(r'^ {0,3}' + re.escape(fence[0]) + '{3,}\\s*$', line):
+                fence = None
+            continue
+        out = ''
+        rest = line
+        while rest:
+            if comment:
+                end = rest.find('-->')
+                if end < 0:
+                    rest = ''
+                else:
+                    comment = False
+                    rest = rest[end + 3:]
+            else:
+                start = rest.find('<!--')
+                if start < 0:
+                    out += rest
+                    rest = ''
+                else:
+                    out += rest[:start]
+                    comment = True
+                    rest = rest[start + 4:]
+        yield out
+
+# sections: heading line -> number of list items below it, up to the next "## " heading
+sections = []
+for line in visible_lines('CHANGELOG.md'):
+    if line.startswith('## '):
+        sections.append([line, 0])
+    elif sections and re.match(r'^\s*[-*+] +\S', line):
+        sections[-1][1] += 1
+
+unreleased = [n for h, n in sections if re.match(r'^## \[?Unreleased\]?\s*$', h)]
+if mode == 'rc':
+    sys.exit(0 if unreleased and unreleased[0] > 0 else 13)
+
 pat = re.compile(r'^## \[' + re.escape(version) + r'\] - (\d{4}-\d{2}-\d{2})\s*$')
-for line in open('CHANGELOG.md', encoding='utf-8'):
-    m = pat.match(line)
+found = None
+for h, n in sections:
+    m = pat.match(h)
     if m:
         try:
             datetime.date.fromisoformat(m.group(1))
         except ValueError:
             continue
-        sys.exit(0)
-sys.exit(1)
+        found = n
+        break
+if found is None:
+    sys.exit(10)
+if found == 0:
+    sys.exit(11)
+if unreleased and unreleased[0] > 0:
+    sys.exit(12)
+sys.exit(0)
 PY
-  pass "CHANGELOG.md has the heading for ${version}"
+}
+rc=0
+if [ "${final}" = 1 ]; then
+  changelog_check final "${version}" || rc=$?
+  case "${rc}" in
+    0) pass "CHANGELOG.md has the heading and the entries for ${version}" ;;
+    10) refuse "CHANGELOG.md has no heading '## [${version}] - YYYY-MM-DD' with a valid date (outside code blocks): move the Unreleased entries under it" ;;
+    11) refuse "the section '## [${version}]' of CHANGELOG.md has no list item: move the Unreleased entries under it" ;;
+    12) refuse "the Unreleased section of CHANGELOG.md still has list items: a final release moves them under '## [${version}]'" ;;
+    *) refuse "CHANGELOG.md could not be checked (exit ${rc})" ;;
+  esac
 else
-  python3 -I - <<'PY' || refuse "the Unreleased section of CHANGELOG.md is missing or empty: an rc needs the changes it ships"
-import re, sys
-inside = False
-content = False
-for line in open('CHANGELOG.md', encoding='utf-8'):
-    if re.match(r'^## ', line):
-        if inside:
-            break
-        inside = bool(re.match(r'^## \[?Unreleased\]?\s*$', line))
-        continue
-    if inside and line.strip() and not line.startswith('#'):
-        content = True
-sys.exit(0 if content else 1)
-PY
-  pass "the Unreleased section of CHANGELOG.md has content"
+  changelog_check rc || rc=$?
+  case "${rc}" in
+    0) pass "the Unreleased section of CHANGELOG.md has entries" ;;
+    13) refuse "the Unreleased section of CHANGELOG.md is missing or empty (no list item): an rc needs the changes it ships" ;;
+    *) refuse "CHANGELOG.md could not be checked (exit ${rc})" ;;
+  esac
 fi
 
 # --- 8. the signing rule -------------------------------------------------------------------------------------------------
@@ -139,7 +213,7 @@ done < "${env_file}"
 [ "${seen_exception}" = 1 ] || refuse "${env_file}: WINDOWS_UNSIGNED_FINAL_TAG is missing (it may be empty, but the line must exist)"
 case "${mode}" in off|signpath|kms) ;; *) refuse "${env_file}: WINDOWS_SIGNING is not off, signpath or kms (unknown modes fail closed)" ;; esac
 if [ -n "${exception}" ]; then
-  printf '%s' "${exception}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+  [[ "${exception}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
     || refuse "${env_file}: WINDOWS_UNSIGNED_FINAL_TAG must be empty or one final tag vX.Y.Z"
 fi
 if [ "${final}" = 1 ] && [ "${mode}" = off ]; then
@@ -152,13 +226,17 @@ fi
 
 # --- 9. the check run "ci-ok" on the commit -----------------------------------------------------------------------------
 body="$(mktemp)"
-trap 'rm -f "${body}"' EXIT
+curl_err="$(mktemp)"
+trap 'rm -f "${body}" "${curl_err}"' EXIT
 url="${api%/}/repos/${repo}/commits/${sha}/check-runs?check_name=ci-ok&filter=latest&per_page=100"
 # the token goes in through a curl config on stdin, so it appears neither in the process list nor in the output
 code="$(printf 'header = "Authorization: Bearer %s"\n' "${token}" | curl --config - --silent --show-error --proto '=https' --tlsv1.2 \
   --max-time 30 --retry 2 --output "${body}" --write-out '%{http_code}' \
   --header 'Accept: application/vnd.github+json' --header 'X-GitHub-Api-Version: 2022-11-28' --header 'User-Agent: myriarch-release-guard' \
-  "${url}" 2>/dev/null)" || refuse "the GitHub API call for the check runs of ${sha:0:12} failed (network or TLS error)"
+  "${url}" 2>"${curl_err}")" || {
+  sed 's/^/guard:   curl: /' "${curl_err}" >&2
+  refuse "the GitHub API call for the check runs of ${sha:0:12} failed (network or TLS error)"
+}
 [ "${code}" = 200 ] || refuse "the GitHub API answered HTTP ${code} for the check runs of ${sha:0:12} (token without checks: read, or wrong repository?)"
 python3 -I - "${body}" <<'PY' || refuse "no check run 'ci-ok' with conclusion success on commit ${sha:0:12}: wait for CI on main, or fix it, then tag again"
 import json, sys

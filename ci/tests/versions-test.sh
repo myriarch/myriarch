@@ -105,13 +105,17 @@ for f in deploy/helm/myriarch/Chart.yaml web/package.json api/openapi.yaml; do
   printf '%s\n' "${copies}" | grep -qx "${f}" && ok "the copy table names ${f}" || fail "the copy table does not name ${f}"
 done
 
-for bad in v0.1.0 0.1 0.1.0.1 01.2.3 1.02.3 1.2.03 0.1.0-rc.0 0.1.0-rc.01 0.1.0-rc 0.1.0-beta.1 1.0.0-alpha.1 0.1.0-rc.1+build ' 0.1.0' '0.1.0 ' ''; do
+for bad in v0.1.0 0.1 0.1.0.1 01.2.3 1.02.3 1.2.03 0.1.0-rc.0 0.1.0-rc.01 0.1.0-rc 0.1.0-beta.1 1.0.0-alpha.1 0.1.0-rc.1+build ' 0.1.0' '0.1.0 ' '' $'0.2.0\n' $'0.2.0\nx' $'0.2.0\n0.2.1'; do
   before="$(snapshot)"
   : > "${STUB_GEN_LOG}"
   expect_fail "set-version refuses '${bad}'" "invalid version|usage" sv "${bad}"
   [ "$(snapshot)" = "${before}" ] && ok "  and changes no file" || fail "set-version '${bad}' changed files"
   [ ! -s "${STUB_GEN_LOG}" ] && ok "  and runs no generator" || fail "set-version '${bad}' ran a generator"
 done
+before="$(snapshot)"
+expect_fail "version-copies write refuses a trailing newline" "invalid version" python3 -I "${V}/ci/version-copies.py" write $'0.2.0\n'
+expect_fail "version-copies check refuses a trailing newline" "invalid version" python3 -I "${V}/ci/version-copies.py" check $'0.2.0\n'
+[ "$(snapshot)" = "${before}" ] && ok "  and changes no file" || fail "version-copies changed files for a trailing newline"
 expect_fail "set-version without an argument" "usage" sv
 expect_fail "set-version with two arguments" "usage" sv 0.1.0 0.1.1
 
@@ -235,6 +239,18 @@ grefuse "a tag that does not exist on origin" "could not fetch tag" v0.1.0-rc.7 
 grefuse "a plain-http API URL" "not an https URL" v0.1.0-rc.1 "${sha}" GITHUB_API_URL=http://api.example.test
 grefuse "a repository name with a space" "not owner/name" v0.1.0-rc.1 "${sha}" "GITHUB_REPOSITORY=example/my repo"
 grefuse "no token" "GITHUB_TOKEN is not set" v0.1.0-rc.1 "${sha}" GITHUB_TOKEN=
+# values with an embedded newline are refused as a whole, before any command or API call
+: > "${STUB_CURL_URLS}"; : > "${STUB_CURL_STDIN}"
+grefuse "a tag with a trailing newline" "not a release tag" $'v0.1.0-rc.1\n' "${sha}"
+grefuse "a tag with a second line" "not a release tag" $'v0.1.0-rc.1\nv0.1.0' "${sha}"
+grefuse "a SHA with a trailing newline" "not a full commit SHA" v0.1.0-rc.1 "${sha}"$'\n'
+grefuse "a SHA with a second line" "not a full commit SHA" v0.1.0-rc.1 "${sha}"$'\n'"${sha}"
+grefuse "a repository with a second line" "not owner/name" v0.1.0-rc.1 "${sha}" GITHUB_REPOSITORY=$'example/myriarch\nother/x'
+grefuse "an API URL with a trailing newline" "not an https URL" v0.1.0-rc.1 "${sha}" GITHUB_API_URL=$'https://api.example.test\n'
+grefuse "an API URL with a second line" "not an https URL" v0.1.0-rc.1 "${sha}" GITHUB_API_URL=$'https://api.example.test\nhttps://evil.test'
+grefuse "a token with a newline (no extra curl directive)" "unexpected format" v0.1.0-rc.1 "${sha}" GITHUB_TOKEN=$'abc\nurl = "https://evil.test"'
+grefuse "a token with a trailing newline" "unexpected format" v0.1.0-rc.1 "${sha}" GITHUB_TOKEN=$'abc\n'
+[ ! -s "${STUB_CURL_URLS}" ] && [ ! -s "${STUB_CURL_STDIN}" ] && ok "  curl was never called" || fail "  curl was called for a value with a newline"
 
 # --- lightweight tag -----------------------------------------------------------------------------------------------------------
 fresh; sha="$(head_sha)"; git -C "${W}" tag v0.1.0-rc.1; git -C "${W}" push -q origin refs/tags/v0.1.0-rc.1
@@ -282,6 +298,16 @@ fresh; printf '# Changelog\n\n## Unreleased\n\n\n\n## [0.0.1] - 2026-01-01\n\n- 
 grefuse "rc whose Unreleased section is blank (content only below the next heading)" "Unreleased section.*empty" v0.1.0-rc.1 "${sha}"
 fresh; printf '# Changelog\n\n## [Unreleased]\n\n- Entry.\n' > "${W}/CHANGELOG.md"; push_main "bracketed Unreleased"; sha="$(head_sha)"; tag_annotated v0.1.0-rc.1
 gpass "rc with a bracketed [Unreleased] heading and an entry" v0.1.0-rc.1 "${sha}"
+rc_changelog() { # <name> <changelog text> <refuse|pass>: an rc on a CHANGELOG with the given text
+  fresh; printf '%b' "$2" > "${W}/CHANGELOG.md"; push_main "changelog"; sha="$(head_sha)"; tag_annotated v0.1.0-rc.1
+  if [ "$3" = pass ]; then gpass "$1" v0.1.0-rc.1 "${sha}"; else grefuse "$1" "Unreleased section.*empty" v0.1.0-rc.1 "${sha}"; fi
+}
+rc_changelog "rc whose Unreleased section has only prose" '# Changelog\n\n## Unreleased\n\nFirst public release.\n\n## [0.0.1] - 2026-01-01\n\n- Old.\n' refuse
+rc_changelog "rc whose Unreleased section has only an HTML comment" '# Changelog\n\n## Unreleased\n\n<!-- nothing yet -->\n\n## [0.0.1] - 2026-01-01\n\n- Old.\n' refuse
+rc_changelog "rc whose Unreleased section has only a multi-line HTML comment with a list item" '# Changelog\n\n## Unreleased\n\n<!--\n- an example entry\n-->\n\n## [0.0.1] - 2026-01-01\n\n- Old.\n' refuse
+rc_changelog "rc whose only list item is in a code block" '# Changelog\n\n## Unreleased\n\n```\n- an example entry\n```\n\n## [0.0.1] - 2026-01-01\n\n- Old.\n' refuse
+rc_changelog "rc with prose and a real list item" '# Changelog\n\n## Unreleased\n\nIntro.\n\n### Added\n\n* Entry.\n' pass
+rc_changelog "rc with a list item after a code block" '# Changelog\n\n## Unreleased\n\n```\ntext\n```\n\n- Entry.\n' pass
 
 # --- final tags and the signing rule ----------------------------------------------------------------------------------------------
 final() { # <tag> <signing mode> <exception> -> commit and tag a final release state; prints nothing, sets sha
@@ -296,7 +322,6 @@ final v0.1.0 off v0.2.0
 grefuse "final tag with mode off and the exception for another final tag" "exception in .* is for v0.2.0" v0.1.0 "${sha}"
 final v0.1.0 off v0.1.0-rc.1
 grefuse "final tag with mode off and an rc tag as the exception" "must be empty or one final tag" v0.1.0 "${sha}"
-final v0.1.0 off v0.1.0-rc.1
 final v0.1.0 off "v0.1.*"
 grefuse "final tag with mode off and a pattern as the exception" "must be empty or one final tag" v0.1.0 "${sha}"
 final v0.1.1 off v0.1.0
@@ -353,6 +378,22 @@ final v0.1.0 signpath ""
 printf '# Changelog\n\n## Unreleased\n\n- Entry.\n' > "${W}/CHANGELOG.md"
 git -C "${W}" commit -q -a -m "no release heading"; git -C "${W}" push -q origin main; git -C "${W}" tag -d v0.1.0 >/dev/null; git -C "${W}" push -q origin :refs/tags/v0.1.0; sha="$(head_sha)"; tag_annotated v0.1.0
 grefuse "final tag without any release heading" "no heading" v0.1.0 "${sha}"
+
+# final tags: the heading, its entries and the Unreleased section
+final_changelog() { # <name> <changelog text> <message regex>: v0.1.0 (mode signpath) on a CHANGELOG with the given text
+  final v0.1.0 signpath ""
+  printf '%b' "$2" > "${W}/CHANGELOG.md"
+  git -C "${W}" commit -q -a -m "changelog"; git -C "${W}" push -q origin main; git -C "${W}" tag -d v0.1.0 >/dev/null
+  git -C "${W}" push -q origin :refs/tags/v0.1.0; sha="$(head_sha)"; tag_annotated v0.1.0
+  if [ -z "$3" ]; then gpass "$1" v0.1.0 "${sha}"; else grefuse "$1" "$3" v0.1.0 "${sha}"; fi
+}
+final_changelog "final tag, release heading only inside a code block" '# Changelog\n\n## Unreleased\n\n- Entry.\n\n```\n## [0.1.0] - 2026-10-20\n\n- Entry.\n```\n' "no heading"
+final_changelog "final tag, release heading only inside an HTML comment" '# Changelog\n\n## Unreleased\n\n<!--\n## [0.1.0] - 2026-10-20\n- Entry.\n-->\n' "no heading"
+final_changelog "final tag, empty release section" '# Changelog\n\n## Unreleased\n\n- Entry.\n\n## [0.1.0] - 2026-10-20\n\n## [0.0.1] - 2026-01-01\n\n- Old.\n' "section .## .0.1.0.. of CHANGELOG.md has no list item"
+final_changelog "final tag, release section with prose only" '# Changelog\n\n## Unreleased\n\n## [0.1.0] - 2026-10-20\n\nFirst release.\n' "no list item"
+final_changelog "final tag, entries left behind under Unreleased" '# Changelog\n\n## Unreleased\n\n- Left behind.\n\n## [0.1.0] - 2026-10-20\n\n- Shipped.\n' "Unreleased section.*still has list items"
+final_changelog "final tag, entries moved under the release heading" '# Changelog\n\n## Unreleased\n\n## [0.1.0] - 2026-10-20\n\n### Added\n\n- Shipped.\n\n## [0.0.1] - 2026-01-01\n\n- Old.\n' ""
+final_changelog "final tag, bracketed Unreleased heading kept empty" '# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-10-20\n\n- Shipped.\n' ""
 
 # --- ci-ok ------------------------------------------------------------------------------------------------------------------------
 fresh; sha="$(head_sha)"; tag_annotated v0.1.0-rc.1

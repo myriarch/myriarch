@@ -68,9 +68,10 @@ There is no `latest` tag while the major version is 0. Pin a version or, better,
 
 ## Tag guard
 
-`ci/release/guard.sh` is the first step of the release workflow. It reads the tag, the commit, the repository, the API URL and
-the token from environment variables, never prints the token, and refuses a release with one clear message per cause. It
-checks, in this order:
+`ci/release/guard.sh` is written to run as the first job of the release workflow (the workflow itself is added in a later
+change). It reads the tag, the commit, the repository, the API URL and the token from environment variables, matches each
+value as a whole (a value with a newline or another control character is refused), never prints the token, and refuses a
+release with one clear message per cause. It checks, in this order:
 
 1. The tag name is `vX.Y.Z` or `vX.Y.Z-rc.N` without leading zeros, and the commit is a full SHA.
 2. The tag is an annotated tag. The guard fetches the tag object from `origin` again, because a checkout can turn an annotated
@@ -78,8 +79,9 @@ checks, in this order:
 3. The tag points at the commit that the run was started for, the checkout is at that commit and has no changes.
 4. The commit is on `origin/main`: a release is built only from merged history.
 5. `VERSION` equals the tag without the `v`, and every copy equals `VERSION` (`ci/check-versions.sh`).
-6. A final tag has a heading `## [X.Y.Z] - YYYY-MM-DD` with a valid date in `CHANGELOG.md`. An rc tag needs entries in the
-   "Unreleased" section.
+6. A final tag has a heading `## [X.Y.Z] - YYYY-MM-DD` with a valid date in `CHANGELOG.md` (a heading inside a code block or
+   an HTML comment does not count), the section under it has at least one list item, and the "Unreleased" section has none
+   left. An rc tag needs at least one list item in the "Unreleased" section; prose and comments are no entries.
 7. The Windows signing rule holds (below).
 8. The check run `ci-ok` of GitHub Actions exists for the commit and has finished with `success`. The guard asks the GitHub REST
    API with `curl`; the token needs only `checks: read`. Any API error, an unexpected answer or a check run from another app
