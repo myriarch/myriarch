@@ -54,6 +54,7 @@ check_tool helm        helm.sh/helm/v4                        HELM_VERSION
 check_tool cosign      github.com/sigstore/cosign/v3          COSIGN_VERSION
 check_tool goreleaser  github.com/goreleaser/goreleaser/v2   GORELEASER_VERSION
 check_tool kind        sigs.k8s.io/kind                       KIND_VERSION
+check_tool actionlint  github.com/rhysd/actionlint            ACTIONLINT_VERSION
 
 # reuse (a Python tool, ci/tools/reuse/): the input files and the hash-pinned requirements agree with REUSE_VERSION
 pins() { # file requirement - the file has a line that starts with the requirement as its first word
