@@ -79,8 +79,11 @@ Further places:
   release fixtures. Both variants contain `LICENSE` and `THIRD_PARTY_NOTICES` under `/usr/share/licenses/myriarch/`. The
   subcommand `scripts/build-image-crane.sh layout` prints the archive paths of the data and license entries of the chosen
   variant without a registry, network or build. The crane scripts need `IMAGE_REPO` (there is no default registry) and
-  respect `DOCKER_CONFIG` without setting it. The Dockerfile build contexts and the image license paths are described in
-  [deploy/README.md](../deploy/README.md).
+  respect `DOCKER_CONFIG` without setting it. These builds run as user and group 65532 and never push to `ghcr.io/myriarch/*`.
+  The published images are built from the release archives instead: `make release-snapshot`, then
+  `ALLOW_DIRTY=1 IMAGE_SOURCE=dist IMAGE_KIND=server scripts/build-image-crane.sh` (and `IMAGE_KIND=updater`) writes the OCI
+  layouts and SBOMs below `.cache/image-dist/`; `ci/release/push-images.sh` pushes a layout by digest. The image contract, the
+  Dockerfile build contexts and the image license paths are described in [deploy/README.md](../deploy/README.md).
 - `deploy/release/goreleaser.yaml` builds `myriarchd` with `embedui` only.
 
 ### Release builds omit `devpg`
