@@ -47,7 +47,7 @@ Product identifiers (binary names, cookie names, token prefixes, attribute keys)
 | Tool | Version |
 |---|---|
 | Go | the version in `go.mod`; newer releases work, CI uses exactly that version |
-| Node.js | the LTS release in `.node-version` (CI uses exactly that version); at least 22.12 (`engines` in `web/package.json`; the website needs 22 or newer) |
+| Node.js | the LTS release in `.node-version` (CI uses exactly that version); at least 22.22.2 or 24.15 (`engines` in `web/package.json`; the website needs 22 or newer) |
 | pnpm | the version in the `packageManager` field of `web/package.json` and `website/package.json` (`corepack enable` provides it) |
 | `make`, `curl`, `jq`, `python3`, `git` | any recent version |
 
