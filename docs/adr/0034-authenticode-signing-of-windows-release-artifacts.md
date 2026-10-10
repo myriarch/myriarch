@@ -1,4 +1,4 @@
-# 0034. Authenticode signing of Windows release artifacts
+# 0034. Authenticode signing of Windows release artifacts by the SignPath Foundation, with a defined fallback and an exception for v0.1.0
 
 - Status: Accepted
 - Date: 2026-10-10
@@ -20,10 +20,9 @@ and a long-lived signing secret is exactly what [ADR-0023](0023-keyless-release-
   whose subscription logs every access, operation and configuration change, or a signing service). Public CAs therefore issue
   no exportable PFX files. Certificates issued from 2026-03-01 are valid for at most 460 days, so a certificate is renewed
   roughly every year.
-- Without an RFC 3161 timestamp a signature becomes invalid when the certificate expires. A signature carries a SHA-256
-  timestamp, and a second timestamp server is the fallback.
-- Signing works on the existing Linux runner (`jsign` or `osslsigncode`). Verification has to run on a Windows runner as well,
-  because Linux CA bundles do not contain all code signing roots.
+- Without an RFC 3161 timestamp a signature becomes invalid when the certificate expires.
+- Where the project signs itself (the fallback), signing works on the existing Linux runner (`jsign` or `osslsigncode`).
+  Verification has to run on a Windows runner as well, because Linux CA bundles do not contain all code signing roots.
 
 **Why signing matters for Myriarch.** Installs are scripted and `myriarch-updater` runs as a service, so the SmartScreen
 warning for a downloaded file matters little. Since 2024 an EV certificate gives no SmartScreen advantage over any other
@@ -69,8 +68,8 @@ Windows is experimental in the first release ([ADR-0021](0021-publication-gates-
    A variant, if SignPath refuses only its Foundation certificate, is SignPath with an own certificate.
 5. **Privacy consequence of an IV certificate.** The legal name of the maintainer and the locality (city, state, country) appear
    in every signed file, and so in every signature that is downloaded. That is personal data. The maintainer accepts this
-   explicitly before an IV certificate is ordered; with the SignPath route the publisher is "SignPath Foundation" and no
-   personal data is involved.
+   explicitly before an IV certificate is ordered. The same applies to the SignPath variant with an own IV certificate. With the
+   SignPath Foundation certificate the publisher is "SignPath Foundation" and no personal data appears in the signature.
 6. **Authenticode adds to Sigstore and never replaces it.** The Sigstore bundles of `checksums.txt` and the archives stay the
    trust anchor of installers and updater. A file is accepted only if it is the pipeline's own reproducible build plus the
    provider's signature, and the pipeline verifies the signature (signer subject, product name, file version, RFC 3161
@@ -80,7 +79,7 @@ Windows is experimental in the first release ([ADR-0021](0021-publication-gates-
    `install-windows.ps1` and `Set-ServiceEnvironment.ps1`. Every signature uses SHA-256 and an RFC 3161 timestamp, with a
    second timestamp server as fallback. Both executables get a Windows version resource (product name "Myriarch", file and
    product version from the tag, original file name), because SignPath enforces product name and version and because App
-   Control and SmartScreen display them. A signed script is never changed afterwards, not even its line endings. The test
+   Control publisher rules can match product and file name. A signed script is never changed afterwards, not even its line endings. The test
    scripts below `ci/tests` are not signed. The Windows scripts ship only in the Windows archives, so that no unsigned copy
    lies next to a signed one. macOS binaries are not part of this decision.
 8. **Exception for v0.1.0.** SignPath accepts only projects that are already released in the form that is to be signed and
@@ -95,17 +94,18 @@ Windows is experimental in the first release ([ADR-0021](0021-publication-gates-
    - The pipeline is built ready for signing (signing hook, version resources, acceptance check, rehearsal with a throwaway
      test CA that exists only in the pull-request rehearsal), and the SignPath application goes out right after `v0.1.0`.
      Published files are never signed with a throwaway key.
-   (The file and the release guard arrive with the release build change; until then, the tree has no such setting.)
+   (The file and the release guard arrive with the release tag guard and the release build change; until then, the tree has no such setting.)
 9. **A change of publisher is announced.** The publisher shown by Windows is part of the identity that SmartScreen
    reputation and App Control rules refer to. Every change (unsigned to SignPath, IV certificate to SignPath, later to a
    foundation) resets reputation and breaks publisher rules that operators wrote, and is announced in the release notes of the
    first release that carries the new publisher. A certificate renewal at the same CA with the same subject is not a change of
    publisher, but it changes the thumbprint.
 10. **Installer checks.** `-UpdaterSignerThumbprint` of `install-windows.ps1` stays for operators who re-sign with their own PKI.
-    It pins the leaf certificate and so breaks at every renewal (at most every 460 days); this is documented where the option is.
-    It is no check for upstream signatures. A check of the signer subject (exact subject, optionally the issuer, plus product
-    name and file version) comes with the provider pull request. The PFX path of `authenticode.sh` stays for private PKIs
-    (`contrib/enterprise-mirror`); the release build change removes it from the release mode of `ci/build-release.sh`.
+    It pins the leaf certificate and so breaks at every renewal (at most every 460 days); the installer change documents this where the option is
+    described. It is no check for upstream signatures. A check of the signer subject (exact subject, optionally the issuer, plus product
+    name and file version) comes with the provider pull request. The PFX path leaves the release build: the release build change moves
+    `authenticode.sh` to `contrib/enterprise-mirror` for private PKIs or deletes it, and `ci/build-release.sh` keeps only the
+    snapshot mode.
 11. **When to re-evaluate.** Azure Artifact Signing opens for individual developers in the EU; the project gets a legal entity;
     the project moves to a foundation. Azure Artifact Signing is then the best technical fit (about US$9.99 a month, OIDC, no
     secret), reached with `curl` and `jsign` instead of Microsoft's actions.
@@ -160,8 +160,9 @@ before it. Its privacy statement depends on the privacy notice of the website.
   It needs no third-party action and no secret, but it costs money, binds a personal name into every signature and adds a
   cloud account for a single maintainer.
 - **A hardware token on a self-hosted runner**: a token that signs without a gate outside GitHub gives no protection against a
-  compromised run, and a self-hosted runner contradicts the rule that release jobs run on GitHub-hosted runners only (the
-  provenance check denies self-hosted runners, and SignPath's origin verification requires GitHub-hosted ones). A hardware
+  compromised run, and a self-hosted runner contradicts the planned rule of the release workflow (ADR-0035) that release jobs
+  run on GitHub-hosted runners only, which the provenance check will enforce with `--deny-self-hosted-runners` and which the
+  SignPath policy will require. A hardware
   token also cannot be attached to a GitHub-hosted runner, and a machine of one person becomes a single point of custody and
   failure. Rejected.
 - **An EV certificate**: only for organizations, at least about US$400 a year, and without a SmartScreen advantage since 2024.

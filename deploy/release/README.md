@@ -84,7 +84,7 @@ not depend on a single vendor.
 
 Authenticode is the signature that Windows evaluates (App Control for Business and AppLocker publisher rules, Smart App
 Control, the execution policy for PowerShell scripts). It adds to the Sigstore signature of a release and never replaces it;
-installers and the updater trust the Sigstore identity of the release workflow. The decision is
+with the keyless release workflow ([ADR-0023](../../docs/adr/0023-keyless-release-signing.md)), installers and the updater trust its Sigstore identity. The decision is
 [ADR-0034](../../docs/adr/0034-authenticode-signing-of-windows-release-artifacts.md).
 
 **Target design.**
@@ -104,10 +104,10 @@ installers and the updater trust the Sigstore identity of the release workflow. 
 that tag (`WINDOWS_UNSIGNED_FINAL_TAG` in `deploy/release/windows-signing.env`). Verify them with cosign before you run
 them; the release notes say so.
 
-**Status of this tree.** The settings file, the signing hook contract, the version resources and the acceptance check arrive
-with the release build change. Until then `authenticode.sh` signs with a PFX file and a password file, and
+**Status of this tree.** The settings file arrives with the release tag guard and the release build change; the signing hook contract, the version
+resources and the acceptance check arrive with the release build change. Until then `authenticode.sh` signs with a PFX file and a password file, and
 `ci/build-release.sh` still requires `AUTHENTICODE_PFX` in release mode. A public certificate authority cannot deliver such a
-file, so this path is for private PKIs only (see `contrib/enterprise-mirror/`), with these settings: `AUTHENTICODE_PFX` (file),
+file, so this path is for private PKIs only (`deploy/release/authenticode.sh`; it may move to `contrib/enterprise-mirror/` with the release build change), with these settings: `AUTHENTICODE_PFX` (file),
 `AUTHENTICODE_PFX_PASSWORD_FILE` (file) and optionally `AUTHENTICODE_TIMESTAMP_URL`. `AUTHENTICODE_CA_FILE` and
 `AUTHENTICODE_TSA_CA_FILE` (default: `EXTRA_CA_FILE`) name the trust anchors of the verification step. The installer option
 `-UpdaterSignerThumbprint` pins the leaf certificate of the updater for operators with a private PKI; it breaks at every
