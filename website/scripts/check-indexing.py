@@ -14,7 +14,8 @@ direction is a defect: a preview that can be indexed, or a production site that 
                      the robots meta tag with noindex,
   - mode production: robots.txt is missing, has the line "Disallow: /", or lacks the line "Sitemap: <base URL>sitemap.xml"
                      (the base URL is WEBSITE_BASEURL or the baseURL of website/config/_default/hugo.yaml), or an HTML page
-                     carries a robots meta tag with noindex.
+                     carries a robots meta tag with noindex (redirect stubs for aliases, which carry a meta refresh and a
+                     canonical link, are exempt).
 
 Only meta tags are evaluated; the word noindex in the text of a page is no finding. The output names the file and the problem,
 never page content. Exit status 0 = clean, 1 = findings, 2 = usage or environment error. Python 3.9 compatible, standard
@@ -35,13 +36,19 @@ class RobotsMeta(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.contents = []
+        self.refresh = False
+        self.canonical = False
 
     def handle_starttag(self, tag, attrs):
+        attr = {k.lower(): (v or "") for k, v in attrs}
+        if tag == "link" and "canonical" in attr.get("rel", "").lower().split():
+            self.canonical = True
         if tag != "meta":
             return
-        attr = {k.lower(): (v or "") for k, v in attrs}
         if attr.get("name", "").strip().lower() == "robots":
             self.contents.append(attr.get("content", ""))
+        if attr.get("http-equiv", "").strip().lower() == "refresh":
+            self.refresh = True
 
 
 def has_noindex(html):
@@ -51,6 +58,17 @@ def has_noindex(html):
     parser.close()
     found = any("noindex" in [d.strip().lower() for d in c.split(",")] for c in parser.contents)
     return len(parser.contents), found
+
+
+def is_redirect_stub(html):
+    """Whether the page is a redirect stub like the one Hugo renders for front matter aliases: a meta refresh plus a canonical link.
+
+    Hugo marks such a stub noindex on purpose; it is not content that production wants indexed.
+    """
+    parser = RobotsMeta()
+    parser.feed(html)
+    parser.close()
+    return parser.refresh and parser.canonical
 
 
 def configured_base_url():
@@ -112,7 +130,7 @@ def check_pages(root, mode):
             _, noindex = has_noindex(html)
             if mode == "preview" and not noindex:
                 findings.append("%s: the preview page has no robots meta tag with noindex" % rel)
-            if mode == "production" and noindex:
+            if mode == "production" and noindex and not is_redirect_stub(html):
                 findings.append("%s: the production page carries a robots meta tag with noindex" % rel)
     return scanned, findings
 

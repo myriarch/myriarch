@@ -1,8 +1,9 @@
 # Builds the project website (website/, ADR-0031), runs the website gate and deploys the finished directory website/public to Vercel as
 # prebuilt static output. Production on pushes to main, previews (noindex) for pull requests from branches of this repository, never for
-# forks. Setup of the Vercel project, the environment "website" and the domain: website/README.md, section "Deployment".
+# forks. Setup of the Vercel project, the environments "website-preview" and "website-production" and the domain: website/README.md, section "Deployment".
 #
-# Isolation: the build job runs repository code and has no secrets. The deploy job has the Vercel secrets, installs the pinned Vercel CLI
+# Isolation: the build job runs repository code and has no secrets. The deploy job (environments website-preview and
+# website-production) has the Vercel secrets, installs the pinned Vercel CLI
 # from website/pnpm-lock.yaml without lifecycle scripts and uploads the artifact of the build job. No third-party action is used.
 name: website
 
@@ -30,6 +31,8 @@ on:
       - 'ci/lib.sh'
       - 'ci/versions.env'
       - 'scripts/check-docs.py'
+      - 'go.mod'
+      - 'Makefile'
       - '.github/workflows/website.yml'
   pull_request:
     paths:
@@ -53,6 +56,8 @@ on:
       - 'ci/lib.sh'
       - 'ci/versions.env'
       - 'scripts/check-docs.py'
+      - 'go.mod'
+      - 'Makefile'
       - '.github/workflows/website.yml'
   # Manual redeploy of production from main (a change outside the path filters, a rotated token).
   workflow_dispatch: {}
@@ -60,10 +65,11 @@ on:
 permissions:
   contents: read
 
-# A newer push to a pull request replaces the running preview. Production runs are never cancelled; a newer pending production run
-# replaces an older pending one, so the newest commit wins.
+# A newer push to a pull request replaces the running preview. Runs on a branch are never cancelled; a newer pending run of the same
+# ref replaces an older pending one, so the newest commit wins. The group is keyed on the ref, so that a manual run from another
+# branch cannot replace a pending production run of main.
 concurrency:
-  group: website-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'production' }}
+  group: website-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('ref-{0}', github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
@@ -102,7 +108,10 @@ jobs:
         run: |
           corepack enable
           cd website
-          pnpm --version
+          want="$(python3 -I -c 'import json; print(json.load(open("package.json"))["packageManager"].split("@", 1)[1].split("+", 1)[0])')"
+          have="$(pnpm --version)"
+          echo "pnpm ${have}"
+          [ "${have}" = "${want}" ] || { echo "::error::pnpm ${have} is active, but website/package.json pins ${want}"; exit 1; }
 
       # ci/website.sh installs the pinned hugo, sass and lychee (SHA-256-verified downloads, ci/versions.env) and the Node
       # dependencies of website/ (pnpm install --frozen-lockfile), builds the site and runs every check of the website gate.
@@ -135,8 +144,10 @@ jobs:
           && github.event.pull_request.user.login != 'dependabot[bot]')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # Previews and production use separate environments, so that the deployment link of production never points to a protected
+    # preview and production can be limited to main (deployment branch policy) or get required reviewers later.
     environment:
-      name: website
+      name: ${{ github.event_name == 'pull_request' && 'website-preview' || 'website-production' }}
       url: ${{ steps.deploy.outputs.url }}
     env:
       TARGET: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
@@ -186,8 +197,22 @@ jobs:
             grep -qxF 'Sitemap: https://myriarch.dev/sitemap.xml' "${out}/static/robots.txt" \
               || { echo "::error::robots.txt of production does not name https://myriarch.dev/sitemap.xml"; exit 1; }
           fi
-          printf '%s\n' '{"version":3,"routes":[{"handle":"filesystem"},{"src":"/.*","status":404,"dest":"/404.html"}]}' > "${out}/config.json"
-          python3 -I -m json.tool "${out}/config.json" > /dev/null
+          # The first route is the trailing-slash redirect that "vercel build" would emit for trailingSlash: /docs -> /docs/. It
+          # matches paths without a final slash and without a dot, so files (robots.txt, sitemap.xml) and "/" are left alone.
+          cat > "${out}/config.json" <<'JSON'
+          {"version":3,"routes":[
+            {"src":"^/((?:[^/]+/)*[^/\\.]+)$","headers":{"Location":"/$1/"},"status":308},
+            {"handle":"filesystem"},
+            {"src":"/.*","status":404,"dest":"/404.html"}]}
+          JSON
+          python3 -I - "${out}/config.json" <<'PY'
+          import json, re, sys
+          routes = json.load(open(sys.argv[1]))["routes"]
+          redirect = re.compile(routes[0]["src"])
+          for path, hit in (("/docs", True), ("/docs/concepts", True), ("/", False), ("/docs/", False), ("/robots.txt", False), ("/sitemap.xml", False), ("/site.webmanifest", False)):
+              if bool(redirect.search(path)) != hit:
+                  sys.exit("::error::the trailing-slash route does not behave as expected for " + path)
+          PY
 
       # The token comes from the environment, not from --token, so that it stays out of the process list. Without --yes the CLI can
       # never create or link a project by itself. stdout of the CLI is the deployment URL; its logs go to stderr.
@@ -201,7 +226,7 @@ jobs:
           set -euo pipefail
           for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
             if [ -z "${!name:-}" ]; then
-              echo "::error::the secret ${name} of the environment website is not set"
+              echo "::error::the secret ${name} of the environment website-${TARGET} is not set"
               exit 1
             fi
           done
@@ -218,12 +243,13 @@ jobs:
       - name: Write the job summary
         env:
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           {
             echo "### Website (${TARGET})"
             echo
             echo "- Deployment: ${DEPLOYMENT_URL}"
-            echo "- Commit: ${GITHUB_SHA}"
+            echo "- Commit: ${HEAD_SHA}"
             if [ "${TARGET}" = production ]; then echo "- Site: https://myriarch.dev/"; fi
             if [ "${TARGET}" = preview ]; then echo "- Previews are protected by Vercel Authentication and marked noindex."; fi
           } >> "${GITHUB_STEP_SUMMARY}"

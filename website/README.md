@@ -186,21 +186,24 @@ renders, the two mounted README files, the build scripts and the workflow itself
 | Job | What it does | Secrets |
 |---|---|---|
 | `build` | installs the pinned tools, runs `make website-check` (with `WEBSITE_ENV=preview` and `WEBSITE_BASEURL=/` for a pull request) and uploads `website/public` | none |
-| `deploy` | installs the pinned Vercel CLI from `pnpm-lock.yaml` without lifecycle scripts, assembles `.vercel/output` from the uploaded site and runs `vercel deploy --prebuilt` | the environment `website` |
+| `deploy` | installs the pinned Vercel CLI from `pnpm-lock.yaml` without lifecycle scripts, assembles `.vercel/output` from the uploaded site and runs `vercel deploy --prebuilt` | the environments `website-preview` and `website-production` |
 
 - **Production** on every push to `main` (and on a manual run from `main`): `vercel deploy --prebuilt --prod`.
 - **Previews** for pull requests from branches of this repository, never for forks. The `deploy` job does not run for a fork, and
   not for a Dependabot pull request either (it has no Actions secrets); both get the build and the gate only. Previews are
   protected by Vercel Authentication, built with `WEBSITE_ENV=preview` and marked `noindex`.
-- **Concurrency:** a newer push to a pull request cancels the running preview. A production run is never cancelled; a newer pending
-  run replaces an older pending one.
+- **Concurrency:** a newer push to a pull request cancels the running preview. A run on a branch is never cancelled; a newer pending
+  run of the same ref replaces an older pending one, so the newest commit of `main` wins and a manual run from another branch cannot
+  replace a pending production run.
 - **Output:** the job summary lists the deployment URL, the commit and, for production, the site address. The workflow writes no pull
   request comment and needs no write permission (`contents: read`).
 - **Guards:** the deploy job fails when `index.html`, `404.html` or `robots.txt` is missing, when a preview lacks `Disallow: /`, when
   production has it or lacks the absolute sitemap line, when a secret is empty, and when the CLI does not print a
   `https://<name>.vercel.app` URL.
-- **`404.html`:** the Build Output API does not serve `404.html` by itself. The deploy job writes `.vercel/output/config.json` with
-  `{"version":3,"routes":[{"handle":"filesystem"},{"src":"/.*","status":404,"dest":"/404.html"}]}`. The file lives only in the job
+- **`404.html` and trailing slashes:** the Build Output API serves neither `404.html` nor the redirect from `/docs` to `/docs/` by
+  itself. The deploy job writes `.vercel/output/config.json` with three routes: a `308` redirect for every path without a final slash
+  and without a dot (the route that `vercel build` generates for `trailingSlash`), `{"handle":"filesystem"}`, and a catch-all that
+  answers `404` with `404.html`. The job tests the redirect pattern against sample paths. The file lives only in the job
   (`/.vercel/` is git-ignored) and is not part of `website/public`.
 - **Actions:** only GitHub-owned actions, each pinned to a commit SHA with the version in a comment. pnpm comes from corepack
   (`packageManager` in `package.json`), hugo, sass and lychee from `ci/install-tools.sh`, the Vercel CLI from the lockfile. Nothing
@@ -216,25 +219,33 @@ renders, the two mounted README files, the build scripts and the workflow itself
    retention policy for preview deployments.
 2. **Token.** Create a Vercel access token scoped to the team, with an expiration date, named for the workflow. It is team-scoped,
    not project-scoped. Rotate it before it expires; an expired token fails the deploy job loudly.
-3. **GitHub environment `website`** (repository settings, Environments) with three secrets: `VERCEL_TOKEN`, `VERCEL_ORG_ID` (the team
-   ID, `team_...`) and `VERCEL_PROJECT_ID` (`prj_...`; both appear in the project settings). Deployment branches: *No restriction*.
-   A pull request job is evaluated against `refs/pull/<n>/merge`, so a branch policy for `main` would block previews; the `if:` of
-   the `deploy` job does the restriction instead. Required reviewers would gate every preview, so none are set.
+3. **Two GitHub environments** (repository settings, Environments), each with the three secrets `VERCEL_TOKEN`, `VERCEL_ORG_ID` (the
+   team ID, `team_...`) and `VERCEL_PROJECT_ID` (`prj_...`; both appear in the project settings):
+   - `website-production`: deployment branches *Selected branches*, only `main`. Required reviewers can be added here later without
+     touching previews.
+   - `website-preview`: deployment branches *No restriction*. A pull request job is evaluated against `refs/pull/<n>/merge`, so a
+     branch policy would block previews; the `if:` of the `deploy` job keeps forks and Dependabot out. No required reviewers, since
+     they would gate every preview.
+
+   The two environments keep the deployment link of the repository for production from flipping to a protected preview URL.
 4. **Domains.** Add `myriarch.dev` (primary) and `www.myriarch.dev` (redirect `308` to the apex) to the project. At the registrar set
    an apex `A` record and a `www` `CNAME` to exactly the values that the Vercel dashboard shows for the project. Remove the parking
    `AAAA` record and every other parking or forwarding record: Vercel serves no IPv6 for the custom domain, and the certificate
    validation prefers IPv6, so a stale `AAAA` record blocks the certificate and sends IPv6 visitors to the parking page. A `CAA`
    record, if present, must allow `letsencrypt.org`.
 5. **Required checks.** Do not make `website` a required status check: its path filters would block pull requests that do not touch
-   the website. `ci.yml` runs the website gate on every pull request.
+   the website. If the gate should be required, run it from the general CI workflow instead of this one.
 
-Residual risk: every workflow run on a branch of this repository (that is, everyone with write access) can use the environment
-secrets, and the token is team-scoped. Fork pull requests never receive it. Separate environments for previews and production, or
-required reviewers for production, are the next step if the number of writers grows.
+Residual risk: the token is team-scoped, and `website-preview` holds the same token as `website-production`. Every workflow run on a
+branch of this repository (that is, everyone with write access) can use the preview environment and so the token; the branch policy of
+`website-production` protects only the production secrets, not the token itself. Fork pull requests never receive it. Required
+reviewers for production, or a separate Vercel team for previews, are the next step if the number of writers grows. The security
+model lists the control ([Security model](../docs/security/model.md#build-and-release)).
 
 ### Acceptance after the first deployments
 
-- Preview (needs a Vercel login): `/` and `/docs/` return 200, `/docs` redirects to `/docs/`, `/no-such-page/` returns 404 with the
+- Preview (needs a Vercel login): `/` and `/docs/` return 200, `/docs` redirects to `/docs/` (the generated `308` route; check this
+  first, a link without the slash must not end in the 404 page), `/no-such-page/` returns 404 with the
   body of `404.html`, `robots.txt` says `Disallow: /`, the pages carry `noindex`, and no request goes to `vercel.live`.
 - Production (`curl -sI https://myriarch.dev/`): `strict-transport-security` is present, `www` redirects with 308 to the apex,
   `robots.txt` names `https://myriarch.dev/sitemap.xml`, `/sitemap.xml` returns 200, a Mermaid `.mjs` file is served as

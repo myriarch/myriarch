@@ -500,6 +500,23 @@ class IndexingTest(TempCase):
         self.assertIn("does not contain the line 'Sitemap: https://example.test/sitemap.xml'", out)
         self.assertIn("index.html: the production page carries a robots meta tag with noindex", out)
 
+    def test_an_alias_redirect_stub_is_no_finding_in_production(self):
+        self.site(self.PROD_ROBOTS, "index, follow")
+        write(
+            self.path("public", "old", "index.html"),
+            '<!doctype html><html><head><title>/docs/</title><link rel=canonical href="https://example.test/docs/">'
+            '<meta name=robots content="noindex"><meta charset=utf-8><meta http-equiv=refresh content="0; url=https://example.test/docs/">'
+            "</head></html>",
+        )
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("3 pages scanned, 0 findings", out)
+        # A noindex page without the redirect markers is still a finding.
+        write(self.path("public", "hidden", "index.html"), self.PAGE % "noindex")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 1)
+        self.assertIn("hidden/index.html", out)
+
     def test_the_sitemap_must_use_the_base_url(self):
         self.site("User-agent: *\nDisallow:\n\nSitemap: https://other.test/sitemap.xml\n", "index, follow")
         rc, out, _ = run_main(self.mod, [self.path("public")])
