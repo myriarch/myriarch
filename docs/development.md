@@ -175,6 +175,26 @@ part of the default `TOOLS` and installed on demand by `ci/website.sh` (see [Web
 actionlint (the linter of the GitHub Actions workflows) is built like the other Go tools; its ShellCheck integration uses the pinned
 shellcheck. It belongs to the `workflows` gate.
 
+The release tooling and the workflow analyser are pinned the same way, so that a release does not depend on whatever a runner
+ships:
+
+- `gh` (the GitHub CLI) and `go-winres` (Windows version information and manifest resources, built from the `tc-hib/go-winres`
+  module) are Go tools built from `ci/tools/<tool>/`.
+- `syft` (SBOM generation) and `zizmor` (static analysis of GitHub Actions workflows) are release downloads like shellcheck,
+  verified against the `SYFT_SHA256_*` and `ZIZMOR_SHA256_*` values in `ci/versions.env`. Both publish binaries for macOS and for
+  Linux, for arm64 and amd64 (zizmor only with glibc, `unknown-linux-gnu`; there is no musl build). syft is not built from source:
+  only the upstream release binaries carry their version, which syft records in every SBOM it makes (a `go build` reports
+  "[not provided]"), and a Go module for it would bring its whole dependency graph into the repository. No gate runs zizmor yet.
+  The SBOM jobs run syft with `SYFT_CHECK_FOR_APP_UPDATE=false`, so that it does not look for a newer release.
+
+`ci/tools/update.sh gh go-winres` regenerates the modules after a version change. It also raises dependencies for which
+`govulncheck -mode=binary -show verbose .cache/bin/<tool>` lists a fixed version (see `raised()` in the script: `golang.org/x/net`
+in `gh`, `golang.org/x/image` in `go-winres`). A raise never lowers a module, and an entry that the tool itself has overtaken is
+reported as obsolete. Findings in the standard library are fixed by the Go toolchain, and a finding without a fixed version cannot
+be raised. `make vulncheck` itself does not scan `ci/tools`. `ci/check.sh` verifies that `go.mod` and `ci/versions.env` agree and
+that the syft and zizmor pins are SHA-256 values. `ci/tests/tool-downloads-test.sh` covers the refusal of a syft or zizmor archive
+whose checksum differs from the pin, and of a binary that reports another version.
+
 PowerShell is only needed for the Windows installer tests: the `pwsh` cases in `internal/updater` and
 `ci/tests/installer-verify.ps1`. Without it these tests are skipped and the report says so. `MYRIARCH_PWSH` points the Go
 tests at a different `pwsh` binary.

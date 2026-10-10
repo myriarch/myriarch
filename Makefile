@@ -61,7 +61,7 @@ PLATFORMS := linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/arm64
 OTELCOL_VERSION ?= $(shell sed -n 's/^OTELCOL_VERSION=//p' ci/versions.env)
 
 # Pinned CI tools (make tools): built from ci/tools/ or downloaded with a SHA-256 check, see ci/install-tools.sh
-TOOLS ?= goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee actionlint
+TOOLS ?= goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee actionlint syft gh go-winres zizmor
 
 SIM_AGENTS   ?= 1000
 SIM_UPDATERS ?= true
