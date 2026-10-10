@@ -242,6 +242,22 @@ renders, the two mounted README files, the build scripts and the workflow itself
    record, if present, must allow `letsencrypt.org`.
 5. **Required checks.** Do not make `website` a required status check: its path filters would block pull requests that do not touch
    the website. If the gate should be required, run it from the general CI workflow instead of this one.
+6. **Firewall.** Bot Protection and the managed rule for AI bots run in **Log** mode, Attack Mode is off, and there are no custom
+   rules and no IP blocks, so the three custom rules and the IP blocks of the Hobby plan stay free for an incident. Log mode only
+   records: visitors see no challenge and get no cookie. With the pinned CLI (`pnpm install --frozen-lockfile --ignore-scripts` in
+   `website/`, then `node_modules/.bin/vercel`):
+
+   ```sh
+   vercel firewall rules edit bot-protection --action log --yes --project myriarch --scope <team>
+   vercel firewall rules edit ai-bots --action log --yes --project myriarch --scope <team>
+   vercel firewall publish --yes --project myriarch --scope <team>
+   vercel firewall status --project myriarch --scope <team>
+   ```
+
+   Challenge and Deny stay off on purpose. A challenge runs a script and sets a session cookie, which the privacy rules exclude, and
+   it breaks the link previews of chat services and the `curl` checks below. Deny for AI bots would also stop assistants from reading
+   the documentation that people ask them about, while the same files stay readable on GitHub. `robots.txt` stays open for every
+   crawler.
 
 Residual risk: the token is team-scoped, and `website-preview` holds the same token as `website-production`. Every workflow run on a
 branch of this repository (that is, everyone with write access) can use the preview environment and so the token; the branch policy of
@@ -259,6 +275,22 @@ model lists the control ([Security model](../docs/security/model.md#build-and-re
   `text/javascript`, and `site.webmanifest` has a JSON or manifest media type.
 - If `vercel deploy --prebuilt` refuses to run without a linked project, add `vercel pull --yes --environment=<preview|production>`
   before the deploy step (it writes the git-ignored `.vercel/project.json`).
+
+### Firewall incidents
+
+The commands take the same `--project myriarch --scope <team>` as in the setup; a rule change is a draft until
+`vercel firewall publish --yes`.
+
+- **Find the cause first:** `vercel firewall overview` (the last day: traffic by action, busiest rules, alerts) and
+  `vercel firewall traffic list`, then `vercel firewall traffic inspect ip <address>` for one client.
+- **One abusive client or network:** `vercel firewall ip-blocks block <address or CIDR> --yes`, or one custom rule on its user agent
+  or network (ASN), added with `--action log` first and switched to `deny` once the log shows that it matches only that client, for
+  example `vercel firewall rules add "Block <client>" --condition '{"type":"user_agent","op":"sub","value":"<name>"}' --action log --yes`.
+- **Too many requests:** the one rate-limit rule of the Hobby plan, keyed on IP and JA4, also in log mode first.
+- **An attack:** `vercel firewall attack-mode enable --duration 1h --yes` challenges every request for an hour. It sets a short-lived
+  security cookie and blocks link previews and scripts, so switch it off with `vercel firewall attack-mode disable --yes` as soon as
+  the attack is over.
+- Revert every incident measure when the incident is over, and keep the setup of step 6 as the normal state.
 
 ### Follow-ups
 

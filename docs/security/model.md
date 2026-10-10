@@ -409,7 +409,9 @@ guidance after each item names what to do.
   ([Deployment](../../website/README.md#deployment)). Vercel makes the first deployment of a project a production
   deployment, whatever the CLI asks for; the deploy job therefore refuses a preview while the project has no production
   deployment, and after every deployment it checks that Vercel recorded the requested target, so that the build of a pull
-  request cannot end up on the production domain unnoticed.
+  request cannot end up on the production domain unnoticed. The Vercel firewall runs Bot Protection and the rule for AI bots in
+  log mode only, so visitors get no challenge and no cookie; blocking measures are for incidents
+  ([Firewall incidents](../../website/README.md#firewall-incidents)).
 - **Experimental platforms.** The Windows installer and service setup, the systemd units and the Helm chart are tested
   in staging mode and with simulated service managers; they are experimental in the first release
   ([ADR-0021](../adr/0021-publication-gates-and-v0-1-0-scope.md)).
