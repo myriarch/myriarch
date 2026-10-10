@@ -1,0 +1,93 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Compose quickstart: PostgreSQL 17 + myriarchd + 200 simulated collectors from the release image, on one machine.
+#
+#   curl -fsSLO https://raw.githubusercontent.com/myriarch/myriarch/v0.1.0/deploy/compose/quickstart.yaml
+#   docker compose -f quickstart.yaml up -d
+#   docker compose -f quickstart.yaml logs -f myriarchd
+#   docker compose -f quickstart.yaml down -v           # stop and delete the database
+#
+# The file needs no repository checkout: the image carries the example GitOps repository (examples/quickstart) and the
+# simulator profiles (examples/sim) below /opt/myriarch. The image is published from the first release on
+# (ghcr.io/myriarch/myriarch, tags X.Y.Z and X.Y, no "latest"); QUICKSTART_IMAGE selects another one, for example a
+# release candidate or an image pinned by digest. SIM_AGENTS sets the number of simulated collectors, and
+# QUICKSTART_GITOPS_DIR the GitOps directory inside the container (see docs/getting-started/docker-compose.md).
+#
+# UI/REST: http://localhost:8080 (dev login admin/admin, operator/operator, viewer/viewer)
+# OpAMP:   ws://localhost:8080/v1/opamp (in dev mode without a mandatory enrollment token)
+#
+# FOR EVALUATION ONLY: myriarchd runs in "dev" mode (well-known logins, insecure cookies, a well-known enrollment token),
+# because "myriarchd serve" refuses an http publicUrl and a directory as GitOps source. The port is published on
+# 127.0.0.1 only. Production: deploy/helm/myriarch with "myriarchd serve".
+#
+# The data directory is /tmp/myriarchd on a tmpfs: the image is built FROM scratch and runs as a non-root user, so there
+# is no writable directory except /tmp. All state lives in the database (the artifact cache is rebuilt on demand).
+name: myriarch-quickstart
+
+# The image of myriarchd and of the simulator. The default tag is the version of the release this file belongs to.
+x-image: &image ${QUICKSTART_IMAGE:-ghcr.io/myriarch/myriarch:0.1.0}
+
+services:
+  postgres:
+    image: postgres:17@sha256:ae69c452f483507a6b99fb654cf93aad7fe156ffd2c56247707eef4e36d3c12b
+    environment:
+      POSTGRES_USER: myriarch
+      POSTGRES_PASSWORD: myriarch-quickstart-password
+      POSTGRES_DB: myriarch
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myriarch -d myriarch"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  myriarchd:
+    image: *image
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - dev
+      - --dsn=postgres://myriarch:myriarch-quickstart-password@postgres:5432/myriarch?sslmode=disable
+      - --listen=:8080
+      # inside the container myriarchd listens on all interfaces and talks to the Postgres container: dev mode
+      # requires an explicit confirmation for that (the port below is bound to 127.0.0.1 only)
+      - --allow-nonlocal
+      - --data-dir=/tmp/myriarchd
+      - --gitops-dir=${QUICKSTART_GITOPS_DIR:-/opt/myriarch/examples/quickstart}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      # local only: dev mode has fixed logins (admin/admin) and OpAMP without an enrollment token;
+      # /metrics is served on the same port
+      - "127.0.0.1:8080:8080"
+    # no healthcheck: the image has no shell and no curl; the endpoints /readyz and /healthz are served on 8080
+
+  myriarch-sim:
+    image: *image
+    entrypoint: ["/usr/local/bin/myriarch-sim"]
+    command:
+      - run
+      - --server=ws://myriarchd:8080/v1/opamp
+      - --agents=${SIM_AGENTS:-200}
+      - --profile=/opt/myriarch/examples/sim/mixed-fleet.yaml
+    # the OpAMP client retries the connection until myriarchd listens
+    depends_on:
+      - myriarchd
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  pgdata:

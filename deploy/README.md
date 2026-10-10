@@ -13,7 +13,7 @@ Operations artifacts. All supervisor configurations use exactly the keys of opam
 | [`helm/myriarch/`](helm/myriarch) | Helm chart for myriarchd (HA, WebSocket ingress, external PostgreSQL) |
 | [`k8s/collector/`](k8s/collector) | Image (supervisor + otelcol-contrib + myriarch-updater), gateway StatefulSet, node DaemonSet, ConfigMaps; container mode of the myriarch-updater |
 | [`updater/container/`](updater/container) | `updater.yaml` for container mode (`myriarch-updater container`) |
-| [`compose/`](compose) | docker-compose: PostgreSQL 17 + myriarchd (+ optional myriarch-sim) for development |
+| [`compose/`](compose) | docker-compose: `docker-compose.yaml` builds PostgreSQL 17 + myriarchd (+ optional myriarch-sim) from source for development; `quickstart.yaml` runs the same system from the release images for an evaluation |
 | [`docker/`](docker) | `myriarchd.Dockerfile` (Node 24 + pnpm -> Go `-tags embedui` -> distroless) and `myriarch-sim.Dockerfile`, for local builds. The published images are not built from Dockerfiles (see "Published images") |
 | [`release/`](release) | `goreleaser.yaml`: release matrix of all binaries (key-based signatures until the keyless GitHub release workflow), `authenticode.sh`, `README.md` (generating/rotating the signing key, signature format contract) |
 
@@ -140,7 +140,10 @@ during a rolling update OIDC logins fail on old replicas until all are updated (
 working).
 
 The dev compose file (`compose/docker-compose.yaml`) starts `myriarchd dev --allow-nonlocal` in the container (ports bound
-to 127.0.0.1 only); `myriarchd dev` without this flag listens on loopback only and refuses non-loopback setups.
+to 127.0.0.1 only); `myriarchd dev` without this flag listens on loopback only and refuses non-loopback setups. The
+quickstart file (`compose/quickstart.yaml`) does the same with the release images (no repository checkout, read-only root
+file system, data directory on a tmpfs below `/tmp`); both files are for evaluation and development only. The image
+variants and the layout of the release image are described in `scripts/build-image-crane.sh`.
 
 ## Collector in Kubernetes
 
