@@ -1,0 +1,424 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Continuous integration (ADR-0032). The jobs run the gates of ci/check-local.sh (one source of commands, local and in CI),
+# plus what only a runner can prove: the platform matrix of the Go tests, the release snapshot, the commit range scan and the
+# end-to-end test. "ci-ok" is the only required check of the branch ruleset.
+#
+# Policy (enforced by ci/check-workflows.py): only GitHub-owned actions pinned to a commit SHA, a read-only token, no
+# pull_request_target or workflow_run, no persisted checkout credentials, a timeout on every job, no secrets.
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  merge_group:
+  schedule:
+    # nightly: new advisories (vulncheck), upstream schemas and downloads, cold caches
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GOTOOLCHAIN: local
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+  CI: 'true'
+
+jobs:
+  # ---- Go: build, vet for the other platforms, lint, release dependencies, licenses of the release ---------------------
+  go:
+    name: go
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+      - name: Run the gates (go)
+        env:
+          ONLY: go
+        run: ci/check-local.sh
+      - name: Upload the gate logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: check-local-go
+          path: .cache/check-local/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---- Go tests on Linux (amd64 and arm64) with a PostgreSQL service and -race ------------------------------------------
+  go-test-linux:
+    name: go-test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    services:
+      postgres:
+        # the digest of deploy/compose/docker-compose.yaml (a multi-architecture index; ci/check.sh keeps both in step)
+        image: postgres:17@sha256:ae69c452f483507a6b99fb654cf93aad7fe156ffd2c56247707eef4e36d3c12b
+        env:
+          # throw-away database of this job, reachable on 127.0.0.1 only: not a secret
+          POSTGRES_PASSWORD: ci-${{ github.run_id }}
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+          --shm-size 256m
+    env:
+      PGTEST_DSN: postgres://postgres:ci-${{ github.run_id }}@127.0.0.1:5432/postgres?sslmode=disable
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+      - name: Raise max_connections of the PostgreSQL service
+        env:
+          PG_ID: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "${PG_ID}" psql -U postgres -c 'ALTER SYSTEM SET max_connections = 300'
+          docker restart "${PG_ID}"
+          for _ in $(seq 1 60); do
+            if docker exec "${PG_ID}" pg_isready -U postgres -q; then break; fi
+            sleep 1
+          done
+          test "$(docker exec "${PG_ID}" psql -U postgres -tAc 'SHOW max_connections')" = 300
+      - name: Run the Go tests (-race, external PostgreSQL)
+        env:
+          ONLY: go-test
+        run: ci/check-local.sh
+      - name: Upload the gate logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: check-local-go-test-${{ matrix.os }}
+          path: .cache/check-local/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---- Go tests on macOS (embedded PostgreSQL, -race) and Windows (no -race, no database tests) -----------------------------
+  go-test-native:
+    name: go-test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            race: '1'
+            devpg: '1'
+            pgskip: ''
+            timeout: 60
+          - os: windows-latest
+            race: '0'
+            devpg: '0'
+            pgskip: '1'
+            timeout: 45
+    env:
+      GO_TEST_RACE: ${{ matrix.race }}
+      GO_TEST_DEVPG: ${{ matrix.devpg }}
+      PGTEST_SKIP: ${{ matrix.pgskip }}
+    steps:
+      - name: Keep the line endings of the repository (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+          git config --global core.longpaths true
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+      - name: Cache the embedded PostgreSQL binaries (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Library/Caches/myriarch/embedded-postgres
+          key: pgtest-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
+      - name: Run the Go tests
+        env:
+          ONLY: go-test
+        run: ci/check-local.sh
+      - name: Upload the gate logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: check-local-go-test-${{ matrix.os }}
+          path: .cache/check-local/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---- web UI: schema drift, typecheck, lint, formatting, tests, build ------------------------------------------------------
+  web:
+    name: web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+        with:
+          node: 'true'
+      - name: Run the gates (web)
+        env:
+          ONLY: web
+        run: ci/check-local.sh
+      - name: Upload the gate logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: check-local-web
+          path: .cache/check-local/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---- binaries, examples and the release snapshot (unsigned, nothing is published) -------------------------------------------
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+        with:
+          node: 'true'
+          tools: goreleaser
+      - name: Build the UI that the binaries embed
+        run: make web-build
+      - name: Run the gates (build, examples)
+        env:
+          ONLY: build,examples
+        run: ci/check-local.sh
+      - name: Build the release snapshot (all platforms, unsigned)
+        run: make release-snapshot
+      - name: Upload the gate logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: check-local-build
+          path: |
+            .cache/check-local/
+            dist/*.txt
+            dist/*.json
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---- shell scripts and the Helm chart ------------------------------------------------------------------------------------------
+  shell-helm:
+    name: shell-helm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+        with:
+          tools: shellcheck helm kubeconform yq
+      - name: Run the gates (shellcheck,helm)
+        env:
+          ONLY: shellcheck,helm
+        run: ci/check-local.sh
+      - name: Upload the gate logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: check-local-shell-helm
+          path: .cache/check-local/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---- documentation and the language guard ----------------------------------------------------------------------------------------
+  docs:
+    name: docs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+      - name: Run the gates (language,docs)
+        env:
+          ONLY: language,docs
+        run: ci/check-local.sh
+      - name: Upload the gate logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: check-local-docs
+          path: .cache/check-local/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---- website: build and checks only, never a deployment -------------------------------------------------------------------------
+  website:
+    name: website
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+        with:
+          node: 'true'
+      - name: Run the gates (website)
+        env:
+          ONLY: website
+        run: ci/check-local.sh
+      - name: Upload the gate logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: check-local-website
+          path: .cache/check-local/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---- licenses, known vulnerabilities, secrets (tree and, on pull requests, the commit range) ---------------------------
+  compliance:
+    name: compliance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+        with:
+          node: 'true'
+      - name: Run the gates (licenses,vulncheck,secrets)
+        env:
+          ONLY: licenses,vulncheck,secrets
+        run: ci/check-local.sh
+      - name: Scan the commits of the pull request for secrets
+        if: github.event_name == 'pull_request'
+        env:
+          SECRETS_SCAN_RANGE: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+        run: ci/secrets-scan.sh
+      - name: Upload the gate logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: check-local-compliance
+          path: .cache/check-local/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---- the workflows themselves: actionlint and the policy check ----------------------------------------------------------------------
+  workflows:
+    name: workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+      - name: Run the gates (workflows)
+        env:
+          ONLY: workflows
+        run: ci/check-local.sh
+      - name: Upload the gate logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: check-local-workflows
+          path: .cache/check-local/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---- tests of the scripts under ci/ and contrib/ ---------------------------------------------------------------------------------------
+  scripts:
+    name: scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+        with:
+          tools: cosign helm crane pwsh gitleaks shellcheck
+      - name: Run the script tests
+        run: make ci-test
+
+  # ---- end-to-end test with the real supervisor and the UI smoke test ----------------------------------------------------------------------
+  e2e:
+    name: e2e
+    uses: ./.github/workflows/e2e.yml
+    with:
+      mode: smoke
+
+  # ---- the only required check: every job above must have succeeded ------------------------------------------------------------------------
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [go, go-test-linux, go-test-native, web, build, shell-helm, docs, website, compliance, workflows, scripts, e2e]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Every job succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"${NEEDS}"
+          jq -e 'to_entries | all(.value.result == "success")' <<<"${NEEDS}" >/dev/null
