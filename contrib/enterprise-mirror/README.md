@@ -10,6 +10,27 @@ key-based release path (`ci/build-release.sh`, `deploy/release/goreleaser.yaml`)
 `verify-release.sh` from this directory. After that, the project's releases are signed keyless with Sigstore, and this toolkit
 serves only operators who mirror and re-sign releases.
 
+## Mirroring keyless releases
+
+The installers (`install-linux.sh`, `install-windows.ps1`) authenticate the updater through the **keyless Sigstore bundle of the
+project's release**, not through a key of the mirror. A mirror therefore has to carry the release files **unchanged**,
+including `checksums.txt` and `checksums.txt.sigstore.json`, below the same directory (`<base>/v<version>/`):
+
+1. Verify the release before you publish it: `cosign verify-blob` of `checksums.txt` with its bundle and the exact identity,
+   then `sha256sum -c`. The commands are in [Verify releases](../../docs/security/verify-releases.md). Mirror only what
+   passed.
+2. Copy all files of the release unchanged. A rewritten `checksums.txt` (a different line, a different line ending, a line
+   for a file that you added) no longer matches the bundle, and hosts stop with `sigstore_verification_failed`.
+3. Point the hosts at the mirror: `--updater-url`, `--updater-checksums-url` (the bundle is expected at
+   `<checksums-url>.sigstore.json`, or pass `--updater-bundle-url`) and, for hosts without access to the Sigstore
+   infrastructure, `--trusted-root` with a `trusted_root.json` that you fetched with `myriarch-updater fetch-trusted-root`.
+   The host still needs a verifier: `cosign` 3.0.4 or newer or an installed `myriarch-updater`.
+4. Re-signing with your own key stays optional and is for your own tooling (`verify-release.sh`, `publish-mirror.sh`). The
+   installers no longer read a key: `--signing-key`/`-SigningKey` and the `checksums.txt.sig` options were removed. Hosts for
+   which you want to rely on your own signature get `--updater-sha256` from a check that you ran yourself.
+
+The scripts in this directory still follow the key-based format below and have not been changed for keyless files.
+
 | Script | Purpose |
 |---|---|
 | `publish-mirror.sh` | Copies the host artifacts of a release into an Artifactory or Nexus repository. Immutable (a file with different content is never overwritten), verifies all signatures before the upload and every file after it. |

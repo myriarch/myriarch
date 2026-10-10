@@ -37,20 +37,25 @@ sudo ./deploy/scripts/install-linux.sh \
   --site-type hq --site-id HQ1 --site-name "Headquarters" --site-country DE --site-timezone Europe/Berlin \
   --collector-version 0.162.0 \
   --with-updater --updater-url https://mirror.example.com/myriarch-releases/v<ver>/myriarch-updater_<ver>_linux_amd64 \
-  --updater-checksums-url https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt --signing-key ./cosign.pub \
+  --updater-checksums-url https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt \
   --trusted-root ./trusted_root.json
 ```
 
 * Collector and supervisor are **verified with SHA-256 and a Sigstore bundle** (`<asset>.sha256`,
   `<asset>.sigstore.json`) before anything is executed (`--verify-signatures require`, the default). The verifier is
-  `cosign` v3 or `myriarch-updater verify-bundle` (`--verifier FILE`, or the updater downloaded with `--with-updater` and
-  verified by SHA-256); without a verifier the installation aborts. `--trusted-root` enables offline verification.
+  `cosign` 3.0.4 or newer or `myriarch-updater verify-bundle` (`--verifier FILE`, or an installed updater, or - with
+  `--updater-sha256` - the updater downloaded with `--with-updater` and verified by that hash); without a verifier the
+  installation aborts. `--trusted-root` enables offline verification.
 * **Our own** binary (`myriarch-updater`, runs as root) needs a trustworthy hash source, at least one of:
-  `--updater-sha256 <hex>` or `--updater-checksums-url <URL> --signing-key cosign.pub`. With the second variant the
-  installer downloads `checksums.txt` and `checksums.txt.sig` (default `<URL>.sig`, or `--updater-checksums-sig-url`),
-  verifies the signature with the public key (`openssl`, otherwise `cosign verify-blob`) and takes the hash from the line
-  whose file name equals the last path segment of `--updater-url`. Both together are allowed (then both must match). The
-  signature check also applies with `--insecure`. Format and keys: [`release/README.md`](release/README.md).
+  `--updater-sha256 <hex>` or `--updater-checksums-url <URL>`. With the second variant the installer downloads
+  `checksums.txt` and its keyless Sigstore bundle (default `<URL>.sigstore.json`, or `--updater-bundle-url`), verifies the
+  bundle against the release identity `release.yml@refs/tags/v<version>` of this repository with the version from
+  `--updater-version` or from the file name of `--updater-url`, and takes the hash from the line whose file name equals the
+  last path segment of `--updater-url`. The verifier is `cosign` 3.0.4 or newer or an already installed updater, never the
+  binary that is being installed; a host without a verifier verifies `checksums.txt` on an admin host and passes
+  `--updater-sha256`. Both together are allowed (then both must match). The check also applies with `--insecure`.
+  `--signing-key` and `--updater-checksums-sig-url` were removed. Steps and commands:
+  [Verify releases](../docs/security/verify-releases.md), [Connect a host](../docs/tasks/connect-a-host.md).
 * Downloads only over **https** (also after redirects). `--insecure` allows only for labs and tests http/file,
   `--verify-signatures skip`, an updater without a hash source and ws:// to the server. The internal CA for a mirror with
   its own certificate must be in the certificate store of the host (`--ca-file` applies only to the connection to myriarchd).
@@ -72,7 +77,7 @@ sudo ./deploy/scripts/install-linux.sh \
   -SiteType branch -SiteId BR042 -SiteName "Branch Hamburg" -SiteCountry DE -SiteRegion north `
   -SiteTimezone Europe/Berlin -CollectorVersion 0.162.0 -WithUpdater `
   -UpdaterUrl https://mirror.example.com/myriarch-releases/v<ver>/myriarch-updater_<ver>_windows_amd64.exe `
-  -UpdaterChecksumsUrl https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt -SigningKey .\cosign.pub
+  -UpdaterChecksumsUrl https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt
 ```
 
 Details, paths, services and troubleshooting (Event Viewer): [`windows/README.md`](windows/README.md).
@@ -80,8 +85,8 @@ Details, paths, services and troubleshooting (Event Viewer): [`windows/README.md
 The supervisor runs as the virtual service account `NT SERVICE\otelcol-supervisor` (not LocalSystem), only the
 `myriarch-updater` runs as SYSTEM. Directories under `C:\ProgramData\Myriarch` are never taken over (foreign owner or
 reparse point => abort); the ACL is reset and verified. Sigstore verification, the https requirement and the hash source
-for the updater (`-UpdaterSha256` or `-UpdaterChecksumsUrl` + `-SigningKey`; the ECDSA signature is verified with .NET
-without external tools) work as on Linux (`-VerifySignatures`, `-Verifier`, `-Insecure`); optionally
+for the updater (`-UpdaterSha256` or `-UpdaterChecksumsUrl` with its keyless bundle; `-UpdaterVersion`,
+`-UpdaterBundleUrl`) work as on Linux (`-VerifySignatures`, `-Verifier`, `-Insecure`); optionally
 `-UpdaterSignerThumbprint` (the Authenticode signature of the updater must be valid and issued by this certificate);
 better pass the token with `-TokenFile`.
 
@@ -240,9 +245,8 @@ them, and whoever distributes them takes on the obligations of what they contain
 ## Verification status
 
 Covered by tests (without a container runtime and without a Windows host): configuration keys, install scripts in staging
-mode (bash; PowerShell in `pwsh`) including the signature verification of our binaries (`ci/tests/installer-verify.sh`),
+mode (bash; PowerShell in `pwsh`) including the verification of the keyless release bundle (`ci/tests/installer-verify.sh`),
 `helm lint`/`helm template` and schema validation of the rendered manifests (kubeconform), `goreleaser check` and a snapshot
 build of the matrix, mirror upload and signing scripts against throw-away servers (`bash ci/tests/run-all.sh`). **Not**
-covered by automated tests: Docker image builds from the Dockerfiles, service creation/registry/ACLs on Windows, the
-`ECDsaCng` path of the signature verification on Windows PowerShell 5.1, systemd integration on a real host, applying the
+covered by automated tests: Docker image builds from the Dockerfiles, service creation/registry/ACLs on Windows, systemd integration on a real host, applying the
 manifests to a cluster.

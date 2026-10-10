@@ -58,8 +58,10 @@ trust base verify the **fingerprint over a second channel**
 ## Rotation
 
 1. Generate a new key pair (as above), commit the new `cosign.pub` in a reviewed change, replace the secrets.
-2. From the next release on the new key signs; installers verify with the key the operator passes via
-   `--signing-key`/`-SigningKey` - distribute the new `cosign.pub` to hosts that are installed afresh.
+2. From the next release on the new key signs. The installers no longer take a key (`--signing-key`/`-SigningKey` were
+   removed; they verify the keyless bundle of the release, see
+   [Verify releases](../../docs/security/verify-releases.md)), so the key only matters for files that you verify
+   yourself, for example with `contrib/enterprise-mirror/verify-release.sh`.
 3. Old releases stay verifiable with the old key (keep the old `cosign.pub`, for example as `cosign-<year>.pub` next to the
    release files).
 4. Compromise: delete the secrets immediately, rotate the key, withdraw the affected releases (remove the published files and
