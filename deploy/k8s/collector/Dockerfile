@@ -43,7 +43,9 @@ ARG OTELCOL_VERSION=0.162.0
 ARG COLLECTOR_IMAGE=otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
 ARG SUPERVISOR_IMAGE=otel/opentelemetry-collector-opampsupervisor:0.162.0@sha256:13af4526381fe8279fb78f211628fea5cae693bf413737f234ee3587d9a44fb6
 ARG GO_IMAGE=golang:1.27-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
-# build (compile from the build context) | image (copy from UPDATER_IMAGE)
+# Where myriarch-updater comes from: build (compile from the build context) or image (copy from UPDATER_IMAGE). Only these two
+# values are valid: the final stage is chosen as "updater-${UPDATER_SOURCE}", and Docker cannot validate the value, so a value
+# that names no stage (a typo) is resolved as an image reference from the default registry, unpinned. Do not pass anything else.
 ARG UPDATER_SOURCE=build
 # "scratch" is a placeholder that keeps the unused stage below valid; UPDATER_SOURCE=image needs a real image by digest
 ARG UPDATER_IMAGE=scratch
@@ -63,11 +65,13 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
       -ldflags "-s -w -X ${VERSION_PKG}.Version=${UPDATER_VERSION} -X ${VERSION_PKG}.Commit=${UPDATER_COMMIT} -X ${VERSION_PKG}.BuildDate=${UPDATER_DATE}" \
       -o /out/myriarch-updater ./cmd/myriarch-updater
 
-# myriarch-updater of the release: the published updater image (FROM scratch)
-FROM ${UPDATER_IMAGE} AS updater-image
-FROM scratch AS updater-published
-COPY --from=updater-image /usr/local/bin/myriarch-updater /out/myriarch-updater
+# myriarch-updater of the release: the published updater image (FROM scratch, the binary is at its entrypoint path)
+FROM ${UPDATER_IMAGE} AS updater-release-src
+# UPDATER_SOURCE=image
+FROM scratch AS updater-image
+COPY --from=updater-release-src /usr/local/bin/myriarch-updater /out/myriarch-updater
 
+# The stage that the collector image copies from: updater-build or updater-image, nothing else. Both write /out/myriarch-updater.
 FROM updater-${UPDATER_SOURCE} AS updater
 
 FROM ${COLLECTOR_IMAGE} AS collector

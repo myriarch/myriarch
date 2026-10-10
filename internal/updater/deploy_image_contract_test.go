@@ -92,16 +92,35 @@ func TestReleaseImageKindsMatchTheReleaseArchives(t *testing.T) {
 	assert.Contains(t, string(readDeploy(t, "helm/myriarch/templates/deployment.yaml")), `args: ["serve", "--config", "/etc/myriarchd/myriarchd.yaml"]`)
 	assert.Contains(t, readRepoFile(t, "scripts/build-image-crane.sh"), `IMAGE_CMD="serve,--config,/etc/myriarchd/myriarchd.yaml"`)
 
-	// the collector Dockerfile copies the updater from the published image at the path of its entrypoint
-	collector := dockerCopies(string(readDeploy(t, "k8s/collector/Dockerfile")))
-	var fromImage *dockerCopy
-	for i := range collector {
-		if collector[i].from == "updater-image" {
-			fromImage = &collector[i]
-		}
+	// the collector Dockerfile chooses the stage "updater" as updater-${UPDATER_SOURCE}: every documented value must name a stage
+	// that writes /out/myriarch-updater (the next stage copies that path), and the stage for the published image reads the
+	// updater at the path of its entrypoint from a stage that is FROM ${UPDATER_IMAGE}
+	collectorFile := string(readDeploy(t, "k8s/collector/Dockerfile"))
+	stages := dockerStages(collectorFile)
+	assert.Contains(t, collectorFile, "ARG UPDATER_SOURCE=build", "the default source is the build context")
+	selector, ok := stages["updater"]
+	if assert.True(t, ok, "collector Dockerfile: stage updater") {
+		assert.Equal(t, "updater-${UPDATER_SOURCE}", selector.from)
 	}
-	if assert.NotNil(t, fromImage, "collector Dockerfile: COPY --from=updater-image") {
-		assert.Equal(t, []string{updaterEntry}, fromImage.srcs)
+	assert.Contains(t, collectorFile, "COPY --from=updater --chmod=0755 /out/"+brand.UpdaterBinary, "the collector image copies the updater stage")
+	for _, source := range []string{"build", "image"} {
+		st, ok := stages["updater-"+source]
+		if !assert.Truef(t, ok, "collector Dockerfile: UPDATER_SOURCE=%s names the stage updater-%s", source, source) {
+			continue
+		}
+		assert.Containsf(t, collectorFile, "UPDATER_SOURCE="+source, "the header documents UPDATER_SOURCE=%s", source)
+		assert.Containsf(t, st.body, "/out/"+brand.UpdaterBinary, "stage updater-%s writes /out/%s", source, brand.UpdaterBinary)
+	}
+	if st, ok := stages["updater-image"]; ok {
+		copies := dockerCopies(st.body)
+		if assert.Len(t, copies, 1, "stage updater-image: one COPY") {
+			assert.Equal(t, []string{updaterEntry}, copies[0].srcs)
+			assert.Equal(t, "/out/"+brand.UpdaterBinary, copies[0].dst)
+			src, ok := stages[copies[0].from]
+			if assert.Truef(t, ok, "stage updater-image copies from the stage %q", copies[0].from) {
+				assert.Equal(t, "${UPDATER_IMAGE}", src.from, "the published updater image is the source")
+			}
+		}
 	}
 	assert.Contains(t, string(readDeploy(t, "k8s/collector/Dockerfile")), "ARG UPDATER_IMAGE=scratch", "no default image: the digest of a release is passed on purpose")
 
@@ -157,4 +176,39 @@ func TestPublishedRepositoriesAndLabels(t *testing.T) {
 func TestRemovedReleaseDockerfilesStayRemoved(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(deployDir, "docker", "myriarchd-release.Dockerfile"))
 	assert.NoFileExists(t, filepath.Join(deployDir, "docker", "myrctl.Dockerfile"))
+}
+
+// dockerStage is one build stage of a Dockerfile: the base of its FROM instruction and the instructions that follow it.
+type dockerStage struct {
+	from, body string
+}
+
+// dockerStages parses the named stages (FROM <base> AS <name>); line continuations are joined and comments skipped.
+func dockerStages(dockerfile string) map[string]dockerStage {
+	out := map[string]dockerStage{}
+	name := ""
+	for _, line := range strings.Split(strings.ReplaceAll(dockerfile, "\\\n", " "), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || strings.HasPrefix(fields[0], "#") {
+			continue
+		}
+		if strings.EqualFold(fields[0], "FROM") {
+			name = ""
+			args := fields[1:]
+			for len(args) > 0 && strings.HasPrefix(args[0], "--") {
+				args = args[1:]
+			}
+			if len(args) == 3 && strings.EqualFold(args[1], "AS") {
+				name = args[2]
+				out[name] = dockerStage{from: args[0]}
+			}
+			continue
+		}
+		if name != "" {
+			st := out[name]
+			st.body += line + "\n"
+			out[name] = st
+		}
+	}
+	return out
 }
