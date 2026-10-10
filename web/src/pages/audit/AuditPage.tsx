@@ -100,7 +100,12 @@ function AuditRow({ e }: { e: AuditEvent }) {
           </Group>
         </Table.Td>
         <Table.Td>
-          <Badge variant="light" color="gray" style={{ textTransform: 'none' }} className="myr-mono">
+          <Badge
+            variant="light"
+            color="gray"
+            style={{ textTransform: 'none' }}
+            className="myr-mono"
+          >
             {e.action}
           </Badge>
         </Table.Td>

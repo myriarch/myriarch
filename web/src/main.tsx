@@ -17,7 +17,9 @@ import i18n from './i18n';
 import { createQueryClient } from './queryClient';
 import { cssVariablesResolver, theme } from './theme/theme';
 
-const colorSchemeManager = localStorageColorSchemeManager({ key: STORAGE_KEY_PREFIX + 'color-scheme' });
+const colorSchemeManager = localStorageColorSchemeManager({
+  key: STORAGE_KEY_PREFIX + 'color-scheme',
+});
 const queryClient = createQueryClient();
 
 async function bootstrap() {

@@ -1,0 +1,39 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+name: ci
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  go:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Gates
+        env:
+          ONLY: go,web
+        run: ci/check-local.sh
+  e2e:
+    uses: ./.github/workflows/e2e.yml
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Deploy
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: ./deploy.sh
+  call-capitalized:
+    uses: ./.github/workflows/reusable.yml
+    Secrets: inherit
+  call-quoted:
+    uses: ./.github/workflows/reusable.yml
+    "secrets": inherit
+  call-flow: { uses: ./.github/workflows/reusable.yml, secrets: inherit }
+  call-pair:
+    uses: ./.github/workflows/reusable.yml
+    # an entry of a flow sequence may be a one-pair mapping: [ secrets: inherit ] is [ { secrets: inherit } ]
+    with: [ secrets: inherit ]

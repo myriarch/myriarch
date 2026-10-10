@@ -46,7 +46,10 @@ describe('mock version selection', () => {
     const hold = db.effectiveTarget('edge-sites');
     expect(hold).toMatchObject({ source: 'hold', gitVersion: '0.161.0' });
     expect(hold.version).toBeUndefined();
-    expect(db.effectiveTarget('linux-hosts')).toMatchObject({ source: 'git', selectionEnabled: false });
+    expect(db.effectiveTarget('linux-hosts')).toMatchObject({
+      source: 'git',
+      selectionEnabled: false,
+    });
   });
 
   it('the effective target is what the collectors are assigned (and the dashboard counts)', () => {

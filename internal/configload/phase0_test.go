@@ -195,6 +195,8 @@ notifications:
     - {name: teams, type: teams, urlFile: /etc/myriarchd/secrets/teams-webhook-url}
     - {name: hook, type: webhook, url: "https://hooks.example.com/x", secretFile: /etc/myriarchd/secrets/hook-secret}
 `
+	// the files are absolute paths of the running platform (on Windows with a volume)
+	y = strings.ReplaceAll(y, "/etc/myriarchd/", absPath("/etc/myriarchd/"))
 	if _, _, err := loadOpts(t, y, Options{SkipFiles: true}); err != nil {
 		t.Fatalf("--skip-files: %v", err)
 	}
@@ -203,10 +205,12 @@ notifications:
 	if err == nil {
 		t.Fatal("missing files must be reported")
 	}
+	// some messages end with the text of the operating system and omit the path
+	reason := missingFileReason(t, absPath("/etc/myriarchd/secrets/database-dsn"))
 	got := map[string]bool{}
 	for _, p := range Problems(err) {
 		got[p.Path] = true
-		if !strings.Contains(p.Message, "no such file") && !strings.Contains(p.Message, "cannot read") {
+		if !strings.Contains(p.Message, reason) && !strings.Contains(p.Message, "cannot read") {
 			t.Errorf("%s: %s", p.Path, p.Message)
 		}
 	}

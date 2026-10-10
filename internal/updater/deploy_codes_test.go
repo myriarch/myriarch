@@ -36,6 +36,29 @@ func catalogCodes(t *testing.T, linux string) map[string]bool {
 	return codes
 }
 
+// catalogDescription returns the description of one catalog entry of install-linux.sh, continuation lines included.
+func catalogDescription(t *testing.T, linux, code string) string {
+	t.Helper()
+	i := strings.Index(linux, "# ---- Error code catalog")
+	j := strings.Index(linux, "# ---- End of error code catalog")
+	require.True(t, i >= 0 && j > i, "install-linux.sh has an error code catalog block")
+	first := regexp.MustCompile(`^#   ` + regexp.QuoteMeta(code) + `\s{2,}(\S.*)$`)
+	more := regexp.MustCompile(`^#\s{4,}(\S.*)$`)
+	var parts []string
+	for _, line := range strings.Split(linux[i:j], "\n") {
+		line = strings.TrimRight(line, "\r")
+		if m := first.FindStringSubmatch(line); m != nil {
+			parts = []string{m[1]}
+		} else if m := more.FindStringSubmatch(line); m != nil && len(parts) > 0 {
+			parts = append(parts, m[1])
+		} else if len(parts) > 0 {
+			break
+		}
+	}
+	require.NotEmpty(t, parts, "the catalog has an entry for %s", code)
+	return strings.Join(parts, " ")
+}
+
 // windowsOnlyCodes parses the "# Windows-only codes:" list in install-windows.ps1.
 func windowsOnlyCodes(t *testing.T, win string) map[string]bool {
 	t.Helper()
@@ -102,6 +125,46 @@ func TestInstallLinuxScriptEveryDieAndWarnCarriesACatalogCode(t *testing.T) {
 	win := string(readDeploy(t, "scripts/install-windows.ps1"))
 	for c := range catalog {
 		assert.True(t, used[c] || strings.Contains(win, "'"+c+"'"), "catalog code %q is never raised by either installer", c)
+	}
+}
+
+// The catalog promises that a tool_missing message names the tool, and docs/tasks/connect-a-host.md tells the operator so.
+// The tools are those in the parentheses of the catalog entry: every message names at least one of them and every one of
+// them is named by a message, so neither the script nor the catalog can drift from the promise.
+func TestInstallLinuxScriptToolMissingMessagesNameTheTool(t *testing.T) {
+	linux := string(readDeploy(t, "scripts/install-linux.sh"))
+	desc := catalogDescription(t, linux, "tool_missing")
+	assert.Contains(t, desc, "the message names the tool")
+	list := regexp.MustCompile(`\(([^)]+)\)`).FindStringSubmatch(desc)
+	require.NotNil(t, list, "the tool_missing entry lists the tools in parentheses: %q", desc)
+	var tools []string
+	toolRe := map[string]*regexp.Regexp{}
+	for _, tool := range regexp.MustCompile(`[\s,/]+`).Split(list[1], -1) {
+		if tool == "" {
+			continue
+		}
+		tools = append(tools, tool)
+		toolRe[tool] = regexp.MustCompile(`\b` + regexp.QuoteMeta(tool) + `\b`)
+	}
+	require.NotEmpty(t, tools, "the tool_missing entry lists the tools: %q", list[1])
+
+	call := regexp.MustCompile(`\bdie tool_missing "([^"]*)"`)
+	named := map[string]bool{}
+	for _, line := range codeLines(linux) {
+		for _, m := range call.FindAllStringSubmatch(line, -1) {
+			found := false
+			for _, tool := range tools {
+				if toolRe[tool].MatchString(m[1]) {
+					named[tool] = true
+					found = true
+				}
+			}
+			assert.True(t, found, "the tool_missing message %q names none of the tools of the catalog (%s)", m[1], list[1])
+		}
+	}
+	// this also fails when the scan above finds no tool_missing call at all
+	for _, tool := range tools {
+		assert.True(t, named[tool], "the catalog lists %s, but no tool_missing message names it", tool)
 	}
 }
 

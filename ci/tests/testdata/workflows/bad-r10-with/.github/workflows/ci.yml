@@ -1,0 +1,30 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+name: ci
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  go:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Gates
+        env:
+          ONLY: go,web
+        run: ci/check-local.sh
+  e2e:
+    uses: ./.github/workflows/e2e.yml
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Deploy
+        uses: ./.github/actions/deploy
+        with:
+          token: ${{ secrets.DEPLOY_TOKEN }}
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}

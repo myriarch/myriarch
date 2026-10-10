@@ -68,6 +68,15 @@ func writeConfig(t *testing.T, content string) string {
 	return p
 }
 
+// absPath turns a slash path such as "/etc/myriarchd/token" into an absolute
+// path of the running platform: the path itself on Unix, with the volume of the
+// temporary directory in front on Windows ("C:/etc/myriarchd/token"; forward
+// slashes are valid there and safe in YAML). The settings that name a file
+// refuse a path without a volume on Windows ("must be an absolute path").
+func absPath(slash string) string {
+	return filepath.VolumeName(os.TempDir()) + slash
+}
+
 // FX-4: exit codes, output format and the file handling of "myriarchd config validate".
 func TestConfigValidate(t *testing.T) {
 	good := writeConfig(t, prodYAML)

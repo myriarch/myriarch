@@ -1,11 +1,7 @@
 // Copyright The Myriarch Authors
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  ENROLLMENT_TOKEN_ENV,
-  ENROLLMENT_TOKEN_FILE,
-  LINUX_COLLECTOR_EXECUTABLE,
-} from '@/brand';
+import { ENROLLMENT_TOKEN_ENV, ENROLLMENT_TOKEN_FILE, LINUX_COLLECTOR_EXECUTABLE } from '@/brand';
 
 /**
  * Install command and supervisor snippet shown after creating an enrollment token. Flag names of

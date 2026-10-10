@@ -1,0 +1,1 @@
+.github/workflows/ci.yml:26: R10: a secrets expression is allowed only as the whole value of a key in the env: of a job or of a step ('KEY: ${{ secrets.NAME }}')

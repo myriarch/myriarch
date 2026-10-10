@@ -259,8 +259,12 @@ func (s *Service) AssignAgent(ctx context.Context, id domain.AgentID) (domain.As
 	return out.assignment, err
 }
 
-// markWritten records a write and reports whether ag (listed at listedAt) may
-// be stale because another call wrote it afterwards.
+// staleSince reports whether ag (listed at listedAt) may be stale because
+// another call wrote it at or after that time. A write in the same clock tick
+// as the listing counts as later: the clock can be coarse (Windows advances it
+// in steps of up to 15.6 ms), and an equal time says nothing about the order.
+// Both times must come from time.Now(), so that the comparison uses the
+// monotonic reading (s.now() strips it).
 func (s *Service) staleSince(id domain.AgentID, listedAt time.Time) bool {
 	if listedAt.IsZero() {
 		return false
@@ -268,7 +272,7 @@ func (s *Service) staleSince(id domain.AgentID, listedAt time.Time) bool {
 	s.writtenMu.Lock()
 	defer s.writtenMu.Unlock()
 	t, ok := s.written[id]
-	return ok && t.After(listedAt)
+	return ok && !t.Before(listedAt)
 }
 
 func (s *Service) markWritten(id domain.AgentID) {

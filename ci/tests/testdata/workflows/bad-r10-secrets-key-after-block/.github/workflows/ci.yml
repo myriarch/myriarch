@@ -1,0 +1,38 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+name: ci
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  go:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Gates
+        env:
+          ONLY: go,web
+        run: ci/check-local.sh
+  e2e:
+    uses: ./.github/workflows/e2e.yml
+  render:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Write a manifest
+        run: |
+          cat > compose.yml <<'EOF'
+          services:
+            app:
+              secrets:
+                - token
+          secrets:
+            token:
+              file: ./token.txt
+          EOF
+          echo '{"secrets": []}' > config.json
+  call:
+    uses: ./.github/workflows/reusable.yml
+    secrets: inherit

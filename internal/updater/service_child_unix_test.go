@@ -37,11 +37,6 @@ func writeScript(t *testing.T, dir, name, body string) string {
 	return p
 }
 
-func pidAlive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
-}
-
 func readPids(t testing.TB, path string) []int {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -99,7 +94,7 @@ func TestChildStartStopCycle(t *testing.T) {
 	require.NoError(t, c.Stop(ctx, "x"))
 	st, _ = c.State(ctx, "x")
 	assert.Equal(t, ServiceStopped, st)
-	assert.False(t, pidAlive(pid), "child is gone")
+	assert.False(t, pidExists(pid), "child is gone")
 	require.NoError(t, c.Stop(ctx, "x"), "stopping a stopped child is not an error")
 
 	time.Sleep(150 * time.Millisecond) // no restart after a deliberate stop
@@ -134,7 +129,7 @@ while :; do sleep 0.05; done
 	took := time.Since(begin)
 	assert.GreaterOrEqual(t, took, 250*time.Millisecond, "SIGTERM was ignored, so the full timeout is waited")
 	assert.Less(t, took, 3*time.Second)
-	assert.False(t, pidAlive(pid))
+	assert.False(t, pidExists(pid))
 }
 
 func TestChildStopKillsTheWholeProcessGroup(t *testing.T) {

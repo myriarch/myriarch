@@ -431,6 +431,23 @@ func TestConcurrentAssignAndReassign(t *testing.T) {
 	assert.Len(t, e.st.Events(id), 1, "the fleet change is recorded once")
 }
 
+// A write in the same clock tick as the listing may have made the listed copy
+// stale, so it counts as stale. A coarse clock (Windows) gives both the same
+// time; counting that as "not later" let ReassignAll work on a stale copy and
+// record a fleet change twice.
+func TestStaleSinceCountsTheSameTickAsLater(t *testing.T) {
+	e := newEnv(t)
+	id := e.addAgent("edge-nl-1001")
+	tick := time.Now()
+	e.svc.writtenMu.Lock()
+	e.svc.written[id] = tick
+	e.svc.writtenMu.Unlock()
+	assert.True(t, e.svc.staleSince(id, tick), "a write in the tick of the listing")
+	assert.True(t, e.svc.staleSince(id, tick.Add(-time.Millisecond)), "a write after the listing")
+	assert.False(t, e.svc.staleSince(id, tick.Add(time.Millisecond)), "a write before the listing")
+	assert.False(t, e.svc.staleSince(id, time.Time{}), "a fresh read is never stale")
+}
+
 func TestRunReloadsSnapshotOnEvents(t *testing.T) {
 	e := newEnv(t)
 	ctx, cancel := context.WithCancel(context.Background())

@@ -26,7 +26,11 @@ import (
 	"github.com/myriarch/myriarch/internal/rollout/memstore"
 )
 
-// connectProxy is a forward proxy that tunnels CONNECT requests.
+// connectProxy is a forward proxy that tunnels CONNECT requests. It hijacks the
+// connection before it answers: Hijack flushes a 200 written earlier and only
+// then stops the background read of net/http, so a client that starts its TLS
+// handshake at once can have the first byte of its ClientHello taken by that
+// read, which hands it back in the bufio.Reader of Hijack and nowhere else.
 func connectProxy(t *testing.T) (*httptest.Server, *atomic.Int32) {
 	t.Helper()
 	var tunnels atomic.Int32
@@ -35,25 +39,33 @@ func connectProxy(t *testing.T) (*httptest.Server, *atomic.Int32) {
 			http.Error(w, "only CONNECT", http.StatusMethodNotAllowed)
 			return
 		}
-		dst, err := net.DialTimeout("tcp", r.Host, 5*time.Second)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
 		hj, ok := w.(http.Hijacker)
 		if !ok {
 			http.Error(w, "no hijack", http.StatusInternalServerError)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
-		src, _, err := hj.Hijack()
+		dst, err := net.DialTimeout("tcp", r.Host, 5*time.Second)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		src, buf, err := hj.Hijack()
 		if err != nil {
 			dst.Close()
 			return
 		}
+		// the client starts its handshake only after it has read this, when the
+		// background read of net/http is stopped
+		if _, err := io.WriteString(src, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
+			src.Close()
+			dst.Close()
+			return
+		}
 		tunnels.Add(1)
-		go func() { _, _ = io.Copy(dst, src); dst.Close() }()
-		go func() { _, _ = io.Copy(src, dst); src.Close() }()
+		// buf.Reader yields the bytes net/http has read from the client already
+		// before it reads src
+		go func() { _, _ = io.Copy(dst, buf.Reader); src.Close(); dst.Close() }()
+		go func() { _, _ = io.Copy(src, dst); src.Close(); dst.Close() }()
 	}))
 	t.Cleanup(srv.Close)
 	return srv, &tunnels

@@ -4,7 +4,7 @@
 
 # Installs the CI tools into ${TOOLS_BIN} (default: .cache/bin, safe to cache between runs).
 #
-#   ci/install-tools.sh goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee
+#   ci/install-tools.sh goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee actionlint
 #   ci/install-tools.sh apt:osslsigncode apt:python3
 #
 # Go tools are built from ci/tools/<tool>/ (go.mod + go.sum in the repository) through the configured GOPROXY (no
@@ -16,7 +16,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 load_versions
 
-[ "$#" -gt 0 ] || die "usage: ci/install-tools.sh <tool>... (goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee apt:<package>)"
+[ "$#" -gt 0 ] || die "usage: ci/install-tools.sh <tool>... (goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee actionlint apt:<package>)"
 mkdir -p "${TOOLS_BIN}"
 
 # Built from ci/tools/<tool>/ (a separate Go module per tool with go.mod AND go.sum in the repository): the hashes of all
@@ -423,6 +423,7 @@ for t in "$@"; do
     gitleaks)     go_install gitleaks     github.com/zricethezav/gitleaks/v8              GITLEAKS_VERSION   gitleaks ;;
     go-licenses)  go_install go-licenses  github.com/google/go-licenses/v2             GOLICENSES_VERSION go-licenses no-trimpath main-toolchain ;;
     reuse)        py_install_reuse ;;
+    actionlint)   go_install actionlint   github.com/rhysd/actionlint/cmd/actionlint   ACTIONLINT_VERSION actionlint ;;
     kind)         go_install kind         sigs.k8s.io/kind                             KIND_VERSION       kind ;;
     kubectl)      release_install_kubectl ;;
     shellcheck)   release_install_shellcheck ;;

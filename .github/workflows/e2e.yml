@@ -1,0 +1,189 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# End-to-end tests (ADR-0032). Pull requests and pushes run the smoke test through ci.yml (job "e2e", part of "ci-ok"), so
+# this workflow has no pull_request trigger of its own. Nightly it runs the heavier variants: the load run with 1,000
+# simulated collectors and the UI-triggered version update. A manual run picks the mode.
+#
+# E2E_REAL=1 and E2E_UI=1 turn a missing prerequisite into a failure instead of a skip: the real supervisor is downloaded
+# and verified against its published SHA-256 on every run (scripts/lib/real-binaries.sh), and the UI smoke test needs the
+# Chrome of the runner image and playwright-core from web/node_modules.
+#
+# The tests bind fixed local ports (scripts/e2e.sh: 18080, 18081, 54339, 1999x; scripts/e2e-ui-updates.sh: 18090, 54340,
+# 19997); every job runs on its own runner, so they do not collide.
+#
+# In a called workflow github.event_name is the event of the caller, so the nightly run of ci.yml (which calls this workflow
+# with mode smoke) would also match 'schedule'. The heavy jobs therefore test `inputs.mode == ''`, which is true only for this
+# workflow's own schedule trigger (it has no inputs); ci/check-workflows.py (R11) keeps the condition in place.
+#
+# GitHub disables scheduled workflows of a public repository after 60 days without repository activity.
+name: e2e
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: smoke runs the smoke test only (the pull request run)
+        type: string
+        required: false
+        default: smoke
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Which tests to run
+        type: choice
+        options: [smoke, load, ui-updates, all]
+        default: smoke
+
+permissions:
+  contents: read
+
+# Not ${{ github.workflow }}: in a called workflow it is the name of the caller and would share the group of ci.yml.
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.ref }}-${{ inputs.mode || github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GOTOOLCHAIN: local
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+  CI: 'true'
+
+jobs:
+  smoke:
+    name: smoke
+    if: inputs.mode == 'smoke' || inputs.mode == 'all'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      E2E_REAL: '1'
+      E2E_UI: '1'
+      E2E_BROWSER: /usr/bin/google-chrome
+      E2E_REAL_DIR: ${{ github.workspace }}/.cache/e2e-real
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+        with:
+          node: 'true'
+      - name: Check the browser of the runner image
+        run: test -x /usr/bin/google-chrome && /usr/bin/google-chrome --version
+      - name: Install the web dependencies (playwright-core for the UI smoke test)
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: Cache the downloaded collector binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/e2e-real/dl
+          # scripts/e2e.sh verifies the SHA-256 on every run, so a cache hit is never trusted unverified
+          key: e2e-real-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ci/versions.env') }}
+      - name: Run the smoke test
+        run: scripts/e2e.sh
+      - name: Upload the logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-smoke
+          path: |
+            .e2e/*.log
+            .e2e/supervisor/*.log
+            .e2e/results.txt
+            !.e2e/**/*.token
+            !.e2e/**/*.secret
+            !.e2e/cookies*
+            !.e2e/data/**
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  load:
+    name: load (1,000 collectors)
+    if: (github.event_name == 'schedule' && inputs.mode == '') || inputs.mode == 'load' || inputs.mode == 'all'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      E2E_REAL: '1'
+      E2E_UI: '1'
+      E2E_AGENTS: '1000'
+      E2E_BROWSER: /usr/bin/google-chrome
+      E2E_REAL_DIR: ${{ github.workspace }}/.cache/e2e-real
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+        with:
+          node: 'true'
+      - name: Check the browser of the runner image
+        run: test -x /usr/bin/google-chrome && /usr/bin/google-chrome --version
+      - name: Install the web dependencies (playwright-core for the UI smoke test)
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: Run the load test
+        run: scripts/e2e.sh
+      - name: Upload the logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-load
+          path: |
+            .e2e/*.log
+            .e2e/supervisor/*.log
+            .e2e/results.txt
+            !.e2e/**/*.token
+            !.e2e/**/*.secret
+            !.e2e/cookies*
+            !.e2e/data/**
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  ui-updates:
+    name: ui-updates
+    if: (github.event_name == 'schedule' && inputs.mode == '') || inputs.mode == 'ui-updates' || inputs.mode == 'all'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      E2E_UI: '1'
+      E2E_BROWSER: /usr/bin/google-chrome
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+        with:
+          node: 'true'
+      - name: Check the browser of the runner image
+        run: test -x /usr/bin/google-chrome && /usr/bin/google-chrome --version
+      - name: Install the web dependencies (playwright-core for the UI test)
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: Run the UI-triggered version update test
+        run: make e2e-ui-updates
+      - name: Upload the logs and screenshots
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-ui-updates
+          path: |
+            .e2e/ui-updates/*.log
+            .e2e/ui-updates/shots/**
+            !.e2e/ui-updates/**/*.token
+            !.e2e/ui-updates/**/*.secret
+            !.e2e/ui-updates/cookies*
+            !.e2e/ui-updates/data/**
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore

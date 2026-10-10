@@ -1,0 +1,1 @@
+.github/workflows/ci.yml:27: R10: job deploy: secrets.GITHUB_TOKEN is not listed in ci/workflow-secrets.txt (ci.yml deploy GITHUB_TOKEN)

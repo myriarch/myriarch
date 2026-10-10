@@ -12,6 +12,7 @@ ci-out
 reports
 .dev
 .e2e
+.vercel
 web/node_modules
 web/coverage
 internal/webui/dist

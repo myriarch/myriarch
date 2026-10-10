@@ -6,10 +6,11 @@
 #  - scripts: executable (except the sourced contrib/enterprise-mirror/ca-env.sh), syntax ok (bash -n)
 #  - tool modules in ci/tools/<tool>: go.mod matches the version in ci/versions.env
 #  - image digests: golang/distroless identical across the Dockerfiles, every FROM and the compose postgres pinned by
-#    digest, MYRCTL_BASE_IMAGE matches myrctl.Dockerfile
+#    digest (the postgres service of ci.yml uses the same digest), MYRCTL_BASE_IMAGE matches myrctl.Dockerfile
 #  - OTELCOL_* pins agree with each other and with deploy/k8s/collector/Dockerfile
 #  - reuse (ci/tools/reuse): requirements.in and requirements.txt pin the version of ci/versions.env, the build
 #    requirements pin poetry-core, and every pinned package carries hashes
+#  - .node-version holds one exact Node.js release of 22 or newer
 #  - goreleaser.yaml references the signing script, which exists
 #  - ci/ and contrib/enterprise-mirror/ script paths mentioned in the Makefile, goreleaser.yaml and the scripts exist
 #    (scripts/ is deliberately not covered here)
@@ -54,6 +55,7 @@ check_tool helm        helm.sh/helm/v4                        HELM_VERSION
 check_tool cosign      github.com/sigstore/cosign/v3          COSIGN_VERSION
 check_tool goreleaser  github.com/goreleaser/goreleaser/v2   GORELEASER_VERSION
 check_tool kind        sigs.k8s.io/kind                       KIND_VERSION
+check_tool actionlint  github.com/rhysd/actionlint            ACTIONLINT_VERSION
 
 # reuse (a Python tool, ci/tools/reuse/): the input files and the hash-pinned requirements agree with REUSE_VERSION
 pins() { # file requirement - the file has a line that starts with the requirement as its first word
@@ -72,6 +74,11 @@ for f in ci/tools/reuse/requirements.txt ci/tools/reuse/build-requirements.txt; 
        END { if (pkg != "" && hashes == 0) missing = 1; exit missing }' "${f}" \
     || bad "${f}: a package without --hash (uv pip compile --generate-hashes)"
 done
+
+# .node-version: one exact release of an LTS line that satisfies the engines of web/ and website/ (22 or newer)
+node_version="$(cat .node-version 2>/dev/null || true)"
+printf '%s' "${node_version}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || bad ".node-version must contain one exact version such as 24.21.0 (got '${node_version}')"
+[ "${node_version%%.*}" -ge 22 ] 2>/dev/null || bad ".node-version (${node_version}) is older than Node.js 22, the floor of web/ and website/"
 
 # digest of the first line of <file> matching <pattern>
 digest_in() { grep -E "$2" "$1" | head -n 1 | sed -n 's/.*@\(sha256:[0-9a-f]\{64\}\).*/\1/p'; }
@@ -98,6 +105,10 @@ for f in deploy/docker/*.Dockerfile; do
   grep -E '^FROM ' "${f}" | grep -Evq '@sha256:[0-9a-f]{64}' && bad "${f}: FROM without digest"
 done
 grep -Eq 'image: postgres:[^[:space:]]+@sha256:[0-9a-f]{64}' deploy/compose/docker-compose.yaml || bad "deploy/compose/docker-compose.yaml: postgres image without digest"
+# the PostgreSQL service of the Go tests in CI uses the digest of the compose file (a multi-architecture index: amd64 and arm64 runners)
+c1="$(digest_in deploy/compose/docker-compose.yaml 'image: postgres:')"
+c2="$(digest_in .github/workflows/ci.yml 'image: postgres:')"
+{ [ -n "${c1}" ] && [ "${c1}" = "${c2}" ]; } || bad ".github/workflows/ci.yml: the postgres service image (${c2:-no digest}) is not the digest of deploy/compose/docker-compose.yaml (${c1:-none})"
 
 # The kind probe (hack/kind): every image pin carries a digest, and the manifests only use @@PLACEHOLDER@@ images (the
 # images are filled in by the scripts, never hard-coded).

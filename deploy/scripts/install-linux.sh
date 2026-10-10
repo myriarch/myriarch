@@ -62,8 +62,8 @@
 #   insecure_required               plain ws/http endpoint or --verify-signatures skip without --insecure
 #   https_required                  non-https download URL (or redirect) without --insecure
 #   file_unreadable                 token file, CA file, trusted root, signing key or verifier is unusable
-#   tool_missing                    a required tool is absent (sha256sum/shasum, curl/wget, tar, install, cmp,
-#                                   systemctl, useradd/adduser)
+#   tool_missing                    a required tool is absent (sha256sum/shasum, curl/wget, tar, gzip, install,
+#                                   cmp, systemctl, useradd/adduser); the message names the tool
 #   sigstore_verifier_missing       no Sigstore verifier (cosign or myriarch-updater verify-bundle)
 #   signature_verifier_missing      neither openssl nor cosign available to verify checksums.txt
 #   privilege_required              not running as root
@@ -434,6 +434,8 @@ check_prereqs() {
     have useradd || have adduser || die tool_missing "useradd/adduser not found"
   fi
   have tar || die tool_missing "tar not found"
+  # GNU tar runs the external gzip for -z; without it the extraction fails and would be reported as a missing binary
+  have gzip || die tool_missing "gzip not found (tar needs it to unpack .tar.gz archives)"
   have install || die tool_missing "install not found"
   have cmp || die tool_missing "cmp not found"
   have curl || { [ "${INSECURE}" = 1 ] && have wget; } || die tool_missing "curl is required (wget cannot restrict redirects to https; it is accepted only with --insecure)"

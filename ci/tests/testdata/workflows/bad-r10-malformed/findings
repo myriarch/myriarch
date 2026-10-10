@@ -1,0 +1,4 @@
+ci/workflow-secrets.txt:3: R10: malformed line 'ci.yml deploy' in ci/workflow-secrets.txt (expected '<workflow file> <job> <NAME>')
+ci/workflow-secrets.txt:4: R10: malformed line 'ci.yml deploy DEPLOY_TOKEN extra' in ci/workflow-secrets.txt (expected '<workflow file> <job> <NAME>')
+ci/workflow-secrets.txt:5: R10: malformed line 'ci.yml deploy 1TOKEN' in ci/workflow-secrets.txt (expected '<workflow file> <job> <NAME>')
+ci/workflow-secrets.txt:6: R10: malformed line '../ci.yml deploy DEPLOY_TOKEN' in ci/workflow-secrets.txt (expected '<workflow file> <job> <NAME>')

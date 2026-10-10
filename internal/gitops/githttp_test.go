@@ -42,7 +42,7 @@ func TestGitHTTPResponsesAreLimited(t *testing.T) {
 func TestGitCloneIsLimitedInSize(t *testing.T) {
 	requireGit(t)
 	work := workRepo(t, "")
-	f := gitFixture(t, "file://"+work, "")
+	f := gitFixture(t, fileURL(work), "")
 	f.cfg.MaxRepoBytes = 2000
 	s := f.build(t)
 	err := s.SyncNow(context.Background(), "startup")
@@ -56,7 +56,7 @@ func TestGitCloneIsLimitedInSize(t *testing.T) {
 	}
 
 	// the same repository is fine with the default limit and is cloned shallow
-	f2 := gitFixture(t, "file://"+work, "")
+	f2 := gitFixture(t, fileURL(work), "")
 	s2 := f2.build(t)
 	require.NoError(t, s2.SyncNow(context.Background(), "startup"))
 	assert.Equal(t, "ok", f2.status(t).State)

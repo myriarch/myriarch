@@ -1,0 +1,99 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Toolchain of the CI jobs: Go from go.mod, optionally Node.js from .node-version with pnpm (corepack), the caches, and the
+# pinned tools of ci/install-tools.sh. Used by every job of .github/workflows (ADR-0032).
+#
+# Policy (checked by ci/check-workflows.py): only GitHub-owned actions, each pinned to a commit SHA. Caches are written by
+# actions/cache only; a cache that a pull request writes is scoped to that pull request and never restored on main.
+name: Set up the toolchain
+description: Go, optionally Node.js with pnpm, and the pinned CI tools
+
+inputs:
+  node:
+    description: "'true' installs Node.js (.node-version), enables pnpm through corepack and caches the pnpm store"
+    required: false
+    default: 'false'
+  tools:
+    description: Space-separated tools for ci/install-tools.sh (for example "shellcheck helm"); empty installs none
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install Go (version of go.mod)
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: go.mod
+        # setup-go's own cache has one key per OS, architecture and go.sum, shared by all jobs: the first job to finish would
+        # save its small cache and every other job would restore an incomplete one. The cache below is per job.
+        cache: false
+
+    - name: Find the Go caches
+      id: gocache
+      shell: bash
+      run: |
+        echo "mod=$(go env GOMODCACHE)" >> "${GITHUB_OUTPUT}"
+        echo "build=$(go env GOCACHE)" >> "${GITHUB_OUTPUT}"
+
+    - name: Cache the Go modules and the build cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ steps.gocache.outputs.mod }}
+          ${{ steps.gocache.outputs.build }}
+        key: go-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', 'ci/tools/*/go.sum', 'website/go.sum') }}
+        restore-keys: |
+          go-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Install Node.js (version of .node-version)
+      if: inputs.node == 'true'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .node-version
+        package-manager-cache: false
+
+    - name: Enable pnpm through corepack
+      if: inputs.node == 'true'
+      shell: bash
+      run: |
+        corepack enable
+        echo "npm_config_store_dir=${RUNNER_TEMP}/pnpm-store" >> "${GITHUB_ENV}"
+
+    - name: Cache the pnpm store
+      if: inputs.node == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/pnpm-store
+        key: pnpm-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('web/pnpm-lock.yaml', 'website/pnpm-lock.yaml') }}
+        restore-keys: |
+          pnpm-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Cache the CI tools
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          .cache/bin
+          .cache/pwsh
+          .cache/reuse
+          .cache/dart-sass
+          .cache/hugo
+          .cache/kubeconform
+        key: tools-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ci/versions.env', 'ci/install-tools.sh', 'ci/tools/**/go.mod', 'ci/tools/**/go.sum', 'ci/tools/reuse/*.txt') }}
+        restore-keys: |
+          tools-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Install the CI tools
+      if: inputs.tools != ''
+      shell: bash
+      env:
+        TOOLS: ${{ inputs.tools }}
+      run: |
+        read -r -a tools <<< "${TOOLS}"
+        ci/install-tools.sh "${tools[@]}"
+
+    - name: Put the CI tools on PATH
+      if: runner.os != 'Windows'
+      shell: bash
+      run: echo "${GITHUB_WORKSPACE}/.cache/bin" >> "${GITHUB_PATH}"

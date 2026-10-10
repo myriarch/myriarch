@@ -5,6 +5,7 @@ package configload
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,29 @@ func writeFile(t *testing.T, name, content string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// absPath turns a slash path such as "/etc/myriarchd/token" into an absolute
+// path of the running platform: the path itself on Unix, with the volume of the
+// temporary directory in front on Windows ("C:/etc/myriarchd/token"; forward
+// slashes are valid there and safe in YAML). The settings that name a file
+// refuse a path without a volume on Windows ("must be an absolute path").
+func absPath(slash string) string {
+	return filepath.VolumeName(os.TempDir()) + slash
+}
+
+// missingFileReason returns the text of the operating system for a file that
+// does not exist, the end of the message "cannot read <file>: <reason>" ("no
+// such file or directory" on Unix, "The system cannot find the file specified."
+// on Windows). file must not exist.
+func missingFileReason(t *testing.T, file string) string {
+	t.Helper()
+	_, err := os.ReadFile(file)
+	var pe *fs.PathError
+	if !errors.Is(err, fs.ErrNotExist) || !errors.As(err, &pe) {
+		t.Fatalf("%s must not exist: %v", file, err)
+	}
+	return pe.Err.Error()
 }
 
 const prodMinimal = `
@@ -119,7 +143,7 @@ server:
   publicUrl: https://${HOST}.example.com
   tls: {terminatedUpstream: true}
 executors: {allowedWebhookHosts: ["*.example.com"]}
-auth: {bootstrapAdmin: {enabled: true, tokenFile: /etc/myriarchd/bootstrap/token}}
+auth: {bootstrapAdmin: {enabled: true, tokenFile: `+absPath("/etc/myriarchd/bootstrap/token")+`}}
 database:
   dsn: postgres://u:${DB_PASS}@db/${DB_NAME:-myriarch}
 gitops:
@@ -622,19 +646,20 @@ func TestWarnings(t *testing.T) {
 }
 
 func TestExecutorSecretRegistryAndOutboundFromYAML(t *testing.T) {
+	secretDir := absPath("/etc/myriarchd/exec")
 	p := writeFile(t, "c.yaml", strings.Replace(prodMinimal, "executors:\n  allowedWebhookHosts: [\"*.example.com\"]\n", "", 1)+`
 outbound:
   allowedCidrs: ["10.20.0.0/16", "192.0.2.7"]
 executors:
   allowedWebhookHosts: ["awx.example.com", "http://legacy.example.com"]
-  secretDir: /etc/myriarchd/exec
+  secretDir: `+secretDir+`
   secretEnvPrefix: ${PREFIX:-MYRIARCH_EXEC_}
   secrets:
     awx-prod:
       env: AWX_PROD_TOKEN
       allowedHosts: ["awx.example.com"]
     deploy-hook:
-      file: /etc/myriarchd/exec/deploy
+      file: `+secretDir+`/deploy
       allowedHosts: ["*.example.com"]
 opamp:
   maxConnectionsPerToken: 500
@@ -647,7 +672,7 @@ opamp:
 	if got := cfg.Executors.Secrets["awx-prod"]; got.Env != "AWX_PROD_TOKEN" || len(got.AllowedHosts) != 1 {
 		t.Errorf("registry: %+v", cfg.Executors.Secrets)
 	}
-	if cfg.Executors.SecretEnvPrefix != "ACME_EXEC_" || cfg.Executors.SecretDir != "/etc/myriarchd/exec" || len(cfg.Outbound.AllowedCIDRs) != 2 {
+	if cfg.Executors.SecretEnvPrefix != "ACME_EXEC_" || cfg.Executors.SecretDir != secretDir || len(cfg.Outbound.AllowedCIDRs) != 2 {
 		t.Errorf("executors/outbound: %+v %+v", cfg.Executors, cfg.Outbound)
 	}
 	if cfg.OpAMP.MaxConnectionsPerToken != 500 || cfg.OpAMP.ConnectRatePerIP != 20 {

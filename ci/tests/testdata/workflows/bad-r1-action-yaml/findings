@@ -1,0 +1,1 @@
+.github/actions/setup/action.yaml:9: R1: uses: actions/setup-go@v5 is not a local path or an actions/* or github/* action pinned to a full commit SHA

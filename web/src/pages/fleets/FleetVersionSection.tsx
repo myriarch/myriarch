@@ -368,7 +368,13 @@ export function FleetVersionSection({ detail }: { detail: FleetDetail }) {
                         </Badge>
                       )}
                       {(frame.versions ?? []).map((v) => (
-                        <Badge key={v} variant="outline" color="gray" className="myr-mono" size="sm">
+                        <Badge
+                          key={v}
+                          variant="outline"
+                          color="gray"
+                          className="myr-mono"
+                          size="sm"
+                        >
                           {v}
                         </Badge>
                       ))}

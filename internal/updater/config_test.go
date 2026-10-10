@@ -46,7 +46,7 @@ func TestParseSpecConfig(t *testing.T) {
 	assert.Equal(t, 120*time.Second, cfg.Update.HealthTimeout.D())
 	assert.True(t, cfg.Update.RequireSignature)
 	assert.Equal(t, DefaultCertificateIdentityRegexp, cfg.Update.CertificateIdentityRegexp)
-	assert.Equal(t, "/var/lib/otelcol/supervisor/persistent_state.yaml", cfg.SupervisorStatePath())
+	assert.Equal(t, filepath.FromSlash("/var/lib/otelcol/supervisor/persistent_state.yaml"), cfg.SupervisorStatePath())
 	assert.Equal(t, 3, cfg.Update.HealthSuccesses)
 	assert.Equal(t, 5*time.Second, cfg.Update.HealthInterval.D())
 }

@@ -6,7 +6,12 @@
 #
 #   scripts/e2e.sh                 smoke run: 32 simulated collectors, all rollout types, HA, (UI/real supervisor if available)
 #   E2E_AGENTS=1000 scripts/e2e.sh load run (1000 collectors + 687 updaters; E2E_PROFILE selects another profile, default e2e)
-#   E2E_REAL=1 scripts/e2e.sh      additionally: REAL opampsupervisor + otelcol-contrib (downloaded once into .e2e/real)
+#   E2E_REAL=1 scripts/e2e.sh      additionally: REAL opampsupervisor + otelcol-contrib of the OTELCOL_VERSION of ci/versions.env,
+#                                  downloaded into .e2e/real/dl (darwin and linux, amd64 and arm64) and verified against the
+#                                  published SHA-256 on every run; a missing prerequisite or a failed check is a FAIL, not a
+#                                  SKIP (E2E_REAL=auto, the default, runs the step only when the binaries are present;
+#                                  E2E_REAL_BASE_URL replaces the GitHub release download URL, file:// works for tests)
+#   E2E_UI=1 scripts/e2e.sh        the UI smoke test is a FAIL instead of a SKIP when playwright-core or a browser is missing
 #   E2E_UI=0 / E2E_HA=0 / E2E_REAL=0   switch single steps off
 #   E2E_KEEP=1                     leave myriarchd/sim running at the end (clean up with scripts/e2e.sh --stop)
 #   NO_BUILD=1                     use the existing bin/ binaries
@@ -423,24 +428,38 @@ check_ge "compare releases" 3 "$(a '/releases/compare?from=0.158.0&to=0.162.0' |
 check_ge "audit log has the actions of the steps above" 8 "$(a '/audit?limit=200' | jq '[.items[].action]|unique|length')"
 
 # ------------------------------------------------------ 7. real supervisor --
+# The collector version comes from ci/versions.env. On darwin and linux (amd64, arm64) both binaries are downloaded from
+# the upstream release (E2E_REAL_BASE_URL) and verified against the published SHA-256 on EVERY run (scripts/lib/real-binaries.sh).
+# E2E_REAL=1 makes an unsupported platform or a failed download or check a FAIL; auto only runs when the binaries exist.
+# shellcheck source=scripts/lib/real-binaries.sh
+. "$ROOT/scripts/lib/real-binaries.sh"
 REAL=${E2E_REAL:-auto}
+REAL_FORCED=0; [ "$REAL" = 1 ] && REAL_FORCED=1
+REAL_V=$(sed -n 's/^OTELCOL_VERSION=//p' "$ROOT/ci/versions.env" | head -n 1)
+REAL_BASE=${E2E_REAL_BASE_URL:-https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download}
+REAL_PLAT=$(real_platform) || REAL_PLAT=""
 if [ "$REAL" = auto ]; then [ -x "$REAL_DIR/opampsupervisor" ] && [ -x "$REAL_DIR/otelcol-contrib" ] && REAL=1 || REAL=0; fi
-if [ "$REAL" = 1 ] && [ "$(uname -s)-$(uname -m)" != "Darwin-arm64" ] && [ ! -x "$REAL_DIR/opampsupervisor" ]; then
-  skip "real supervisor" "automatic download only implemented for darwin/arm64; put opampsupervisor and otelcol-contrib into $REAL_DIR"; REAL=0
-fi
 if [ "$REAL" = 1 ]; then
-  section "7. REAL opampsupervisor + otelcol-contrib (darwin/arm64)"
-  if [ ! -x "$REAL_DIR/opampsupervisor" ] || [ ! -x "$REAL_DIR/otelcol-contrib" ]; then
-    mkdir -p "$REAL_DIR"; V=0.162.0; B=https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download
-    log "downloading otelcol-contrib and opampsupervisor $V (~125 MB) into $REAL_DIR"
-    ( cd "$REAL_DIR" \
-      && curl -fsSLO "$B/v$V/otelcol-contrib_${V}_darwin_arm64.tar.gz" && tar -xzf "otelcol-contrib_${V}_darwin_arm64.tar.gz" otelcol-contrib \
-      && curl -fsSL -o opampsupervisor "$B/cmd%2Fopampsupervisor%2Fv$V/opampsupervisor_${V}_darwin_arm64" && chmod +x opampsupervisor ) \
-      || { fail "download real binaries" "network?"; REAL=0; }
+  section "7. REAL opampsupervisor + otelcol-contrib ${REAL_V} (${REAL_PLAT:-$(uname -s)/$(uname -m)})"
+  mkdir -p "$REAL_DIR"
+  if [ -z "$REAL_V" ]; then
+    fail "real binaries: version" "OTELCOL_VERSION not found in ci/versions.env"; REAL=0
+  elif [ -n "$REAL_PLAT" ]; then
+    if real_prepare "$REAL_DIR" "$REAL_V" "$REAL_BASE"; then
+      pass "real binaries: downloaded and SHA-256 verified" "$REAL_PLAT, otelcol-contrib and opampsupervisor $REAL_V, files in $REAL_DIR/dl"
+    else
+      fail "real binaries: download and SHA-256 verification" "see the [real-binaries] lines above (network? E2E_REAL_BASE_URL?)"; REAL=0
+    fi
+  elif [ "$REAL_FORCED" = 1 ]; then
+    fail "real binaries" "no release assets for $(uname -s)/$(uname -m) (supported: darwin and linux on amd64 and arm64)"; REAL=0
+  elif [ -x "$REAL_DIR/opampsupervisor" ] && [ -x "$REAL_DIR/otelcol-contrib" ]; then
+    log "real binaries: unverified, placed by hand in $REAL_DIR (platform $(uname -s)/$(uname -m) has no release assets)"
+  else
+    skip "real binaries" "no release assets for $(uname -s)/$(uname -m); put opampsupervisor and otelcol-contrib into $REAL_DIR"; REAL=0
   fi
 fi
 if [ "$REAL" = 1 ]; then
-  check_eq "otelcol-contrib version" "otelcol-contrib version 0.162.0" "$("$REAL_DIR/otelcol-contrib" --version)"
+  check_eq "otelcol-contrib version" "otelcol-contrib version $REAL_V" "$("$REAL_DIR/otelcol-contrib" --version)"
   SUP_DIR="$E2E_DIR/supervisor"; rm -rf "$SUP_DIR" /tmp/myriarch-e2e-storage; mkdir -p "$SUP_DIR/storage" /tmp/myriarch-e2e-storage
   cat > "$SUP_DIR/supervisor.yaml" <<EOF
 server:
@@ -491,7 +510,7 @@ EOF
   MAC=$(a '/agents?attr=site.id%3Dmac-01' | jq -r '.items[0].id')
   wait_until 180 "[ \"\$(a /agents/$MAC | jq -r '.configSync + \"/\" + .agent.remoteConfig.status')\" = in_sync/applied ]"
   check_eq "real collector: configSync / remoteConfig" "in_sync/applied" "$(a /agents/$MAC | jq -r '.configSync + "/" + .agent.remoteConfig.status')"
-  check_eq "real collector: version" 0.162.0 "$(a /agents/$MAC | jq -r .agent.version)"
+  check_eq "real collector: version" "$REAL_V" "$(a /agents/$MAC | jq -r .agent.version)"
   check_eq "real collector: healthy" true "$(a /agents/$MAC | jq -r .agent.health.healthy)"
   check_ge "available components (receivers)" 100 "$(a /agents/$MAC/components | jq '.components.receivers|keys|length')"
   check_ge "effective config contains the rendered exporter" 1 "$(a /agents/$MAC/effective-config | jq -r .body | grep -c 'otlp_grpc/gateway')"
@@ -537,7 +556,7 @@ EOF
   check_eq "no active rollout left for the removed dev-mac fleet" 0 "$(a '/rollouts?active=true&fleet=dev-mac&limit=20' | jq '.items|length')"
 else
   section "7. real supervisor"
-  skip "real opampsupervisor + otelcol-contrib" "E2E_REAL=1 downloads them once into $REAL_DIR (darwin/arm64)"
+  skip "real opampsupervisor + otelcol-contrib" "E2E_REAL=1 downloads and verifies them (into $REAL_DIR); E2E_REAL=0 or no binaries and E2E_REAL=auto skip this step"
 fi
 
 # --------------------------------------------------------------------- 8. HA --
@@ -607,14 +626,17 @@ fi
 PW_PATH=${E2E_PLAYWRIGHT_NODE_PATH:-}
 if [ -z "$PW_PATH" ]; then for c in "$E2E_DIR/node_modules" "$ROOT/web/node_modules" "$ROOT/node_modules"; do [ -d "$c/playwright-core" ] && PW_PATH=$c && break; done; fi
 if [ "$UI" = auto ]; then [ -n "$BROWSER_BIN" ] && [ -n "$PW_PATH" ] && UI=1 || UI=0; fi
-if [ "$UI" = 1 ]; then
+if [ "$UI" = 1 ] && { [ -z "$BROWSER_BIN" ] || [ -z "$PW_PATH" ]; }; then
+  section "9. UI smoke test"
+  fail "UI smoke test" "E2E_UI=1 needs playwright-core (cd web && pnpm install, or E2E_PLAYWRIGHT_NODE_PATH) and a Chromium-based browser (E2E_BROWSER)"
+elif [ "$UI" = 1 ]; then
   section "9. UI smoke test (headless browser)"
   if (cd "$ROOT" && NODE_PATH=$PW_PATH BASE=$BASE_A BROWSER=$BROWSER_BIN MIN_AGENTS=$AGENTS node scripts/e2e/ui-smoke.mjs) >"$E2E_DIR/ui-smoke.log" 2>&1; then
     pass "UI smoke test (all pages light+dark, login form, viewer permissions)" "$(grep -c '^ok' "$E2E_DIR/ui-smoke.log") checks, see $E2E_DIR/ui-smoke.log"
   else fail "UI smoke test" "$(tail -5 "$E2E_DIR/ui-smoke.log" | tr '\n' ' ')"; fi
 else
   section "9. UI smoke test"
-  skip "UI smoke test" "needs playwright-core (cd $E2E_DIR && npm i playwright-core, or E2E_PLAYWRIGHT_NODE_PATH) and a Chromium-based browser (E2E_BROWSER)"
+  skip "UI smoke test" "needs playwright-core (cd web && pnpm install, or E2E_PLAYWRIGHT_NODE_PATH) and a Chromium-based browser (E2E_BROWSER)"
 fi
 
 # ------------------------------------------- 9b. agent with a declarative token --

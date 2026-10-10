@@ -919,9 +919,7 @@ export const handlers: HttpHandler[] = [
             (statuses.length === 0 || statuses.includes(t.status)) &&
             (agent === null || t.agentId === agent),
         )
-        .sort(
-          sort === 'activity' ? compareTargetsByActivity : compareTargetsByWave,
-        );
+        .sort(sort === 'activity' ? compareTargetsByActivity : compareTargetsByWave);
       return json(page(items, url));
     }),
   ),
@@ -1157,7 +1155,9 @@ export const handlers: HttpHandler[] = [
           commit: s.latestCommit,
           result: applied ? 'applied' : 'unchanged',
           issues: [],
-          changed: applied ? ['blueprints/office-linux.yaml', 'fleets/linux-hosts.yaml'] : undefined,
+          changed: applied
+            ? ['blueprints/office-linux.yaml', 'fleets/linux-hosts.yaml']
+            : undefined,
         });
         db.gitopsStatus = {
           ...s,

@@ -74,7 +74,7 @@ func gitFixture(t *testing.T, repoURL, subdir string) *fixture {
 func TestGitFileSourceCloneFetchAndForcePush(t *testing.T) {
 	requireGit(t)
 	work := workRepo(t, "")
-	f := gitFixture(t, "file://"+work, "")
+	f := gitFixture(t, fileURL(work), "")
 	s := f.build(t)
 	ctx := context.Background()
 
@@ -85,7 +85,7 @@ func TestGitFileSourceCloneFetchAndForcePush(t *testing.T) {
 	assert.Equal(t, c1, st.AppliedCommit.SHA)
 	assert.Equal(t, "Alice Admin", st.AppliedCommit.Author)
 	assert.Equal(t, "initial import", st.AppliedCommit.Message, "first line only")
-	assert.Equal(t, "file://"+work, st.Source)
+	assert.Equal(t, fileURL(work), st.Source)
 	assert.Equal(t, "main", st.Branch)
 	snap, _ := f.st.GitOps().GetSnapshot(ctx)
 	assert.Equal(t, c1, snap.Commit)
@@ -131,7 +131,7 @@ func TestGitFileSourceCloneFetchAndForcePush(t *testing.T) {
 func TestGitSourceSubdirectoryAndWrongBranch(t *testing.T) {
 	requireGit(t)
 	work := workRepo(t, "gitops")
-	f := gitFixture(t, "file://"+work, "gitops")
+	f := gitFixture(t, fileURL(work), "gitops")
 	s := f.build(t)
 	require.NoError(t, s.SyncNow(context.Background(), "startup"))
 	st := f.status(t)
@@ -140,7 +140,7 @@ func TestGitSourceSubdirectoryAndWrongBranch(t *testing.T) {
 	snap, _ := f.st.GitOps().GetSnapshot(context.Background())
 	assert.Equal(t, "gitops/fleets/datacenter.yaml", snap.Fleets[0].Source.Path, "paths are repository relative")
 
-	f2 := gitFixture(t, "file://"+work, "gitops")
+	f2 := gitFixture(t, fileURL(work), "gitops")
 	f2.cfg.Branch = "nonexistent"
 	s2 := f2.build(t)
 	require.Error(t, s2.SyncNow(context.Background(), "startup"))

@@ -1,0 +1,1 @@
+ci/workflow-secrets.txt:3: R10: stale entry: job deploy of ci.yml does not read secrets.OTHER_TOKEN in an env: of the job or of a step

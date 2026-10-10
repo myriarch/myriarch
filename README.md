@@ -72,7 +72,7 @@ The scope of v0.1.0 is in [ADR-0021](docs/adr/0021-publication-gates-and-v0-1-0-
 This runs the server with an embedded PostgreSQL, the example GitOps repository and 1,000 simulated collectors on your
 machine. It needs no container runtime.
 
-Prerequisites: Go (the version required by `go.mod`), Node.js 20.19 or newer, pnpm 10, `make`, `curl`, `jq` and
+Prerequisites: Go (the version required by `go.mod`), Node.js (the version in `.node-version`, at least 22.12), pnpm 10, `make`, `curl`, `jq` and
 `python3`. Git must be installed.
 
 ```bash

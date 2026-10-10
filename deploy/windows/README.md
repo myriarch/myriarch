@@ -120,7 +120,7 @@ is at the top of that script.
 | `insecure_required` | plain `ws://`/`http://` endpoint or `-VerifySignatures skip` without `-Insecure` |
 | `https_required` | non-https download URL or redirect without `-Insecure` |
 | `file_unreadable` | token file, CA file, trusted root, signing key or verifier is not usable |
-| `tool_missing` | a required tool is absent (`tar.exe`) |
+| `tool_missing` | a required tool is absent (`tar.exe`); the message names the tool |
 | `sigstore_verifier_missing` | no Sigstore verifier (`-Verifier`, `cosign.exe`, or the SHA-256 checked updater) |
 | `signature_verifier_missing` | ECDSA verification is not possible on this system, or `Get-AuthenticodeSignature` is unavailable |
 | `privilege_required` | not running as Administrator |

@@ -97,11 +97,11 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # Node 24 is the version that still bundles corepack (Node 25 and later do not).
+      # The version comes from .node-version: Node 24, which still bundles corepack (Node 25 and later do not).
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.21.0
+          node-version-file: .node-version
           package-manager-cache: false
 
       - name: Enable pnpm through corepack
@@ -153,12 +153,14 @@ jobs:
       TARGET: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
       VERCEL_TELEMETRY_DISABLED: '1'
     steps:
-      # Only the manifest and the lockfile are needed to install the Vercel CLI; .git stays, so that the CLI can send commit metadata.
+      # Only the manifest, the lockfile and .node-version are needed to install the Vercel CLI; .git stays, so that the CLI can send
+      # commit metadata.
       - name: Check out the Node manifest and lockfile
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: |
+            .node-version
             website/package.json
             website/pnpm-lock.yaml
           sparse-checkout-cone-mode: false
@@ -166,7 +168,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.21.0
+          node-version-file: .node-version
           package-manager-cache: false
 
       - name: Install the pinned Vercel CLI

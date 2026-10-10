@@ -104,15 +104,21 @@ func TestCLIStatusWithConfigPrintsHostState(t *testing.T) {
 }
 
 func TestCLIContainerRequiresValidConfig(t *testing.T) {
+	// Windows has no container mode: the command refuses before it looks at the configuration.
+	const containerUnsupported = "only supported on Linux and macOS"
 	_, err := runCLI(t, "container")
-	require.ErrorContains(t, err, "--config is required")
+	if runtime.GOOS == "windows" {
+		require.ErrorContains(t, err, containerUnsupported)
+	} else {
+		require.ErrorContains(t, err, "--config is required")
+	}
 	// a valid service-mode config without the container section is refused by the container command
 	cfgPath := filepath.Join(t.TempDir(), "updater.yaml")
 	require.NoError(t, os.WriteFile(cfgPath, []byte("server: {endpoint: 'wss://x/v1/opamp', token: t}\n"), 0o600))
 	_, err = runCLI(t, "container", "--config", cfgPath)
 	require.Error(t, err)
 	if runtime.GOOS == "windows" {
-		assert.Contains(t, err.Error(), "only supported on Linux and macOS")
+		assert.Contains(t, err.Error(), containerUnsupported)
 		return
 	}
 	assert.Contains(t, err.Error(), "container.supervisorCommand is required")

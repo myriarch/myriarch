@@ -27,12 +27,13 @@ spec() {
     helm)        echo "helm.sh/helm/v4/cmd/helm HELM_VERSION" ;;
     cosign)      echo "github.com/sigstore/cosign/v3/cmd/cosign COSIGN_VERSION" ;;
     kind)        echo "sigs.k8s.io/kind KIND_VERSION" ;;
+    actionlint)  echo "github.com/rhysd/actionlint/cmd/actionlint ACTIONLINT_VERSION" ;;
     goreleaser)  echo "github.com/goreleaser/goreleaser/v2 GORELEASER_VERSION" ;;
     *)           return 1 ;;
   esac
 }
 
-tools=("$@"); [ "$#" -gt 0 ] || tools=(crane gotestsum govulncheck go-licenses gitleaks yq kubeconform kustomize helm cosign goreleaser kind)
+tools=("$@"); [ "$#" -gt 0 ] || tools=(crane gotestsum govulncheck go-licenses gitleaks yq kubeconform kustomize helm cosign goreleaser kind actionlint)
 for t in "${tools[@]}"; do
   sp="$(spec "${t}")" || die "unknown tool: ${t}"
   mod="${sp%% *}"; var="${sp##* }"
