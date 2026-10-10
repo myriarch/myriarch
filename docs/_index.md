@@ -47,8 +47,10 @@ contracts in [design/](design/README.md) pin down protocols and behavior that co
 
 [Operations](operations/_index.md) is for people who run myriarch: [authentication](operations/authentication.md) (single
 sign-on, the bootstrap administrator, API tokens), the [production checklist](operations/production-checklist.md) with the
-security-relevant settings, and [troubleshooting](operations/troubleshooting.md). Guides for installation with Helm, upgrades,
-backup, high availability, air-gapped use and monitoring are being written.
+security-relevant settings, and [troubleshooting](operations/troubleshooting.md).
+
+A guide for the installation with Helm is being written; guides for upgrades, backup and restore, high availability,
+monitoring, air-gapped installation and an artifact mirror are planned for v0.2.0.
 
 The [security section](security/_index.md) describes the controls of the system: trust boundaries, agent and user
 authentication, artifact verification, outbound connections and network policy. To report a vulnerability, read

@@ -27,7 +27,7 @@ The scope of the first release is fixed by [ADR-0021](docs/adr/0021-publication-
 
 - A Helm chart that installs with default values, Docker Compose files, installation scripts for Linux and Windows hosts.
 - CI and signed multi-architecture images (`linux/amd64` and `linux/arm64`) of the server and the updater, built from the release binaries and running as user 65532 ([ADR-0023](docs/adr/0023-keyless-release-signing.md), [ADR-0024](docs/adr/0024-container-registry-and-image-set.md)).
-- English README and quickstart, the community files, and the English core documentation.
+- English README and quickstart, the community files, and the English core documentation, including tutorials for a first fleet and rollout and for Docker Compose, a guide for the installation with Helm, and generated references for the command line, the REST API, the server configuration, the environment variables and the metrics.
 
 **Not in v0.1.0:** the signed OCI chart, the kind quickstart and the collector chart (see v0.2.0), a published collector image, a separate image of `myrctl` (the binary is in the release archives and in the server image), the `gitops-pr` executor, and the MCP server.
 
@@ -54,7 +54,7 @@ The scope of the first release is fixed by [ADR-0021](docs/adr/0021-publication-
 
 ### Documentation
 
-- A reference for the server configuration, and a rendered API reference generated from `api/openapi.yaml`.
+- Operations guides: upgrades, backup and restore, high availability, monitoring, air-gapped installation and an artifact mirror.
 
 ## Later
 

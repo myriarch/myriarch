@@ -926,17 +926,18 @@ the page it will replace:
 
 ```yaml
 ---
-title: "Install with Helm"
-weight: 10
-description: "Installing the chart is documented soon."
+title: "Upgrade myriarch"
+weight: 50
+description: "Upgrade the server, the database schema and the updaters without downtime."
 params:
   placeholder:
     tracking: "operations-manual"
-    replaces: "docs/operations/install-helm.md"
+    replaces: "docs/operations/upgrade.md"
+    planned: "v0.2.0"
 ---
 ```
 
-The body is a single call of the `placeholder` shortcode (copy an existing placeholder page), which renders the notice and links to the closest existing pages. The file is `website/content/docs/operations/install-helm.md`. The tracking value is never rendered; it is a lowercase topic slug (`operations-manual`) or a GitHub issue reference, which must be quoted (`"#123"`; an unquoted `#` starts a YAML comment). An optional `planned: "v0.2.0"` under `placeholder` makes the notice say
+The body is a single call of the `placeholder` shortcode (copy an existing placeholder page), which renders the notice and links to the closest existing pages. The file is `website/content/docs/operations/upgrade.md`. The tracking value is never rendered; it is a lowercase topic slug (`operations-manual`) or a GitHub issue reference, which must be quoted (`"#123"`; an unquoted `#` starts a YAML comment). An optional `planned: "v0.2.0"` under `placeholder` makes the notice say
 that the page is planned for that release; without it the notice makes no promise. When the real page is
 added to `docs/`, the placeholder must be deleted in the same change: `website/scripts/check-placeholders.py` fails otherwise,
 so two pages for one URL cannot exist.

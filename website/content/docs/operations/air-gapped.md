@@ -6,6 +6,7 @@ params:
   placeholder:
     tracking: "operations-manual"
     replaces: "docs/operations/air-gapped.md"
+    planned: "v0.2.0"
 ---
 
 {{< placeholder >}}

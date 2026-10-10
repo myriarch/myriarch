@@ -12,7 +12,8 @@ which repository file it replaces and under which topic or issue the page is tra
     params:
       placeholder:
         tracking: "operations-manual"
-        replaces: "docs/operations/install-helm.md"
+        replaces: "docs/operations/upgrade.md"
+        planned: "v0.2.0"
 
 The author of the real page adds the file named in `replaces`; the placeholder must go in the same change, because two pages for one
 URL path would duplicate the content. The check fails when

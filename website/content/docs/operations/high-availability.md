@@ -6,6 +6,7 @@ params:
   placeholder:
     tracking: "operations-manual"
     replaces: "docs/operations/high-availability.md"
+    planned: "v0.2.0"
 ---
 
 {{< placeholder >}}
