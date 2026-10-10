@@ -31,9 +31,8 @@ Node.js 22 or newer because of markdownlint-cli2 (`engines` in `package.json`; t
 
 ```text
 go.mod, go.sum              the pin of the Docsy module (github.com/docsy/docsy/theme)
-package.json, pnpm-lock.yaml  Bootstrap, Font Awesome Free, lunr, Mermaid (shipped) and markdownlint-cli2; exact versions
+package.json, pnpm-lock.yaml  Bootstrap, Font Awesome Free, lunr, Mermaid (shipped), markdownlint-cli2 and the Vercel CLI (deployment); exact versions
 config/_default/            hugo.yaml (site), module.yaml (mounts), params.yaml, menus.yaml
-config/preview/hugo.yaml    the environment "preview"
 content/                    pages that exist only on the website, content adapters (_content.gotmpl)
 data/repo_pages.yaml        repository files that adapters render (the root files)
 data/third_party.yaml       the notices of /legal/third-party/
