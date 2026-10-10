@@ -300,3 +300,4 @@ server was killed with `kill -9`, see [Local development](local-dev.md#stop-and-
 - Turn your directory into a real repository with the template described in
   [gitops-template/README.md](../../gitops-template/README.md).
 - Connect a real host: [Connect a host](../tasks/connect-a-host.md).
+- Run the whole system in containers on one machine: [Docker Compose](docker-compose.md).

@@ -142,7 +142,8 @@ working).
 The dev compose file (`compose/docker-compose.yaml`) starts `myriarchd dev --allow-nonlocal` in the container (ports bound
 to 127.0.0.1 only); `myriarchd dev` without this flag listens on loopback only and refuses non-loopback setups. The
 quickstart file (`compose/quickstart.yaml`) does the same with the release images (no repository checkout, read-only root
-file system, data directory on a tmpfs below `/tmp`); both files are for evaluation and development only. The image
+file system, data directory on a tmpfs below `/tmp`) and is the file of the
+[Docker Compose tutorial](../docs/getting-started/docker-compose.md); both files are for evaluation and development only. The image
 variants and the layout of the release image are described in `scripts/build-image-crane.sh`.
 
 ## Collector in Kubernetes
