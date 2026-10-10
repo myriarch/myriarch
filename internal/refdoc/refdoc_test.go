@@ -26,6 +26,7 @@ import (
 	"github.com/myriarch/myriarch/internal/config"
 	"github.com/myriarch/myriarch/internal/configload"
 	"github.com/myriarch/myriarch/internal/docgen"
+	"github.com/myriarch/myriarch/internal/netguard"
 )
 
 // updating reports whether the generated files are rewritten instead of compared (make docs-gen).
@@ -337,11 +338,20 @@ func TestEveryEnvironmentReadIsDocumented(t *testing.T) {
 	for name, places := range found {
 		assert.True(t, documented[name], "the environment variable %s (%s) is not documented: add it to envReads in internal/refdoc/env.go", name, strings.Join(places, ", "))
 	}
-	// the registry names only variables that exist: a stale entry is as wrong as a missing one
+	// the registry names only variables that exist: a stale entry is as wrong as a missing one. The scan sees the literal reads
+	// and the brand constants; the proxy variables are read through netguard.ProxyEnvVars and the others by the standard library.
+	known := map[string]bool{"NO_PROXY": true, "no_proxy": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true}
+	for _, n := range netguard.ProxyEnvVars() {
+		known[n] = true
+	}
 	for _, r := range envReads {
 		assert.NotEmpty(t, r.Names)
 		assert.NotEmpty(t, r.ReadBy)
 		assert.NotEmpty(t, r.Effect)
+		for _, n := range r.Names {
+			_, scanned := found[n]
+			assert.True(t, scanned || known[n], "envReads documents %s, which no production code reads: remove the entry from internal/refdoc/env.go", n)
+		}
 	}
 }
 

@@ -243,7 +243,7 @@ type AuthConfig struct {
 	// APITokenMaxTTL is the maximum lifetime of API tokens (default 90 days): a token created without
 	// expiresAt gets it, a longer expiresAt is refused, and an older token stops working. 0 means unlimited
 	// (production logs a warning). It is the only way a removal at the identity provider reaches API tokens
-	// besides disabling the user in myriarch.
+	// besides disabling the user in Myriarch.
 	APITokenMaxTTL time.Duration `yaml:"apiTokenMaxTtl"`
 	// CookieSecure forces the Secure cookie flag (default true; dev false). With it the session cookie is
 	// named __Host-myriarch_session.

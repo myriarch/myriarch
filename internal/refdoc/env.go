@@ -42,14 +42,14 @@ var envReads = []EnvRead{
 		Effect: "The enrollment token of the simulated collectors when `--token` is not given. Prefer it to the flag: arguments are visible in process listings.",
 	},
 	{
-		Names:  append(append([]string{}, netguard.ProxyEnvVars...), "NO_PROXY", "no_proxy"),
-		ReadBy: "`" + brand.ServerBinary + "` (every outbound connection), `" + brand.UpdaterBinary + "` and `" + brand.SimBinary + "` (package downloads)",
+		Names:  append(netguard.ProxyEnvVars(), "NO_PROXY", "no_proxy"),
+		ReadBy: "`" + brand.ServerBinary + "` (every outbound connection except artifact downloads while `artifacts.proxyUrl` is set), `" + brand.UpdaterBinary + "` and `" + brand.SimBinary + "` (package downloads)",
 		Effect: "Forward proxy for outbound HTTP and HTTPS connections, as the Go standard library reads it (`NO_PROXY` lists the hosts that bypass the proxy). `" + brand.ServerBinary + "` exempts the host and port of the proxy from the address check (`outbound.allowedCidrs`). While a proxy is in use, `" + brand.ServerBinary + "` still refuses a destination that is given as an address in a denied range, and `localhost`; other host names are left to the egress policy of the proxy. `ALL_PROXY` is not used.",
 	},
 	{
 		Names:  []string{"SSL_CERT_FILE", "SSL_CERT_DIR"},
-		ReadBy: "`" + brand.ServerBinary + "`, `" + brand.UpdaterBinary + "` and `" + brand.SimBinary + "` (Go standard library, on Linux and other Unix systems except macOS)",
-		Effect: "The CA bundle file and the CA directories that replace the default locations of the system trust store. The binaries carry an embedded copy of the Mozilla roots that Go uses only when the system provides no roots at all. `outbound.caFile` adds CA certificates on top of whichever roots are in use.",
+		ReadBy: "`" + brand.ServerBinary + "`, `" + brand.UpdaterBinary + "`, `" + brand.SimBinary + "` and `" + brand.CLIBinary + "` (Go standard library, on Linux and other Unix systems except macOS)",
+		Effect: "The CA bundle file and the CA directories that replace the default locations of the system trust store. `" + brand.ServerBinary + "`, `" + brand.SimBinary + "` and `" + brand.CLIBinary + "` carry an embedded copy of the Mozilla roots that Go uses only when the system provides no roots at all; `" + brand.UpdaterBinary + "` relies on the system trust store only, so on a host without CA certificates its TLS connections fail. `outbound.caFile` adds CA certificates on top of whichever roots are in use, and applies to `" + brand.ServerBinary + "` only.",
 	},
 	{
 		Names:  []string{"PGTEST_CACHE_DIR"},
@@ -167,7 +167,7 @@ func RenderEnvironment(overrides []configload.EnvOverride, templateVars []Templa
 	sorted := append([]configload.EnvOverride(nil), overrides...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 	b.WriteString("## Configuration overrides\n\n")
-	b.WriteString("Every scalar setting of the [server configuration](configuration.md) can be overridden with an environment variable. The name is `" + brand.EnvPrefix + "` followed by the YAML path in upper case, joined with `_`. A camelCase key is not split: `server.publicUrl` becomes `" + brand.EnvPrefix + "SERVER_PUBLICURL`.\n\n")
+	b.WriteString("Every setting of the [server configuration](configuration.md) except lists of objects and maps can be overridden with an environment variable. The name is `" + brand.EnvPrefix + "` followed by the YAML path in upper case, joined with `_`. A camelCase key is not split: `server.publicUrl` becomes `" + brand.EnvPrefix + "SERVER_PUBLICURL`.\n\n")
 	b.WriteString("- A list is given as comma separated values, for example `" + brand.EnvPrefix + "AUTH_OIDC_SCOPES=openid,profile,email`.\n")
 	b.WriteString("- A duration uses Go syntax such as `30s` or `5m`. A plain integer is rejected.\n")
 	b.WriteString("- An empty value is ignored for a boolean, a number and a duration. For a string it sets the empty string.\n")
