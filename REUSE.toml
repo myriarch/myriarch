@@ -29,6 +29,7 @@ path = [
   "**/.helmignore",
   "**/.prettierignore",
   ".editorconfig",
+  ".node-version",
   ".github/CODEOWNERS",
   "**/*.env",
   "**/requirements*.txt",
