@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Myriarch REST API
-  version: 1.0.0-alpha.1
+  version: 0.1.0-rc.1
   summary: Management API of myriarchd (OpAMP based OpenTelemetry Collector fleet management)
   description: |
     REST API used by the myriarch web UI, myrctl and automation.
