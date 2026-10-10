@@ -42,17 +42,17 @@ docker compose -f quickstart.yaml up -d
 docker compose -f quickstart.yaml logs -f myriarchd
 ```
 
-The file is self-contained. Its default image tag is the version of the release it belongs to (`ghcr.io/myriarch/myriarch:0.1.0`
-in the file of `v0.1.0`). For a release candidate use its tag in the URL, for example `v0.1.0-rc.1`, and name the image
-of the candidate with `QUICKSTART_IMAGE`:
+The file is self-contained. Its default image tag is the version of the release it belongs to, so the file of every tag,
+release candidates included, starts the image of that tag (`ghcr.io/myriarch/myriarch:0.1.0` in the file of `v0.1.0`; use
+`v0.1.0-rc.1` in the URL for a release candidate). `QUICKSTART_IMAGE` selects any other image, for example one that you
+pinned by digest (`ghcr.io/myriarch/myriarch@sha256:...`) or copied to your own registry:
 
 ```bash
-QUICKSTART_IMAGE=ghcr.io/myriarch/myriarch:0.1.0-rc.1 docker compose -f quickstart.yaml up -d
+QUICKSTART_IMAGE=ghcr.io/myriarch/myriarch@sha256:<digest> docker compose -f quickstart.yaml up -d
 ```
 
-`QUICKSTART_IMAGE` selects any other image too, for example one that you pinned by digest
-(`ghcr.io/myriarch/myriarch@sha256:...`) or copied to your own registry. The release notes show how to verify the
-signatures of the images before you run them.
+[Verify releases](../security/verify-releases.md) explains how to check the files of a release. Verifying the container
+images will be documented together with the release workflow.
 
 The log of `myriarchd` shows the `DEV MODE` warning and `http server listening` once the database is ready. Open
 <http://localhost:8080> and sign in as `admin` with the password `admin`. After a short ramp-up the agents of the fleets
@@ -79,8 +79,8 @@ docker compose -f deploy/compose/docker-compose.yaml --profile sim up           
 ```
 
 This development file mounts the example GitOps repository from the checkout and reads recorded release data from
-`internal/release/testdata/fixtures`, so it needs no network access at runtime. It is the same system: the UI is on
-<http://localhost:8080> with the same logins. See [`deploy/README.md`](../../deploy/README.md) for the files under `deploy/`.
+`internal/release/testdata/fixtures`, so the release tracker needs no network access at runtime. It is the same system:
+the UI is on <http://localhost:8080> with the same logins. See [`deploy/README.md`](../../deploy/README.md) for the files under `deploy/`.
 
 ## Look around
 
@@ -131,8 +131,10 @@ QUICKSTART_GITOPS_DIR=/gitops docker compose -f quickstart.yaml -f gitops.yaml u
 The server re-reads the directory every 10 seconds, so an edit in `./gitops` reaches the system without a restart; a change
 of a blueprint or a fleet starts a configuration rollout (see [Roll out a configuration change](../tasks/roll-out-a-config-change.md)).
 The files must be readable by the non-root user of the container: keep them world-readable (mode `0644` for files, `0755`
-for directories). The example repository has policies with night-time maintenance windows. For a change that you want to
-watch within seconds, point the fleets at the policy `config-canary` as described in
+for directories). In the example repository all three fleets use the configuration policy `config-canary`, which has no
+maintenance windows: a configuration change rolls out at once, and the wave `rest` waits for your approval. Version
+rollouts use the policy `canary-then-all` with night-time windows; for a version rollout that you want to watch within
+seconds, point `versionPolicy` of your copy at `config-canary` as described in
 [`examples/quickstart/README.md`](../../examples/quickstart/README.md). `myrctl validate` checks the directory before the
 server does ([Validate a GitOps repository](../tasks/validate-a-gitops-repository.md)).
 

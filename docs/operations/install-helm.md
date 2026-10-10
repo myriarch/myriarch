@@ -40,8 +40,10 @@ The images `ghcr.io/myriarch/myriarch` (the server) and `ghcr.io/myriarch/myriar
 on.** Pin the image by digest in production (`image.digest`, see below).
 
 Before the first release, or to run an unreleased commit, build the release variant of the image and push it to your own
-registry. The script needs no container runtime. It builds the binaries, packs them into a `FROM scratch` image and pushes it
-with `crane`; the work tree must be clean (`ALLOW_DIRTY=1` overrides this for experiments):
+registry. The script needs no container runtime, but it needs the build toolchain of the repository (Go, Node.js and pnpm,
+see [Local development](../getting-started/local-dev.md#prerequisites); the script builds the web UI when it is missing)
+and `python3`. It builds the binaries, packs them into a `FROM scratch` image and pushes it with `crane`; the work tree
+must be clean (`ALLOW_DIRTY=1` overrides this for experiments):
 
 ```bash
 make tools TOOLS=crane                                         # installs crane into .cache/bin
@@ -54,17 +56,22 @@ The last command prints the `sha256:...` digest of the pushed image. Use it in t
 `--set image.repository=registry.example.com/myriarch/myriarch --set image.digest=sha256:...`. The image is built for
 `linux/amd64`; `IMAGE_PLATFORM=linux/arm64` builds an arm64 image with a tag that ends in `-arm64`. The release variant has
 no embedded PostgreSQL and no test fixtures; `IMAGE_VARIANT=release scripts/build-image-crane.sh layout` lists its files.
-`scripts/build-image-crane.sh` documents all variables.
+`scripts/build-image-crane.sh` documents all variables. Output line names and platform handling can change with the
+multi-architecture image work before the first release; read the output of the script and its header rather than relying
+on this page. The image declares the user 1001, while the chart runs the pod as user 65532 (`podSecurityContext.runAsUser`);
+this works because the image writes nothing outside of `/tmp` and all its files are world-readable.
 
 ## Install with the minimal values
 
 The chart installs with its defaults once two things exist: a Secret with the database connection string and the
-external URL of the server. Create the namespace and the Secret. Write the connection string into a file first, so that
-it does not appear in your shell history:
+external URL of the server. Create the namespace and the Secret. The commands read the connection string without echo,
+so that it does not appear in your shell history or on the screen, and write it to a file that only you can read. Paste
+the string at the prompt (for example `postgres://myriarch:<password>@pg.example.com:5432/myriarch?sslmode=verify-full`)
+and press Enter:
 
 ```bash
 kubectl create namespace myriarch
-printf '%s' 'postgres://myriarch:<password>@pg.example.com:5432/myriarch?sslmode=verify-full' > database-dsn
+(umask 077; read -rs DSN; printf '%s' "$DSN" > database-dsn)
 kubectl -n myriarch create secret generic myriarch-secrets --from-file=database-dsn=database-dsn
 rm database-dsn
 ```
@@ -114,10 +121,11 @@ break-glass account use a bcrypt password hash in your own Secret (`bootstrapAdm
 Git is the source of truth for blueprints, fleets and rollout policies. Start with an empty repository on your Git server
 and fill it from the template, as described in [`gitops-template/README.md`](../../gitops-template/README.md). Create a
 read-only access token for the repository and add it to the Secret under the key `git-token`. The patch keeps the
-existing keys, and the token goes through a temporary file instead of a command line argument:
+existing keys. The token is read without echo and goes through a temporary file that only you can read, instead of a
+command line argument or your shell history:
 
 ```bash
-printf '{"stringData":{"git-token":"%s"}}' '<token>' > git-token-patch.json
+(umask 077; read -rs TOKEN; printf '{"stringData":{"git-token":"%s"}}' "$TOKEN" > git-token-patch.json)
 kubectl -n myriarch patch secret myriarch-secrets --type merge --patch-file git-token-patch.json
 rm git-token-patch.json
 ```
@@ -151,9 +159,10 @@ you want to check a repository before it reaches the server, use `myrctl validat
 
 Collectors and users reach the server through the Gateway. The chart creates the `HTTPRoute`, not the Gateway. Ingress
 controllers and OpenShift work too: the overlays in `deploy/helm/myriarch/examples/` (for example
-[`ingress-nginx.yaml`](../../deploy/helm/myriarch/examples/ingress-nginx.yaml); there are also `ingress-f5-nginx.yaml`,
-`ingress-haproxy.yaml`, `ingress-traefik.yaml` and `openshift.yaml` with a Route) replace the `httpRoute` block. In all
-cases the chart insists on three settings, because the server must trust the forwarded headers of the proxy only:
+[`ingress-traefik.yaml`](../../deploy/helm/myriarch/examples/ingress-traefik.yaml); there are also
+`ingress-haproxy.yaml`, `ingress-f5-nginx.yaml` and `openshift.yaml` with a Route, and `ingress-nginx.yaml` as a legacy
+example, because ingress-nginx is no longer maintained) replace the `httpRoute` block. By default the chart requires
+three settings, because the server must trust the forwarded headers of the proxy only:
 
 - `config.server.trustedProxies`: the addresses the server sees the connections from, that is the pods of the Gateway or
   ingress controller (not the address of the load balancer);
@@ -161,7 +170,9 @@ cases the chart insists on three settings, because the server must trust the for
 - `networkPolicy.ingress.allowSameNamespace: false`, because any other pod of the namespace could forge the forwarded
   headers otherwise.
 
-Rendering fails with a message that names the value if one of them is missing. The agents then connect to
+Rendering fails with a message that names the value if one of them is missing. Two exceptions exist: `httpRoute` and
+`ingress` accept an empty `trustedProxies` only with `allowWithoutTrustedProxies: true` (the client address is then not
+evaluated), and the OpenShift Route adds the namespace of the router to the NetworkPolicy by itself. The agents then connect to
 `wss://fleet.example.com/v1/opamp`. The complete values file of this guide, with the sections from above, the route and
 a declared enrollment token (next section):
 
@@ -263,16 +274,21 @@ example with OIDC, an artifact mirror and a gateway collector is in
 Upgrade from the checkout of a newer tag, with the same values file; read the changelog of the release first:
 
 ```bash
-git -C myriarch fetch --depth 1 origin tag v0.1.1
-git -C myriarch checkout v0.1.1
+git -C myriarch fetch --depth 1 origin tag <newer tag>
+git -C myriarch checkout <newer tag>
 helm upgrade myriarch ./myriarch/deploy/helm/myriarch -n myriarch -f myriarch-values.yaml
 ```
 
-The server applies new database migrations at its start. If you ever run a build from before migration `00003` (user
-identity from provider, issuer and subject), scale to one replica for that upgrade (`--set replicaCount=1`), upgrade, and
-scale up again: old replicas can no longer store OIDC users once the migration has run. An upgrade guide is planned for v0.2.0.
+The server applies new database migrations at its start. An upgrade guide is planned for v0.2.0.
 
 `helm uninstall myriarch -n myriarch` removes what the chart created, including the generated Secrets (the bootstrap
-token and the declared enrollment tokens: collectors that use them need new tokens after a reinstall). It keeps the Secret
-`myriarch-secrets`, the namespace and every external Secret you referenced with `existingSecret`, and the database with all
-its data. Delete the database yourself if you want a fresh start.
+token and the declared enrollment tokens). It keeps the Secret `myriarch-secrets`, the namespace and every external
+Secret you referenced with `existingSecret`, and the database with all its data. Delete the database yourself if you want
+a fresh start.
+
+An uninstall does **not** revoke enrollment tokens. The token records live in the database, and the server never revokes a
+declared token automatically: the old token keeps working for as long as the database exists and nobody revokes it. A
+reinstall generates a new Secret with a new token value, and the server logs a warning for the old token that is no
+longer configured. Do not treat a reinstall as a token rotation. To retire the old token, revoke it in the UI (*Settings*,
+tab *Enrollment tokens*) or with `DELETE /api/v1/enrollment-tokens/{id}`; see
+[Authentication](authentication.md#63-rotation) for the rotation without a gap.

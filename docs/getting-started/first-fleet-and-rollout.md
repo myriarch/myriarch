@@ -6,8 +6,7 @@ description: "A guided first session: create a fleet in a GitOps repository, enr
 
 In this tutorial you write your own small GitOps repository with one fleet and one rollout policy, enroll ten simulated
 collectors with an enrollment token, and roll out a configuration change in two waves with an approval in between. You
-need no container runtime and no external service. Every step was run exactly as written, and the results below are what
-the system showed (the exact seconds vary).
+need no container runtime and no external service. The results below are what the system shows (the exact seconds vary).
 
 What you build:
 
@@ -166,8 +165,8 @@ either in the UI (*Settings*, tab *Enrollment tokens*, button *Create token*; th
 api -X POST -d '{"name":"lab","labels":{"environment":"lab"}}' localhost:8080/api/v1/enrollment-tokens | jq -r .secret
 ```
 
-The command prints the secret, which starts with `myre_`. It is shown only at creation, so copy it now. Dev mode does not *require* a token, but a token that an agent presents is validated, and
-its labels are bound to the agent. That is what puts the simulated collectors into your fleet. In a real installation the
+The command prints the secret, which starts with `myre_`. It is shown only at creation, so copy it now. Dev mode does
+not *require* a token, but a token that an agent presents is validated, and its labels are bound to the agent. That is what puts the simulated collectors into your fleet. In a real installation the
 server requires a token (see [Connect a host](../tasks/connect-a-host.md)).
 
 ## Connect ten simulated collectors
@@ -269,8 +268,8 @@ api localhost:8080/api/v1/rollouts/$R | jq '{status, statusReason, counts}'
 api 'localhost:8080/api/v1/agents?kind=collector&limit=20' | jq '[.items[].configSync] | group_by(.) | map({(.[0]): length}) | add'
 ```
 
-The first command shows the final status and `"succeeded": 10` in the counts. The second shows `{"in_sync": 10}`: all 10 agents
-are in sync again, now with `limit_percentage: 70`. This is the principle of Myriarch in small: Git holds
+The first command shows the final status and `"succeeded": 10` in the counts. The second shows `{"in_sync": 10}`: all
+10 agents are in sync again, now with `limit_percentage: 70`. This is the principle of Myriarch in small: Git holds
 the desired state, the policy defines how a change travels, and a person decides at the point that the policy marks.
 Rerun `bin/myrctl render` to see the new value in the rendered configuration of the sample agent.
 
@@ -292,8 +291,8 @@ Stop the simulator and the server with `Ctrl+C` in their terminals, then delete 
 rm -rf .dev/first-fleet-data
 ```
 
-The directories `.dev/first-fleet` and the file `.dev/first-fleet-profile.yaml` are yours to keep as a starting point. If the
-server was killed with `kill -9`, see [Local development](local-dev.md#stop-and-reset) for the leftover PostgreSQL.
+The directories `.dev/first-fleet` and the file `.dev/first-fleet-profile.yaml` are yours to keep as a starting point.
+If the server was killed with `kill -9`, see [Local development](local-dev.md#stop-and-reset) for the leftover PostgreSQL.
 
 ## Next steps
 
