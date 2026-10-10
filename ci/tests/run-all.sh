@@ -8,7 +8,8 @@
 #                      scripts/check-docs.py), image-crane-test.sh (the crane image build scripts),
 #                      helm-messages-test.sh (value-path error messages of the Helm chart), license-headers-test.sh (SPDX
 #                      header tool scripts/license-headers.py), third-party-notices-test.sh (THIRD_PARTY_NOTICES generator),
-#                      website-test.sh (unit tests of the website checks in website/scripts, ci/website.sh arguments)
+#                      website-test.sh (unit tests of the website checks in website/scripts, ci/website.sh arguments),
+#                      check-workflows-test.sh (workflow policy check ci/check-workflows.py)
 #   installers         installer-verify.sh (signature verification in install-linux.sh/.ps1), verify-testenv-test.sh,
 #                      release-guard-test.sh (tag-on-release-branch guard of ci/lib.sh)
 #   enterprise-mirror  contrib/enterprise-mirror/tests: sign-blob-test.sh, publish-mirror-test.sh, verify-release-test.sh,
@@ -26,7 +27,7 @@ run() { printf '\n===== %s =====\n' "$*"; "$@" || rc=1; }
 mirror_tests="${ROOT}/contrib/enterprise-mirror/tests"
 for g in "${groups[@]}"; do
   case "${g}" in
-    static)            run "${CI_DIR}/check.sh"; run "${CI_DIR}/tests/check-language-test.sh"; run "${CI_DIR}/tests/check-docs-test.sh"; run "${CI_DIR}/tests/image-crane-test.sh"; run "${CI_DIR}/tests/helm-messages-test.sh"; run "${CI_DIR}/tests/license-headers-test.sh"; run "${CI_DIR}/tests/third-party-notices-test.sh"; run "${CI_DIR}/tests/vulncheck-test.sh"; run "${CI_DIR}/tests/secrets-scan-test.sh"; run "${CI_DIR}/tests/dockerignore-test.sh"; run "${CI_DIR}/tests/website-test.sh" ;;
+    static)            run "${CI_DIR}/check.sh"; run "${CI_DIR}/tests/check-language-test.sh"; run "${CI_DIR}/tests/check-docs-test.sh"; run "${CI_DIR}/tests/image-crane-test.sh"; run "${CI_DIR}/tests/helm-messages-test.sh"; run "${CI_DIR}/tests/license-headers-test.sh"; run "${CI_DIR}/tests/third-party-notices-test.sh"; run "${CI_DIR}/tests/vulncheck-test.sh"; run "${CI_DIR}/tests/secrets-scan-test.sh"; run "${CI_DIR}/tests/dockerignore-test.sh"; run "${CI_DIR}/tests/website-test.sh"; run "${CI_DIR}/tests/check-workflows-test.sh" ;;
     installers)        run "${CI_DIR}/tests/installer-verify.sh"; run "${CI_DIR}/tests/verify-testenv-test.sh"; run "${CI_DIR}/tests/release-guard-test.sh" ;;
     enterprise-mirror) run "${mirror_tests}/sign-blob-test.sh"; run "${mirror_tests}/publish-mirror-test.sh"; run "${mirror_tests}/verify-release-test.sh"; run "${mirror_tests}/ca-env-test.sh" ;;
     pwsh)              work="$(mktemp -d)"

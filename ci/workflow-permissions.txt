@@ -1,0 +1,9 @@
+# Job-level write permissions that the workflow policy check (ci/check-workflows.py, rule R3) allows.
+#
+# Every workflow has `permissions: contents: read` at the top. A job may ask for more only when it is listed here, one
+# line per scope in the form
+#
+#   <workflow file> <job id> <scope>
+#
+# for example `deploy.yml publish pages`. Each line needs a review of the job: which scope, why, and that the job does
+# not run code of a pull request. The file is empty on purpose.

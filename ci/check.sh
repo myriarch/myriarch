@@ -10,6 +10,7 @@
 #  - OTELCOL_* pins agree with each other and with deploy/k8s/collector/Dockerfile
 #  - reuse (ci/tools/reuse): requirements.in and requirements.txt pin the version of ci/versions.env, the build
 #    requirements pin poetry-core, and every pinned package carries hashes
+#  - .node-version holds one exact Node.js release of 22 or newer
 #  - goreleaser.yaml references the signing script, which exists
 #  - ci/ and contrib/enterprise-mirror/ script paths mentioned in the Makefile, goreleaser.yaml and the scripts exist
 #    (scripts/ is deliberately not covered here)
@@ -73,6 +74,11 @@ for f in ci/tools/reuse/requirements.txt ci/tools/reuse/build-requirements.txt; 
        END { if (pkg != "" && hashes == 0) missing = 1; exit missing }' "${f}" \
     || bad "${f}: a package without --hash (uv pip compile --generate-hashes)"
 done
+
+# .node-version: one exact release of an LTS line that satisfies the engines of web/ and website/ (22 or newer)
+node_version="$(cat .node-version 2>/dev/null || true)"
+printf '%s' "${node_version}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || bad ".node-version must contain one exact version such as 24.21.0 (got '${node_version}')"
+[ "${node_version%%.*}" -ge 22 ] 2>/dev/null || bad ".node-version (${node_version}) is older than Node.js 22, the floor of web/ and website/"
 
 # digest of the first line of <file> matching <pattern>
 digest_in() { grep -E "$2" "$1" | head -n 1 | sed -n 's/.*@\(sha256:[0-9a-f]\{64\}\).*/\1/p'; }

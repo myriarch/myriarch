@@ -39,6 +39,8 @@ path = [
   "hack/kind/git/sshd_config",
   "ci/license-overrides.txt",
   "ci/vulncheck-allowlist.txt",
+  "ci/workflow-permissions.txt",
+  "ci/tests/testdata/workflows/**",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "Copyright The Myriarch Authors"
