@@ -4,6 +4,10 @@
 name: e2e
 on:
   workflow_call:
+    inputs:
+      mode:
+        type: string
+        default: smoke
   schedule:
     - cron: '17 3 * * *'
 permissions:
@@ -21,3 +25,9 @@ jobs:
         with:
           name: e2e-smoke
           path: .e2e/results.txt
+  load:
+    if: (github.event_name == 'schedule' && inputs.mode == '') || inputs.mode == 'load'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - run: echo load

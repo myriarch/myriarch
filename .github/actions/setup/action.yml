@@ -26,11 +26,26 @@ runs:
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
         go-version-file: go.mod
-        cache: true
-        cache-dependency-path: |
-          go.sum
-          ci/tools/*/go.sum
-          website/go.sum
+        # setup-go's own cache has one key per OS, architecture and go.sum, shared by all jobs: the first job to finish would
+        # save its small cache and every other job would restore an incomplete one. The cache below is per job.
+        cache: false
+
+    - name: Find the Go caches
+      id: gocache
+      shell: bash
+      run: |
+        echo "mod=$(go env GOMODCACHE)" >> "${GITHUB_OUTPUT}"
+        echo "build=$(go env GOCACHE)" >> "${GITHUB_OUTPUT}"
+
+    - name: Cache the Go modules and the build cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ steps.gocache.outputs.mod }}
+          ${{ steps.gocache.outputs.build }}
+        key: go-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', 'ci/tools/*/go.sum', 'website/go.sum') }}
+        restore-keys: |
+          go-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-
 
     - name: Install Node.js (version of .node-version)
       if: inputs.node == 'true'

@@ -291,8 +291,9 @@ is a collapsible log group; a failed job uploads `.cache/check-local/` (the gate
 and a skipped or cancelled job fails `ci-ok`. The workflows have no path filters, so `ci-ok` always reports. The policy check
 fails when a gate of `ci/check-local.sh` has no job in `ci.yml`.
 
-Nightly (`ci.yml` at 04:41 UTC and `e2e.yml` at 03:17 UTC) the full pipeline runs against the current vulnerability database and
-upstream downloads, together with the load run and the UI version update test. GitHub disables scheduled workflows of a public
+Nightly `ci.yml` (04:41 UTC) runs the full pipeline, including the smoke test, against the current vulnerability database and
+upstream downloads. `e2e.yml` has its own schedule (03:17 UTC) for the heavy variants, the load run and the UI version update
+test; they do not run inside `ci.yml`, whose call uses the mode `smoke`. GitHub disables scheduled workflows of a public
 repository after 60 days without repository activity.
 
 ### Reproduce a job locally
@@ -320,7 +321,7 @@ The rules are enforced by `ci/check-workflows.py` (part of the `workflows` gate)
   repository's own installer (`ci/install-tools.sh`) or corepack.
 - **A read-only token**: `permissions: contents: read` at the top of every workflow. A job-level write scope needs a line in
   `ci/workflow-permissions.txt` (`<workflow file> <job> <scope>`) and a review of the job.
-- **No `pull_request_target` and no `workflow_run`**, no secrets, `persist-credentials: false` on every checkout, a timeout on
+- **No `pull_request_target` and no `workflow_run`**, no secrets (a `secrets.*` expression or a `secrets:` key fails the check), `persist-credentials: false` on every checkout, a timeout on
   every job, and no `github.event.*`, `github.head_ref` or `inputs.*` expression inside a `run:` block (pass it through `env:`).
 - **Toolchains from the repository**: `go-version-file: go.mod` and `node-version-file: .node-version`, never a literal version.
 - **Caches** come from `actions/cache` and the `setup-*` actions only. A cache written by a pull request is not restored on `main`.
@@ -331,7 +332,9 @@ The rules are enforced by `ci/check-workflows.py` (part of the `workflows` gate)
 
 ### Update an action pin
 
-Dependabot (`.github/dependabot.yml`) proposes the updates weekly in one pull request and keeps the comment in step. By hand: look up
+Dependabot (`.github/dependabot.yml`) proposes the updates weekly in one pull request and keeps the comment in step. Its commits
+carry no `Signed-off-by` line, so the DCO check stays red until a maintainer signs off (for example `git rebase --signoff` on the
+branch, or a squash merge whose commit message carries the maintainer's sign-off). By hand: look up
 the commit of the release tag and replace the SHA and the comment in every place the action is used (`ci/check-workflows.py` fails
 when the pins differ):
 

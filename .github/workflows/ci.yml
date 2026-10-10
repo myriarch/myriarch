@@ -24,7 +24,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # Pull requests share one group per pull request (a newer push cancels the older run). Every other event gets its own
+  # group, because GitHub keeps only one pending run per group and would drop queued runs of main commits otherwise.
+  group: ci-${{ github.event.pull_request.number || format('{0}-{1}', github.ref, github.event_name == 'push' && github.sha || github.event_name) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:

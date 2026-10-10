@@ -27,6 +27,11 @@ Rules
       gates of `ci/check-local.sh --list`. A gate without a CI job fails.
   R9  Toolchains come from the repository: `node-version-file: .node-version` and `go-version-file: go.mod`, never a
       literal `node-version:` or `go-version:`.
+  R10 No secrets: no `${{ secrets.* }}` expression, no `secrets:` key (`secrets: inherit` of a reusable workflow call).
+      `github.token` and the default GITHUB_TOKEN are not secrets in this sense.
+  R11 A workflow that has both `workflow_call` and `schedule` triggers: inside a called workflow `github.event_name` is the
+      event of the caller, so an `if:` that tests `github.event_name == 'schedule'` must also test `inputs.<name> == ''`
+      (true only for the workflow's own schedule run).
 
 --remote (needs network, for updating pins): `git ls-remote` for every pinned action and a comparison of the SHA with
 the tag that the comment names.
@@ -49,6 +54,8 @@ USES_ANY = re.compile(r"^(\s*)(?:-\s+)?uses:")
 PINNED = re.compile(r"^(actions|github)/([A-Za-z0-9._-]+)(/[A-Za-z0-9._/-]+)?@([0-9a-f]{40})$")
 VERSION_COMMENT = re.compile(r"^#\s*(v\d+\.\d+\.\d+)\s*$")
 EXPR_UNSAFE = re.compile(r"\$\{\{[^}]*\b(github\.event\.|github\.head_ref|github\.ref_name|inputs\.)")
+SECRETS_EXPR = re.compile(r"\$\{\{[^}]*\bsecrets\b")
+SECRETS_KEY = re.compile(r"^\s*(?:-\s+)?secrets\s*:")
 TRIGGER_KEY = re.compile(r"^\s*(pull_request_target|workflow_run)\s*:")
 TRIGGER_INLINE = re.compile(r"^on\s*:.*\b(pull_request_target|workflow_run)\b")
 
@@ -97,7 +104,9 @@ class Checker:
         self.rule_checkout(path, lines)
         self.rule_run_injection(path, lines)
         self.rule_toolchains(path, lines)
+        self.rule_secrets(path, lines)
         if is_workflow:
+            self.rule_schedule_conditions(path, lines)
             self.rule_permissions(path, lines)
             self.rule_timeouts(path, lines)
 
@@ -240,8 +249,7 @@ class Checker:
                 if m and not is_blank_or_comment(line):
                     inline = m.group(1).split("#", 1)[0].strip()
                     if inline:
-                        if inline == "write-all":
-                            self.add(path, i + 1, "R3", "job %s: write-all is forbidden" % name)
+                        self.check_inline_permissions(path, i + 1, wf, name, inline)
                     else:
                         j = i + 1
                         while j < end and (is_blank_or_comment(lines[j]) or indent_of(lines[j]) >= 6):
@@ -250,6 +258,49 @@ class Checker:
                                 self.add(path, j + 1, "R3", "job %s: '%s: write' is not listed in ci/workflow-permissions.txt (%s %s %s)" % (name, mm.group(1), wf, name, mm.group(1)))
                             j += 1
                 i += 1
+
+    def check_inline_permissions(self, path, lineno, wf, job, value):
+        """Job-level `permissions:` with a value on the same line: `read-all`, `{}` or a one-line flow mapping."""
+        if value in ("read-all", "{}"):
+            return
+        if value == "write-all":
+            self.add(path, lineno, "R3", "job %s: write-all is forbidden" % job)
+            return
+        m = re.match(r"^\{(.*)\}$", value)
+        if not m:
+            self.add(path, lineno, "R3", "job %s: cannot parse the permissions value '%s' (use block form or a one-line mapping)" % (job, value))
+            return
+        for item in m.group(1).split(","):
+            item = item.strip()
+            if not item:
+                continue
+            kv = re.match(r"^['\"]?([A-Za-z-]+)['\"]?\s*:\s*['\"]?([A-Za-z-]+)['\"]?$", item)
+            if not kv:
+                self.add(path, lineno, "R3", "job %s: cannot parse the permissions entry '%s'" % (job, item))
+            elif kv.group(2) == "write" and (wf, job, kv.group(1)) not in self.allow:
+                self.add(path, lineno, "R3", "job %s: '%s: write' is not listed in ci/workflow-permissions.txt (%s %s %s)" % (job, kv.group(1), wf, job, kv.group(1)))
+            elif kv.group(2) not in ("read", "write", "none"):
+                self.add(path, lineno, "R3", "job %s: unknown permission level '%s'" % (job, kv.group(2)))
+
+    def rule_secrets(self, path, lines):
+        for i, line in enumerate(lines, 1):
+            if is_blank_or_comment(line):
+                continue
+            code = line.split(" #", 1)[0]
+            if SECRETS_EXPR.search(code):
+                self.add(path, i, "R10", "a secrets expression is forbidden: the workflows run without secrets")
+            elif SECRETS_KEY.match(code):
+                self.add(path, i, "R10", "a secrets: key (secrets: inherit or a mapping) is forbidden")
+
+    def rule_schedule_conditions(self, path, lines):
+        text = "\n".join(lines)
+        if not (re.search(r"^  workflow_call\s*:", text, re.M) and re.search(r"^  schedule\s*:", text, re.M)):
+            return
+        for i, line in enumerate(lines, 1):
+            if is_blank_or_comment(line):
+                continue
+            if re.match(r"^\s*(?:-\s+)?if\s*:", line) and "github.event_name == 'schedule'" in line and not re.search(r"inputs\.[A-Za-z_-]+ == ''", line):
+                self.add(path, i, "R11", "in a workflow with workflow_call and schedule triggers, a schedule condition must also test inputs.<name> == ''")
 
     def jobs(self, lines):
         """job name -> (first line index, end line index exclusive)."""

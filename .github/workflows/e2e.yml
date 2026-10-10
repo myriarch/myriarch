@@ -12,6 +12,10 @@
 # The tests bind fixed local ports (scripts/e2e.sh: 18080, 18081, 54339, 1999x; scripts/e2e-ui-updates.sh: 18090, 54340,
 # 19997); every job runs on its own runner, so they do not collide.
 #
+# In a called workflow github.event_name is the event of the caller, so the nightly run of ci.yml (which calls this workflow
+# with mode smoke) would also match 'schedule'. The heavy jobs therefore test `inputs.mode == ''`, which is true only for this
+# workflow's own schedule trigger (it has no inputs); ci/check-workflows.py (R11) keeps the condition in place.
+#
 # GitHub disables scheduled workflows of a public repository after 60 days without repository activity.
 name: e2e
 
@@ -90,6 +94,7 @@ jobs:
           name: e2e-smoke
           path: |
             .e2e/*.log
+            .e2e/supervisor/*.log
             .e2e/results.txt
             !.e2e/**/*.token
             !.e2e/**/*.secret
@@ -101,7 +106,7 @@ jobs:
 
   load:
     name: load (1,000 collectors)
-    if: github.event_name == 'schedule' || inputs.mode == 'load' || inputs.mode == 'all'
+    if: (github.event_name == 'schedule' && inputs.mode == '') || inputs.mode == 'load' || inputs.mode == 'all'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -133,6 +138,7 @@ jobs:
           name: e2e-load
           path: |
             .e2e/*.log
+            .e2e/supervisor/*.log
             .e2e/results.txt
             !.e2e/**/*.token
             !.e2e/**/*.secret
@@ -144,7 +150,7 @@ jobs:
 
   ui-updates:
     name: ui-updates
-    if: github.event_name == 'schedule' || inputs.mode == 'ui-updates' || inputs.mode == 'all'
+    if: (github.event_name == 'schedule' && inputs.mode == '') || inputs.mode == 'ui-updates' || inputs.mode == 'all'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
