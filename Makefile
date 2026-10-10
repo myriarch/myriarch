@@ -6,7 +6,7 @@
 # Targets:
 #   make build        Go binaries into ./bin (build tags: embedui if internal/webui/dist exists, plus devpg = embedded PostgreSQL for `myriarchd dev`)
 #   make test         Go unit tests (embedded PostgreSQL for DB tests, no Docker needed) plus the tagged tests of internal/devpg
-#   make lint         go vet + gofmt check (+ UI lint if web/node_modules exists)
+#   make lint         go vet + gofmt check (+ UI lint, format check and typecheck if web/node_modules exists)
 #   make web-build    build the React UI into internal/webui/dist
 #   make dev          myriarchd dev mode: embedded PostgreSQL + examples/quickstart (built with the devpg tag; first start downloads the PostgreSQL binaries)
 #   make sim          myriarch-sim with SIM_AGENTS agents against the dev server
@@ -34,7 +34,7 @@
 #   make kind-probe   Kubernetes probe of the whole system on kind from zero: cluster, images, install, numbered checks (hack/kind/probe.sh --fresh; see hack/kind/README.md)
 #   make vulncheck    govulncheck over the release and the devpg build; fails on called vulnerabilities (ci/vulncheck.sh, allowlist ci/vulncheck-allowlist.txt; needs network access)
 #   make secrets-scan gitleaks over an export of HEAD (ci/secrets-scan.sh, configuration .gitleaks.toml; SECRETS_SCAN_WORKTREE=1 scans the work tree)
-#   make check-local  run every local gate (go, go-test, web, build, examples, shellcheck, helm, language, docs, website, licenses, vulncheck, secrets, e2e); SKIP=e2e,go-test ONLY=... LANGUAGE_GUARD=strict|warn|off (empty = strict: the strict scope fails on findings, warn downgrades, off skips); logs in .cache/check-local/
+#   make check-local  run every local gate (go, go-test, web, build, examples, shellcheck, workflows, helm, language, docs, website, licenses, vulncheck, secrets, e2e); SKIP=e2e,go-test ONLY=... LANGUAGE_GUARD=strict|warn|off (empty = strict: the strict scope fails on findings, warn downgrades, off skips); logs in .cache/check-local/
 
 comma     := ,
 GO        ?= go
@@ -92,7 +92,7 @@ lint:
 	$(GO) vet ./...
 	@out=$$(gofmt -l $$(git ls-files '*.go' 2>/dev/null || find . -name '*.go' -not -path './web/*')); \
 		if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
-	@if [ -d web/node_modules ]; then cd web && $(PNPM) lint && $(PNPM) typecheck; fi
+	@if [ -d web/node_modules ]; then cd web && $(PNPM) lint && $(PNPM) format:check && $(PNPM) typecheck; fi
 
 fmt:
 	gofmt -w $$(find . -name '*.go' -not -path './web/*')
@@ -240,7 +240,7 @@ secrets-scan:
 	ci/install-tools.sh gitleaks
 	ci/secrets-scan.sh
 
-# All local gates (ci/check-local.sh): go, go-test, web, build, examples, shellcheck, helm, language, docs, website, licenses, vulncheck, secrets, e2e. The variables are passed
+# All local gates (ci/check-local.sh): go, go-test, web, build, examples, shellcheck, workflows, helm, language, docs, website, licenses, vulncheck, secrets, e2e. The variables are passed
 # explicitly, so both `make check-local SKIP=e2e` and an environment SKIP work. LANGUAGE_GUARD empty = strict: the strict scope fails on findings, warn downgrades, off skips.
 check-local:
 	SKIP='$(SKIP)' ONLY='$(ONLY)' LANGUAGE_GUARD='$(LANGUAGE_GUARD)' LANGUAGE_GUARD_PATHS='$(LANGUAGE_GUARD_PATHS)' ci/check-local.sh
