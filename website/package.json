@@ -15,9 +15,13 @@
     "mermaid": "11.17.2"
   },
   "devDependencies": {
-    "markdownlint-cli2": "0.23.3"
+    "markdownlint-cli2": "0.23.3",
+    "vercel": "62.0.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": []
+    "onlyBuiltDependencies": [],
+    "ignoredBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

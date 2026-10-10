@@ -44,3 +44,6 @@ CLAUDE.local.md
 # Python bytecode of the helper scripts
 __pycache__/
 *.pyc
+
+# Website: state of the Vercel CLI and the output assembled for a deployment (.github/workflows/website.yml)
+/.vercel/

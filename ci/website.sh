@@ -22,7 +22,9 @@
 # Environment:
 #   WEBSITE_PORT      port of serve and preview (default 1313; never 8080 or the ports of the end-to-end tests)
 #   WEBSITE_BASEURL   overrides the base URL of the build (previews on a host with another name)
-#   WEBSITE_ENV       Hugo environment of build and check (default production; "preview" sets noindex and Disallow all)
+#   WEBSITE_ENV       production (default) or preview. Both build with the Hugo environment "production" (minified, fingerprinted assets,
+#                     no source maps), so that a preview ships the same bytes as production; preview only sets the site parameter
+#                     params.preview (noindex on every page, "Disallow: /" in robots.txt, no sitemap line)
 #   TOOLS_BIN         directory of the pinned tools (default .cache/bin; a git worktree points it at the main working copy)
 set -euo pipefail
 # shellcheck source=ci/lib.sh
@@ -53,7 +55,13 @@ case "${PORT}" in
   ''|*[!0-9]*) die "WEBSITE_PORT must be a number" ;;
   8080|18080|18081|54339|1946[4-9]|19998|19999) die "WEBSITE_PORT ${PORT} is reserved (development server, end-to-end tests)" ;;
 esac
-ENVIRONMENT="${WEBSITE_ENV:-production}"
+WEBSITE_ENV="${WEBSITE_ENV:-production}"
+case "${WEBSITE_ENV}" in
+  production) unset HUGO_PARAMS_PREVIEW ;;
+  preview) export HUGO_PARAMS_PREVIEW=true ;;
+  *) die "WEBSITE_ENV must be production or preview" ;;
+esac
+export WEBSITE_ENV
 
 export PATH="${TOOLS_BIN}:${PATH}"
 export HUGO_CACHEDIR="${ROOT}/.cache/hugo"
@@ -66,7 +74,7 @@ log "installing the Node dependencies of website/ (pnpm install --frozen-lockfil
 (cd website && CI=true pnpm install --frozen-lockfile) >&2 || die "pnpm install failed in website/ (network access? pnpm-lock.yaml up to date?)"
 
 hugo_build() {
-  local args=(--source website --environment "${ENVIRONMENT}" --gc --minify --panicOnWarning --cleanDestinationDir --destination public)
+  local args=(--source website --environment production --gc --minify --panicOnWarning --cleanDestinationDir --destination public)
   if [ -n "${WEBSITE_BASEURL:-}" ]; then args+=(--baseURL "${WEBSITE_BASEURL}"); fi
   log "hugo ${args[*]}"
   hugo "${args[@]}"

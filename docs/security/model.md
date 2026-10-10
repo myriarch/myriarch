@@ -380,6 +380,16 @@ guidance after each item names what to do.
 - **Release pipeline controls are pending.** Protected release environments, signing jobs without caches, SBOM and
   provenance attestations and a verification step before publishing belong to the release workflow, which does not
   exist yet. No release has been published.
+- **Website deployment uses a team-scoped Vercel token.** The token and the Vercel IDs exist only as secrets of the GitHub
+  environments `website-preview` and `website-production`; the build job of `.github/workflows/website.yml`, which runs
+  repository code, has no secrets, and the deploy job installs the pinned Vercel CLI without lifecycle scripts and uploads
+  the artifact of the build job. Pull requests from forks never receive the token. The token is team-scoped with an
+  expiration date and is rotated before it expires. Residual risk: every workflow run on a branch of the repository can use
+  `website-preview` and so the token. Production is limited to `main` by the deployment branch policy of its environment
+  ([Deployment](../../website/README.md#deployment)). Vercel makes the first deployment of a project a production
+  deployment, whatever the CLI asks for; the deploy job therefore refuses a preview while the project has no production
+  deployment, and after every deployment it checks that Vercel recorded the requested target, so that the build of a pull
+  request cannot end up on the production domain unnoticed.
 - **Experimental platforms.** The Windows installer and service setup, the systemd units and the Helm chart are tested
   in staging mode and with simulated service managers; they are experimental in the first release
   ([ADR-0021](../adr/0021-publication-gates-and-v0-1-0-scope.md)).

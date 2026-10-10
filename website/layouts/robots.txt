@@ -3,10 +3,11 @@ Copyright The Myriarch Authors
 SPDX-License-Identifier: Apache-2.0
 */ -}}
 {{- /*
-robots.txt. Production allows everything and names the sitemap; the environment "preview" (deployments for review) disallows everything.
+robots.txt. Production allows everything and names the sitemap; a preview (deployment for review, built with WEBSITE_ENV=preview, which sets
+params.preview) disallows everything.
 */ -}}
 User-agent: *
-{{ if eq hugo.Environment "preview" -}}
+{{ if eq (string site.Params.preview) "true" -}}
 Disallow: /
 {{ else -}}
 Disallow:
