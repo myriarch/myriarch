@@ -1,11 +1,11 @@
 ---
 title: "Releasing"
 weight: 110
-description: "How a Myriarch release is versioned and which checks a release tag must pass: the VERSION file, release candidates, image tags and the tag guard."
+description: "How a Myriarch release is versioned and which checks a release tag must pass: the VERSION file, release candidates, image tags, the tag guard and the release build."
 ---
 
-This page is for maintainers who prepare and tag a release. It describes how the version is kept in one place and what the
-tag guard refuses. The local gates are in the [development guide](development.md#gates).
+This page is for maintainers who prepare and tag a release. It describes how the version is kept in one place, what the
+tag guard refuses and where the release build is documented. The local gates are in the [development guide](development.md#gates).
 
 ## Versioning
 
@@ -108,4 +108,21 @@ The guard needs a checkout of the tag with `origin` as the remote that has the t
 
 ```bash
 ci/tests/versions-test.sh
+```
+
+## Release build
+
+The release build (`deploy/release/goreleaser.yaml`) turns a tagged commit into the archives, the bare updater binaries, one SBOM
+per archive and `checksums.txt`. It holds no signing key: the Sigstore signature is made by the release workflow, and the Windows
+files get their Authenticode signature through a hook in stages (`MYRIARCH_WINDOWS_STAGE`), whose mode comes from
+`deploy/release/windows-signing.env` (see [Windows signing rule](#windows-signing-rule) and
+[ADR-0034](adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Nothing in the repository publishes a release.
+
+[`deploy/release/README.md`](../deploy/release/README.md) is the reference for the
+build: the assets and the contents of `checksums.txt`, the stages `off`, `collect` and `apply`, the contract of the signing hook
+(`ci/release/windows-sign-hook.sh`), the acceptance check of signed files and the commands. Two commands run the build locally:
+
+```bash
+make release-snapshot     # unsigned snapshot of the whole matrix
+make release-rehearsal    # the path of a release in a snapshot, with a throwaway signing CA
 ```
