@@ -12,6 +12,12 @@
 #
 # The build context is the repository root (myriarch-updater is built as well; container mode: deploy/k8s/collector/README.md).
 #
+# myriarch-updater: by default it is compiled from the build context. To take the released binary instead, pass the published
+# updater image by digest (the release notes name it; the binary is the one in the signed release archive):
+#   --build-arg UPDATER_SOURCE=image --build-arg UPDATER_IMAGE=ghcr.io/myriarch/myriarch-updater@sha256:<digest>
+# The image is FROM scratch with /usr/local/bin/myriarch-updater. A build with UPDATER_SOURCE=image and no UPDATER_IMAGE fails
+# at the COPY. The Dockerfile builds for the platform of the build host (linux/amd64 when compiled from source).
+#
 # Without a container runtime (CI systems without Docker, developer Mac): scripts/build-collector-image-crane.sh <version> builds
 # the same image with crane (same contract: numeric user 10001, group 0 writable, ENTRYPOINT/CMD); change both together.
 #
@@ -37,9 +43,13 @@ ARG OTELCOL_VERSION=0.162.0
 ARG COLLECTOR_IMAGE=otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
 ARG SUPERVISOR_IMAGE=otel/opentelemetry-collector-opampsupervisor:0.162.0@sha256:13af4526381fe8279fb78f211628fea5cae693bf413737f234ee3587d9a44fb6
 ARG GO_IMAGE=golang:1.27-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
+# build (compile from the build context) | image (copy from UPDATER_IMAGE)
+ARG UPDATER_SOURCE=build
+# "scratch" is a placeholder that keeps the unused stage below valid; UPDATER_SOURCE=image needs a real image by digest
+ARG UPDATER_IMAGE=scratch
 
-# myriarch-updater (static, linux/amd64) for container mode
-FROM ${GO_IMAGE} AS updater
+# myriarch-updater (static, linux/amd64) for container mode, compiled from the build context
+FROM ${GO_IMAGE} AS updater-build
 # Package that receives the build metadata (-X); must equal the module path of go.mod plus /internal/version.
 ARG VERSION_PKG=github.com/myriarch/myriarch/internal/version
 ARG UPDATER_VERSION=0.0.0-dev
@@ -52,6 +62,13 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
       -ldflags "-s -w -X ${VERSION_PKG}.Version=${UPDATER_VERSION} -X ${VERSION_PKG}.Commit=${UPDATER_COMMIT} -X ${VERSION_PKG}.BuildDate=${UPDATER_DATE}" \
       -o /out/myriarch-updater ./cmd/myriarch-updater
+
+# myriarch-updater of the release: the published updater image (FROM scratch)
+FROM ${UPDATER_IMAGE} AS updater-image
+FROM scratch AS updater-published
+COPY --from=updater-image /usr/local/bin/myriarch-updater /out/myriarch-updater
+
+FROM updater-${UPDATER_SOURCE} AS updater
 
 FROM ${COLLECTOR_IMAGE} AS collector
 

@@ -14,7 +14,7 @@ Operations artifacts. All supervisor configurations use exactly the keys of opam
 | [`k8s/collector/`](k8s/collector) | Image (supervisor + otelcol-contrib + myriarch-updater), gateway StatefulSet, node DaemonSet, ConfigMaps; container mode of the myriarch-updater |
 | [`updater/container/`](updater/container) | `updater.yaml` for container mode (`myriarch-updater container`) |
 | [`compose/`](compose) | docker-compose: PostgreSQL 17 + myriarchd (+ optional myriarch-sim) for development |
-| [`docker/`](docker) | `myriarchd.Dockerfile` (Node 20 + pnpm -> Go `-tags embedui` -> distroless, local builds), `myriarchd-release.Dockerfile` (runtime image from the signed release binary, CI), `myrctl.Dockerfile` (CI tool image), `myriarch-sim.Dockerfile` |
+| [`docker/`](docker) | `myriarchd.Dockerfile` (Node 20 + pnpm -> Go `-tags embedui` -> distroless) and `myriarch-sim.Dockerfile`, for local builds. The published images are not built from Dockerfiles (see "Published images") |
 | [`release/`](release) | `goreleaser.yaml`: release matrix of all binaries (key-based signatures until the keyless GitHub release workflow), `authenticode.sh`, `README.md` (generating/rotating the signing key, signature format contract) |
 
 CI scripts and local gates: [`../ci`](../ci) (`make check-local`); enterprise mirror tools: [`../contrib/enterprise-mirror`](../contrib/enterprise-mirror).
@@ -165,8 +165,9 @@ keyless Sigstore signing (ADR-0023).
   Generating, storing and rotating the key and the path to a KMS-held key: [`release/README.md`](release/README.md).
   The install scripts verify `checksums.txt` with it and take the updater hash from it (see above).
 * **Authenticode** for the Windows binaries (`release/authenticode.sh`; release builds abort without a certificate).
-* The runtime image of myriarchd (`docker/myriarchd-release.Dockerfile`) contains exactly the signed binary from `checksums.txt`;
-  base images are pinned by digest in the Dockerfiles (maintenance: `ci/versions.env`, `ci/pin-images.sh`). The upstream
+* The published images (`ghcr.io/myriarch/myriarch`, `ghcr.io/myriarch/myriarch-updater`) contain exactly the binary of the
+  release archive that `checksums.txt` lists (see "Published images"); base images are pinned by digest in the local
+  Dockerfiles (maintenance: `ci/versions.env`, `ci/pin-images.sh`). The upstream
   images of the collector image are bound to the signed upstream release binaries
   (`contrib/enterprise-mirror/verify-upstream-images.sh`; the supervisor image is not signed with cosign upstream).
   `scripts/build-collector-image-crane.sh` runs this verification by default when it pushes (`VERIFY_UPSTREAM=0` skips
@@ -181,6 +182,44 @@ on the host. In addition, bare binaries `myriarch-updater_<ver>_<os>_<arch>[.exe
 (`<mirror>/myriarch-releases/v<ver>/<file>`, `contrib/enterprise-mirror/publish-mirror.sh`), because hosts download from
 there without credentials.
 
+## Published images
+
+The project publishes two images, each an image index for `linux/amd64` and `linux/arm64` ([ADR-0024](../docs/adr/0024-container-registry-and-image-set.md)):
+
+| Image | Program | Entrypoint | Default command |
+|---|---|---|---|
+| `ghcr.io/myriarch/myriarch` | `myriarchd` with the embedded web UI | `/usr/local/bin/myriarchd` | `serve --config /etc/myriarchd/myriarchd.yaml` |
+| `ghcr.io/myriarch/myriarch-updater` | `myriarch-updater` | `/usr/local/bin/myriarch-updater` | none |
+
+The images contain the binary of the linux archive of the release build (`myriarchd_<version>_linux_<arch>.tar.gz`,
+`myriarch-updater_<version>_linux_<arch>.tar.gz`, listed in `checksums.txt`), not a second compilation. The release tags are
+`X.Y.Z-rc.N` for release candidates and `X.Y.Z` and `X.Y` for final releases; there is no `latest` during v0.x. Pin the digest
+in deployments.
+
+* **Contract.** `FROM scratch`, one layer per platform, `USER 65532:65532` (the Helm chart uses the same user and group), no
+  shell, no package manager and no package database. The binary is in `/usr/local/bin`, the license files in
+  `/usr/share/licenses/myriarch/` (`LICENSE`, `THIRD_PARTY_NOTICES`), `/etc/passwd` and `/etc/group` name the user 65532, `/tmp` is
+  empty with mode 1777, `HOME=/tmp`. Files belong to `root` and are world readable. The root CAs are embedded in the binaries
+  (`golang.org/x/crypto/x509roots/fallback`, used only when the host has no CA bundle), and so is the time zone database of
+  `myriarchd`. The images hold no examples, no `myrctl` and no simulator: take them from the release archives. The project
+  publishes no image of `myrctl`; a CI job downloads the archive or builds a small image of its own from it.
+* **Labels.** `org.opencontainers.image.{title,description,source,version,revision,created,vendor,licenses}` and the base name
+  `scratch` in the config of every platform; the same keys without the base name as annotations of the index, from which ghcr.io
+  links the package to `https://github.com/myriarch/myriarch`. Values common to all images are in `ci/image-labels.env`.
+* **Build.** `IMAGE_SOURCE=dist IMAGE_KIND=server|updater scripts/build-image-crane.sh` reads the archives from `dist/`
+  (`DIST_DIR`), checks them (SHA-256 from `checksums.txt`; static ELF of the platform; embedded root CAs; for the server the web
+  UI without `devpg` and the time zone database; the commit of a clean work tree recorded in the binary) and writes an OCI layout
+  below `.cache/image-dist/` (`OUT_DIR`) whose `index.json` is the index. Fixed timestamps and sorted entries make it
+  deterministic: the same archives and commit give the same digests. It also writes one SPDX SBOM per platform with the pinned
+  syft (`IMAGE_SBOM=0` skips it). Nothing is compiled and nothing is pushed. Try it with `make release-snapshot` and
+  `ALLOW_DIRTY=1 IMAGE_SOURCE=dist IMAGE_KIND=updater scripts/build-image-crane.sh`.
+* **Push.** `ci/release/push-images.sh <layout> <repository>@sha256:<digest>` pushes by digest with `crane push --index`,
+  compares the digest with `index.json` before and with the registry afterwards, and never sets a tag. It refuses a reference
+  without digest, because `crane` then creates the tag `latest`. The repositories `ghcr.io/myriarch/*` are written only from
+  `.github/workflows/release.yml` at a version tag (`GITHUB_WORKFLOW_REF`); the release tags are added after signing and
+  verification. A build from source (`IMAGE_SOURCE=build`, below) refuses these repositories.
+* **Verification.** The signatures and attestations of the images and how to verify them come with the release workflow.
+
 ## License files
 
 The project is Apache-2.0 (`LICENSE`). `THIRD_PARTY_NOTICES` reproduces the license texts and NOTICE files of the software the
@@ -194,24 +233,25 @@ with every artifact that is built here, except the mirror image (see below):
 * **myriarchd.** The same two texts are compiled into the binary and served without credentials at `/licenses/LICENSE` and
   `/licenses/THIRD_PARTY_NOTICES` (`/licenses` is an index); the web UI links to them under Settings, System.
 * **Images.** Every image built from this repository holds `/usr/share/licenses/myriarch/LICENSE` and
-  `/usr/share/licenses/myriarch/THIRD_PARTY_NOTICES` (mode 0644, `root:root`): the crane server image
-  (`scripts/build-image-crane.sh`), `docker/myriarchd.Dockerfile`, `docker/myriarchd-release.Dockerfile`,
-  `docker/myriarch-sim.Dockerfile`, `docker/myrctl.Dockerfile` and the collector image (`k8s/collector/Dockerfile`,
-  `scripts/build-collector-image-crane.sh`). The updater image (`ghcr.io/myriarch/myriarch-updater`) follows the same contract
-  once it exists. `scripts/build-image-crane.sh layout` and `scripts/build-collector-image-crane.sh layout` print the paths of
-  the data and license files of the layer without building anything (a test checks them: `ci/tests/image-crane-test.sh`).
+  `/usr/share/licenses/myriarch/THIRD_PARTY_NOTICES` (mode 0644, `root:root`): the published server and updater images
+  (`scripts/build-image-crane.sh` with `IMAGE_SOURCE=dist`), the crane image built from source, `docker/myriarchd.Dockerfile`,
+  `docker/myriarch-sim.Dockerfile` and the collector image (`k8s/collector/Dockerfile`,
+  `scripts/build-collector-image-crane.sh`). `scripts/build-image-crane.sh layout` and
+  `scripts/build-collector-image-crane.sh layout` print the paths of the data and license files of the layer without building
+  anything (a test checks them: `ci/tests/image-crane-test.sh`).
   The mirror image (`scripts/build-mirror-image-crane.sh`) is the exception: it holds busybox and the OpenTelemetry release
   files, not the project's binaries, and no `LICENSE` or `THIRD_PARTY_NOTICES`. Its label names the two licenses of its
   content (`Apache-2.0 AND GPL-2.0-only`); whoever pushes it takes on the obligations of busybox (corresponding source of the
   pinned base image). The label `org.opencontainers.image.licenses` (`Apache-2.0`, value in `ci/image-labels.env`) is set by the
   Dockerfiles of `docker/` and by `scripts/build-image-crane.sh`; the collector image has no such label because of its alpine base.
-* **Build contexts of the release images.** The context of `docker/myriarchd-release.Dockerfile` is a directory with exactly
-  three files: the binary `myriarchd` (from the goreleaser build) and `LICENSE` and `THIRD_PARTY_NOTICES` of the same commit.
-  The context of `docker/myrctl.Dockerfile` is the same with the binary `myrctl`. `docker/myriarchd.Dockerfile` and
-  `docker/myriarch-sim.Dockerfile` take the repository root as context, which already holds both files. A test
+* **Files of the published images.** They come from the release archives of the binary (`LICENSE` and `THIRD_PARTY_NOTICES`
+  at the archive root, see above), not from a build context. `docker/myriarchd.Dockerfile` and `docker/myriarch-sim.Dockerfile`
+  take the repository root as context, which already holds both files. A test
   (`internal/updater/deploy_consistency_test.go`) checks the COPY sources of the Dockerfiles.
 
-`scripts/build-image-crane.sh` builds two variants of the server image, selected with `IMAGE_VARIANT`:
+The single-platform server image that `scripts/build-image-crane.sh` builds from the work tree (`IMAGE_SOURCE=build`, the default;
+development, tests and the kind probe; it runs as `65532:65532`, contains `myriarchd`, `myrctl` and `myriarch-sim` and is pushed
+to the `IMAGE_REPO` you name, never to `ghcr.io/myriarch/*`) comes in two variants, selected with `IMAGE_VARIANT`:
 
 | `IMAGE_VARIANT` | `myriarchd` build tags | Data below `/opt/myriarch` | Default tag |
 |---|---|---|---|
@@ -249,4 +289,6 @@ mode (bash; PowerShell in `pwsh`) including the verification of the keyless rele
 `helm lint`/`helm template` and schema validation of the rendered manifests (kubeconform), `goreleaser check` and a snapshot
 build of the matrix, mirror upload and signing scripts against throw-away servers (`bash ci/tests/run-all.sh`). **Not**
 covered by automated tests: Docker image builds from the Dockerfiles, service creation/registry/ACLs on Windows, systemd integration on a real host, applying the
-manifests to a cluster.
+manifests to a cluster. The release images are covered up to the registry: the build from release archives (contract, determinism,
+SBOMs) and the push by digest run against a registry on `127.0.0.1` in `ci/tests/image-crane-test.sh`; whether ghcr.io accepts
+a tag-less push by digest and rejects a wrong digest is checked with the first release candidate.

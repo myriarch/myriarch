@@ -18,11 +18,20 @@
 #   IMAGE_VARIANT=release scripts/build-image-crane.sh layout
 #                                             print the paths of the data and license files of the variant; needs no
 #                                             IMAGE_REPO, no network and no repository state, and builds nothing
+#   IMAGE_SOURCE=dist IMAGE_KIND=server scripts/build-image-crane.sh
+#   IMAGE_SOURCE=dist IMAGE_KIND=updater scripts/build-image-crane.sh
+#                                             the release images (see below): from the linux archives of a goreleaser
+#                                             build in dist/, writes a layout for linux/amd64 and linux/arm64, one SPDX
+#                                             SBOM per platform; pushes nothing and needs no IMAGE_REPO
 #
-# The published server image is ghcr.io/myriarch/myriarch (ADR-0024, ADR-0029) with the layout built here (myriarchd +
-# myrctl + myriarch-sim, FROM scratch). IMAGE_VARIANT=dev (default) builds the dev/sim variant (devpg tag, release fixtures);
-# IMAGE_VARIANT=release builds the variant meant for publication (the release workflow decides how the published
-# image is built). The updater image is ghcr.io/myriarch/myriarch-updater.
+# Two ways to build, selected with IMAGE_SOURCE:
+#   build (default)  compiles the binaries from this work tree and builds a single-platform image of the development and
+#                    test variants (myriarchd + myrctl + myriarch-sim); pushes it to IMAGE_REPO. Never to ghcr.io/myriarch.
+#   dist             builds the published images from the release binaries: ghcr.io/myriarch/myriarch (myriarchd) and
+#                    ghcr.io/myriarch/myriarch-updater (ADR-0024, ADR-0029), each an index for linux/amd64 and linux/arm64.
+#                    Nothing is compiled: the binaries are the ones in the goreleaser archives (listed in checksums.txt, which
+#                    the release workflow signs). The images are pushed by ci/release/push-images.sh, by digest, from the
+#                    release workflow only.
 #
 # What it does
 #   1. builds static linux/<arch> binaries (IMAGE_PLATFORM, default linux/amd64) with the ldflags of the Makefile: myriarchd (-tags
@@ -31,8 +40,8 @@
 #      every binary carries the embedded Mozilla root CAs (and, where it needs them, the time zone database);
 #   2. packs them into ONE deterministic layer tar (root:root, mtime = commit time, sorted): 0755 binaries in
 #      /usr/local/bin, 0644 data below /opt/myriarch (examples/quickstart, examples/sim and, in the dev variant only, release
-#      fixtures), the license files below /usr/share/licenses/myriarch, a minimal /etc/passwd and /etc/group (user 1001,
-#      group 0) and an empty /tmp (1777);
+#      fixtures), the license files below /usr/share/licenses/myriarch, a minimal /etc/passwd and /etc/group (user and
+#      group 65532) and an empty /tmp (1777);
 #   3. assembles the image and pushes it in ONE step, so there is never a half-finished image under the final tag:
 #        BASE_IMAGE=scratch (default)  the layer is gzipped here and written together with the image config and the manifest
 #                                      as an OCI image layout (no build timestamps: the same commit gives the same image
@@ -42,6 +51,26 @@
 #        BASE_IMAGE=<image>            `crane mutate --append`: the layer goes on top of that image, entrypoint, cmd, env,
 #                                      workdir, user and labels are set in the same push;
 #   4. prints the digest. Lines starting with IMAGE_ on stdout are machine readable (everything else goes to stderr).
+#
+# Release images (IMAGE_SOURCE=dist)
+#   Inputs: the goreleaser dist directory (DIST_DIR, default ./dist) with checksums.txt and the archives
+#   myriarchd_<version>_linux_<arch>.tar.gz (IMAGE_KIND=server) or myriarch-updater_<version>_linux_<arch>.tar.gz
+#   (IMAGE_KIND=updater). <version> is IMAGE_RELEASE_VERSION (default: "version" of DIST_DIR/metadata.json, which goreleaser
+#   derives from the tag without "v"). Each archive must be listed in checksums.txt with its SHA-256; its binary is checked
+#   (static ELF of the platform, embedded root CAs, and for the server the web UI and the time
+#   zone database; scripts/lib/oci_image.py). Dev build tags (devpg) are refused.
+#   Output: a flat OCI layout in OUT_DIR/<kind> (default .cache/image-dist/<kind>; it is recreated): index.json IS the
+#   index with the manifests of both platforms and its annotations, so its SHA-256 is the digest of the image index
+#   before anything is pushed. The same inputs give the same bytes (SOURCE_DATE_EPOCH or the commit time). Beside it:
+#   OUT_DIR/<kind>.env (the IMAGE_ lines below) and, unless IMAGE_SBOM=0, OUT_DIR/<kind>.sbom/<os>_<arch>.spdx.json from the
+#   pinned syft (SYFT_CHECK_FOR_APP_UPDATE=false; SYFT overrides the binary). stdout:
+#     IMAGE_KIND, IMAGE_LAYOUT (directory), IMAGE_INDEX_DIGEST (sha256:<sha256 of index.json>),
+#     IMAGE_MANIFEST_DIGEST_LINUX_AMD64, IMAGE_MANIFEST_DIGEST_LINUX_ARM64, IMAGE_SBOM_LINUX_AMD64, IMAGE_SBOM_LINUX_ARM64
+#   Contract: FROM scratch, ONE layer per platform, user and group 65532 (numeric USER 65532:65532), entrypoint
+#   /usr/local/bin/myriarchd (CMD serve --config /etc/myriarchd/myriarchd.yaml) or /usr/local/bin/myriarch-updater, the
+#   licenses in /usr/share/licenses/myriarch, no shell. The OCI labels are in the platform configs, the title, description,
+#   source, version, revision, created, vendor and licenses also in the index annotations (ghcr.io reads them from there).
+#   The source is SOURCE_URL or LABEL_SOURCE of ci/image-labels.env, never the git remote.
 #
 # Why FROM scratch
 #   The binaries are static (CGO_ENABLED=0) and use no system library. The OS packages of a base image are dead weight
@@ -60,7 +89,7 @@
 #
 # Image contract (what deploy manifests may rely on)
 #   ENTRYPOINT /usr/local/bin/myriarchd, CMD serve --config /etc/myriarchd/myriarchd.yaml, ENV HOME=/tmp (scratch: and
-#   PATH=/usr/local/bin), WORKDIR /opt/myriarch, USER 1001 (numeric and non-root for runAsNonRoot; OpenShift replaces the
+#   PATH=/usr/local/bin), WORKDIR /opt/myriarch, USER 65532 (numeric and non-root for runAsNonRoot; OpenShift replaces the
 #   UID by one of the project range, so nothing is written outside of volumes and all files are world readable),
 #   myriarch-sim: command /usr/local/bin/myriarch-sim, myrctl: /usr/local/bin/myrctl,
 #   data: /opt/myriarch/examples/quickstart, /opt/myriarch/examples/sim, and in the dev variant only
@@ -68,14 +97,22 @@
 #   licenses (both variants, 0644 root:root): /usr/share/licenses/myriarch/LICENSE (Apache-2.0) and
 #   /usr/share/licenses/myriarch/THIRD_PARTY_NOTICES (generated by scripts/gen-third-party-notices.sh); the build fails if one
 #   of them is missing. myriarchd serves the same texts under /licenses,
-#   /etc/passwd + /etc/group (root, and user 1001 with group 0), an empty /tmp (1777).
+#   /etc/passwd + /etc/group (root, and user and group 65532), an empty /tmp (1777).
 #
 # Environment
-#   IMAGE_REPO     target repository (required, no default): <registry>[:port]/<path> without tag or digest
+#   IMAGE_SOURCE   build (default) | dist                 see above; dist ignores IMAGE_REPO, IMAGE_VARIANT, BASE_IMAGE, TAG, DRY_RUN
+#   IMAGE_KIND     server | updater (dist only, required)
+#   DIST_DIR       goreleaser dist directory (dist only)  default ./dist
+#   IMAGE_RELEASE_VERSION  release version without "v" (dist only)  default: DIST_DIR/metadata.json
+#   IMAGE_PLATFORMS  linux/amd64,linux/arm64 (dist only; the default is the release matrix, the tests use one platform)
+#   IMAGE_SBOM     1 (default) | 0: write the SPDX SBOMs of the platforms (dist only)
+#   SYFT           path of the syft binary                default .cache/bin/syft (ci/install-tools.sh syft)
+#   OUT_DIR        output directory (dist only)           default ./.cache/image-dist
+#   IMAGE_REPO     target repository (build only; required, no default): <registry>[:port]/<path> without tag or digest
 #   IMAGE_VARIANT  dev (default) | release                dev: myriarchd with the devpg tag (embedded PostgreSQL for `myriarchd dev`)
 #                                                         and /opt/myriarch/release-fixtures; release: embedui only, no
 #                                                         release fixtures. Examples and license files are in both.
-#   TAG            image tag                              default <git short sha> (+ "-dirty" with ALLOW_DIRTY=1; + "-release" for
+#   TAG            image tag (build only)                 default <git short sha> (+ "-dirty" with ALLOW_DIRTY=1; + "-release" for
 #                                                         the release variant; + "-arm64" for arm64), so the variants never
 #                                                         overwrite each other
 #   IMAGE_PLATFORM linux/amd64 (default) | linux/arm64: the platform of the single-platform image; arm64 tags get the suffix
@@ -115,7 +152,12 @@ WEB_BUILD="${WEB_BUILD:-auto}"
 DRY_RUN="${DRY_RUN:-0}"
 VERIFY="${VERIFY:-0}"
 KEEP_WORK="${KEEP_WORK:-0}"
-IMAGE_UID="1001"
+IMAGE_UID="65532" # the user and group of every image of the project (Helm chart, Dockerfiles, release images)
+IMAGE_SOURCE="${IMAGE_SOURCE:-build}"
+IMAGE_KIND="${IMAGE_KIND:-}"
+DIST_DIR="${DIST_DIR:-${ROOT}/dist}"
+IMAGE_SBOM="${IMAGE_SBOM:-1}"
+IMAGE_PLATFORMS="${IMAGE_PLATFORMS:-linux/amd64,linux/arm64}"
 # the image contract (the same values for the scratch layout and for `crane mutate`; lists are comma separated like the
 # crane flags, so their elements must not contain commas)
 IMAGE_ENTRYPOINT="/usr/local/bin/myriarchd"
@@ -124,6 +166,9 @@ IMAGE_WORKDIR="/opt/myriarch"
 IMAGE_PORTS="8080/tcp,9090/tcp,9464/tcp"
 # label values must not contain commas (crane parses --label as CSV)
 IMAGE_DESCRIPTION="OpAMP fleet manager for OpenTelemetry Collectors - myriarchd + myriarch-sim + myrctl"
+IMAGE_SUMMARY="OpAMP fleet manager for OpenTelemetry Collectors"
+IMAGE_CONTENTS="static Go binaries and data only; no OS packages; no shell; root CAs and time zones are embedded in the binaries"
+IMAGE_TITLE="" # LABEL_TITLE of ci/image-labels.env (the server image), set once the labels are loaded
 BASE_MODE="image"
 if [ "${BASE_IMAGE}" = scratch ]; then BASE_MODE="scratch"; fi
 
@@ -144,10 +189,17 @@ image_variant_check() {
     *) die "invalid IMAGE_VARIANT '${IMAGE_VARIANT}' (dev or release)" ;;
   esac
   # The dev variant (embedded PostgreSQL, release fixtures) is never pushed to the published repository.
-  case "$(printf '%s' "${IMAGE_REPO}" | tr '[:upper:]' '[:lower:]')" in
-    ghcr.io/myriarch/*)
-      [ "${IMAGE_VARIANT}" = release ] || die "the published repository ${IMAGE_REPO} takes the release variant only: set IMAGE_VARIANT=release (the default is dev)" ;;
-  esac
+  if image_is_published_repo "${IMAGE_REPO}"; then
+    [ "${IMAGE_VARIANT}" = release ] || die "the published repository ${IMAGE_REPO} takes the release variant only: set IMAGE_VARIANT=release (the default is dev)"
+  fi
+}
+
+# The published repositories hold the release images only: they are built from the release archives (IMAGE_SOURCE=dist) and
+# pushed by ci/release/push-images.sh from the release workflow, never from this work tree. A dry run pushes nothing.
+image_publish_check() {
+  if image_is_published_repo "${IMAGE_REPO}" && [ "${DRY_RUN}" != 1 ]; then
+    die "${IMAGE_REPO} is a published repository: its images are built from the release archives (IMAGE_SOURCE=dist) and pushed by ci/release/push-images.sh in the release workflow; this build from source pushes elsewhere (IMAGE_REPO) or runs with DRY_RUN=1"
+  fi
 }
 
 WORK=""
@@ -201,7 +253,8 @@ cmd_login() {
 }
 
 # ---- git metadata -------------------------------------------------------------------------------------------------
-git_metadata() {
+# git_state: the commit, the commit time and the dirty state of the work tree; sets DIRTY, FULL_SHA, COMMIT, EPOCH and DATE.
+git_state() {
   have git || die "git not found"
   git -C "${ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "${ROOT} is not a git work tree (tag, labels and version come from git)"
   DIRTY=0
@@ -214,8 +267,17 @@ git_metadata() {
     warn "building from a dirty work tree (ALLOW_DIRTY=1): the image is not reproducible from a commit"
   fi
   FULL_SHA="$(git -C "${ROOT}" rev-parse HEAD)"
-  # the same values as the Makefile (VERSION/COMMIT), so `make build` and the image report the same version
+  # the same value as the Makefile (COMMIT), so `make build` and the image report the same commit
   COMMIT="${COMMIT:-$(git -C "${ROOT}" rev-parse --short HEAD)}"
+  EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "${ROOT}" log -1 --format=%ct)}"
+  [[ "${EPOCH}" =~ ^[0-9]+$ ]] || die "invalid SOURCE_DATE_EPOCH '${EPOCH}'"
+  DATE="$(python3 -c 'import datetime,sys; print(datetime.datetime.fromtimestamp(int(sys.argv[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "${EPOCH}")"
+}
+
+# git_metadata: git_state plus the version, the tag and the source URL of the build from source.
+git_metadata() {
+  git_state
+  # the same value as the Makefile (VERSION)
   VERSION="${VERSION:-$(git -C "${ROOT}" describe --tags --always --dirty 2>/dev/null || echo "0.0.0-${COMMIT}")}"
   # `git describe --dirty` ignores untracked files, this script does not
   if [ "${DIRTY}" = 1 ]; then
@@ -228,9 +290,6 @@ git_metadata() {
     TAG="${TAG}${IMAGE_TAG_SUFFIX}"
   fi
   [[ "${TAG}" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]] || die "invalid image tag '${TAG}'"
-  EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "${ROOT}" log -1 --format=%ct)}"
-  [[ "${EPOCH}" =~ ^[0-9]+$ ]] || die "invalid SOURCE_DATE_EPOCH '${EPOCH}'"
-  DATE="$(python3 -c 'import datetime,sys; print(datetime.datetime.fromtimestamp(int(sys.argv[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "${EPOCH}")"
   SOURCE_URL="$(image_source_url "${ROOT}")"
 }
 
@@ -380,10 +439,11 @@ for name in ("LICENSE", "THIRD_PARTY_NOTICES"):
         raise SystemExit(name + " is missing in the repository root (THIRD_PARTY_NOTICES: scripts/gen-third-party-notices.sh)")
     add_file("usr/share/licenses/myriarch/" + name, src, 0o644)
 
-# Users: there is no base image to bring /etc/passwd. User 1001 (the USER of the image) in group 0, as OpenShift's
-# restricted SCC runs containers with an arbitrary UID in group 0 (that UID has no entry; Go does not need one).
-add_data("etc/passwd", b"root:x:0:0:root:/root:/sbin/nologin\nmyriarch:x:1001:0:myriarch:/tmp:/sbin/nologin\n")
-add_data("etc/group", b"root:x:0:\n")
+# Users: there is no base image to bring /etc/passwd. User 65532 (the USER of the image) with a group of the same number.
+# OpenShift's restricted SCC runs containers with an arbitrary UID in group 0 (that UID has no entry; Go does not need one):
+# everything is world readable and nothing is written outside of volumes.
+add_data("etc/passwd", b"root:x:0:0:root:/root:/sbin/nologin\nmyriarch:x:65532:65532:myriarch:/tmp:/sbin/nologin\n")
+add_data("etc/group", b"root:x:0:\nmyriarch:x:65532:\n")
 # empty, world writable with sticky bit (the manifests mount an emptyDir over it; plain `docker run` writes here)
 add_dir("tmp", 0o1777)
 
@@ -439,18 +499,18 @@ cmd_layout() {
 # there is no base.digest and base.name says so; with a base image both come from that image.
 compute_labels() {
   LABELS=(
-    "org.opencontainers.image.title=${LABEL_TITLE}"
+    "org.opencontainers.image.title=${IMAGE_TITLE}"
     "org.opencontainers.image.description=${IMAGE_DESCRIPTION}"
     "org.opencontainers.image.vendor=${LABEL_VENDOR}"
     "org.opencontainers.image.licenses=${LABEL_LICENSES}"
     "org.opencontainers.image.revision=${FULL_SHA}"
     "org.opencontainers.image.version=${VERSION}"
     "org.opencontainers.image.created=${DATE}"
-    "name=${LABEL_TITLE}" "summary=OpAMP fleet manager for OpenTelemetry Collectors"
+    "name=${IMAGE_TITLE}" "summary=${IMAGE_SUMMARY}"
     "description=${IMAGE_DESCRIPTION}"
     "version=${VERSION}" "release=${COMMIT}"
     "vcs-type=git" "vcs-ref=${FULL_SHA}" "build-date=${DATE}"
-    "io.k8s.display-name=${LABEL_TITLE}" "io.k8s.description=${IMAGE_DESCRIPTION}"
+    "io.k8s.display-name=${IMAGE_TITLE}" "io.k8s.description=${IMAGE_DESCRIPTION}"
     "io.openshift.tags=myriarch opamp observability"
     "vendor=${LABEL_VENDOR}"
   )
@@ -462,7 +522,7 @@ compute_labels() {
       "org.opencontainers.image.base.name=scratch"
       "dev.myriarch.image.base=scratch"
       "dev.myriarch.image.variant=${IMAGE_VARIANT}"
-      "dev.myriarch.image.contents=static Go binaries and data only; no OS packages; no shell; root CAs and time zones are embedded in the binaries"
+      "dev.myriarch.image.contents=${IMAGE_CONTENTS}"
     )
   else
     LABELS+=(
@@ -476,99 +536,23 @@ compute_labels() {
 # Writes layer + config + manifest as an OCI image layout into ${WORK}/oci: everything is derived from the inputs (the layer
 # bytes, the commit time, the labels), nothing from the build time, so the same commit gives the same layer, config and
 # manifest digest. The layer is gzipped with a fixed header (no name, no timestamp, OS unknown) and zlib level 9; the
-# uncompressed digest (IMAGE_LAYER_SHA256, the "diff id") does not depend on zlib at all.
+# uncompressed digest (IMAGE_LAYER_SHA256, the "diff id") does not depend on zlib at all. scripts/lib/oci_image.py writes it
+# (the same code writes the layout of the release images).
 build_image_layout() {
   local meta
   printf '%s\n' "${LABELS[@]}" > "${WORK}/labels.txt"
-  # (the Python code writes its result to a file: bash 3.2 of macOS mis-parses here-documents inside $( ))
-  python3 - "${WORK}/layer.tar" "${WORK}/oci" "${DATE}" "${IMAGE_ENTRYPOINT}" "${IMAGE_CMD}" "HOME=/tmp,PATH=/usr/local/bin" \
-    "${IMAGE_WORKDIR}" "${IMAGE_UID}" "${IMAGE_PORTS}" "${WORK}/labels.txt" "${IMAGE_GOARCH}" > "${WORK}/layout.meta" <<'PY' || die "building the image layout failed"
-import gzip, hashlib, json, os, struct, sys, zlib
-
-layer_path, outdir, created, entrypoint, cmd, env, workdir, user, ports, labels_path, arch = sys.argv[1:12]
-
-def sha256(b):
-    return hashlib.sha256(b).hexdigest()
-
-def dump(o):
-    return json.dumps(o, sort_keys=True, separators=(",", ":")).encode()
-
-raw = open(layer_path, "rb").read()
-diff_id = sha256(raw)
-co = zlib.compressobj(9, zlib.DEFLATED, -15, 9)
-gz = (b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff" + co.compress(raw) + co.flush()
-      + struct.pack("<II", zlib.crc32(raw) & 0xFFFFFFFF, len(raw) & 0xFFFFFFFF))
-if gzip.decompress(gz) != raw:
-    raise SystemExit("internal error: the gzipped layer does not round-trip")
-
-labels = {}
-for line in open(labels_path):
-    line = line.rstrip("\n")
-    if line:
-        k, v = line.split("=", 1)
-        labels[k] = v
-
-config = {
-    "created": created,
-    "architecture": arch,
-    "os": "linux",
-    "config": {
-        "User": user,
-        "ExposedPorts": {p: {} for p in ports.split(",")},
-        "Env": env.split(","),
-        "Entrypoint": [entrypoint],
-        "Cmd": cmd.split(","),
-        "WorkingDir": workdir,
-        "Labels": labels,
-    },
-    "rootfs": {"type": "layers", "diff_ids": ["sha256:" + diff_id]},
-    "history": [{"created": created, "created_by": "scripts/build-image-crane.sh (FROM scratch): static binaries and data"}],
-}
-
-blobs = os.path.join(outdir, "blobs", "sha256")
-os.makedirs(blobs)
-
-def put(data):
-    d = sha256(data)
-    with open(os.path.join(blobs, d), "wb") as f:
-        f.write(data)
-    return d
-
-config_bytes = dump(config)
-layer_digest = put(gz)
-config_digest = put(config_bytes)
-manifest_bytes = dump({
-    "schemaVersion": 2,
-    "mediaType": "application/vnd.oci.image.manifest.v1+json",
-    "config": {"mediaType": "application/vnd.oci.image.config.v1+json", "digest": "sha256:" + config_digest, "size": len(config_bytes)},
-    "layers": [{"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": "sha256:" + layer_digest, "size": len(gz)}],
-})
-manifest_digest = put(manifest_bytes)
-
-with open(os.path.join(outdir, "oci-layout"), "w") as f:
-    f.write('{"imageLayoutVersion":"1.0.0"}')
-with open(os.path.join(outdir, "index.json"), "wb") as f:
-    f.write(dump({
-        "schemaVersion": 2,
-        "mediaType": "application/vnd.oci.image.index.v1+json",
-        "manifests": [{
-            "mediaType": "application/vnd.oci.image.manifest.v1+json",
-            "digest": "sha256:" + manifest_digest, "size": len(manifest_bytes),
-            "platform": {"architecture": arch, "os": "linux"},
-        }],
-    }))
-
-print("layer_digest=sha256:" + layer_digest)
-print("layer_size=%d" % len(gz))
-print("config_digest=sha256:" + config_digest)
-print("manifest_digest=sha256:" + manifest_digest)
-PY
+  python3 "${ROOT}/scripts/lib/oci_image.py" layout --out "${WORK}/oci" --created "${DATE}" --user "${IMAGE_UID}" \
+    --entrypoint "${IMAGE_ENTRYPOINT}" --cmd "${IMAGE_CMD}" --env "HOME=/tmp,PATH=/usr/local/bin" --workdir "${IMAGE_WORKDIR}" \
+    --ports "${IMAGE_PORTS}" --labels "${WORK}/labels.txt" \
+    --history "scripts/build-image-crane.sh (FROM scratch): static binaries and data" \
+    --platform "${IMAGE_PLATFORM}=${WORK}/layer.tar" > "${WORK}/layout.meta" || die "building the image layout failed"
   meta="$(cat "${WORK}/layout.meta")"
-  LAYER_DIGEST="$(sed -n 's/^layer_digest=//p' <<<"${meta}")"
-  CONFIG_DIGEST="$(sed -n 's/^config_digest=//p' <<<"${meta}")"
-  MANIFEST_DIGEST="$(sed -n 's/^manifest_digest=//p' <<<"${meta}")"
+  local suffix="${IMAGE_PLATFORM/\//_}"
+  LAYER_DIGEST="$(sed -n "s/^layer_digest\.${suffix}=//p" <<<"${meta}")"
+  CONFIG_DIGEST="$(sed -n "s/^config_digest\.${suffix}=//p" <<<"${meta}")"
+  MANIFEST_DIGEST="$(sed -n "s/^manifest_digest\.${suffix}=//p" <<<"${meta}")"
   [[ "${MANIFEST_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || die "unexpected manifest digest '${MANIFEST_DIGEST}'"
-  log "image layout: layer ${LAYER_DIGEST} ($(sed -n 's/^layer_size=//p' <<<"${meta}") bytes gzipped), config ${CONFIG_DIGEST}, manifest ${MANIFEST_DIGEST}"
+  log "image layout: layer ${LAYER_DIGEST} ($(sed -n "s/^layer_size\.${suffix}=//p" <<<"${meta}") bytes gzipped), config ${CONFIG_DIGEST}, manifest ${MANIFEST_DIGEST}"
 }
 
 # ---- push ---------------------------------------------------------------------------------------------------------
@@ -646,8 +630,10 @@ cmd_build() {
   image_variant_check
   image_platform_check
   image_require_repo scripts/build-image-crane.sh "registry.example.com/<org>/myriarch"
+  image_publish_check
   if [ "${BASE_MODE}" != scratch ]; then image_require_digest_pin BASE_IMAGE "${BASE_IMAGE}"; fi
   image_labels_load
+  IMAGE_TITLE="${LABEL_TITLE}"
   have python3 || die "python3 not found (builds the deterministic layer tar)"
   git_metadata
   log "version ${VERSION} (commit ${COMMIT}, ${DATE}) -> ${IMAGE_REPO}:${TAG} (variant ${IMAGE_VARIANT})"
@@ -687,8 +673,162 @@ cmd_build() {
   if [ "${BASE_MODE}" = scratch ]; then printf 'IMAGE_LAYER_DIGEST=%s\n' "${LAYER_DIGEST}"; fi
 }
 
+# ---- release images (IMAGE_SOURCE=dist) -----------------------------------------------------------------------------------
+resolve_syft() {
+  if [ -n "${SYFT:-}" ]; then
+    [ -x "${SYFT}" ] || die "SYFT=${SYFT} is not executable"
+    return 0
+  fi
+  # the pinned release of ci/versions.env, verified against its SHA-256 (ci/install-tools.sh)
+  TOOLS_BIN="${TOOLS_BIN}" "${ROOT}/ci/install-tools.sh" syft >&2 && [ -x "${TOOLS_BIN}/syft" ] ||
+    die "syft not available: run ci/install-tools.sh syft (the SBOMs of the images come from the pinned syft; IMAGE_SBOM=0 skips them)"
+  SYFT="${TOOLS_BIN}/syft"
+}
+
+# dist_version: the release version of the archives (sets RELEASE_VERSION). When DIST_DIR/metadata.json (goreleaser) exists,
+# its commit must be the commit of the work tree and its version the release version.
+dist_version() {
+  local meta="${DIST_DIR}/metadata.json" from_meta="" meta_commit=""
+  [ -d "${DIST_DIR}" ] || die "DIST_DIR ${DIST_DIR} does not exist: run the release build first (make release-snapshot, or goreleaser for a release)"
+  if [ -f "${meta}" ]; then
+    from_meta="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("version", ""))' "${meta}")" || die "cannot read ${meta}"
+    meta_commit="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("commit", ""))' "${meta}")" || die "cannot read ${meta}"
+    [ "${meta_commit}" = "${FULL_SHA}" ] ||
+      die "${meta} was written for commit ${meta_commit:-none}, the work tree is at ${FULL_SHA}: build the archives and the images from the same commit"
+  fi
+  RELEASE_VERSION="${IMAGE_RELEASE_VERSION:-${from_meta}}"
+  [ -n "${RELEASE_VERSION}" ] || die "no release version: set IMAGE_RELEASE_VERSION or provide ${meta}"
+  [[ "${RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die "invalid release version '${RELEASE_VERSION}' (X.Y.Z or X.Y.Z-rc.N, without v)"
+  if [ -n "${from_meta}" ] && [ "${RELEASE_VERSION}" != "${from_meta}" ]; then
+    die "IMAGE_RELEASE_VERSION ${RELEASE_VERSION} differs from the version of ${meta} (${from_meta})"
+  fi
+}
+
+# the labels that the index repeats as annotations (ghcr.io takes the metadata of a multi-platform package from the index)
+dist_annotations() {
+  local l key
+  for l in "${LABELS[@]}"; do
+    key="${l%%=*}"
+    case "${key}" in
+      org.opencontainers.image.title | org.opencontainers.image.description | org.opencontainers.image.source | \
+        org.opencontainers.image.version | org.opencontainers.image.revision | org.opencontainers.image.created | \
+        org.opencontainers.image.vendor | org.opencontainers.image.licenses) printf '%s\n' "${l}" ;;
+    esac
+  done
+}
+
+cmd_dist() {
+  local layout out plat suffix meta platforms=() seen="" sbom_dir sum upper
+  local plat_args=() strict_vcs="--strict-vcs"
+  case "${IMAGE_KIND}" in
+    server)
+      IMAGE_REPO_NAME="ghcr.io/myriarch/myriarch"
+      IMAGE_DESCRIPTION="OpAMP fleet manager for OpenTelemetry Collectors - myriarchd"
+      IMAGE_SUMMARY="OpAMP fleet manager for OpenTelemetry Collectors"
+      IMAGE_CONTENTS="the static Go binary myriarchd and the license files only; no OS packages; no shell; root CAs and time zones are embedded in the binary" ;;
+    updater)
+      IMAGE_REPO_NAME="ghcr.io/myriarch/myriarch-updater"
+      IMAGE_DESCRIPTION="Host agent that installs OpenTelemetry Collector binary updates - myriarch-updater"
+      IMAGE_SUMMARY="Collector binary updater for the myriarch fleet manager"
+      IMAGE_CONTENTS="the static Go binary myriarch-updater and the license files only; no OS packages; no shell; root CAs are embedded in the binary" ;;
+    "") die "IMAGE_KIND is not set: IMAGE_SOURCE=dist builds the server image (IMAGE_KIND=server) or the updater image (IMAGE_KIND=updater)" ;;
+    *) die "invalid IMAGE_KIND '${IMAGE_KIND}' (server or updater)" ;;
+  esac
+  IFS=, read -r -a platforms <<<"${IMAGE_PLATFORMS}"
+  [ "${#platforms[@]}" -ge 1 ] || die "IMAGE_PLATFORMS is empty"
+  for plat in "${platforms[@]}"; do
+    case "${plat}" in
+      linux/amd64 | linux/arm64) ;;
+      *) die "unsupported platform '${plat}' in IMAGE_PLATFORMS (linux/amd64 or linux/arm64)" ;;
+    esac
+    case " ${seen} " in *" ${plat} "*) die "platform ${plat} occurs twice in IMAGE_PLATFORMS" ;; esac
+    seen="${seen} ${plat}"
+  done
+  case "${IMAGE_SBOM}" in 0 | 1) ;; *) die "IMAGE_SBOM must be 0 or 1" ;; esac
+  image_labels_load
+  case "${IMAGE_KIND}" in server) IMAGE_TITLE="${LABEL_TITLE}" ;; updater) IMAGE_TITLE="${LABEL_TITLE_UPDATER}" ;; esac
+  have python3 || die "python3 not found (builds the deterministic layers)"
+  have go || die "go not found (the build information of the binaries is checked with go version -m)"
+  git_state
+  if [ "${DIRTY}" = 1 ] && [ "${ALLOW_DIRTY}" != 1 ]; then
+    git -C "${ROOT}" status --short >&2
+    die "the work tree has uncommitted changes: release images are built from a committed tree (ALLOW_DIRTY=1 for a local test)"
+  fi
+  # a release binary records the clean commit it was built from; a local test (ALLOW_DIRTY=1) may use a dirty tree
+  if [ "${ALLOW_DIRTY}" = 1 ]; then strict_vcs=""; fi
+  dist_version
+  VERSION="${RELEASE_VERSION}"
+  IMAGE_VARIANT=release
+  # not the git remote: a release image must not depend on the checkout it is built in
+  SOURCE_URL="${SOURCE_URL:-${LABEL_SOURCE}}"
+  case "${SOURCE_URL}" in *,*) die "SOURCE_URL must not contain a comma (crane parses --label as CSV)" ;; esac
+
+  out="${OUT_DIR:-${ROOT}/.cache/image-dist}"
+  [ -n "${out}" ] || die "OUT_DIR is empty"
+  layout="${out}/${IMAGE_KIND}"
+  sbom_dir="${out}/${IMAGE_KIND}.sbom"
+  WORK="$(mktemp -d "${TMPDIR:-/tmp}/myriarch-image.XXXXXX")"
+  # recreate the outputs of this kind (IMAGE_KIND is server or updater here, so the paths are below OUT_DIR)
+  rm -rf "${layout}" "${sbom_dir}"
+  rm -f "${layout}.env"
+  mkdir -p "${out}"
+  log "release image ${IMAGE_REPO_NAME} ${RELEASE_VERSION} (commit ${COMMIT}, ${DATE}) from ${DIST_DIR}: ${IMAGE_PLATFORMS}"
+
+  compute_labels
+  printf '%s\n' "${LABELS[@]}" > "${WORK}/labels.txt"
+  dist_annotations > "${WORK}/annotations.txt"
+  for plat in "${platforms[@]}"; do plat_args+=(--platform "${plat}"); done
+  python3 "${ROOT}/scripts/lib/oci_image.py" dist --kind "${IMAGE_KIND}" --dist "${DIST_DIR}" --version "${RELEASE_VERSION}" \
+    --epoch "${EPOCH}" --created "${DATE}" --uid "${IMAGE_UID}" --out "${layout}" --labels "${WORK}/labels.txt" \
+    --annotations "${WORK}/annotations.txt" --revision "${FULL_SHA}" ${strict_vcs} "${plat_args[@]}" > "${WORK}/layout.meta" ||
+    die "building the release image failed"
+  meta="$(cat "${WORK}/layout.meta")"
+  IMAGE_INDEX_DIGEST="$(sed -n 's/^index_digest=//p' <<<"${meta}")"
+  [[ "${IMAGE_INDEX_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || die "unexpected index digest '${IMAGE_INDEX_DIGEST}'"
+  sum="$(python3 -I -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "${layout}/index.json")"
+  [ "sha256:${sum}" = "${IMAGE_INDEX_DIGEST}" ] || die "internal error: index.json hashes to sha256:${sum}, not ${IMAGE_INDEX_DIGEST}"
+
+  {
+    printf 'IMAGE_KIND=%s\n' "${IMAGE_KIND}"
+    printf 'IMAGE_REPO_NAME=%s\n' "${IMAGE_REPO_NAME}"
+    printf 'IMAGE_RELEASE_VERSION=%s\n' "${RELEASE_VERSION}"
+    printf 'IMAGE_LAYOUT=%s\n' "${layout}"
+    printf 'IMAGE_INDEX_DIGEST=%s\n' "${IMAGE_INDEX_DIGEST}"
+  } > "${WORK}/summary.env"
+  for plat in "${platforms[@]}"; do
+    suffix="${plat/\//_}"
+    upper="$(printf '%s' "${suffix}" | tr '[:lower:]' '[:upper:]')"
+    printf 'IMAGE_MANIFEST_DIGEST_%s=%s\n' "${upper}" "$(sed -n "s/^manifest_digest\\.${suffix}=//p" <<<"${meta}")" >> "${WORK}/summary.env"
+  done
+
+  if [ "${IMAGE_SBOM}" = 1 ]; then
+    resolve_syft
+    mkdir -p "${sbom_dir}"
+    for plat in "${platforms[@]}"; do
+      suffix="${plat/\//_}"
+      upper="$(printf '%s' "${suffix}" | tr '[:lower:]' '[:upper:]')"
+      log "SBOM ${plat}"
+      # no update check; the cache stays out of the home directory
+      SYFT_CHECK_FOR_APP_UPDATE=false SYFT_CACHE_DIR="${WORK}/syft-cache" "${SYFT}" scan "oci-dir:${layout}" --platform "${plat}" \
+        --source-name "${IMAGE_REPO_NAME}" --source-version "$(sed -n "s/^manifest_digest\\.${suffix}=//p" <<<"${meta}")" \
+        -o "spdx-json=${sbom_dir}/${suffix}.spdx.json" -q >&2 || die "syft failed for ${plat}"
+      [ -s "${sbom_dir}/${suffix}.spdx.json" ] || die "syft wrote no SBOM for ${plat}"
+      printf 'IMAGE_SBOM_%s=%s\n' "${upper}" "${sbom_dir}/${suffix}.spdx.json" >> "${WORK}/summary.env"
+    done
+  fi
+
+  cp "${WORK}/summary.env" "${layout}.env"
+  cat "${WORK}/summary.env"
+  log "layout ${layout}: push it with ci/release/push-images.sh ${layout} <repository>@${IMAGE_INDEX_DIGEST}"
+}
+
 case "${1:-build}" in
-  build) cmd_build ;;
+  build)
+    case "${IMAGE_SOURCE}" in
+      build) cmd_build ;;
+      dist) cmd_dist ;;
+      *) die "invalid IMAGE_SOURCE '${IMAGE_SOURCE}' (build or dist)" ;;
+    esac ;;
   layout) cmd_layout ;;
   login) shift; cmd_login "$@" ;;
   -h|--help|help) sed -n '2,/^set -euo pipefail$/p' "${BASH_SOURCE[0]}" | sed -e '/^set -euo/d' -e 's/^# \{0,1\}//' ;;

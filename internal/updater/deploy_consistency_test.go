@@ -262,25 +262,10 @@ func copyTo(copies []dockerCopy, dst string) (dockerCopy, bool) {
 	return dockerCopy{}, false
 }
 
-// The Dockerfiles of the images that are built from release artifacts take a build context that consists of exactly the
-// files they copy (documented in their header comments and in deploy/README.md), and no image carries the release
-// fixtures (test data of `myriarchd dev --releases-fixtures`, present only in the dev variant of the crane image).
-func TestReleaseDockerfilesBuildContext(t *testing.T) {
-	for rel, want := range map[string][]string{
-		"docker/myriarchd-release.Dockerfile": {"LICENSE", "THIRD_PARTY_NOTICES", "myriarchd"},
-		"docker/myrctl.Dockerfile":            {"LICENSE", "THIRD_PARTY_NOTICES", "myrctl"},
-	} {
-		df := string(readDeploy(t, rel))
-		var got []string
-		for _, c := range dockerCopies(df) {
-			assert.Emptyf(t, c.from, "%s has a single stage: COPY --from is not expected", rel)
-			got = append(got, c.srcs...)
-		}
-		sort.Strings(got)
-		assert.Equalf(t, want, got, "%s: the COPY sources are exactly the build context", rel)
-		assert.Contains(t, df, "THIRD_PARTY_NOTICES", "%s documents the build context", rel)
-	}
-
+// No image carries the release fixtures (test data of `myriarchd dev --releases-fixtures`, present only in the dev variant
+// of the crane image). The published images are not built from Dockerfiles but by scripts/build-image-crane.sh from the
+// release archives (deploy_image_contract_test.go), so deploy/docker holds only the local build Dockerfiles.
+func TestNoImageCarriesReleaseFixtures(t *testing.T) {
 	var all []string
 	files, err := filepath.Glob(filepath.Join(deployDir, "docker", "*.Dockerfile"))
 	require.NoError(t, err)

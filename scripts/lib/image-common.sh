@@ -15,12 +15,13 @@ VERSION_PKG=github.com/myriarch/myriarch/internal/version
 
 # ---- OCI labels ---------------------------------------------------------------------------------------------------
 # Reads ci/image-labels.env (IMAGE_LABELS_FILE overrides the path; for tests only) into the plain shell variables
-# LABEL_VENDOR, LABEL_LICENSES, LABEL_LICENSES_MIRROR, LABEL_SOURCE, LABEL_TITLE, LABEL_TITLE_COLLECTOR and LABEL_TITLE_MIRROR.
+# LABEL_VENDOR, LABEL_LICENSES, LABEL_LICENSES_MIRROR, LABEL_SOURCE, LABEL_TITLE, LABEL_TITLE_UPDATER, LABEL_TITLE_COLLECTOR
+# and LABEL_TITLE_MIRROR.
 image_labels_load() {
   local file="${IMAGE_LABELS_FILE:-${ROOT}/ci/image-labels.env}" line key value n=0 name
   [ -f "${file}" ] || die "label file ${file} not found"
   # shellcheck disable=SC2034  # read by the sourcing scripts
-  LABEL_VENDOR="" LABEL_LICENSES="" LABEL_LICENSES_MIRROR="" LABEL_SOURCE="" LABEL_TITLE="" LABEL_TITLE_COLLECTOR="" LABEL_TITLE_MIRROR=""
+  LABEL_VENDOR="" LABEL_LICENSES="" LABEL_LICENSES_MIRROR="" LABEL_SOURCE="" LABEL_TITLE="" LABEL_TITLE_UPDATER="" LABEL_TITLE_COLLECTOR="" LABEL_TITLE_MIRROR=""
   while IFS= read -r line || [ -n "${line}" ]; do
     n=$((n + 1))
     case "${line}" in
@@ -30,7 +31,7 @@ image_labels_load() {
     key="${line%%=*}"
     value="${line#*=}"
     case "${key}" in
-      LABEL_VENDOR | LABEL_LICENSES | LABEL_LICENSES_MIRROR | LABEL_SOURCE | LABEL_TITLE | LABEL_TITLE_COLLECTOR | LABEL_TITLE_MIRROR) ;;
+      LABEL_VENDOR | LABEL_LICENSES | LABEL_LICENSES_MIRROR | LABEL_SOURCE | LABEL_TITLE | LABEL_TITLE_UPDATER | LABEL_TITLE_COLLECTOR | LABEL_TITLE_MIRROR) ;;
       *) die "${file}:${n}: unknown key '${key}'" ;;
     esac
     case "${value}" in
@@ -38,7 +39,7 @@ image_labels_load() {
     esac
     printf -v "${key}" '%s' "${value}"
   done < "${file}"
-  for name in LABEL_VENDOR LABEL_LICENSES LABEL_LICENSES_MIRROR LABEL_TITLE LABEL_TITLE_COLLECTOR LABEL_TITLE_MIRROR; do
+  for name in LABEL_VENDOR LABEL_LICENSES LABEL_LICENSES_MIRROR LABEL_TITLE LABEL_TITLE_UPDATER LABEL_TITLE_COLLECTOR LABEL_TITLE_MIRROR; do
     [ -n "${!name}" ] || die "${file}: ${name} is missing or empty"
   done
 }
@@ -77,6 +78,16 @@ image_require_digest_pin() {
   local name="$1" ref="$2"
   [[ "${ref}" =~ @sha256:[0-9a-f]{64}$ ]] ||
     die "${name} must be pinned by digest: <repo>:<tag>@sha256:<digest> (crane digest <repo>:<tag>)"
+}
+
+# ---- published repositories ---------------------------------------------------------------------------------------
+# image_is_published_repo <repo>: success for the repositories of the project (ghcr.io/myriarch/..., any spelling). Only
+# ci/release/push-images.sh, run by the release workflow, writes to them (ADR-0024, ADR-0029).
+image_is_published_repo() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    ghcr.io/myriarch/*) return 0 ;;
+  esac
+  return 1
 }
 
 # ---- source URL ---------------------------------------------------------------------------------------------------
