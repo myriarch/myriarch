@@ -37,6 +37,9 @@ type UpdaterAgent struct {
 	col *CollectorAgent
 	uid uuid.UUID
 
+	// lifecycle serializes Start against Stop, so that Stop never stops a client whose Start is still running (opamp-go
+	// does not allow Start and Stop of one client to overlap). It is taken before mu.
+	lifecycle sync.Mutex
 	mu        sync.Mutex
 	cli       client.OpAMPClient
 	running   bool
@@ -143,6 +146,8 @@ func (u *UpdaterAgent) publishHealth() {
 
 // Start connects the updater (idempotent).
 func (u *UpdaterAgent) Start(ctx context.Context) error {
+	u.lifecycle.Lock()
+	defer u.lifecycle.Unlock()
 	u.mu.Lock()
 	if u.running {
 		u.mu.Unlock()
@@ -196,9 +201,12 @@ func (u *UpdaterAgent) Start(ctx context.Context) error {
 
 // Stop disconnects the updater.
 func (u *UpdaterAgent) Stop(ctx context.Context) {
+	// Wait for a Start in progress; see CollectorAgent.Stop.
+	u.lifecycle.Lock()
 	u.mu.Lock()
 	if !u.running {
 		u.mu.Unlock()
+		u.lifecycle.Unlock()
 		return
 	}
 	u.running = false
@@ -207,6 +215,7 @@ func (u *UpdaterAgent) Stop(ctx context.Context) {
 	was := u.connected
 	u.connected = false
 	u.mu.Unlock()
+	u.lifecycle.Unlock()
 	if was {
 		u.sim.connectedUpdaters.Add(-1)
 		u.sim.metrics.updatersConnected.Dec()

@@ -12,9 +12,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-telemetry/opamp-go/protobufs"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -197,7 +199,7 @@ func TestSimFailedConfigIsRolledBackAutomatically(t *testing.T) {
 
 	good, goodHash := "receivers:\n  otlp_grpc: {}\n", []byte("good")
 	f.pushConfig(good, goodHash)
-	eventually(t, 10*time.Second, func() bool { return r.Stats().ConfigsApplied == 4 }, "good config applied")
+	waitAllReportedApplied(t, f, r, goodHash)
 
 	bad, badHash := "receivers:\n  simulate-config-failure: {}\n", []byte("bad")
 	f.pushConfig(bad, badHash)
@@ -440,11 +442,18 @@ func TestSimRealDownloadVerifiesSHA256(t *testing.T) {
 	}
 	// wrong hash -> INSTALL_FAILED, version unchanged
 	f.pushOffer(mk(sha256Bytes([]byte("wrong"))))
-	eventually(t, 20*time.Second, func() bool { return r.Stats().UpdatesFailed == 3 }, "hash mismatch detected")
+	// The counter moves before the INSTALL_FAILED status reaches the server, so wait for the server to hold the
+	// failure of every updater instead of for the counter.
+	eventually(t, 20*time.Second, func() bool {
+		return f.count(func(a *fakeAgent) bool {
+			s := a.pkgStatus[""]
+			return a.ident["service.name"] == "myriarch-updater" && s != nil &&
+				s.Status == protobufs.PackageStatusEnum_PackageStatusEnum_InstallFailed &&
+				strings.Contains(s.ErrorMessage, "SHA-256 mismatch")
+		}) == 3
+	}, "every updater reports INSTALL_FAILED with a SHA-256 mismatch")
+	assert.Equal(t, int64(3), r.Stats().UpdatesFailed)
 	for _, c := range r.Collectors() {
-		if c.updater != nil {
-			assert.Contains(t, f.get(c.updater.uid).pkgStatus[""].ErrorMessage, "SHA-256 mismatch")
-		}
 		assert.NotEqual(t, "0.163.0", c.Version())
 	}
 
@@ -490,12 +499,56 @@ func TestSimChurnReconnects(t *testing.T) {
 	}, "agents reconnect: %+v", r.Stats())
 }
 
+// Stop must not stop the client of a Start that is still running: opamp-go does not allow Start and Stop of one
+// client to overlap, and under -race the overlap is reported as a data race. A churn reconnect (goOffline) and the
+// shutdown of the simulator are such a pair. The test overlaps Start and Stop of the same agents on purpose.
+func TestSimStartAndStopOfOneAgentDoNotOverlap(t *testing.T) {
+	f := newFakeMyriarchd(t)
+	r := startSim(t, f, 2, fastProfile(t, nil), nil)
+	waitAllConnected(t, r, 20*time.Second)
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	for _, c := range r.Collectors() {
+		for i := 0; i < 20; i++ {
+			wg.Add(2)
+			go func() { defer wg.Done(); _ = c.Start(ctx) }()
+			go func() { defer wg.Done(); c.Stop(ctx) }()
+			if c.updater != nil {
+				wg.Add(2)
+				go func() { defer wg.Done(); _ = c.updater.Start(ctx) }()
+				go func() { defer wg.Done(); c.updater.Stop(ctx) }()
+			}
+		}
+	}
+	wg.Wait()
+	// Whatever the interleaving ended in, the agents can be stopped and brought back to a connected state. (The
+	// connection counters of Stats are not checked: a late OnConnect of a stopped client may still count.)
+	for _, c := range r.Collectors() {
+		c.Stop(ctx)
+		if c.updater != nil {
+			c.updater.Stop(ctx)
+		}
+		require.NoError(t, c.Start(ctx))
+		if c.updater != nil {
+			require.NoError(t, c.updater.Start(ctx))
+		}
+	}
+	eventually(t, 20*time.Second, func() bool {
+		for _, c := range r.Collectors() {
+			if !c.State().Connected || (c.updater != nil && !c.updater.State().Connected) {
+				return false
+			}
+		}
+		return true
+	}, "every agent reconnects")
+}
+
 func TestSimRemoteConfigSurvivesReconnect(t *testing.T) {
 	f := newFakeMyriarchd(t)
 	r := startSim(t, f, 2, fastProfile(t, nil), nil)
 	waitAllConnected(t, r, 20*time.Second)
 	f.pushConfig("a: b\n", []byte("h1"))
-	eventually(t, 10*time.Second, func() bool { return r.Stats().ConfigsApplied == 2 }, "applied")
+	waitAllReportedApplied(t, f, r, []byte("h1"))
 
 	c := r.Collectors()[0]
 	c.goOffline(context.Background(), 100*time.Millisecond)
@@ -508,46 +561,133 @@ func TestSimRemoteConfigSurvivesReconnect(t *testing.T) {
 	})
 }
 
+// holdApplies lets the apply of a remote config start (APPLYING is reported) but not finish on its own: the timer
+// that ends an apply is an hour away, and the test ends the apply it wants to end with finishApplyNow. That makes
+// the state "an apply is in flight" last as long as the test needs, without a timing window.
+func holdApplies(p *Profile) {
+	p.Behavior.ConfigApplyDelay = DurRange{Min: time.Hour, Max: time.Hour}
+}
+
+// inflightApply returns the epoch and generation of the apply that is in flight, the arguments of its finishApply.
+func (a *CollectorAgent) inflightApply() (epoch, gen int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.epoch, a.applyGen
+}
+
+// finishApplyNow runs what the apply timer of the apply in flight would run.
+func finishApplyNow(c *CollectorAgent, hash, body []byte) {
+	epoch, gen := c.inflightApply()
+	c.finishApply(epoch, gen, hash, body, "", false)
+}
+
+// reportedStatus reports whether the server's last remote config status of the agent is st for hash.
+func (f *fakeMyriarchd) reportedStatus(id uuid.UUID, st protobufs.RemoteConfigStatuses, hash []byte) bool {
+	ok := false
+	f.with(id, func(a *fakeAgent) {
+		ok = a.rcStatus != nil && a.rcStatus.Status == st && bytes.Equal(a.rcStatus.LastRemoteConfigHash, hash)
+	})
+	return ok
+}
+
+// waitAllReportedApplied waits until the server holds APPLIED for hash from every collector. The counter of
+// Stats().ConfigsApplied is not enough as a barrier: it moves before the APPLIED report is sent, so a test that
+// acts on it races with the tail of the apply.
+func waitAllReportedApplied(t testing.TB, f *fakeMyriarchd, r *runningSim, hash []byte) {
+	t.Helper()
+	eventually(t, 10*time.Second, func() bool {
+		for _, c := range r.Collectors() {
+			if !f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, hash) {
+				return false
+			}
+		}
+		return true
+	}, "every collector reports APPLIED for %q", hash)
+}
+
 // An apply that is cut short by a restart (the upgrade of a version rollout drops the connection while the config
 // is being applied) must not leave the agent reporting APPLYING for ever: the new process reports the config it
 // runs, so the server offers the desired one again. Found by the HA step of scripts/e2e.sh, where such an agent held
 // a config rollout until its applyTimeout.
+// The test holds the apply, so there is no time window: the interrupted apply (h2) stays in flight until the
+// connection drops, the reconnected agent must report the config it runs (h1), and the timer of the interrupted apply,
+// fired by hand after the reconnect, must not take effect.
 func TestSimInterruptedApplyIsNotReplayedAfterReconnect(t *testing.T) {
 	f := newFakeMyriarchd(t)
-	r := startSim(t, f, 2, fastProfile(t, func(p *Profile) {
-		p.Behavior.ConfigApplyDelay = DurRange{Min: 600 * time.Millisecond, Max: 600 * time.Millisecond}
-	}), nil)
+	r := startSim(t, f, 2, fastProfile(t, holdApplies), nil)
 	waitAllConnected(t, r, 20*time.Second)
-	f.pushConfig("a: b\n", []byte("h1"))
-	eventually(t, 10*time.Second, func() bool { return r.Stats().ConfigsApplied == 2 }, "first config applied")
-
 	c := r.Collectors()[0]
-	f.pushConfig("a: c\n", []byte("h2"))
+	applying := func(hash []byte) {
+		eventually(t, 10*time.Second, func() bool {
+			return f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLYING, hash)
+		}, "the config %q is being applied", hash)
+	}
+
+	f.pushConfig("a: b\n", []byte("h1"))
+	applying([]byte("h1"))
+	finishApplyNow(c, []byte("h1"), []byte("a: b\n"))
 	eventually(t, 10*time.Second, func() bool {
-		ok := false
-		f.with(c.uid, func(a *fakeAgent) {
-			ok = a.rcStatus != nil && a.rcStatus.Status == protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLYING &&
-				bytes.Equal(a.rcStatus.LastRemoteConfigHash, []byte("h2"))
-		})
-		return ok
-	}, "the second config is being applied")
+		return f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, []byte("h1"))
+	}, "the first config is applied")
+
+	f.pushConfig("a: c\n", []byte("h2"))
+	applying([]byte("h2")) // stays so: nothing ends this apply but the test
+	staleEpoch, staleGen := c.inflightApply()
+	appliedBefore := c.State().ConfigsApplied
 
 	c.goOffline(context.Background(), 50*time.Millisecond)
-	eventually(t, 10*time.Second, func() bool { return c.State().Connected }, "reconnected")
-	eventually(t, 5*time.Second, func() bool {
-		ok := false
-		f.with(c.uid, func(a *fakeAgent) {
-			ok = a.rcStatus != nil && a.rcStatus.Status == protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED &&
-				bytes.Equal(a.rcStatus.LastRemoteConfigHash, []byte("h1"))
-		})
-		return ok
+	eventually(t, 10*time.Second, func() bool {
+		st := r.Stats()
+		return c.State().Connected && st.ConnectedUpdaters == st.Updaters // goOffline restarts the updater after the collector
+	}, "reconnected")
+	eventually(t, 10*time.Second, func() bool {
+		return f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, []byte("h1"))
 	}, "the reconnected agent reports the config it runs instead of the interrupted apply")
-	time.Sleep(800 * time.Millisecond) // the interrupted apply must not complete in the background
-	f.with(c.uid, func(a *fakeAgent) {
-		assert.Equal(t, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, a.rcStatus.Status)
-		assert.Equal(t, []byte("h1"), a.rcStatus.LastRemoteConfigHash)
-	})
-	assert.Equal(t, "6831", c.State().RemoteConfig, "the interrupted apply did not become the running config (hex of h1)")
+
+	// The timer of the interrupted apply would fire now; its epoch is gone, so it must not take effect. The test runs
+	// what the timer closure runs (finishApply with the epoch and generation captured when the apply started); it
+	// does not cover a regression of the closure itself, which captures both values when it is created.
+	c.finishApply(staleEpoch, staleGen, []byte("h2"), []byte("a: c\n"), "", false)
+	st := c.State()
+	assert.Equal(t, "6831", st.RemoteConfig, "the interrupted apply did not become the running config (hex of h1)")
+	assert.Equal(t, appliedBefore, st.ConfigsApplied, "the interrupted apply did not complete")
+	assert.Equal(t, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED.String(), st.RemoteStatus)
+	assert.Equal(t, "6831", st.StatusHash)
+	assert.True(t, f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, []byte("h1")))
+}
+
+// The report that ends an apply runs after the apply updated the agent state, outside of its lock. When the next
+// config arrives in that gap, the APPLIED report of the old config must not replace the APPLYING report of the new
+// one: the server would hold APPLIED for the old hash while the new config is being applied (and the APPLYING
+// report would be lost whenever both are pending in the client at once).
+func TestSimStaleApplyReportDoesNotReplaceTheNewerConfigStatus(t *testing.T) {
+	f := newFakeMyriarchd(t)
+	r := startSim(t, f, 1, fastProfile(t, holdApplies), nil)
+	waitAllConnected(t, r, 20*time.Second)
+	c := r.Collectors()[0]
+
+	f.pushConfig("a: b\n", []byte("h1"))
+	eventually(t, 10*time.Second, func() bool {
+		return f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLYING, []byte("h1"))
+	}, "the first config is being applied")
+	oldEpoch, oldGen := c.inflightApply()
+
+	f.pushConfig("a: c\n", []byte("h2"))
+	eventually(t, 10*time.Second, func() bool {
+		return f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLYING, []byte("h2"))
+	}, "the second config is being applied")
+
+	c.reportRemoteStatus(oldEpoch, oldGen, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, []byte("h1"), "")
+	st := c.State()
+	assert.Equal(t, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLYING.String(), st.RemoteStatus)
+	assert.Equal(t, "6832", st.StatusHash, "the status is still the one of the newer config (hex of h2)")
+
+	// The current apply can still report.
+	epoch, gen := c.inflightApply()
+	c.reportRemoteStatus(epoch, gen, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, []byte("h2"), "")
+	eventually(t, 10*time.Second, func() bool {
+		return f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, []byte("h2"))
+	}, "the current apply reports")
 }
 
 func TestSimMetricsEndpoint(t *testing.T) {
@@ -670,9 +810,20 @@ func TestSimUpgradeReportsTheRealStartupSequenceAndReconnects(t *testing.T) {
 	}, "healthy with the new version")
 	f.with(c.uid, func(a *fakeAgent) {
 		assert.Greater(t, a.disconnects, discBefore, "the upgrade drops the connection and reconnects")
-		n := len(a.healthLog)
-		require.GreaterOrEqual(t, n, 3)
-		assert.Equal(t, []string{"", "StatusStarting", "StatusOK"}, a.healthLog[n-3:], "boot sequence of the new process")
+		// The boot sequence of the new process is what follows the stop of the old one. Its first report (healthy:
+		// false, no status yet) is the health the client sends on connect; when the connect is slow (a loaded
+		// runner), the starting phase has begun already and the client sends that instead.
+		boot := a.healthLog
+		for i := len(boot) - 1; i >= 0; i-- {
+			if boot[i] == "StatusStopping" {
+				boot = boot[i+1:]
+				break
+			}
+		}
+		if len(boot) > 0 && boot[0] == "" {
+			boot = boot[1:]
+		}
+		assert.Equal(t, []string{"StatusStarting", "StatusOK"}, boot, "boot sequence of the new process: %q", a.healthLog)
 	})
 }
 
@@ -681,7 +832,7 @@ func TestSimValidateConfigKeepsFailedStatus(t *testing.T) {
 	r := startSim(t, f, 2, fastProfile(t, func(p *Profile) { p.Behavior.ValidateConfig = true }), nil)
 	waitAllConnected(t, r, 20*time.Second)
 	f.pushConfig("receivers:\n  otlp_grpc: {}\n", []byte("good"))
-	eventually(t, 10*time.Second, func() bool { return r.Stats().ConfigsApplied == 2 }, "good config applied")
+	waitAllReportedApplied(t, f, r, []byte("good"))
 	f.pushConfig("receivers:\n  simulate-config-failure: {}\n", []byte("bad"))
 	eventually(t, 10*time.Second, func() bool { return r.Stats().ConfigsFailed == 2 }, "bad config fails")
 	time.Sleep(600 * time.Millisecond)

@@ -41,6 +41,10 @@ type CollectorAgent struct {
 	sim  *Simulator
 	spec AgentSpec
 
+	// lifecycle serializes Start against Stop, so that Stop never stops a client whose Start is still running (opamp-go
+	// does not allow Start and Stop of one client to overlap). It is taken before mu.
+	lifecycle   sync.Mutex
+	statusMu    sync.Mutex // serializes reportRemoteStatus; taken before mu
 	mu          sync.Mutex
 	uid         uuid.UUID
 	version     string
@@ -132,6 +136,8 @@ func (a *CollectorAgent) healthMsg() *protobufs.ComponentHealth {
 
 // Start connects the agent (idempotent).
 func (a *CollectorAgent) Start(ctx context.Context) error {
+	a.lifecycle.Lock()
+	defer a.lifecycle.Unlock()
 	a.mu.Lock()
 	if a.running {
 		a.mu.Unlock()
@@ -219,9 +225,13 @@ func (a *CollectorAgent) Start(ctx context.Context) error {
 
 // Stop disconnects the agent (sends AgentDisconnect) and invalidates timers.
 func (a *CollectorAgent) Stop(ctx context.Context) {
+	// Wait for a Start in progress: the client it publishes is stopped only after its Start returned. The lock is
+	// released before the callbacks run and the client stops; a later Start creates a new client.
+	a.lifecycle.Lock()
 	a.mu.Lock()
 	if !a.running {
 		a.mu.Unlock()
+		a.lifecycle.Unlock()
 		return
 	}
 	a.running = false
@@ -234,6 +244,7 @@ func (a *CollectorAgent) Stop(ctx context.Context) {
 	a.pendingCallbacks = nil
 	a.restarting = false
 	a.mu.Unlock()
+	a.lifecycle.Unlock()
 	if was {
 		a.sim.connectedCollectors.Add(-1)
 		a.sim.metrics.agentsConnected.Dec()
@@ -298,9 +309,21 @@ func (a *CollectorAgent) onMessage(_ context.Context, msg *types.MessageData) {
 	}
 }
 
-func (a *CollectorAgent) setRemoteStatus(st protobufs.RemoteConfigStatuses, hash []byte, errMsg string) {
+// reportRemoteStatus records st as the current remote config status and hands it to the OpAMP client, unless the
+// apply identified by (epoch, gen) has been superseded: by a newer config (applyGen) or by a stop of the process
+// (epoch). Every report of an apply goes through here, and statusMu keeps the check, the stored status and the
+// hand-over to the client in one order. Without that, the tail of an apply that has just finished (its APPLIED report
+// runs after the state was updated, outside of mu) could overwrite the APPLYING report of the next config, and the
+// server would see APPLIED for the old hash while the new one is being applied.
+func (a *CollectorAgent) reportRemoteStatus(epoch, gen int, st protobufs.RemoteConfigStatuses, hash []byte, errMsg string) {
 	s := &protobufs.RemoteConfigStatus{LastRemoteConfigHash: hash, Status: st, ErrorMessage: errMsg}
+	a.statusMu.Lock()
+	defer a.statusMu.Unlock()
 	a.mu.Lock()
+	if a.epoch != epoch || a.applyGen != gen {
+		a.mu.Unlock()
+		return
+	}
 	a.lastStatus = s
 	cli := a.cli
 	a.mu.Unlock()
@@ -367,7 +390,7 @@ func (a *CollectorAgent) applyRemoteConfig(rc *protobufs.AgentRemoteConfig) {
 	unhealthy := failMsg == "" && a.rand() < b.UnhealthyAfterApplyRate
 	a.mu.Unlock()
 
-	a.setRemoteStatus(protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLYING, hash, "")
+	a.reportRemoteStatus(epoch, gen, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLYING, hash, "")
 	time.AfterFunc(delay, func() { a.finishApply(epoch, gen, hash, body, failMsg, unhealthy) })
 }
 
@@ -384,16 +407,11 @@ func (a *CollectorAgent) finishApply(epoch, gen int, hash, body []byte, failMsg 
 		a.mu.Unlock()
 		a.sim.metrics.configsFailed.Inc()
 		a.sim.configsFailed.Add(1)
-		a.setRemoteStatus(protobufs.RemoteConfigStatuses_RemoteConfigStatuses_FAILED, hash, failMsg)
+		a.reportRemoteStatus(epoch, gen, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_FAILED, hash, failMsg)
 		if len(prev) > 0 && !a.sim.behavior.ValidateConfig {
 			// automatic rollback: the previous config is running again
 			time.AfterFunc(200*time.Millisecond, func() {
-				a.mu.Lock()
-				ok := a.epoch == epoch && a.applyGen == gen && a.running
-				a.mu.Unlock()
-				if ok {
-					a.setRemoteStatus(protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, prev, "")
-				}
+				a.reportRemoteStatus(epoch, gen, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, prev, "")
 			})
 		}
 		return
@@ -418,7 +436,7 @@ func (a *CollectorAgent) finishApply(epoch, gen int, hash, body []byte, failMsg 
 	if cli != nil {
 		_ = cli.UpdateEffectiveConfig(context.Background())
 	}
-	a.setRemoteStatus(protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, hash, "")
+	a.reportRemoteStatus(epoch, gen, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, hash, "")
 	if cli != nil {
 		_ = cli.SetHealth(h)
 	}
