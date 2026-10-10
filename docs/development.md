@@ -250,6 +250,10 @@ parallel, so the wall clock measures the machine as much as the renderer, and th
 PERFTEST=1 go test -count=1 -v -run '^TestRenderFleet5000UnderFiveSeconds$' ./internal/blueprint
 ```
 
+With `PERFTEST=1` the test renders the fleet three times, logs every duration and holds the median against the budget. A shared
+CI runner stalls now and then; one stall does not move the median, while a slower renderer is slower in every render. The
+`-v` log of a green run shows how much margin the budget has.
+
 `GO_TEST_PERF=0` leaves that run out; the Windows job does, because the budget belongs to the server, which does not ship for
 Windows. In a `-race` build the test skips the budget check even with `PERFTEST=1` and says so.
 

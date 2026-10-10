@@ -6,6 +6,7 @@ package blueprint_test
 import (
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -61,8 +62,10 @@ func BenchmarkRenderFleet5000(b *testing.B) {
 
 // Acceptance: rendering a fleet of 5000 agents takes < 5 s. In `go test ./...` other packages run in parallel, so the wall
 // clock measures the machine as much as the renderer: the budget is asserted only with PERFTEST=1, in a run of this test
-// alone and without -race (the go-test gate of ci/check-local.sh does that; GO_TEST_PERF=0 leaves it out). Without
-// PERFTEST the test still renders all 5000 agents, checks the results and logs the duration.
+// alone and without -race (the go-test gate of ci/check-local.sh does that; GO_TEST_PERF=0 leaves it out). A shared CI runner
+// still stalls now and then, so the budget applies to the median of three renders: one stall does not move the median, a
+// slower renderer is slower in every render. Without PERFTEST the test renders all 5000 agents once, checks the results and
+// logs the duration.
 func TestRenderFleet5000UnderFiveSeconds(t *testing.T) {
 	if testing.Short() {
 		t.Skip("performance test")
@@ -78,5 +81,14 @@ func TestRenderFleet5000UnderFiveSeconds(t *testing.T) {
 		// the race detector slows the renderer down by roughly 5-10x, so no budget fits both builds
 		t.Skipf("PERFTEST=1 in a -race build: the rendering and its checks passed, the budget of %s was not checked (run without -race)", budget)
 	}
-	require.Less(t, d, budget)
+	renders := []time.Duration{d}
+	for len(renders) < 3 {
+		d = renderFleet(t, 5000)
+		t.Logf("rendered 5000 agents in %s", d)
+		renders = append(renders, d)
+	}
+	slices.Sort(renders)
+	median := renders[len(renders)/2]
+	t.Logf("median of %d renders: %s (budget %s)", len(renders), median, budget)
+	require.Less(t, median, budget, "the median of %d renders is over the budget", len(renders))
 }

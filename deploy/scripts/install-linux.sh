@@ -63,7 +63,7 @@
 #   https_required                  non-https download URL (or redirect) without --insecure
 #   file_unreadable                 token file, CA file, trusted root, signing key or verifier is unusable
 #   tool_missing                    a required tool is absent (sha256sum/shasum, curl/wget, tar, gzip, install,
-#                                   cmp, systemctl, useradd/adduser)
+#                                   cmp, systemctl, useradd/adduser); the message names the tool
 #   sigstore_verifier_missing       no Sigstore verifier (cosign or myriarch-updater verify-bundle)
 #   signature_verifier_missing      neither openssl nor cosign available to verify checksums.txt
 #   privilege_required              not running as root
