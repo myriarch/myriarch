@@ -6,7 +6,8 @@
 # end-to-end test. "ci-ok" is the only required check of the branch ruleset.
 #
 # Policy (enforced by ci/check-workflows.py): only GitHub-owned actions pinned to a commit SHA, a read-only token, no
-# pull_request_target or workflow_run, no persisted checkout credentials, a timeout on every job, no secrets.
+# pull_request_target or workflow_run, no persisted checkout credentials, a timeout on every job, no secrets (only the deployment
+# jobs that ci/workflow-secrets.txt lists may read one; this workflow has none).
 name: ci
 
 on:

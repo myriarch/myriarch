@@ -199,7 +199,7 @@ make docs-check                                   # when you touched documentati
 | `build` | `make build` |
 | `examples` | `make validate-examples` (`myrctl validate --strict` on `examples/quickstart`, `gitops-template/config` and `hack/kind/gitops`) |
 | `shellcheck` | `ci/lint-shell.sh` over all shell scripts we ship or run |
-| `workflows` | `ci/lint-workflows.sh`: `actionlint` over `.github/workflows` and the policy check `ci/check-workflows.py` (pinned actions, read-only token, forbidden triggers, a timeout per job, parity with the gates; see [Continuous integration](#continuous-integration)) |
+| `workflows` | `ci/lint-workflows.sh`: `actionlint` over `.github/workflows` and the policy check `ci/check-workflows.py` (pinned actions, read-only token, forbidden triggers, secrets only for listed deployment jobs, a timeout per job, parity with the gates; see [Continuous integration](#continuous-integration)) |
 | `helm` | `ci/lint-helm.sh` and `ci/helm-conform.sh` (renders the chart with the example values and validates it against the schemas of Kubernetes 1.30.0, the chart floor, and 1.34.12) |
 | `language` | the language guard for English (see below) |
 | `docs` | `make docs-check`: generated CLI reference up to date, links, front matter |
@@ -341,14 +341,33 @@ The rules are enforced by `ci/check-workflows.py` (part of the `workflows` gate)
   repository's own installer (`ci/install-tools.sh`) or corepack.
 - **A read-only token**: `permissions: contents: read` at the top of every workflow. A job-level write scope needs a line in
   `ci/workflow-permissions.txt` (`<workflow file> <job> <scope>`) and a review of the job.
-- **No `pull_request_target` and no `workflow_run`**, no secrets (a `secrets.*` expression or a `secrets:` key fails the check), `persist-credentials: false` on every checkout, a timeout on
+- **No `pull_request_target` and no `workflow_run`**, `persist-credentials: false` on every checkout, a timeout on
   every job, and no `github.event.*`, `github.head_ref` or `inputs.*` expression inside a `run:` block (pass it through `env:`).
+- **Secrets only for listed deployment jobs.** A `${{ secrets.NAME }}` expression passes the check only when all three hold:
+  `ci/workflow-secrets.txt` lists `<workflow file> <job> <NAME>`, the job declares `environment:` (so the protection rules of
+  the environment apply before the job starts), and the expression is the whole value of a key in the `env:` of the job or of
+  one of its steps (`KEY: ${{ secrets.NAME }}`). Everything else fails, also inside a listed job: a secret in `run:` text,
+  `with:`, `if:`, the workflow-level `env:`, a flow mapping or a block scalar, in index syntax (`secrets['NAME']`) or as the
+  argument of a function (`toJSON(secrets)`), and every `secrets:` key (`secrets: inherit`). A line of the list whose workflow
+  file, job or secret is gone, a malformed line and a duplicate line fail too. `github.token` is not a secret in this sense:
+  use it (not `secrets.GITHUB_TOKEN`) when a step needs the token of the job.
 - **Toolchains from the repository**: `go-version-file: go.mod` and `node-version-file: .node-version`, never a literal version.
 - **Caches** come from `actions/cache` and the `setup-*` actions only. A cache written by a pull request is not restored on `main`.
   A release workflow must not use caches (`TOOLS_NO_CACHE=1`).
 - **Artifacts** of a failed run are an allow-list of log files. Artifacts of a public repository can be downloaded by any signed-in
   user, so they never contain tokens, cookies or database files.
 - First-time contributors' pull requests wait for a maintainer to approve the workflow run.
+
+### Add a deployment secret
+
+To let a deployment job read a secret:
+
+1. Create the GitHub environment (repository settings, Environments) with its protection rules, for example a deployment
+   branch policy or required reviewers, and store the secret in that environment, not in the repository.
+2. Declare `environment: <name>` in the job and pass the secret as `KEY: ${{ secrets.NAME }}` in the `env:` of the job or of the
+   step that needs it. The step reads the environment variable.
+3. Add the line `<workflow file> <job> <NAME>` to `ci/workflow-secrets.txt`. The pull request says which secret, why the job
+   needs it and which environment protects it. Fork pull requests receive no secrets from GitHub.
 
 ### Update an action pin
 

@@ -32,13 +32,17 @@ do so without widening the attack surface of a public repository:
    `cache` and `upload-artifact`, each as `uses: actions/<name>@<40 hex> # vX.Y.Z`. Every other tool comes from the
    repository's own pinned installer (`ci/install-tools.sh`: Go tools built from `ci/tools/<tool>` with `go.sum`, release
    downloads checked against SHA-256 values) and pnpm through corepack. Dependabot keeps the pins current.
-3. **A read-only token and no secrets.** Every workflow has `permissions: contents: read` at the top. A job may ask for more
-   only when `ci/workflow-permissions.txt` lists the workflow, the job and the scope. `pull_request_target` and `workflow_run`
-   are forbidden, checkouts never persist credentials, untrusted expressions (`github.event.*`, `github.head_ref`) reach a
-   script only through `env:`, and no job uses a secret. Caches written by a pull request are scoped to that pull request
-   by GitHub and are never restored on `main`; release builds will run without caches ([ADR-0023](0023-keyless-release-signing.md)).
-   Uploaded logs are an allow-list of log files, never tokens, cookies or database files, because the artifacts of a public
-   repository can be downloaded by any signed-in user.
+3. **A read-only token and secrets only for listed deployment jobs.** Every workflow has `permissions: contents: read` at
+   the top. A job may ask for more only when `ci/workflow-permissions.txt` lists the workflow, the job and the scope.
+   `pull_request_target` and `workflow_run` are forbidden, checkouts never persist credentials, and untrusted expressions
+   (`github.event.*`, `github.head_ref`) reach a script only through `env:`. The CI jobs use no secret. A deployment job may
+   read a secret when `ci/workflow-secrets.txt` lists the workflow, the job and the secret, the job declares `environment:`
+   (so the protection rules of the environment apply before it starts) and the secret is the whole value of a key,
+   `KEY: ${{ secrets.NAME }}`, in the `env:` of the job or of one of its steps. Every other way to reach a secret fails the
+   check, also inside a listed job: `run:` text, `with:`, `if:`, index syntax, `toJSON(secrets)`, `secrets: inherit`. Caches
+   written by a pull request are scoped to that pull request by GitHub and are never restored on `main`; release builds will
+   run without caches ([ADR-0023](0023-keyless-release-signing.md)). Uploaded logs are an allow-list of log files, never
+   tokens, cookies or database files, because the artifacts of a public repository can be downloaded by any signed-in user.
 4. **One required check: `ci-ok`.** The job `ci-ok` depends on every other job (including the called end-to-end workflow)
    and succeeds only when all of them succeeded; a skipped, cancelled or failed job fails it. The workflows have no path
    filters, so `ci-ok` always reports. The branch ruleset requires `ci-ok` and the DCO check, and nothing else.
@@ -64,7 +68,8 @@ do so without widening the attack surface of a public repository:
 - One source of commands: a contributor reproduces a failed job on their machine, and the maintainers do not maintain a
   second description of the checks.
 - A small, reviewable supply chain: five GitHub-owned actions, pinned, updated by pull requests.
-- A fork pull request cannot reach a secret or a write token, because none exists.
+- A fork pull request cannot reach a secret or a write token: GitHub passes no secrets to the workflow of a fork, the CI jobs
+  have none, and a deployment job needs a reviewed line in `ci/workflow-secrets.txt` and a protected environment.
 - Windows, macOS and arm64 are tested before a release, not after.
 
 ### Negative
@@ -74,7 +79,7 @@ do so without widening the attack surface of a public repository:
 - The nightly runs and the Windows tests need maintenance; a scheduled workflow is switched off by GitHub after 60 days
   without repository activity.
 - The line-based policy check relies on the layout that actionlint accepts (two-space indentation, one key per line) and
-  does not parse YAML anchors; the workflows do not use them.
+  does not parse YAML anchors; the workflows do not use them, and an alias next to a secrets expression fails the check.
 - Network-dependent gates (vulncheck, helm schemas, website, embedded PostgreSQL download) can fail for reasons outside the
   repository. A failed job is re-run; there are no hidden retries.
 

@@ -1,0 +1,1 @@
+.github/workflows/ci.yml:31: R10: an alias (*name) in a workflow with a secrets expression could copy the secret into a job that is not listed

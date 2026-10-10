@@ -1,0 +1,2 @@
+.github/workflows/ci.yml:28: R10: job deploy: secrets.DEPLOY_TOKEN needs 'environment:' at job level, so that the protection rules of the environment guard the job
+.github/workflows/ci.yml:37: R10: job deploy-flow: secrets.DEPLOY_TOKEN needs 'environment:' at job level, so that the protection rules of the environment guard the job

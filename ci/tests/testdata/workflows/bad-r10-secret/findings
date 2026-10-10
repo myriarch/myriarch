@@ -1,0 +1,2 @@
+.github/workflows/ci.yml:24: R10: job go: secrets.DEPLOY_TOKEN is not listed in ci/workflow-secrets.txt (ci.yml go DEPLOY_TOKEN)
+.github/workflows/ci.yml:24: R10: job go: secrets.DEPLOY_TOKEN needs 'environment:' at job level, so that the protection rules of the environment guard the job

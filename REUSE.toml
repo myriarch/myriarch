@@ -40,6 +40,7 @@ path = [
   "ci/license-overrides.txt",
   "ci/vulncheck-allowlist.txt",
   "ci/workflow-permissions.txt",
+  "ci/workflow-secrets.txt",
   "ci/tests/testdata/workflows/**",
 ]
 precedence = "override"

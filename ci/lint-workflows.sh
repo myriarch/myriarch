@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Lints the GitHub Actions workflows: actionlint (syntax, expressions, runner labels, ShellCheck over the run: blocks),
-# then the project policy of ci/check-workflows.py (pinned actions, token permissions, triggers, gate parity).
+# then the project policy of ci/check-workflows.py (pinned actions, token permissions, triggers, secrets, gate parity).
 #
 #   ci/lint-workflows.sh
 #
