@@ -194,7 +194,7 @@ make docs-check                                   # when you touched documentati
 | Gate | What it runs |
 |---|---|
 | `go` | `go build ./...` with and without the `devpg` tag, vet for Windows and macOS, `ci/lint-go.sh` (go mod verify, vet, gofmt), the release dependency check and the license check |
-| `go-test` | `go test -race -count=1 ./...` and the tagged tests of `internal/devpg` (`GO_TEST_RACE=0` drops `-race`, `GO_TEST_DEVPG=0` leaves out the `devpg` tests) |
+| `go-test` | `go test -race -count=1 ./...`, the tagged tests of `internal/devpg` and the render budget test of `internal/blueprint` in a run of its own without `-race` (`GO_TEST_RACE=0` drops `-race`, `GO_TEST_DEVPG=0` leaves out the `devpg` tests, `GO_TEST_PERF=0` leaves out the budget test) |
 | `web` | `pnpm install --frozen-lockfile`, a check that `web/src/api/schema.d.ts` matches `pnpm gen:api`, typecheck, lint, the formatting check (`pnpm format:check`; `pnpm format` fixes it), tests and the production build |
 | `build` | `make build` |
 | `examples` | `make validate-examples` (`myrctl validate --strict` on `examples/quickstart`, `gitops-template/config` and `hack/kind/gitops`) |
@@ -222,6 +222,7 @@ The gates run in the order `go go-test web build examples shellcheck workflows h
 | `LANGUAGE_GUARD_PATHS="..."` | space-separated pathspecs of the strict scope |
 | `GO_TEST_RACE=0\|1` | `go-test`: `-race` on (default) or off |
 | `GO_TEST_DEVPG=0\|1` | `go-test`: run the tagged `devpg` tests (default) or leave them out |
+| `GO_TEST_PERF=0\|1` | `go-test`: run the render budget test alone and without `-race` (default) or leave it out; see [Render budget](#render-budget) |
 | `HELM_KUBERNETES_VERSIONS="1.30.0 1.34.12"` | `helm`: Kubernetes versions of the schemas that the rendered manifests are validated against |
 | `CHECK_LOCAL_STREAM=0\|1` | print every gate to the console in a `::group::` block as well as to its log (default 1 in GitHub Actions, 0 elsewhere) |
 | `E2E_*` | passed through to `scripts/e2e.sh` |
@@ -236,6 +237,21 @@ make check-local ONLY=website             # only the website build and its check
 Logs are written to `.cache/check-local/<gate>.log` and the summary to `.cache/check-local/summary.txt`. A missing tool is
 reported with the hint to run `make tools`. The runner always continues after a failed gate and prints a table at the end;
 the exit code is 1 if any gate failed.
+
+### Render budget
+
+The server renders a fleet of 5,000 agents in under 5 seconds (acceptance criterion). `TestRenderFleet5000UnderFiveSeconds` in
+`internal/blueprint` always renders the 5,000 agents and checks the results (no errors, different configurations for different
+agents), but it holds the duration against the budget only with `PERFTEST=1`. Inside `go test ./...` other packages run in
+parallel, so the wall clock measures the machine as much as the renderer, and the race detector slows the renderer down by 5 to
+10 times. The `go-test` gate therefore runs the test a second time, alone and without `-race`:
+
+```bash
+PERFTEST=1 go test -count=1 -v -run '^TestRenderFleet5000UnderFiveSeconds$' ./internal/blueprint
+```
+
+`GO_TEST_PERF=0` leaves that run out; the Windows job does, because the budget belongs to the server, which does not ship for
+Windows. In a `-race` build the test skips the budget check even with `PERFTEST=1` and says so.
 
 ### Language guard
 
@@ -274,8 +290,8 @@ is a collapsible log group; a failed job uploads `.cache/check-local/` (the gate
 | Job | Gates and commands | Runner |
 |---|---|---|
 | `go` | `go` | ubuntu-24.04 |
-| `go-test-linux` | `go-test` with `-race` against a PostgreSQL 17 service (`PGTEST_DSN`, `max_connections` 300) | ubuntu-24.04 and ubuntu-24.04-arm |
-| `go-test-native` | `go-test`: macOS with `-race` and the embedded PostgreSQL; Windows without `-race` and with `PGTEST_SKIP=1` | macos-latest, windows-latest |
+| `go-test-linux` | `go-test` with `-race` against a PostgreSQL 17 service (`PGTEST_DSN`, `max_connections` 300), then the render budget test | ubuntu-24.04 and ubuntu-24.04-arm |
+| `go-test-native` | `go-test`: macOS with `-race`, the embedded PostgreSQL and the render budget test; Windows without `-race`, with `PGTEST_SKIP=1` and without the budget test (`GO_TEST_PERF=0`) | macos-latest, windows-latest |
 | `web` | `web` | ubuntu-24.04 |
 | `build` | `build`, `examples`, then `make release-snapshot` (the full release matrix, unsigned, nothing published) | ubuntu-24.04 |
 | `shell-helm` | `shellcheck`, `helm` | ubuntu-24.04 |
@@ -302,7 +318,7 @@ repository after 60 days without repository activity.
 make tools                                  # once: the pinned tools in .cache/bin
 make check-local ONLY=web                   # the job "web"
 make check-local ONLY=licenses,vulncheck,secrets      # the job "compliance"
-GO_TEST_RACE=0 GO_TEST_DEVPG=0 PGTEST_SKIP=1 make check-local ONLY=go-test    # the Windows variant of "go-test"
+GO_TEST_RACE=0 GO_TEST_DEVPG=0 GO_TEST_PERF=0 PGTEST_SKIP=1 make check-local ONLY=go-test    # the Windows variant of "go-test"
 make ci-test                                # the job "scripts"
 CHECK_LOCAL_STREAM=1 make check-local ONLY=docs       # with the log groups of GitHub Actions
 ```

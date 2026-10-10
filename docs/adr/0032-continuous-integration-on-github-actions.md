@@ -45,7 +45,10 @@ do so without widening the attack surface of a public repository:
 5. **A platform matrix where the code depends on the platform.** Go tests run with `-race` on Linux amd64 and arm64 against
    a PostgreSQL service (`PGTEST_DSN`, same image digest as the compose file) and on macOS against the embedded PostgreSQL.
    Windows runs the tests without `-race` and without the database tests (`PGTEST_SKIP=1`). The `go` gate also vets the code
-   for Windows and macOS and compiles the tests of the host updater for Windows.
+   for Windows and macOS and compiles the tests of the host updater for Windows. A wall-clock budget needs an idle machine, so
+   the render budget of the server (5000 agents in under 5 s) is asserted only by a run of its own without `-race`
+   (`GO_TEST_PERF`, `PERFTEST=1`), never inside the parallel `go test ./...`; Windows leaves that run out, because the server
+   does not ship for Windows.
 6. **End-to-end tests are part of CI.** `scripts/e2e.sh` runs on pull requests with the real supervisor and the UI smoke
    test; with `E2E_REAL=1` and `E2E_UI=1` a missing prerequisite is a failure, and the downloaded collector binaries are
    checked against the SHA-256 that upstream publishes on every run. The load run (1,000 collectors) and the UI-triggered

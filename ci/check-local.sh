@@ -20,6 +20,8 @@
 #                            scripts/check-language.exclude apply)
 #   GO_TEST_RACE             go-test: 1 (default) runs go test with -race, 0 without (Windows CI)
 #   GO_TEST_DEVPG            go-test: 1 (default) also runs the devpg tests (embedded PostgreSQL), 0 leaves them out
+#   GO_TEST_PERF             go-test: 1 (default) also runs the render budget test (5000 agents in under 5 s) alone and without
+#                            -race with PERFTEST=1, 0 leaves it out (Windows CI); the other runs never check the budget
 #   HELM_KUBERNETES_VERSIONS helm: Kubernetes versions of the kubeconform schemas (default: 1.30.0 1.34.12)
 #   CHECK_LOCAL_STREAM       1 streams every gate to the console in a ::group:: block (the default when GITHUB_ACTIONS=true,
 #                            the log file is written as well), 0 writes the log file only (the default elsewhere)
@@ -39,7 +41,7 @@ usage() {
 usage: ci/check-local.sh [--list] [-h]
   SKIP=g1,g2   skip gates          ONLY=g1,g2   run only these gates
   LANGUAGE_GUARD=strict|warn|off   LANGUAGE_GUARD_PATHS="pathspec ..."
-  GO_TEST_RACE=0|1  GO_TEST_DEVPG=0|1  HELM_KUBERNETES_VERSIONS="1.30.0 ..."
+  GO_TEST_RACE=0|1  GO_TEST_DEVPG=0|1  GO_TEST_PERF=0|1  HELM_KUBERNETES_VERSIONS="1.30.0 ..."
   CHECK_LOCAL_STREAM=0|1           stream gates as ::group:: blocks (default 1 in GitHub Actions)
 gates: ${GATES}
 USAGE
@@ -117,11 +119,19 @@ gate_go_test() {
   ulimit -n 10240 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
   local race="-race"
   [ "${GO_TEST_RACE:-1}" = 0 ] && race=""
+  # A wall-clock budget needs an idle machine and go test ./... runs packages in parallel: only the last run below asserts
+  # the render budget (TestRenderFleet5000UnderFiveSeconds, PERFTEST=1), so a PERFTEST of the caller must not reach the others.
+  unset PERFTEST
   # untagged: covers the devpg stub and TestDevCommandAgainstExternalPostgres (myriarchd dev --dsn without the tag)
   # shellcheck disable=SC2086  # race is empty or one flag
   go test ${race} -count=1 ./...
   # shellcheck disable=SC2086
   if [ "${GO_TEST_DEVPG:-1}" != 0 ]; then go test ${race} -count=1 -tags devpg ./internal/devpg/...; fi
+  # the budget test alone and without -race (the race detector slows the renderer down by 5-10x); -v logs the measured time
+  if [ "${GO_TEST_PERF:-1}" != 0 ]; then
+    echo "== go-test: render budget of internal/blueprint (PERFTEST=1, run alone, without -race)"
+    PERFTEST=1 go test -count=1 -v -run '^TestRenderFleet5000UnderFiveSeconds$' ./internal/blueprint
+  fi
 }
 
 # Not ci/test-web.sh: it may run corepack or a global npm install, which changes the system.

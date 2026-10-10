@@ -136,15 +136,20 @@ jobs:
             race: '1'
             devpg: '1'
             pgskip: ''
+            perf: '1'
             timeout: 60
           - os: windows-latest
             race: '0'
             devpg: '0'
             pgskip: '1'
+            # the render budget (5000 agents in under 5 s) is an acceptance criterion of the server, which does not ship for
+            # Windows; the main run still renders the fleet there, only the timing run is left out
+            perf: '0'
             timeout: 45
     env:
       GO_TEST_RACE: ${{ matrix.race }}
       GO_TEST_DEVPG: ${{ matrix.devpg }}
+      GO_TEST_PERF: ${{ matrix.perf }}
       PGTEST_SKIP: ${{ matrix.pgskip }}
     steps:
       - name: Keep the line endings of the repository (Windows)

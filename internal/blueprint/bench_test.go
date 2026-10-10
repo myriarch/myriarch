@@ -5,6 +5,7 @@ package blueprint_test
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -58,16 +59,24 @@ func BenchmarkRenderFleet5000(b *testing.B) {
 	}
 }
 
-// Acceptance: rendering a fleet of 5000 agents takes < 5 s.
+// Acceptance: rendering a fleet of 5000 agents takes < 5 s. In `go test ./...` other packages run in parallel, so the wall
+// clock measures the machine as much as the renderer: the budget is asserted only with PERFTEST=1, in a run of this test
+// alone and without -race (the go-test gate of ci/check-local.sh does that; GO_TEST_PERF=0 leaves it out). Without
+// PERFTEST the test still renders all 5000 agents, checks the results and logs the duration.
 func TestRenderFleet5000UnderFiveSeconds(t *testing.T) {
 	if testing.Short() {
 		t.Skip("performance test")
 	}
-	budget := 5 * time.Second
-	if raceEnabled {
-		budget *= 6 // the race detector slows down by roughly 5-10x
-	}
+	const budget = 5 * time.Second
 	d := renderFleet(t, 5000)
 	t.Logf("rendered 5000 agents in %s", d)
+	if os.Getenv("PERFTEST") != "1" {
+		t.Logf("the budget of %s was not checked (PERFTEST=1 checks it; run the test alone and without -race)", budget)
+		return
+	}
+	if raceEnabled {
+		// the race detector slows the renderer down by roughly 5-10x, so no budget fits both builds
+		t.Skipf("PERFTEST=1 in a -race build: the rendering and its checks passed, the budget of %s was not checked (run without -race)", budget)
+	}
 	require.Less(t, d, budget)
 }
