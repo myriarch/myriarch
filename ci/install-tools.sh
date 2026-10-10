@@ -543,8 +543,12 @@ release_install_osslsigncode() {
   } > "${tmp}/build/config.h"
   local incl=() libs=()
   if [ "${prefix}" != /usr ]; then incl=("-I${prefix}/include"); libs=("-L${prefix}/lib"); fi
-  # -std=gnu11 (not c11): getpass and mmap are hidden under strict c11 on glibc
-  ( cd "${src}" && cc -std=gnu11 -O2 -Wno-deprecated-declarations -DHAVE_CONFIG_H=1 -I"${tmp}/build" ${incl[@]+"${incl[@]}"} \
+  # -std=gnu11 (not c11): getpass and mmap are hidden under strict c11 on glibc. osslsigncode parses files that a signing provider
+  # returns, so the build is hardened explicitly (Debian and Ubuntu compilers do it by default, Apple clang does not): fortified
+  # libc calls, stack protector and, on Linux, immediate binding with a read-only relocation table.
+  local harden=(-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fstack-protector-strong)
+  case "$(uname -s)" in Linux) harden+=("-Wl,-z,relro,-z,now") ;; esac
+  ( cd "${src}" && cc -std=gnu11 -O2 "${harden[@]}" -Wno-deprecated-declarations -DHAVE_CONFIG_H=1 -I"${tmp}/build" ${incl[@]+"${incl[@]}"} \
       osslsigncode.c helpers.c utf.c msi.c pe.c cab.c cat.c appx.c script.c \
       ${libs[@]+"${libs[@]}"} -lssl -lcrypto -lz -o "${tmp}/osslsigncode" ) >&2 \
     || die "osslsigncode: the build failed (C compiler, OpenSSL 3 and zlib headers?)"
