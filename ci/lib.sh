@@ -55,6 +55,18 @@ sha256_of() { # file
   fi
 }
 
+# Name (without the directory) of the stamp that ci/install-tools.sh keeps in ${TOOLS_BIN} for a tool that is built from the Go
+# module ci/tools/<tool>/: .stamp-<tool>-<version>-<digest><suffix>, with the first 12 hex digits of the SHA-256 of go.mod followed
+# by go.sum. A cached binary is trusted only when a stamp of exactly this name exists, so a change of either file (a raised
+# requirement, for example) rebuilds the tool even when an older tool cache is restored under a new cache key.
+go_tool_stamp() { # tool version [suffix]
+  local dir="${CI_DIR}/tools/$1" digest
+  [ -f "${dir}/go.mod" ] && [ -f "${dir}/go.sum" ] || die "ci/tools/$1/go.mod or go.sum is missing (ci/tools/update.sh $1)"
+  digest="$(cat "${dir}/go.mod" "${dir}/go.sum" | sha256_of /dev/stdin)"
+  [ "${#digest}" -ge 12 ] || die "cannot compute the digest of ci/tools/$1/go.mod and go.sum"
+  printf '.stamp-%s-%s-%s%s' "$1" "$2" "${digest:0:12}" "${3:-}"
+}
+
 # Release version from the git tag (v1.2.3 -> 1.2.3); VERSION overrides RELEASE_TAG.
 release_version() {
   local v="${VERSION:-${RELEASE_TAG:-}}"

@@ -1,12 +1,30 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Keeps the pinned GitHub Actions current (ADR-0032). Dependabot rewrites both the commit SHA and the "# vX.Y.Z" comment, which
-# is the format that ci/check-workflows.py requires. Only GitHub-owned actions are used, so every update comes from actions/*.
-# An update arrives as a pull request that goes through the same checks as any other change; read the release notes before
-# merging a major version.
+# Keeps the dependencies current. What else an update has to change is described in docs/development.md, "Dependency updates".
+#
+# Version updates: the entries below, except the CI tool modules, propose their updates once a week, on Monday, as one
+# grouped pull request per directory. A group takes every update of its entry, so open-pull-requests-limit only counts the
+# updates that cannot be grouped. Security updates need the repository setting "Dependabot security updates". They are
+# independent of the schedule, the groups and the limit: a pull request comes as soon as an advisory has a fix, one per
+# vulnerable dependency and directory.
+#
+# Pull requests: an update goes through the same checks as any other change. The required DCO check passes the commits that
+# a bot authored, so an unmodified Dependabot pull request needs no sign-off and its commits stay as they are; a commit that
+# a maintainer adds to the branch carries that maintainer's sign-off. Read the release notes before merging a major version.
+#
+# Labels: none are set here. Dependabot then creates and applies its default labels ("dependencies" and one per ecosystem),
+# and the "Dependencies" category of .github/release.yml matches them. With custom labels it creates none and applies only
+# labels that already exist in the repository, so the pull requests would arrive without a label.
+#
+# Updated by hand, not listed here: the container image digests (ci/pin-images.sh; ci/check.sh keeps the Dockerfiles, the
+# compose file and ci/versions.env in step), reuse (ci/tools/reuse, hash-pinned for Python 3.9; a security update can still
+# reach it, see docs/development.md) and the Docsy theme (website/go.mod, whose overrides are pinned in
+# website/overrides.txt).
 version: 2
 updates:
+  # GitHub Actions (ADR-0032). Dependabot rewrites both the commit SHA and the "# vX.Y.Z" comment, which is the format that
+  # ci/check-workflows.py requires. Only GitHub-owned actions are used, so every update comes from actions/*.
   - package-ecosystem: github-actions
     directories:
       - /
@@ -17,4 +35,71 @@ updates:
     groups:
       github-actions:
         patterns: ['*']
-    labels: [dependencies]
+
+  # The product: the root Go module. A changed version of a linked package changes THIRD_PARTY_NOTICES (make notices).
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      go-modules:
+        patterns: ['*']
+    open-pull-requests-limit: 3
+
+  # The CI tool modules (one module per tool): security updates only. Every requirement in them is marked "// indirect" (a
+  # tool is only named by a "tool" directive), and Dependabot proposes version updates for direct requirements only (its
+  # default). The tool versions are the pins of ci/versions.env, which ci/check.sh compares with go.mod; the limit of 0
+  # states that no version updates are wanted.
+  - package-ecosystem: gomod
+    directories:
+      - '/ci/tools/*'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 0
+
+  # The web UI (pnpm). A changed version of a bundled package changes THIRD_PARTY_NOTICES (make notices).
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      web-ui:
+        patterns: ['*']
+    open-pull-requests-limit: 3
+
+  # The website tooling (pnpm). A shipped package also needs its new version in website/data/third_party.yaml
+  # (check-notices.py).
+  - package-ecosystem: npm
+    directory: /website
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      website:
+        patterns: ['*']
+    open-pull-requests-limit: 3
+
+  # The brand asset generator: Python packages here, Node.js packages in the next entry. No gate runs the generator, so
+  # compare its output before merging an update (assets/brand/README.md).
+  - package-ecosystem: pip
+    directory: /assets/brand/source
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      brand-python:
+        patterns: ['*']
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: npm
+    directory: /assets/brand/source
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      brand-node:
+        patterns: ['*']
+    open-pull-requests-limit: 3

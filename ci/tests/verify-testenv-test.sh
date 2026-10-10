@@ -15,7 +15,7 @@ tools="${TEST_TMP}/tools"; mkdir -p "${tools}"
 for t in helm:HELM yq:YQ kustomize:KUSTOMIZE; do
   name="${t%%:*}"; var="${t##*:}_VERSION"
   printf '#!/bin/sh\necho %s\n' "${name}" > "${tools}/${name}"; chmod +x "${tools}/${name}"
-  : > "${tools}/.stamp-${name}-${!var}"
+  : > "${tools}/$(go_tool_stamp "${name}" "${!var}")"   # the stamp of the current go.mod and go.sum (see install-tools-test.sh)
 done
 printf '#!/bin/sh\necho "myriarchd test"\n' > "${TEST_TMP}/myriarchd"; chmod +x "${TEST_TMP}/myriarchd"
 
