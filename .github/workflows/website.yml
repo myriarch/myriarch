@@ -1,0 +1,229 @@
+# Builds the project website (website/, ADR-0031), runs the website gate and deploys the finished directory website/public to Vercel as
+# prebuilt static output. Production on pushes to main, previews (noindex) for pull requests from branches of this repository, never for
+# forks. Setup of the Vercel project, the environment "website" and the domain: website/README.md, section "Deployment".
+#
+# Isolation: the build job runs repository code and has no secrets. The deploy job has the Vercel secrets, installs the pinned Vercel CLI
+# from website/pnpm-lock.yaml without lifecycle scripts and uploads the artifact of the build job. No third-party action is used.
+name: website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - 'docs/**'
+      - 'api/openapi.yaml'
+      - 'assets/brand/**'
+      - 'ROADMAP.md'
+      - 'CHANGELOG.md'
+      - 'CONTRIBUTING.md'
+      - 'GOVERNANCE.md'
+      - 'SECURITY.md'
+      - 'CODE_OF_CONDUCT.md'
+      - 'MAINTAINERS.md'
+      - 'ADOPTERS.md'
+      - 'CONTRIBUTOR_LADDER.md'
+      - 'deploy/helm/myriarch/README.md'
+      - 'gitops-template/README.md'
+      - 'ci/website.sh'
+      - 'ci/install-tools.sh'
+      - 'ci/lib.sh'
+      - 'ci/versions.env'
+      - 'scripts/check-docs.py'
+      - '.github/workflows/website.yml'
+  pull_request:
+    paths:
+      - 'website/**'
+      - 'docs/**'
+      - 'api/openapi.yaml'
+      - 'assets/brand/**'
+      - 'ROADMAP.md'
+      - 'CHANGELOG.md'
+      - 'CONTRIBUTING.md'
+      - 'GOVERNANCE.md'
+      - 'SECURITY.md'
+      - 'CODE_OF_CONDUCT.md'
+      - 'MAINTAINERS.md'
+      - 'ADOPTERS.md'
+      - 'CONTRIBUTOR_LADDER.md'
+      - 'deploy/helm/myriarch/README.md'
+      - 'gitops-template/README.md'
+      - 'ci/website.sh'
+      - 'ci/install-tools.sh'
+      - 'ci/lib.sh'
+      - 'ci/versions.env'
+      - 'scripts/check-docs.py'
+      - '.github/workflows/website.yml'
+  # Manual redeploy of production from main (a change outside the path filters, a rotated token).
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# A newer push to a pull request replaces the running preview. Production runs are never cancelled; a newer pending production run
+# replaces an older pending one, so the newest commit wins.
+concurrency:
+  group: website-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+
+jobs:
+  build:
+    name: build and check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Hugo fetches the Docsy theme as a Go module.
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Node 24 is the version that still bundles corepack (Node 25 and later do not).
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+
+      - name: Enable pnpm through corepack
+        run: |
+          corepack enable
+          cd website
+          pnpm --version
+
+      # ci/website.sh installs the pinned hugo, sass and lychee (SHA-256-verified downloads, ci/versions.env) and the Node
+      # dependencies of website/ (pnpm install --frozen-lockfile), builds the site and runs every check of the website gate.
+      # A pull request builds the preview variant (production assets plus noindex), so the gate runs on the bytes that are deployed.
+      - name: Build and check the website
+        env:
+          WEBSITE_ENV: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
+          WEBSITE_BASEURL: ${{ github.event_name == 'pull_request' && '/' || '' }}
+        run: make website-check
+
+      - name: Upload the built site
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: website-public
+          path: website/public
+          if-no-files-found: error
+          retention-days: 3
+          include-hidden-files: false
+
+  deploy:
+    name: deploy
+    needs: build
+    # Pull requests from forks never deploy (they have no secrets and run untrusted code); Dependabot pull requests have no Actions
+    # secrets either and get the build only. Manual runs deploy production from main only.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && github.event.pull_request.user.login != 'dependabot[bot]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: website
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      TARGET: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
+      VERCEL_TELEMETRY_DISABLED: '1'
+    steps:
+      # Only the manifest and the lockfile are needed to install the Vercel CLI; .git stays, so that the CLI can send commit metadata.
+      - name: Check out the Node manifest and lockfile
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            website/package.json
+            website/pnpm-lock.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+
+      - name: Install the pinned Vercel CLI
+        run: |
+          corepack enable
+          cd website
+          pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Download the built site
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: website-public
+          path: .vercel/output/static
+
+      # The Build Output API does not serve 404.html by itself. The routes below hand every path without a file to it. The file is
+      # generated here, never committed and never part of website/public, so that the site itself stays host-neutral (ADR-0031).
+      - name: Assemble and guard the output
+        run: |
+          set -euo pipefail
+          out=.vercel/output
+          for f in index.html 404.html robots.txt; do
+            [ -f "${out}/static/${f}" ] || { echo "::error::${out}/static/${f} is missing in the built site"; exit 1; }
+          done
+          if [ "${TARGET}" = preview ]; then
+            grep -qxF 'Disallow: /' "${out}/static/robots.txt" || { echo "::error::the preview does not disallow crawlers in robots.txt"; exit 1; }
+          else
+            if grep -qxF 'Disallow: /' "${out}/static/robots.txt"; then echo "::error::production disallows crawlers in robots.txt"; exit 1; fi
+            grep -qxF 'Sitemap: https://myriarch.dev/sitemap.xml' "${out}/static/robots.txt" \
+              || { echo "::error::robots.txt of production does not name https://myriarch.dev/sitemap.xml"; exit 1; }
+          fi
+          printf '%s\n' '{"version":3,"routes":[{"handle":"filesystem"},{"src":"/.*","status":404,"dest":"/404.html"}]}' > "${out}/config.json"
+          python3 -I -m json.tool "${out}/config.json" > /dev/null
+
+      # The token comes from the environment, not from --token, so that it stays out of the process list. Without --yes the CLI can
+      # never create or link a project by itself. stdout of the CLI is the deployment URL; its logs go to stderr.
+      - name: Deploy to Vercel
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::the secret ${name} of the environment website is not set"
+              exit 1
+            fi
+          done
+          args=(deploy --prebuilt)
+          if [ "${TARGET}" = production ]; then args+=(--prod); fi
+          output="$(website/node_modules/.bin/vercel "${args[@]}")"
+          url="$(printf '%s\n' "${output}" | tail -n 1)"
+          if ! printf '%s' "${url}" | grep -Eq '^https://[a-z0-9-]+\.vercel\.app$'; then
+            echo "::error::the Vercel CLI did not print a deployment URL on its last line"
+            exit 1
+          fi
+          echo "url=${url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Write the job summary
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          {
+            echo "### Website (${TARGET})"
+            echo
+            echo "- Deployment: ${DEPLOYMENT_URL}"
+            echo "- Commit: ${GITHUB_SHA}"
+            if [ "${TARGET}" = production ]; then echo "- Site: https://myriarch.dev/"; fi
+            if [ "${TARGET}" = preview ]; then echo "- Previews are protected by Vercel Authentication and marked noindex."; fi
+          } >> "${GITHUB_STEP_SUMMARY}"
