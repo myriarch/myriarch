@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-telemetry/opamp-go/protobufs"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -197,7 +198,7 @@ func TestSimFailedConfigIsRolledBackAutomatically(t *testing.T) {
 
 	good, goodHash := "receivers:\n  otlp_grpc: {}\n", []byte("good")
 	f.pushConfig(good, goodHash)
-	eventually(t, 10*time.Second, func() bool { return r.Stats().ConfigsApplied == 4 }, "good config applied")
+	waitAllReportedApplied(t, f, r, goodHash)
 
 	bad, badHash := "receivers:\n  simulate-config-failure: {}\n", []byte("bad")
 	f.pushConfig(bad, badHash)
@@ -495,7 +496,7 @@ func TestSimRemoteConfigSurvivesReconnect(t *testing.T) {
 	r := startSim(t, f, 2, fastProfile(t, nil), nil)
 	waitAllConnected(t, r, 20*time.Second)
 	f.pushConfig("a: b\n", []byte("h1"))
-	eventually(t, 10*time.Second, func() bool { return r.Stats().ConfigsApplied == 2 }, "applied")
+	waitAllReportedApplied(t, f, r, []byte("h1"))
 
 	c := r.Collectors()[0]
 	c.goOffline(context.Background(), 100*time.Millisecond)
@@ -508,46 +509,131 @@ func TestSimRemoteConfigSurvivesReconnect(t *testing.T) {
 	})
 }
 
+// holdApplies lets the apply of a remote config start (APPLYING is reported) but not finish on its own: the timer
+// that ends an apply is an hour away, and the test ends the apply it wants to end with finishApplyNow. That makes
+// the state "an apply is in flight" last as long as the test needs, without a timing window.
+func holdApplies(p *Profile) {
+	p.Behavior.ConfigApplyDelay = DurRange{Min: time.Hour, Max: time.Hour}
+}
+
+// inflightApply returns the epoch and generation of the apply that is in flight, the arguments of its finishApply.
+func (a *CollectorAgent) inflightApply() (epoch, gen int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.epoch, a.applyGen
+}
+
+// finishApplyNow runs what the apply timer of the apply in flight would run.
+func finishApplyNow(c *CollectorAgent, hash, body []byte) {
+	epoch, gen := c.inflightApply()
+	c.finishApply(epoch, gen, hash, body, "", false)
+}
+
+// reportedStatus reports whether the server's last remote config status of the agent is st for hash.
+func (f *fakeMyriarchd) reportedStatus(id uuid.UUID, st protobufs.RemoteConfigStatuses, hash []byte) bool {
+	ok := false
+	f.with(id, func(a *fakeAgent) {
+		ok = a.rcStatus != nil && a.rcStatus.Status == st && bytes.Equal(a.rcStatus.LastRemoteConfigHash, hash)
+	})
+	return ok
+}
+
+// waitAllReportedApplied waits until the server holds APPLIED for hash from every collector. The counter of
+// Stats().ConfigsApplied is not enough as a barrier: it moves before the APPLIED report is sent, so a test that
+// acts on it races with the tail of the apply.
+func waitAllReportedApplied(t testing.TB, f *fakeMyriarchd, r *runningSim, hash []byte) {
+	t.Helper()
+	eventually(t, 10*time.Second, func() bool {
+		for _, c := range r.Collectors() {
+			if !f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, hash) {
+				return false
+			}
+		}
+		return true
+	}, "every collector reports APPLIED for %q", hash)
+}
+
 // An apply that is cut short by a restart (the upgrade of a version rollout drops the connection while the config
 // is being applied) must not leave the agent reporting APPLYING for ever: the new process reports the config it
 // runs, so the server offers the desired one again. Found by the HA step of scripts/e2e.sh, where such an agent held
 // a config rollout until its applyTimeout.
+// The test holds the apply, so there is no time window: the interrupted apply (h2) stays in flight until the
+// connection drops, the reconnected agent must report the config it runs (h1), and the timer of the interrupted apply,
+// fired by hand after the reconnect, must not take effect.
 func TestSimInterruptedApplyIsNotReplayedAfterReconnect(t *testing.T) {
 	f := newFakeMyriarchd(t)
-	r := startSim(t, f, 2, fastProfile(t, func(p *Profile) {
-		p.Behavior.ConfigApplyDelay = DurRange{Min: 600 * time.Millisecond, Max: 600 * time.Millisecond}
-	}), nil)
+	r := startSim(t, f, 2, fastProfile(t, holdApplies), nil)
 	waitAllConnected(t, r, 20*time.Second)
-	f.pushConfig("a: b\n", []byte("h1"))
-	eventually(t, 10*time.Second, func() bool { return r.Stats().ConfigsApplied == 2 }, "first config applied")
-
 	c := r.Collectors()[0]
-	f.pushConfig("a: c\n", []byte("h2"))
+	applying := func(hash []byte) {
+		eventually(t, 10*time.Second, func() bool {
+			return f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLYING, hash)
+		}, "the config %q is being applied", hash)
+	}
+
+	f.pushConfig("a: b\n", []byte("h1"))
+	applying([]byte("h1"))
+	finishApplyNow(c, []byte("h1"), []byte("a: b\n"))
 	eventually(t, 10*time.Second, func() bool {
-		ok := false
-		f.with(c.uid, func(a *fakeAgent) {
-			ok = a.rcStatus != nil && a.rcStatus.Status == protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLYING &&
-				bytes.Equal(a.rcStatus.LastRemoteConfigHash, []byte("h2"))
-		})
-		return ok
-	}, "the second config is being applied")
+		return f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, []byte("h1"))
+	}, "the first config is applied")
+
+	f.pushConfig("a: c\n", []byte("h2"))
+	applying([]byte("h2")) // stays so: nothing ends this apply but the test
+	staleEpoch, staleGen := c.inflightApply()
+	appliedBefore := c.State().ConfigsApplied
 
 	c.goOffline(context.Background(), 50*time.Millisecond)
-	eventually(t, 10*time.Second, func() bool { return c.State().Connected }, "reconnected")
-	eventually(t, 5*time.Second, func() bool {
-		ok := false
-		f.with(c.uid, func(a *fakeAgent) {
-			ok = a.rcStatus != nil && a.rcStatus.Status == protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED &&
-				bytes.Equal(a.rcStatus.LastRemoteConfigHash, []byte("h1"))
-		})
-		return ok
+	eventually(t, 10*time.Second, func() bool {
+		st := r.Stats()
+		return c.State().Connected && st.ConnectedUpdaters == st.Updaters // goOffline restarts the updater after the collector
+	}, "reconnected")
+	eventually(t, 10*time.Second, func() bool {
+		return f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, []byte("h1"))
 	}, "the reconnected agent reports the config it runs instead of the interrupted apply")
-	time.Sleep(800 * time.Millisecond) // the interrupted apply must not complete in the background
-	f.with(c.uid, func(a *fakeAgent) {
-		assert.Equal(t, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, a.rcStatus.Status)
-		assert.Equal(t, []byte("h1"), a.rcStatus.LastRemoteConfigHash)
-	})
-	assert.Equal(t, "6831", c.State().RemoteConfig, "the interrupted apply did not become the running config (hex of h1)")
+
+	// The timer of the interrupted apply would fire now; its epoch is gone, so it must not take effect.
+	c.finishApply(staleEpoch, staleGen, []byte("h2"), []byte("a: c\n"), "", false)
+	st := c.State()
+	assert.Equal(t, "6831", st.RemoteConfig, "the interrupted apply did not become the running config (hex of h1)")
+	assert.Equal(t, appliedBefore, st.ConfigsApplied, "the interrupted apply did not complete")
+	assert.Equal(t, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED.String(), st.RemoteStatus)
+	assert.Equal(t, "6831", st.StatusHash)
+	assert.True(t, f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, []byte("h1")))
+}
+
+// The report that ends an apply runs after the apply updated the agent state, outside of its lock. When the next
+// config arrives in that gap, the APPLIED report of the old config must not replace the APPLYING report of the new
+// one: the server would hold APPLIED for the old hash while the new config is being applied (and the APPLYING
+// report would be lost whenever both are pending in the client at once).
+func TestSimStaleApplyReportDoesNotReplaceTheNewerConfigStatus(t *testing.T) {
+	f := newFakeMyriarchd(t)
+	r := startSim(t, f, 1, fastProfile(t, holdApplies), nil)
+	waitAllConnected(t, r, 20*time.Second)
+	c := r.Collectors()[0]
+
+	f.pushConfig("a: b\n", []byte("h1"))
+	eventually(t, 10*time.Second, func() bool {
+		return f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLYING, []byte("h1"))
+	}, "the first config is being applied")
+	oldEpoch, oldGen := c.inflightApply()
+
+	f.pushConfig("a: c\n", []byte("h2"))
+	eventually(t, 10*time.Second, func() bool {
+		return f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLYING, []byte("h2"))
+	}, "the second config is being applied")
+
+	c.reportRemoteStatus(oldEpoch, oldGen, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, []byte("h1"), "")
+	st := c.State()
+	assert.Equal(t, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLYING.String(), st.RemoteStatus)
+	assert.Equal(t, "6832", st.StatusHash, "the status is still the one of the newer config (hex of h2)")
+
+	// The current apply can still report.
+	epoch, gen := c.inflightApply()
+	c.reportRemoteStatus(epoch, gen, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, []byte("h2"), "")
+	eventually(t, 10*time.Second, func() bool {
+		return f.reportedStatus(c.uid, protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED, []byte("h2"))
+	}, "the current apply reports")
 }
 
 func TestSimMetricsEndpoint(t *testing.T) {
@@ -681,7 +767,7 @@ func TestSimValidateConfigKeepsFailedStatus(t *testing.T) {
 	r := startSim(t, f, 2, fastProfile(t, func(p *Profile) { p.Behavior.ValidateConfig = true }), nil)
 	waitAllConnected(t, r, 20*time.Second)
 	f.pushConfig("receivers:\n  otlp_grpc: {}\n", []byte("good"))
-	eventually(t, 10*time.Second, func() bool { return r.Stats().ConfigsApplied == 2 }, "good config applied")
+	waitAllReportedApplied(t, f, r, []byte("good"))
 	f.pushConfig("receivers:\n  simulate-config-failure: {}\n", []byte("bad"))
 	eventually(t, 10*time.Second, func() bool { return r.Stats().ConfigsFailed == 2 }, "bad config fails")
 	time.Sleep(600 * time.Millisecond)
