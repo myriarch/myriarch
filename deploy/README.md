@@ -173,8 +173,9 @@ keyless Sigstore signing (ADR-0023).
   `scripts/build-collector-image-crane.sh` runs this verification by default when it pushes (`VERIFY_UPSTREAM=0` skips
   it for a lab build), uses the reviewed digests of `ci/versions.env` for the pinned version and refuses upstream image
   overrides that are not pinned by digest (`ALLOW_UNPINNED_IMAGES=1` allows a tag for a lab build).
-  `scripts/build-image-crane.sh` refuses the `dev` variant for the published repository `ghcr.io/myriarch/*`; build it
-  with `IMAGE_VARIANT=release`.
+  `scripts/build-image-crane.sh` in its default mode (build from source) refuses `ghcr.io/myriarch/*` for every variant
+  (`DRY_RUN=1` only builds); the published images are built with `IMAGE_SOURCE=dist` and pushed by
+  `ci/release/push-images.sh` from `release.yml`.
 
 The `myriarch-updater` archives additionally contain `deploy/` (scripts, templates, units) - the package is self-contained
 on the host. In addition, bare binaries `myriarch-updater_<ver>_<os>_<arch>[.exe]` are produced for
@@ -210,7 +211,11 @@ in deployments.
   (`DIST_DIR`), checks them (SHA-256 from `checksums.txt`; static ELF of the platform; embedded root CAs; for the server the web
   UI without `devpg` and the time zone database; the commit of a clean work tree recorded in the binary) and writes an OCI layout
   below `.cache/image-dist/` (`OUT_DIR`) whose `index.json` is the index. Fixed timestamps and sorted entries make it
-  deterministic: the same archives and commit give the same digests. It also writes one SPDX SBOM per platform with the pinned
+  deterministic: the same archives and commit give the same uncompressed layer (`diff_id`) everywhere, and the same layer,
+  manifest and index digests with the same zlib (the compressed layer comes from the zlib that Python links; a different
+  implementation such as zlib-ng can compress to other bytes, so the build logs the zlib version). The release build (without
+  `ALLOW_DIRTY=1`) also needs a clean tree, the `metadata.json` of goreleaser for the same commit, both platforms and the SBOMs.
+  It also writes one SPDX SBOM per platform with the pinned
   syft (`IMAGE_SBOM=0` skips it). Nothing is compiled and nothing is pushed. Try it with `make release-snapshot` and
   `ALLOW_DIRTY=1 IMAGE_SOURCE=dist IMAGE_KIND=updater scripts/build-image-crane.sh`.
 * **Push.** `ci/release/push-images.sh <layout> <repository>@sha256:<digest>` pushes by digest with `crane push --index`,

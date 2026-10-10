@@ -309,6 +309,20 @@ t_pub_push() { IMAGE_VARIANT=release IMAGE_REPO=ghcr.io/myriarch/myriarch bash "
 expect_fail "a build from source refuses to push to the published repository" "is a published repository" t_pub_push
 t_pub_push_case() { IMAGE_VARIANT=release IMAGE_REPO=GHCR.io/myriarch/myriarch-updater bash "${IMG}"; }
 expect_fail "... also with another spelling of the host" "is a published repository" t_pub_push_case
+t_pub_push_port() { IMAGE_VARIANT=release IMAGE_REPO=ghcr.io:443/myriarch/myriarch bash "${IMG}"; }
+expect_fail "... also with the default port" "is a published repository" t_pub_push_port
+t_pub_push_dot() { IMAGE_VARIANT=release IMAGE_REPO=ghcr.io./myriarch/myriarch-updater bash "${IMG}"; }
+expect_fail "... also with the trailing dot of a fully qualified host name" "is a published repository" t_pub_push_dot
+t_published_spelling() { # repo: success if image_is_published_repo accepts it
+  bash -c 'die() { exit 1; }; ROOT="$1"; . "$1/scripts/lib/image-common.sh"; image_is_published_repo "$2"' _ "${REPO}" "$1"
+}
+for r in ghcr.io/myriarch/myriarch GHCR.io/MyriArch/x ghcr.io:443/myriarch/x ghcr.io./myriarch/x ghcr.io.:443/myriarch/x; do
+  expect_ok "image_is_published_repo accepts ${r}" t_published_spelling "${r}"
+done
+for r in ghcr.io/other/x registry.example.com/myriarch/x 127.0.0.1:5000/myriarch/x ghcr.io/myriarchx/y; do
+  t_not_published() { ! t_published_spelling "$1"; }
+  expect_ok "image_is_published_repo does not accept ${r}" t_not_published "${r}"
+done
 
 # ---- (m) release images from the release archives (IMAGE_SOURCE=dist) ---------------------------------------------------
 # Stand-ins for the release archives of goreleaser: small static linux binaries built from this repository (myrctl for
@@ -323,8 +337,8 @@ EPOCH=1700000000
 VERSION_PKG_FULL="github.com/myriarch/myriarch/internal/version"
 BIN="${W}/bin"
 mkdir -p "${BIN}/amd64" "${BIN}/arm64"
-build_bin() { # out goarch package tags version
-  ( cd "${REPO}" && CGO_ENABLED=0 GOOS=linux GOARCH="$2" go build -trimpath ${4:+-tags "$4"} \
+build_bin() { # out goarch package tags version; BUILD_GOOS, BUILD_CGO and BUILD_DIR (default: this work tree) change the build
+  ( cd "${BUILD_DIR:-${REPO}}" && CGO_ENABLED="${BUILD_CGO:-0}" GOOS="${BUILD_GOOS:-linux}" GOARCH="$2" go build -trimpath ${4:+-tags "$4"} \
       -ldflags "-s -w -X ${VERSION_PKG_FULL}.Version=${5:-${RV}}" -o "$1" "$3" ) >"${W}/build.log" 2>&1 || { cat "${W}/build.log" >&2; return 1; }
 }
 built=1
@@ -335,6 +349,21 @@ done
 build_bin "${BIN}/amd64/devpg" amd64 ./cmd/myrctl embedui,devpg || built=0
 build_bin "${BIN}/amd64/noui" amd64 ./cmd/myrctl "" || built=0
 build_bin "${BIN}/amd64/oldversion" amd64 ./cmd/myrctl embedui 1.0.0 || built=0
+# the updater with the tag of the server: embedded roots, version and tags are right, the time zone database is missing
+build_bin "${BIN}/amd64/notz" amd64 ./cmd/myriarch-updater embedui || built=0
+# a static ELF of the right machine that is not a linux build, and a build that recorded CGO_ENABLED=1 (no C compiler is
+# needed: with netgo and osusergo no package uses cgo)
+BUILD_GOOS=freebsd build_bin "${BIN}/amd64/freebsd" amd64 ./cmd/myrctl embedui || built=0
+cgo_built=1
+BUILD_CGO=1 build_bin "${BIN}/amd64/cgo" amd64 ./cmd/myrctl embedui,netgo,osusergo || cgo_built=0
+# the same server with the program header PHDR turned into PT_INTERP: what a dynamically linked binary has
+python3 -I - "${BIN}/amd64/myriarchd" "${BIN}/amd64/interp" <<'PY' || built=0
+import sys
+data = bytearray(open(sys.argv[1], "rb").read())
+phoff = int.from_bytes(data[32:40], "little")
+data[phoff:phoff + 4] = (3).to_bytes(4, "little")
+open(sys.argv[2], "wb").write(data)
+PY
 mkdir -p "${W}/noroots"
 printf 'package main\n\nfunc main() {}\n' > "${W}/noroots/main.go"
 ( cd "${W}/noroots" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "${BIN}/amd64/noroots" main.go ) >"${W}/build.log" 2>&1 || built=0
@@ -369,8 +398,8 @@ open(os.path.join(dist, "checksums.txt"), "w").write("".join(sums))
 json.dump({"project_name": "myriarch", "version": version, "commit": commit}, open(os.path.join(dist, "metadata.json"), "w"))
 PY
 HEAD_SHA="$(git -C "${REPO}" rev-parse HEAD)"
-mkdist() { # dist name amd64-binary arm64-binary [version] [extra]
-  python3 -I "${W}/mkdist.py" "$1" "${5:-${RV}}" "${HEAD_SHA}" "$2" "$3" "$4" "${REPO}" "${@:6}"
+mkdist() { # dist name amd64-binary arm64-binary [version] [extra]; MKDIST_COMMIT overrides the commit of metadata.json
+  python3 -I "${W}/mkdist.py" "$1" "${5:-${RV}}" "${MKDIST_COMMIT:-${HEAD_SHA}}" "$2" "$3" "$4" "${REPO}" "${@:6}"
 }
 mkdist "${W}/dist-ok-server" myriarchd "${BIN}/amd64/myriarchd" "${BIN}/arm64/myriarchd"
 mkdist "${W}/dist-ok-updater" myriarch-updater "${BIN}/amd64/myriarch-updater" "${BIN}/arm64/myriarch-updater"
@@ -575,6 +604,25 @@ PY
   mkdist "${W}/dist-nolic" myriarchd "${BIN}/amd64/myriarchd" "${BIN}/arm64/myriarchd" "${RV}" omit=THIRD_PARTY_NOTICES
   t_nolic() { run_dist server "${W}/dist-nolic" "${W}/outf"; }
   expect_fail "an archive without a license file is refused" "lacks THIRD_PARTY_NOTICES" t_nolic
+  mkdist "${W}/dist-notz" myriarchd "${BIN}/amd64/notz" "${BIN}/arm64/myriarchd"
+  t_notz() { run_dist server "${W}/dist-notz" "${W}/outf"; }
+  expect_fail "a server without the time zone database is refused" "does not embed the time zone database" t_notz
+  mkdist "${W}/dist-interp" myriarchd "${BIN}/amd64/interp" "${BIN}/arm64/myriarchd"
+  t_interp() { run_dist server "${W}/dist-interp" "${W}/outf"; }
+  expect_fail "a dynamically linked binary (PT_INTERP) is refused" "dynamically linked" t_interp
+  mkdist "${W}/dist-freebsd" myriarchd "${BIN}/amd64/freebsd" "${BIN}/arm64/myriarchd"
+  t_freebsd() { run_dist server "${W}/dist-freebsd" "${W}/outf"; }
+  expect_fail "a binary that is not a linux build is refused" "build setting GOOS is 'freebsd', expected 'linux'" t_freebsd
+  if [ "${cgo_built}" = 1 ]; then
+    mkdist "${W}/dist-cgo" myriarchd "${BIN}/amd64/cgo" "${BIN}/arm64/myriarchd"
+    t_cgo() { run_dist server "${W}/dist-cgo" "${W}/outf"; }
+    expect_fail "a binary that records CGO_ENABLED=1 is refused" "build setting CGO_ENABLED is '1', expected '0'" t_cgo
+  else
+    ok "no cross build with CGO_ENABLED=1 possible here: the CGO_ENABLED case is skipped"
+  fi
+  cp -R "${W}/dist-ok-server" "${W}/dist-dup" && tail -n 1 "${W}/dist-ok-server/checksums.txt" >> "${W}/dist-dup/checksums.txt"
+  t_dup() { run_dist server "${W}/dist-dup" "${W}/outf"; }
+  expect_fail "an archive listed twice in checksums.txt is refused" "lists myriarchd_${RV}_linux_arm64.tar.gz 2 times" t_dup
   python3 -I -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["commit"]="0"*40; json.dump(d,open(p,"w"))' "${W}/dist-ok-server/metadata.json"
   t_commit() { run_dist server "${W}/dist-ok-server" "${W}/outf"; }
   expect_fail "archives of another commit are refused" "build the archives and the images from the same commit" t_commit
@@ -587,6 +635,61 @@ PY
   if [ ! -e "${W}/strict-out" ]; then ok "a refused build leaves no layout behind"; else fail "a refused build left ${W}/strict-out"; fi
   t_published_dist() { run_dist server "${W}/dist-ok-server" "${W}/outf" IMAGE_SBOM=0 IMAGE_REPO=ghcr.io/myriarch/myriarch; }
   if OUT="$(t_published_dist 2>&1)"; then ok "dist mode builds without pushing, whatever IMAGE_REPO says"; else fail "dist mode with IMAGE_REPO: ${OUT}"; fi
+
+  # --- the release mode (no ALLOW_DIRTY=1): in a throwaway clone of HEAD that carries the scripts of this work tree as one more
+  # commit, so that the tree is clean and the stand-in binaries record its commit
+  CL_REPO="${W}/clone"
+  clone_git() { git -C "${CL_REPO}" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
+  if git clone -q --local "${REPO}" "${CL_REPO}" >/dev/null 2>&1 && cp -R "${REPO}/scripts/." "${CL_REPO}/scripts/" && cp -R "${REPO}/ci/." "${CL_REPO}/ci/" \
+     && clone_git add -A >/dev/null 2>&1 && clone_git commit -q --allow-empty -m "scripts of the work tree" >/dev/null 2>&1; then
+    CL_SHA="$(clone_git rev-parse HEAD)"
+    sbuilt=1
+    for arch in amd64 arm64; do
+      mkdir -p "${W}/binc/${arch}"
+      BUILD_DIR="${CL_REPO}" build_bin "${W}/binc/${arch}/myriarchd" "${arch}" ./cmd/myrctl embedui || sbuilt=0
+    done
+    MKDIST_COMMIT="${CL_SHA}" mkdist "${W}/dist-strict" myriarchd "${W}/binc/amd64/myriarchd" "${W}/binc/arm64/myriarchd"
+    run_strict() { # dist out [VAR=value ...]
+      local dist="$1" out="$2"; shift 2
+      env -u IMAGE_REPO -u IMAGE_RELEASE_VERSION -u SOURCE_URL -u IMAGE_PLATFORMS -u OUT_DIR -u SYFT -u ALLOW_DIRTY -u IMAGE_SBOM \
+        IMAGE_SOURCE=dist IMAGE_KIND=server DIST_DIR="${dist}" OUT_DIR="${out}" SYFT="${W}/syft-stub" SYFT_STUB_LOG="${W}/syft-strict.log" \
+        SOURCE_DATE_EPOCH="${EPOCH}" "$@" bash "${CL_REPO}/scripts/build-image-crane.sh"
+    }
+    if [ "${sbuilt}" = 1 ]; then
+      t_strict_ok() { run_strict "${W}/dist-strict" "${W}/outs"; }
+      expect_ok "the release mode builds from a clean tree with archives of its commit" t_strict_ok
+      t_strict_noplat() { run_strict "${W}/dist-strict" "${W}/outs" IMAGE_PLATFORMS=linux/arm64; }
+      expect_fail "the release mode refuses a single platform" "a release image has exactly the platforms" t_strict_noplat
+      t_strict_nosbom() { run_strict "${W}/dist-strict" "${W}/outs" IMAGE_SBOM=0; }
+      expect_fail "the release mode refuses IMAGE_SBOM=0" "a release image has its SBOMs" t_strict_nosbom
+      t_strict_src() { run_strict "${W}/dist-strict" "${W}/outs" SOURCE_URL=https://example.org/other; }
+      expect_fail "the release mode refuses another source URL" "SOURCE_URL differs from LABEL_SOURCE" t_strict_src
+      cp -R "${W}/dist-strict" "${W}/dist-strict-nometa" && rm "${W}/dist-strict-nometa/metadata.json"
+      t_strict_nometa() { run_strict "${W}/dist-strict-nometa" "${W}/outs"; }
+      expect_fail "the release mode refuses a missing metadata.json" "metadata.json is missing" t_strict_nometa
+      t_strict_nometa_env() { run_strict "${W}/dist-strict-nometa" "${W}/outs" IMAGE_RELEASE_VERSION="${RV}"; }
+      expect_fail "... also when the version comes from the environment" "metadata.json is missing" t_strict_nometa_env
+      cp -R "${W}/dist-strict" "${W}/dist-strict-nover" && python3 -I -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); del d["version"]; json.dump(d,open(p,"w"))' "${W}/dist-strict-nover/metadata.json"
+      t_strict_nover() { run_strict "${W}/dist-strict-nover" "${W}/outs" IMAGE_RELEASE_VERSION="${RV}"; }
+      expect_fail "the release mode refuses a metadata.json without a version" "has no version" t_strict_nover
+      cp -R "${W}/dist-strict" "${W}/dist-strict-nocommit" && python3 -I -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); del d["commit"]; json.dump(d,open(p,"w"))' "${W}/dist-strict-nocommit/metadata.json"
+      t_strict_nocommit() { run_strict "${W}/dist-strict-nocommit" "${W}/outs"; }
+      expect_fail "the release mode refuses a metadata.json without a commit" "was written for commit none" t_strict_nocommit
+      printf 'x\n' > "${CL_REPO}/untracked.txt"
+      t_strict_dirty() { run_strict "${W}/dist-strict" "${W}/outs"; }
+      expect_fail "the release mode refuses a tree with an untracked file" "uncommitted changes" t_strict_dirty
+      rm -f "${CL_REPO}/untracked.txt"
+      # one more commit: the archives and their binaries are those of the previous commit
+      clone_git commit -q --allow-empty -m "another commit" >/dev/null 2>&1
+      MKDIST_COMMIT="$(clone_git rev-parse HEAD)" mkdist "${W}/dist-strict-old" myriarchd "${W}/binc/amd64/myriarchd" "${W}/binc/arm64/myriarchd"
+      t_strict_rev() { run_strict "${W}/dist-strict-old" "${W}/outs"; }
+      expect_fail "the release mode refuses a binary that was built at another commit" "was built from commit '${CL_SHA}'" t_strict_rev
+    else
+      fail "stand-in binaries could not be built in the clone"
+    fi
+  else
+    fail "the clone for the release mode tests could not be made"
+  fi
 
   # --- push by digest to a registry on 127.0.0.1 (random port); only the process started here is stopped
   PUSH="${REPO}/ci/release/push-images.sh"
@@ -654,6 +757,8 @@ PY
   expect_fail "... from the release workflow on a branch" "published repositories are written only" env GITHUB_WORKFLOW_REF="myriarch/myriarch/.github/workflows/release.yml@refs/heads/main" CRANE="${W}/crane-stub" bash "${PUSH}" "${SRV_LAYOUT}" "${GH_REF}"
   expect_fail "... from a fork" "published repositories are written only" env GITHUB_WORKFLOW_REF="someone/myriarch/.github/workflows/release.yml@refs/tags/v0.1.0" CRANE="${W}/crane-stub" bash "${PUSH}" "${SRV_LAYOUT}" "${GH_REF}"
   expect_fail "... also with another spelling of the host" "published repositories are written only" env -u GITHUB_WORKFLOW_REF CRANE="${W}/crane-stub" bash "${PUSH}" "${SRV_LAYOUT}" "GHCR.io/myriarch/myriarch@${IDX1}"
+  expect_fail "... also with the default port" "published repositories are written only" env -u GITHUB_WORKFLOW_REF CRANE="${W}/crane-stub" bash "${PUSH}" "${SRV_LAYOUT}" "ghcr.io:443/myriarch/myriarch@${IDX1}"
+  expect_fail "... also with the trailing dot of a fully qualified host name" "published repositories are written only" env -u GITHUB_WORKFLOW_REF CRANE="${W}/crane-stub" bash "${PUSH}" "${SRV_LAYOUT}" "ghcr.io./myriarch/myriarch@${IDX1}"
   expect_fail "... for the updater repository as well" "published repositories are written only" env -u GITHUB_WORKFLOW_REF CRANE="${W}/crane-stub" bash "${PUSH}" "${UPD_LAYOUT}" "ghcr.io/myriarch/myriarch-updater@${UPD_DIGEST}"
   if [ ! -e "${CALLS}" ]; then ok "crane was not called by any refused push"; else fail "crane was called: $(cat "${CALLS}")"; fi
   # from the release workflow the script goes on: crane push gets the layout and the reference with the digest, and nothing else
@@ -662,6 +767,52 @@ PY
   # a registry that reports another digest is caught on the client
   printf '#!/bin/sh\n[ "$1" = digest ] && { echo sha256:%s; exit 0; }\nexec "%s" "$@"\n' "$(printf '0%.0s' $(seq 1 64))" "${CRANE}" > "${W}/crane-liar"; chmod 0755 "${W}/crane-liar"
   expect_fail "a digest the registry reports differently is a failure" "the registry reports sha256:0000" env CRANE="${W}/crane-liar" bash "${PUSH}" "${SRV_LAYOUT}" "${REG}/myriarch/liar@${IDX1}"
+  # the checks after the push: the stub accepts the push and answers like a registry that serves something else
+  printf '#!/bin/sh\ncase "$1" in\n  push) exit 0 ;;\n  digest) echo %s ;;\n  manifest) echo "{}" ;;\n  validate) exit 0 ;;\nesac\n' "${IDX1}" > "${W}/crane-wrongindex"
+  printf '#!/bin/sh\ncase "$1" in\n  push) exit 0 ;;\n  digest) echo %s ;;\n  manifest) cat "%s" ;;\n  validate) echo "layer missing" >&2; exit 1 ;;\nesac\n' "${IDX1}" "${SRV_LAYOUT}/index.json" > "${W}/crane-invalid"
+  chmod 0755 "${W}/crane-wrongindex" "${W}/crane-invalid"
+  expect_fail "an index the registry serves with another hash is a failure" "the index the registry serves for .* hashes to sha256:" env CRANE="${W}/crane-wrongindex" bash "${PUSH}" "${SRV_LAYOUT}" "${REG}/myriarch/stub@${IDX1}"
+  expect_fail "an image the registry cannot validate is a failure" "is incomplete or invalid" env CRANE="${W}/crane-invalid" bash "${PUSH}" "${SRV_LAYOUT}" "${REG}/myriarch/stub@${IDX1}"
+
+  # the published repositories also need a complete release image: both platforms and the source annotation
+  WF="myriarch/myriarch/.github/workflows/release.yml@refs/tags/v0.1.0-rc.1"
+  push_pub() { env GITHUB_WORKFLOW_REF="${WF}" CRANE="${W}/crane-stub" bash "${PUSH}" "$@"; }
+  ONE_DIGEST="sha256:$(sha256_of "${W}/out4/server/index.json")"
+  expect_fail "a published repository refuses an image for one platform" "exactly the platforms linux/amd64 and linux/arm64, the index has linux/arm64" push_pub "${W}/out4/server" "ghcr.io/myriarch/myriarch@${ONE_DIGEST}"
+  sed 's#^LABEL_SOURCE=.*#LABEL_SOURCE=https://example.org/other#' "${REPO}/ci/image-labels.env" > "${W}/labels-other-source.env"
+  OS="$(run_dist server "${W}/dist-ok-server" "${W}/out8" IMAGE_SBOM=0 IMAGE_LABELS_FILE="${W}/labels-other-source.env" 2>/dev/null)"
+  expect_fail "a published repository refuses another source in the annotations" "the index lacks the annotation org.opencontainers.image.source=https://github.com/myriarch/myriarch" push_pub "${W}/out8/server" "ghcr.io/myriarch/myriarch@$(value_of IMAGE_INDEX_DIGEST "${OS}")"
+  cat > "${W}/strip_label.py" <<'PY'
+import hashlib, json, os, shutil, sys
+
+src, dst = sys.argv[1:3]
+shutil.copytree(src, dst)
+blobs = os.path.join(dst, "blobs", "sha256")
+
+def put(data):
+    d = hashlib.sha256(data).hexdigest()
+    open(os.path.join(blobs, d), "wb").write(data)
+    return "sha256:" + d
+
+def dump(o):
+    return json.dumps(o, sort_keys=True, separators=(",", ":")).encode()
+
+index = json.load(open(os.path.join(dst, "index.json")))
+for m in index["manifests"]:
+    man = json.load(open(os.path.join(blobs, m["digest"][7:])))
+    cfg = json.load(open(os.path.join(blobs, man["config"]["digest"][7:])))
+    del cfg["config"]["Labels"]["org.opencontainers.image.source"]
+    cb = dump(cfg)
+    man["config"] = dict(man["config"], digest=put(cb), size=len(cb))
+    mb = dump(man)
+    m["digest"], m["size"] = put(mb), len(mb)
+ib = dump(index)
+open(os.path.join(dst, "index.json"), "wb").write(ib)
+print("sha256:" + hashlib.sha256(ib).hexdigest())
+PY
+  NOLABEL_DIGEST="$(python3 -I "${W}/strip_label.py" "${SRV_LAYOUT}" "${W}/layout-nolabel")"
+  expect_fail "a published repository refuses a platform config without the source label" "lacks the label org.opencontainers.image.source=" push_pub "${W}/layout-nolabel" "ghcr.io/myriarch/myriarch@${NOLABEL_DIGEST}"
+  if ! push_stub "${W}/layout-nolabel" "${REG}/myriarch/nolabel@${NOLABEL_DIGEST}" 2>&1 | grep -q "lacks the label"; then ok "... another repository does not need it"; else fail "the label requirement applies to every repository"; fi
   stop_registry
   REG_PID=""
 else

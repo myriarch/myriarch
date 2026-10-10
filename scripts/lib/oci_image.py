@@ -268,30 +268,40 @@ def archive_checksum(dist, archive_name):
     path = os.path.join(dist, "checksums.txt")
     if not os.path.isfile(path):
         raise CheckError("%s is missing: the archives of a release are bound to its checksums" % path)
+    found = []
     with open(path, encoding="utf-8") as f:
         for line in f:
             fields = line.split()
             if len(fields) == 2 and fields[1] == archive_name:
-                return fields[0]
-    raise CheckError("%s does not list %s" % (path, archive_name))
+                found.append(fields[0])
+    if not found:
+        raise CheckError("%s does not list %s" % (path, archive_name))
+    if len(found) > 1:
+        raise CheckError("%s lists %s %d times (one checksum per archive)" % (path, archive_name, len(found)))
+    return found[0]
 
 
-def read_archive(path, wanted):
-    """The regular files of the archive root named in wanted (name -> bytes); anything else in the archive is ignored."""
+def read_archive(data, label, wanted):
+    """The regular files of the archive root named in wanted (name -> bytes); anything else in the archive is ignored.
+    data holds the bytes of the archive: the bytes that were checked against checksums.txt are the bytes that are read."""
     found = {}
-    with tarfile.open(path, "r:gz") as tf:
+    try:
+        tf = tarfile.open(fileobj=io.BytesIO(data), mode="r:gz")
+    except (tarfile.TarError, OSError, EOFError, zlib.error) as e:
+        raise CheckError("%s is not a gzipped tar archive: %s" % (label, e))
+    with tf:
         for member in tf.getmembers():
             name = member.name[2:] if member.name.startswith("./") else member.name
             if name not in wanted:
                 continue
             if not member.isreg():
-                raise CheckError("%s: %s is not a regular file" % (os.path.basename(path), name))
+                raise CheckError("%s: %s is not a regular file" % (label, name))
             if name in found:
-                raise CheckError("%s: %s occurs twice" % (os.path.basename(path), name))
+                raise CheckError("%s: %s occurs twice" % (label, name))
             found[name] = tf.extractfile(member).read()
     missing = [n for n in wanted if n not in found]
     if missing:
-        raise CheckError("%s lacks %s at its root" % (os.path.basename(path), ", ".join(missing)))
+        raise CheckError("%s lacks %s at its root" % (label, ", ".join(missing)))
     return found
 
 
@@ -353,6 +363,9 @@ def cmd_dist(args):
     kind = KINDS[args.kind]
     binary = kind["binary"]
     platforms = []
+    # The compressed layer (and with it the manifest and index digests) depends on the zlib implementation; the uncompressed
+    # layer (diff_id) does not. The version is logged so that a rebuild with other digests can be traced to this cause.
+    print("[image] zlib %s (layer compression)" % zlib.ZLIB_RUNTIME_VERSION, file=sys.stderr)
     with tempfile.TemporaryDirectory(prefix="myriarch-image-layers-") as tmp:
         for spec in args.platform:
             os_name, arch = parse_platform(spec)
@@ -362,10 +375,11 @@ def cmd_dist(args):
                 raise CheckError("%s is missing: run the release build first (make release-snapshot, or goreleaser for a release)" % path)
             want = archive_checksum(args.dist, name)
             with open(path, "rb") as f:
-                got = sha256(f.read())
+                archive = f.read()
+            got = sha256(archive)
             if got != want:
                 raise CheckError("%s: SHA-256 %s differs from checksums.txt (%s)" % (name, got, want))
-            files = read_archive(path, (binary,) + LICENSE_FILES)
+            files = read_archive(archive, name, (binary,) + LICENSE_FILES)
             check_binary(files[binary], "%s (%s/%s)" % (binary, os_name, arch), args.kind, arch, args.version,
                          args.revision, args.strict_vcs)
             layer = os.path.join(tmp, "layer-%s-%s.tar" % (os_name, arch))

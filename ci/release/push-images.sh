@@ -24,6 +24,9 @@
 #   - The repositories of the project (ghcr.io/myriarch/...) are written only from the release workflow: GITHUB_WORKFLOW_REF
 #     must name .github/workflows/release.yml of myriarch/myriarch at a version tag (ADR-0035 freezes this signing identity). This is a
 #     guard against a push from a laptop, not a security boundary: what GITHUB_TOKEN may write is decided by GitHub.
+#   - For the repositories of the project the layout must also be a complete release image: index manifests for exactly
+#     linux/amd64 and linux/arm64, and the source org.opencontainers.image.source of ci/image-labels.env (LABEL_SOURCE) in the
+#     index annotations and in every platform config (ghcr.io links the package to the repository through it).
 #   - Credentials: the script does not log in and does not touch DOCKER_CONFIG. The release workflow runs
 #     `crane auth login ghcr.io` with the default HOME beforehand (actions/attest reads only $HOME/.docker/config.json).
 #   - Pushing the same digest again changes nothing.
@@ -68,12 +71,21 @@ fi
 # ---- the layout ----------------------------------------------------------------------------------------------------
 [ -d "${LAYOUT}" ] || die "layout ${LAYOUT} is not a directory"
 have python3 || die "python3 not found"
+PUBLISHED=0
+WANT_SOURCE=""
+if image_is_published_repo "${REPO}"; then
+  PUBLISHED=1
+  image_labels_load
+  WANT_SOURCE="${LABEL_SOURCE}"
+  [ -n "${WANT_SOURCE}" ] || die "LABEL_SOURCE is empty in ci/image-labels.env"
+fi
 # index.json is a flat index (every manifest has a platform), every blob it needs is present with the right size and digest,
 # and the SHA-256 of index.json is the digest of the reference.
-python3 -I - "${LAYOUT}" "${DIGEST}" <<'PY' || die "the layout ${LAYOUT} is not a valid release image for ${DIGEST}"
+python3 -I - "${LAYOUT}" "${DIGEST}" "${PUBLISHED}" "${WANT_SOURCE}" <<'PY' || die "the layout ${LAYOUT} is not a valid release image for ${DIGEST}"
 import hashlib, json, os, sys
 
-layout, want = sys.argv[1], sys.argv[2]
+layout, want, published, want_source = sys.argv[1], sys.argv[2], sys.argv[3] == "1", sys.argv[4]
+SOURCE = "org.opencontainers.image.source"
 
 def fail(msg):
     print("[push-images] ERROR: " + msg, file=sys.stderr)
@@ -106,16 +118,24 @@ if got != want:
 index = json.loads(raw)
 if index.get("mediaType") != "application/vnd.oci.image.index.v1+json" or not index.get("manifests"):
     fail("index.json is not an image index with manifests (a layout with a nested index is not pushed with --index)")
+platforms = []
+if published and (index.get("annotations") or {}).get(SOURCE) != want_source:
+    fail("the index lacks the annotation %s=%s (ghcr.io links the package to the repository through it)" % (SOURCE, want_source))
 for m in index["manifests"]:
     if m.get("mediaType") != "application/vnd.oci.image.manifest.v1+json":
         fail("index.json lists a descriptor of type %s, expected image manifests only" % m.get("mediaType"))
     plat = m.get("platform") or {}
     if not plat.get("os") or not plat.get("architecture"):
         fail("a manifest of index.json has no platform")
+    platforms.append("%s/%s" % (plat["os"], plat["architecture"]))
     manifest = json.loads(blob(m))
-    blob(manifest["config"])
+    config = json.loads(blob(manifest["config"]))
+    if published and ((config.get("config") or {}).get("Labels") or {}).get(SOURCE) != want_source:
+        fail("the config of %s lacks the label %s=%s" % (platforms[-1], SOURCE, want_source))
     for layer in manifest["layers"]:
         blob(layer)
+if published and sorted(platforms) != ["linux/amd64", "linux/arm64"]:
+    fail("a release image has exactly the platforms linux/amd64 and linux/arm64, the index has %s" % ", ".join(sorted(platforms)))
 PY
 
 # ---- crane ---------------------------------------------------------------------------------------------------------

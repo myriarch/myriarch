@@ -82,10 +82,20 @@ image_require_digest_pin() {
 
 # ---- published repositories ---------------------------------------------------------------------------------------
 # image_is_published_repo <repo>: success for the repositories of the project (ghcr.io/myriarch/..., any spelling). Only
-# ci/release/push-images.sh, run by the release workflow, writes to them (ADR-0024, ADR-0029).
+# ci/release/push-images.sh, run by the release workflow, writes to them (ADR-0024, ADR-0029). The host and the first path
+# segment are compared after the spellings of the same registry are normalised: upper case, a trailing dot of a fully
+# qualified host name (ghcr.io.) and any port (ghcr.io:443).
 image_is_published_repo() {
-  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
-    ghcr.io/myriarch/*) return 0 ;;
+  local lower host rest
+  lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  host="${lower%%/*}"
+  rest="${lower#*/}"
+  [ "${rest}" != "${lower}" ] || return 1
+  host="${host%%:*}"
+  host="${host%.}"
+  [ "${host}" = ghcr.io ] || return 1
+  case "${rest}" in
+    myriarch | myriarch/*) return 0 ;;
   esac
   return 1
 }

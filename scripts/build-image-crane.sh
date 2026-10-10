@@ -58,7 +58,10 @@
 #   (IMAGE_KIND=updater). <version> is IMAGE_RELEASE_VERSION (default: "version" of DIST_DIR/metadata.json, which goreleaser
 #   derives from the tag without "v"). Each archive must be listed in checksums.txt with its SHA-256; its binary is checked
 #   (static ELF of the platform, embedded root CAs, and for the server the web UI and the time
-#   zone database; scripts/lib/oci_image.py). Dev build tags (devpg) are refused.
+#   zone database; scripts/lib/oci_image.py). Dev build tags (devpg) are refused. Without ALLOW_DIRTY=1 (the release build) the
+#   work tree must be clean, DIST_DIR/metadata.json must exist with the commit of the work tree and a version, the binaries
+#   must record that commit of a clean tree, and the test knobs IMAGE_PLATFORMS (other than both platforms), IMAGE_SBOM=0 and a
+#   SOURCE_URL other than LABEL_SOURCE are refused.
 #   Output: a flat OCI layout in OUT_DIR/<kind> (default .cache/image-dist/<kind>; it is recreated): index.json IS the
 #   index with the manifests of both platforms and its annotations, so its SHA-256 is the digest of the image index
 #   before anything is pushed. The same inputs give the same bytes (SOURCE_DATE_EPOCH or the commit time). Beside it:
@@ -77,7 +80,8 @@
 #   and are exactly where image vulnerability scanners report findings, none of them in our code. Without a base there is
 #   no package database and no os-release to match against. What the binaries need from an operating system is embedded
 #   instead:
-#     root CAs     golang.org/x/crypto/x509roots/fallback (Mozilla set, imported in cmd/myriarchd, cmd/myriarch-sim, cmd/myrctl).
+#     root CAs     golang.org/x/crypto/x509roots/fallback (Mozilla set, imported in cmd/myriarchd, cmd/myriarch-updater, cmd/myriarch-sim,
+#                  cmd/myrctl).
 #                  Go uses it only if the host has no CA bundle of its own (x509.SetFallbackRoots); outbound.caFile, the
 #                  gitops/AWX CA files etc. are added on top of it (internal/netguard). A bundle mounted at
 #                  /etc/ssl/certs/ca-certificates.crt (or SSL_CERT_FILE) is used instead of the embedded set.
@@ -104,8 +108,9 @@
 #   IMAGE_KIND     server | updater (dist only, required)
 #   DIST_DIR       goreleaser dist directory (dist only)  default ./dist
 #   IMAGE_RELEASE_VERSION  release version without "v" (dist only)  default: DIST_DIR/metadata.json
-#   IMAGE_PLATFORMS  linux/amd64,linux/arm64 (dist only; the default is the release matrix, the tests use one platform)
-#   IMAGE_SBOM     1 (default) | 0: write the SPDX SBOMs of the platforms (dist only)
+#   IMAGE_PLATFORMS  linux/amd64,linux/arm64 (dist only; the default is the release matrix, the tests use one platform; only
+#                  with ALLOW_DIRTY=1 another value is accepted)
+#   IMAGE_SBOM     1 (default) | 0: write the SPDX SBOMs of the platforms (dist only; 0 only with ALLOW_DIRTY=1)
 #   SYFT           path of the syft binary                default .cache/bin/syft (ci/install-tools.sh syft)
 #   OUT_DIR        output directory (dist only)           default ./.cache/image-dist
 #   IMAGE_REPO     target repository (build only; required, no default): <registry>[:port]/<path> without tag or digest
@@ -541,7 +546,7 @@ compute_labels() {
 build_image_layout() {
   local meta
   printf '%s\n' "${LABELS[@]}" > "${WORK}/labels.txt"
-  python3 "${ROOT}/scripts/lib/oci_image.py" layout --out "${WORK}/oci" --created "${DATE}" --user "${IMAGE_UID}" \
+  python3 -I "${ROOT}/scripts/lib/oci_image.py" layout --out "${WORK}/oci" --created "${DATE}" --user "${IMAGE_UID}" \
     --entrypoint "${IMAGE_ENTRYPOINT}" --cmd "${IMAGE_CMD}" --env "HOME=/tmp,PATH=/usr/local/bin" --workdir "${IMAGE_WORKDIR}" \
     --ports "${IMAGE_PORTS}" --labels "${WORK}/labels.txt" \
     --history "scripts/build-image-crane.sh (FROM scratch): static binaries and data" \
@@ -685,16 +690,22 @@ resolve_syft() {
   SYFT="${TOOLS_BIN}/syft"
 }
 
-# dist_version: the release version of the archives (sets RELEASE_VERSION). When DIST_DIR/metadata.json (goreleaser) exists,
-# its commit must be the commit of the work tree and its version the release version.
+# dist_version: the release version of the archives (sets RELEASE_VERSION). DIST_DIR/metadata.json (goreleaser) binds the
+# archives to a commit and a version: its commit must be the commit of the work tree and its version the release version.
+# A build without ALLOW_DIRTY=1 (the release build) refuses a missing metadata.json or one without commit and version; with
+# ALLOW_DIRTY=1 (local tests with stand-in archives) the file is optional and IMAGE_RELEASE_VERSION names the version.
 dist_version() {
   local meta="${DIST_DIR}/metadata.json" from_meta="" meta_commit=""
   [ -d "${DIST_DIR}" ] || die "DIST_DIR ${DIST_DIR} does not exist: run the release build first (make release-snapshot, or goreleaser for a release)"
+  if [ ! -f "${meta}" ] && [ "${ALLOW_DIRTY}" != 1 ]; then
+    die "${meta} is missing: a release build binds the archives to the commit and the version through the metadata.json of goreleaser (ALLOW_DIRTY=1 for a local test)"
+  fi
   if [ -f "${meta}" ]; then
     from_meta="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("version", ""))' "${meta}")" || die "cannot read ${meta}"
     meta_commit="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("commit", ""))' "${meta}")" || die "cannot read ${meta}"
     [ "${meta_commit}" = "${FULL_SHA}" ] ||
       die "${meta} was written for commit ${meta_commit:-none}, the work tree is at ${FULL_SHA}: build the archives and the images from the same commit"
+    if [ -z "${from_meta}" ] && [ "${ALLOW_DIRTY}" != 1 ]; then die "${meta} has no version"; fi
   fi
   RELEASE_VERSION="${IMAGE_RELEASE_VERSION:-${from_meta}}"
   [ -n "${RELEASE_VERSION}" ] || die "no release version: set IMAGE_RELEASE_VERSION or provide ${meta}"
@@ -746,6 +757,15 @@ cmd_dist() {
   done
   case "${IMAGE_SBOM}" in 0 | 1) ;; *) die "IMAGE_SBOM must be 0 or 1" ;; esac
   image_labels_load
+  # The release build (no ALLOW_DIRTY) publishes both platforms with their SBOMs and the source label that links the package
+  # to the repository: the test knobs that change this are refused instead of leaking into a release.
+  if [ "${ALLOW_DIRTY}" != 1 ]; then
+    [ "${IMAGE_PLATFORMS}" = "linux/amd64,linux/arm64" ] ||
+      die "IMAGE_PLATFORMS '${IMAGE_PLATFORMS}': a release image has exactly the platforms linux/amd64,linux/arm64 (ALLOW_DIRTY=1 for a local test)"
+    [ "${IMAGE_SBOM}" = 1 ] || die "IMAGE_SBOM=0: a release image has its SBOMs (ALLOW_DIRTY=1 for a local test)"
+    [ -z "${SOURCE_URL:-}" ] || [ "${SOURCE_URL}" = "${LABEL_SOURCE}" ] ||
+      die "SOURCE_URL differs from LABEL_SOURCE of ci/image-labels.env: a release image links to the repository of the project (ALLOW_DIRTY=1 for a local test)"
+  fi
   case "${IMAGE_KIND}" in server) IMAGE_TITLE="${LABEL_TITLE}" ;; updater) IMAGE_TITLE="${LABEL_TITLE_UPDATER}" ;; esac
   have python3 || die "python3 not found (builds the deterministic layers)"
   have go || die "go not found (the build information of the binaries is checked with go version -m)"
@@ -778,7 +798,7 @@ cmd_dist() {
   printf '%s\n' "${LABELS[@]}" > "${WORK}/labels.txt"
   dist_annotations > "${WORK}/annotations.txt"
   for plat in "${platforms[@]}"; do plat_args+=(--platform "${plat}"); done
-  python3 "${ROOT}/scripts/lib/oci_image.py" dist --kind "${IMAGE_KIND}" --dist "${DIST_DIR}" --version "${RELEASE_VERSION}" \
+  python3 -I "${ROOT}/scripts/lib/oci_image.py" dist --kind "${IMAGE_KIND}" --dist "${DIST_DIR}" --version "${RELEASE_VERSION}" \
     --epoch "${EPOCH}" --created "${DATE}" --uid "${IMAGE_UID}" --out "${layout}" --labels "${WORK}/labels.txt" \
     --annotations "${WORK}/annotations.txt" --revision "${FULL_SHA}" ${strict_vcs} "${plat_args[@]}" > "${WORK}/layout.meta" ||
     die "building the release image failed"
