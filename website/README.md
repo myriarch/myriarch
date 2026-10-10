@@ -121,6 +121,47 @@ to the project header of each of these files, so that the derivation is machine-
 3. Update `Docsy` in `data/third_party.yaml`, the Mermaid version in `config/_default/params.yaml` if the theme moved it, and run
    `make website-check` and the browser check (`node website/scripts/check-requests.mjs`).
 
+## Node dependency overrides
+
+`package.json` pins its direct dependencies exactly and `pnpm-lock.yaml` pins everything below them. The Vercel CLI and
+markdownlint-cli2 pin some of their own dependencies exactly, so `pnpm update` cannot reach a fixed release. Until the tool ships
+one, `pnpm.overrides` in `package.json` replaces the vulnerable version with the first release that no advisory covers (checked with
+`pnpm audit` and the GitHub Advisory Database). JSON allows no comments, so the reasons are here:
+
+| Override | Replaces | Why |
+|---|---|---|
+| `@vercel/container>tar@<7.5.21` | tar 7.5.11 | pinned by `@vercel/container`; 7.5.21 is the first release without an advisory (7.5.18, the fix that the Dependabot alerts name, is still affected by GHSA-23hp-3jrh-7fpw and GHSA-r292-9mhp-454m). The key names the parent, so the tar 7.5.22 of `@mapbox/node-pre-gyp` and `@vercel/fun` stays |
+| `@vercel/python-analysis>minimatch@<10.2.3` | minimatch 10.1.1 | pinned by `@vercel/python-analysis`. The key names the parent, so the minimatch 10.2.6 that `glob` resolves from its `^10.2.2` stays |
+| `js-yaml@>=4.0.0 <4.3.2` | js-yaml 4.1.1 | pinned by `@vercel/python-analysis`. The range is the affected 4.x line: its upper bound keeps js-yaml 5 (markdownlint-cli2) out, its lower bound a js-yaml 3 |
+| `smol-toml@<1.9.0` | smol-toml 1.5.2 and 1.8.0 | pinned by the Vercel CLI, its builders and markdownlint-cli2 |
+| `undici@<6.0.0` | undici 5.28.4 and 5.29.0 | pinned by the Vercel CLI and `@vercel/node`; undici 5 has no fix. The CLI imports undici only for its proxy support. undici 6 no longer depends on `@fastify/busboy`, which leaves the lockfile |
+
+pnpm applies a key when the version range that a package declares for the dependency intersects the range of the key. The keys
+therefore name the vulnerable versions and not the version that a tool pins today, and a key with a parent names the parent without
+a version. An entry keeps working across releases of the parent and stops by itself once the parent pins a fixed version. After an
+update of the Vercel CLI or markdownlint-cli2, run `pnpm install` here and `pnpm audit`, and drop an entry when removing it changes
+nothing in `pnpm-lock.yaml` but the `overrides:` block that records the entries in effect.
+
+`pnpm audit` does not come back clean. These findings remain, each for a reason; a finding that is missing from this table needs a
+decision, an override or a row here:
+
+| Finding | Package and path | Why it stays |
+|---|---|---|
+| GHSA-j3q9-mxjg-w52f, GHSA-27v5-c462-wpq7 | path-to-regexp 8.3.0 under `vercel > @vercel/backends` | `@vercel/backends` is the builder for backend projects. It runs in `vercel build`, which this repository never calls: the deploy job runs `vercel deploy --prebuilt`. GitHub dismissed the alerts automatically (development scope) |
+| GHSA-2g4f-4pwh-qvx6 | ajv 8.6.3 under `vercel > @vercel/backends > @vercel/static-config` | The same builder, the same reason |
+| GHSA-vfj7-8cjw-p6xm | braces 3.0.3 under `markdownlint-cli2 > micromatch` | No fixed release exists. markdownlint-cli2 expands the glob patterns of its configuration and command line, which maintainers write. GitHub dismissed the alert automatically |
+| GHSA-238p-pmpm-9mq7 | katex 0.16.47 under `mermaid` and under `markdownlint-cli2 > markdownlint > micromark-extension-math` | There is no override; see below |
+
+KaTeX has no override because it would not change what the site serves. Mermaid and markdownlint accept only a KaTeX range below
+0.18, which excludes the fix (0.18.2), and the Mermaid files that the site ships (`mermaid.esm.min.mjs` and
+`chunks/mermaid.esm.min/**`) contain their own copy of KaTeX (0.16.47 in Mermaid 11.17.2). An override would only change the
+installed copy under `node_modules`, which nothing that the site ships uses; markdownlint loads it but parses Markdown without
+rendering math. The lockfile would then report a version that the site does not serve, and a later advisory that affects the
+shipped copy but not 0.18.2 would raise no alert. The advisory needs an `Object.prototype` that is already polluted and
+attacker-controlled math in a page, and the site renders only diagrams that maintainers write. The shipped copy changes with a
+Mermaid release that bundles KaTeX 0.18.2 or later; the Dependabot alert for the advisory is dismissed as a tolerable risk with this
+paragraph as the reason.
+
 ## Checks
 
 `make website-check` runs, after the build: `hugo mod verify`, lychee (offline, with fragments), markdownlint, the front matter of
