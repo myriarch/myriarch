@@ -143,6 +143,11 @@ expect_ok "--updater-version agrees with the version in --updater-url" t_version
 t_version_mismatch() { run_release "$(fresh)" --updater-version 9.9.8; }
 expect_fail "--updater-version differs from the version in --updater-url" '\[option_conflict\].*9\.9\.8.*9\.9\.9' t_version_mismatch
 
+t_version_case() { run_release "$(fresh)" --updater-version "${UPDATER_VERSION}-RC.1"; }
+expect_fail "--updater-version differing only in case or pre-release is a conflict" '\[option_conflict\]' t_version_case
+t_version_badpre() { run_release "$(fresh)" --updater-version "${UPDATER_VERSION}--x"; }
+expect_fail "--updater-version with a pre-release part that does not start with an alphanumeric is invalid" '\[option_invalid\]' t_version_badpre
+
 t_version_missing() { run_release "$(fresh)" --updater-url "file://${REL}/myriarch-updater-plain-name"; }
 expect_fail "no version in the file name and no --updater-version" '\[option_missing\].*--updater-version' t_version_missing
 
@@ -217,12 +222,21 @@ t_cosign_400() { t_cosign_path v4.0.0; };  expect_ok "cosign 4.0.0 from PATH is 
 t_cosign_303() { t_cosign_path v3.0.3; };  expect_fail "cosign 3.0.3 is too old" '\[sigstore_verifier_outdated\].*3\.0\.4' t_cosign_303
 t_cosign_241() { t_cosign_path v2.4.1; };  expect_fail "cosign 2.4.1 is too old" '\[sigstore_verifier_outdated\]' t_cosign_241
 t_cosign_dev() { t_cosign_path devel; };   expect_fail "cosign without a usable version is refused" '\[sigstore_verifier_outdated\]' t_cosign_dev
+t_cosign_304rc() { t_cosign_path v3.0.4-rc.1; }; expect_fail "a pre-release of 3.0.4 (v3.0.4-rc.1) is too old" '\[sigstore_verifier_outdated\]' t_cosign_304rc
+t_cosign_305rc() { t_cosign_path v3.0.5-rc.1; }; expect_ok "a pre-release of a newer version (v3.0.5-rc.1) is accepted" t_cosign_305rc
 OLD_ROOT="$(fresh)"
 t_cosign_old_nothing() { local d; d="$(cosign_stub_dir v3.0.3)"; rm -f "${UPDATER_RAN}"; PATH="${d}" STUB_COSIGN_VERSION=v3.0.3 run_release_nov "${OLD_ROOT}"; }
 expect_fail "an old cosign stops the installation before anything is downloaded or installed" '\[sigstore_verifier_outdated\]' t_cosign_old_nothing
 if no_install "${OLD_ROOT}" && [ ! -e "${UPDATER_RAN}" ]; then ok "  ... nothing installed, the updater was not run"; else fail "something was installed or run after an outdated cosign"; fi
 t_verifier_old() { STUB_COSIGN_VERSION=v3.0.3 run_release "$(fresh)"; }
 expect_fail "--verifier pointing to an old cosign is refused" '\[sigstore_verifier_outdated\]' t_verifier_old
+# a cosign under another name (the release asset name) gets the same version check, not a verify-bundle call
+t_verifier_renamed_old() { local d="${W}/bin-renamed"; mkdir -p "${d}"; cp "${STUBS}/cosign" "${d}/cosign-linux-amd64"
+  STUB_COSIGN_VERSION=v3.0.3 run_release "$(fresh)" --verifier "${d}/cosign-linux-amd64"; }
+expect_fail "--verifier cosign-linux-amd64 reporting 3.0.3 is refused with sigstore_verifier_outdated" '\[sigstore_verifier_outdated\]' t_verifier_renamed_old
+t_verifier_renamed_ok() { local d="${W}/bin-renamed"; mkdir -p "${d}"; cp "${STUBS}/cosign" "${d}/cosign-linux-amd64"
+  STUB_COSIGN_VERSION=v3.1.3 run_release "$(fresh)" --verifier "${d}/cosign-linux-amd64"; }
+expect_ok "--verifier cosign-linux-amd64 reporting 3.1.3 is called as cosign verify-blob" t_verifier_renamed_ok
 
 t_old_cosign_installed_updater() { local r d; r="$(fresh)"; d="$(cosign_stub_dir v3.0.3)"
   mkdir -p "${r}/opt/myriarch/updater"; cp "${STUBS}/updater/myriarch-updater" "${r}/opt/myriarch/updater/myriarch-updater"

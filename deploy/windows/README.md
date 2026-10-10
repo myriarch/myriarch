@@ -42,7 +42,7 @@ The enrollment token is **not** in `supervisor.yaml` but in the service environm
 (registry `HKLM\SYSTEM\CurrentControlSet\Services\otelcol-supervisor`, `Environment`, REG_MULTI_SZ). The
 ACL of this key is replaced first by a fresh descriptor for SYSTEM/Administrators only and read back; any other allow
 entry stops the installation (`acl_failed`), and only then is the token written. The installer takes its Sigstore
-verifier from `-Verifier`, an already installed `myriarch-updater.exe` or `cosign.exe` 3.0.4 or newer (from `PATH`, but
+verifier from `-Verifier` (in a directory that only Administrators can write), an already installed `myriarch-updater.exe` or `cosign.exe` 3.0.4 or newer (from `PATH`, but
 only from a directory that only Administrators can write); the updater that it downloads in the same run is never the
 verifier of the `checksums.txt` that carries its own hash. It creates its working directory with a protected DACL, hashes verified files again after they
 were copied, and copies a `-CaFile` bundle to `C:\ProgramData\Myriarch\config\ca.pem`. Collector secrets (for example
@@ -79,7 +79,9 @@ hash source for `myriarch-updater.exe` (at least one of the first two):
 | `-UpdaterBundleUrl <URL>` | different location of the bundle (default: `<checksums-url>.sigstore.json`) |
 | `-UpdaterSignerThumbprint <hex>` | optional: the Authenticode signature of the updater must be valid (`Get-AuthenticodeSignature`, status `Valid`) and come from this certificate. A pinned thumbprint breaks at every renewal of the certificate, so use it only with a private PKI whose certificate you control |
 
-The verifier of `checksums.txt` is, in this order: `-Verifier` (an installed `myriarch-updater.exe`, or `cosign.exe`), an
+The verifier of `checksums.txt` is, in this order: `-Verifier` (an installed `myriarch-updater.exe`, or `cosign.exe`; it must be in
+a directory that only Administrators can write, otherwise the installation stops with `directory_unsafe`. A folder that an
+administrator creates directly under `C:\` usually grants Modify to every authenticated user, so do not use `C:\Tools`), an
 already installed `myriarch-updater.exe`, or `cosign.exe` from `PATH` if its directory can only be written by
 administrators. A `cosign.exe` must be version 3.0.4 or newer; an older one stops the installation with
 `sigstore_verifier_outdated`. The updater that is being installed is never used for this, because its hash comes from the
@@ -94,7 +96,7 @@ Example (mirror `myriarch-releases` with anonymous read access from the site net
 .\deploy\scripts\install-windows.ps1 -OpampEndpoint wss://fleet.example.com/v1/opamp -TokenFile C:\Temp\enrollment-token.txt `
   -SiteType edge -SiteId 1001 -CollectorVersion 0.161.0 -WithUpdater `
   -UpdaterUrl https://mirror.example.com/myriarch-releases/v<ver>/myriarch-updater_<ver>_windows_amd64.exe `
-  -UpdaterChecksumsUrl https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt -Verifier C:\Tools\cosign.exe
+  -UpdaterChecksumsUrl https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt -Verifier 'C:\Program Files\cosign\cosign.exe'
 ```
 
 Both hash sources together are allowed (then both must match). The check of `checksums.txt` also applies with
@@ -156,7 +158,7 @@ is at the top of that script.
 | `archive_invalid` | the collector archive has no regular binary in its root |
 | `collector_start_failed` | the new collector binary cannot be started |
 | `collector_version_mismatch` | the collector reports another version than requested |
-| `directory_unsafe` | a data directory is a reparse point, has the wrong owner, has an unexpected ACE, or is not a directory |
+| `directory_unsafe` | a data directory is a reparse point, has the wrong owner, has an unexpected ACE, or is not a directory; or `-Verifier` is in a directory that unprivileged accounts can change |
 | `acl_failed` | `icacls` failed |
 | `service_config_failed` | `sc.exe` failed |
 | `updater_install_failed` | `myriarch-updater install` failed |

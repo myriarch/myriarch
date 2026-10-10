@@ -110,6 +110,36 @@ Resolve-Verifier -L $L2
 Check 'an old cosign.exe does not hide an installed myriarch-updater' ($script:VerifierPath -eq (Join-Path $L2.Updater 'myriarch-updater.exe'))
 $env:PATH = $origPath
 
+# a pre-release of the minimum is older than the minimum
+foreach ($case in @(@('v3.0.4-rc.1', $false), @('v3.0.5-rc.1', $true), @('v3.0.4+build', $true))) {
+  $dir = Join-Path $tmp ('pre-' + $case[0]); New-CosignStub -Dir $dir -VersionLine ('GitVersion:    ' + $case[0])
+  & $fresh; $script:Verifier = Join-Path $dir 'cosign.exe'
+  $msg = Message-Of { Resolve-Verifier -L $L }
+  if ($case[1]) { Check "-Verifier cosign $($case[0]) is accepted" ($msg -eq '' -and $script:VerifierPath -eq $script:Verifier) }
+  else { Check "-Verifier cosign $($case[0]) is refused with sigstore_verifier_outdated" ($msg -match '\[sigstore_verifier_outdated\]' -and $script:VerifierPath -eq '') }
+}
+
+# -Verifier in a directory that unprivileged accounts can change is refused before it is run (the ACL check is replaced here)
+function Test-AclEnforced { return $true }
+function Test-AdminOnlyDirectory { param([string]$Path) return -not ($Path -like '*unsafe*') }
+$dir = Join-Path $tmp 'unsafe-tools'; New-CosignStub -Dir $dir -VersionLine 'GitVersion:    v3.1.3'
+& $fresh; $script:Verifier = Join-Path $dir 'cosign.exe'
+$msg = Message-Of { Resolve-Verifier -L $L }
+Check '-Verifier in a user-writable directory is refused with directory_unsafe' ($msg -match '\[directory_unsafe\]' -and $script:VerifierPath -eq '')
+$dir = Join-Path $tmp 'unsafe-updater'; New-Item -ItemType Directory -Path $dir -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $dir 'myriarch-updater.exe') -Value 'x' -NoNewline
+& $fresh; $script:Verifier = Join-Path $dir 'myriarch-updater.exe'
+$msg = Message-Of { Resolve-Verifier -L $L }
+Check 'an updater passed as -Verifier from a user-writable directory is refused too' ($msg -match '\[directory_unsafe\]' -and $script:VerifierPath -eq '')
+$dir = Join-Path $tmp 'safe-tools'; New-CosignStub -Dir $dir -VersionLine 'GitVersion:    v3.1.3'
+& $fresh; $script:Verifier = Join-Path $dir 'cosign.exe'
+$msg = Message-Of { Resolve-Verifier -L $L }
+Check '-Verifier in an administrator-only directory is accepted' ($msg -eq '' -and $script:VerifierPath -eq $script:Verifier)
+& $fresh; $script:Verifier = Join-Path (Join-Path $tmp 'unsafe-tools') 'cosign.exe'; $script:VerifySignatures = 'skip'
+Check 'with -VerifySignatures skip no verifier is run, so its location does not matter' ((Message-Of { Resolve-Verifier -L $L }) -eq '')
+function Test-AclEnforced { return $false }
+function Test-AdminOnlyDirectory { param([string]$Path) return $true }
+
 # ---- Copy with re-hash ---------------------------------------------------------------------------------------
 $src = Join-Path $tmp 'src.bin'
 Set-Content -LiteralPath $src -Value 'payload' -NoNewline

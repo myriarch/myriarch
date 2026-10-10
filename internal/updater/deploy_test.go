@@ -858,7 +858,7 @@ func TestInstallLinuxScriptRequiresCosign304OrNewer(t *testing.T) {
 	rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
 	addBundles(t, rel)
 	u := addUpdaterRelease(t, rel, "0.1.0")
-	for version, ok := range map[string]bool{"v3.0.3": false, "v2.4.1": false, "v3.0.4": true, "v3.1.3": true, "v4.0.0": true, "devel": false} {
+	for version, ok := range map[string]bool{"v3.0.3": false, "v2.4.1": false, "v3.0.4": true, "v3.1.3": true, "v4.0.0": true, "devel": false, "v3.0.4-rc.1": false, "v3.0.5-rc.1": true} {
 		t.Run(version, func(t *testing.T) {
 			cosign, calls := writeFakeCosign(t, version, 0)
 			root := t.TempDir()
@@ -892,6 +892,33 @@ func TestInstallLinuxScriptRequiresCosign304OrNewer(t *testing.T) {
 	out, err = runInstallEnv(t, root, []string{"PATH=" + path}, releaseArgs(rel, u)...)
 	require.NoError(t, err, out)
 	assert.Contains(t, readCalls(t, calls)[0], "verify-bundle")
+}
+
+// A cosign under another file name (the release asset name) gets the same version floor and is called with verify-blob,
+// not as "myriarch-updater verify-bundle".
+func TestInstallLinuxScriptTreatsEveryCosignFileNameAsCosign(t *testing.T) {
+	rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+	addBundles(t, rel)
+	u := addUpdaterRelease(t, rel, "0.1.0")
+	for _, c := range []struct {
+		version string
+		ok      bool
+	}{{"v3.0.3", false}, {"v3.1.3", true}} {
+		t.Run(c.version, func(t *testing.T) {
+			cosign, calls := writeFakeCosign(t, c.version, 0)
+			renamed := filepath.Join(filepath.Dir(cosign), "cosign-linux-amd64")
+			require.NoError(t, os.Rename(cosign, renamed))
+			out, err := runInstallRaw(t, t.TempDir(), releaseArgs(rel, u, "--verifier", renamed)...)
+			if c.ok {
+				require.NoError(t, err, out)
+				assert.Contains(t, readCalls(t, calls)[0], "verify-blob")
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, out, "[sigstore_verifier_outdated]")
+			assert.Empty(t, readCalls(t, calls))
+		})
+	}
 }
 
 func TestInstallLinuxScriptNeverVerifiesWithTheUpdaterItInstalls(t *testing.T) {

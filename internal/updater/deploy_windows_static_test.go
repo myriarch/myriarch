@@ -117,6 +117,10 @@ func TestInstallWindowsScriptDoesNotTrustUserControllableLocations(t *testing.T)
 	require.True(t, iExplicit >= 0 && iDownload > iExplicit && iInstalled > iDownload && iCosign > iInstalled,
 		"verifier order: -Verifier, verified updater, installed updater, cosign.exe")
 	assert.Contains(t, body, "Test-AdminOnlyDirectory", "cosign.exe is only accepted from an administrator-only directory")
+	// an explicit -Verifier is subject to the same directory check, before its version is read or it is run
+	assert.Regexp(t, `(?s)if \(\$Verifier\) \{.*?Test-AclEnforced.*?Test-AdminOnlyDirectory.*?Stop-Install 'directory_unsafe'.*?Get-CosignVersionProblem`, body,
+		"-Verifier must be in an administrator-only directory (an elevated process must not run a replaceable binary)")
+	assert.Contains(t, script, "[Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT", "the ACL check is enforced on Windows")
 	assert.Regexp(t, `\$script:UpdaterDownload -and -not \$UpdaterChecksumsUrl -and \$UpdaterSha256`, body,
 		"the downloaded updater verifies only when its hash does not come from the file that the verifier has to check")
 	assert.Contains(t, body, "Get-CosignVersionProblem", "a cosign must be 3.0.4 or newer")

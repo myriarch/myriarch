@@ -62,9 +62,12 @@ Every file you downloaded must say `OK`. `--ignore-missing` skips the lines of f
 `checksums.txt` at all is not part of the release. On Windows compare one file at a time:
 
 ```powershell
-$want = (Select-String -Path checksums.txt -Pattern '  myriarch-updater_0.1.0_windows_amd64.exe$').Line.Split(' ')[0]
-$got  = (Get-FileHash -Algorithm SHA256 myriarch-updater_0.1.0_windows_amd64.exe).Hash.ToLowerInvariant()
-if ($got -ne $want) { throw 'SHA-256 mismatch' }
+$file  = 'myriarch-updater_0.1.0_windows_amd64.exe'
+$lines = @(Get-Content checksums.txt | Where-Object { $_.EndsWith("  $file", [StringComparison]::Ordinal) })
+if ($lines.Count -ne 1) { throw "expected exactly one line for $file in checksums.txt" }
+$want = $lines[0].Split(' ')[0]
+$got  = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant()
+if ($got -cne $want) { throw 'SHA-256 mismatch' }
 ```
 
 If a check fails, do not run the file. A failure of the first command means that the file is not the one the workflow
@@ -116,13 +119,14 @@ You do not need to run these steps for a host that you install with the scripts:
   (`<url>.sigstore.json`, or `--updater-bundle-url`), verifies the bundle against the identity above, and takes the SHA-256 of
   the updater from the line of the file name in `--updater-url`. The version of the identity is `--updater-version` or the
   version in that file name; if both are given, they must agree.
-- The verifier is `cosign` 3.0.4 or newer, or an already installed `myriarch-updater` (`--verifier`). It is never the
-  updater that is being installed, because that binary is only trusted through the file the verifier has to check.
+- The verifier is the file given with `--verifier`, otherwise `cosign` 3.0.4 or newer if it is in `PATH`, otherwise an
+  already installed `myriarch-updater`. It is never the updater that is being installed, because that binary is only trusted through the file the verifier has to check.
 - **Hosts without a verifier** (no `cosign`, no installed updater): verify `checksums.txt` on an admin host as shown above,
   take the SHA-256 of the updater from it and pass `--updater-sha256` (`-UpdaterSha256`). The installer then checks the
   downloaded updater against that hash and uses it to verify the collector and supervisor bundles.
-- **Upgrades:** run the installer again with the new version. The updater that is already installed verifies the bundle of the
-  new release, then the new updater replaces it.
+- **Upgrades:** run the installer again with the new version. On Linux a `cosign` 3.0.4 or newer in `PATH` verifies the bundle
+  of the new release, and the updater that is already installed does so on a host without `cosign` (on Windows the installed
+  updater comes before `cosign.exe`); then the new updater replaces it.
 
 ## Mirrors
 

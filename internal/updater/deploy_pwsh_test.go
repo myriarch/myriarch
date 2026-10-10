@@ -331,7 +331,7 @@ func TestInstallWindowsScriptRequiresCosign304OrNewer(t *testing.T) {
 	skipOnWindowsHost(t)
 	relDir, _, _ := newFakeWindowsRelease(t, "0.162.0")
 	name, _ := addWindowsUpdaterRelease(t, relDir, "0.1.0")
-	for version, ok := range map[string]bool{"v3.0.3": false, "v2.4.1": false, "v3.0.4": true, "v3.1.3": true, "devel": false} {
+	for version, ok := range map[string]bool{"v3.0.3": false, "v2.4.1": false, "v3.0.4": true, "v3.1.3": true, "devel": false, "v3.0.4-rc.1": false, "v3.0.5-rc.1": true} {
 		t.Run(version, func(t *testing.T) {
 			cosign, _ := writeFakeCosign(t, version, 0)
 			root := t.TempDir()
@@ -359,6 +359,15 @@ func TestInstallWindowsScriptRemovedKeyOptionsNameTheirReplacement(t *testing.T)
 		"-SigningKey":             {[]string{"-SigningKey", "cosign.pub"}, "-UpdaterChecksumsUrl"},
 		"-UpdaterChecksumsSigUrl": {[]string{"-UpdaterChecksumsSigUrl", "https://mirror.example.com/checksums.txt.sig"}, "-UpdaterBundleUrl"},
 	}
+	// an empty value is still a use of the removed option
+	cases["-SigningKey empty"] = struct {
+		args        []string
+		replacement string
+	}{[]string{"-SigningKey", ""}, "-UpdaterChecksumsUrl"}
+	cases["-UpdaterChecksumsSigUrl empty"] = struct {
+		args        []string
+		replacement string
+	}{[]string{"-UpdaterChecksumsSigUrl", ""}, "-UpdaterBundleUrl"}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()

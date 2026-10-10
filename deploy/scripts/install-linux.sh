@@ -385,9 +385,9 @@ validate_inputs() {
   [ -n "${SITE_TYPE}" ] || die option_missing "--site-type is missing"
   [ -n "${SITE_ID}" ]   || die option_missing "--site-id is missing"
   [ -n "${COLLECTOR_VERSION}" ] || die option_missing "--collector-version is missing"
-  [[ "${COLLECTOR_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die option_invalid "invalid --collector-version: ${COLLECTOR_VERSION}"
+  [[ "${COLLECTOR_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]] || die option_invalid "invalid --collector-version: ${COLLECTOR_VERSION}"
   [ -n "${SUPERVISOR_VERSION}" ] || SUPERVISOR_VERSION="${COLLECTOR_VERSION}"
-  [[ "${SUPERVISOR_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die option_invalid "invalid --supervisor-version: ${SUPERVISOR_VERSION}"
+  [[ "${SUPERVISOR_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]] || die option_invalid "invalid --supervisor-version: ${SUPERVISOR_VERSION}"
   local v
   for v in "${SITE_TYPE}" "${SITE_ID}" "${SITE_NAME}" "${SITE_COUNTRY}" "${SITE_REGION}" "${SITE_TIMEZONE}" "${ENVIRONMENT}" "${OPAMP_ENDPOINT}" "${CA_FILE}"; do
     if [[ "${v}" =~ [[:cntrl:]] ]]; then die option_invalid "control character in a parameter value"; fi
@@ -419,11 +419,11 @@ validate_inputs() {
     local updater_asset url_version=""
     updater_asset="${UPDATER_URL%%[?#]*}"; updater_asset="${updater_asset##*/}"
     [ -n "${updater_asset}" ] || die option_invalid "no file name in --updater-url: ${UPDATER_URL}"
-    if [[ "${updater_asset}" =~ ^myriarch-updater_([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)_linux_(amd64|arm64)$ ]]; then
+    if [[ "${updater_asset}" =~ ^myriarch-updater_([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?)_linux_(amd64|arm64)$ ]]; then
       url_version="${BASH_REMATCH[1]}"
     fi
     if [ -n "${UPDATER_VERSION}" ]; then
-      [[ "${UPDATER_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die option_invalid "invalid --updater-version: ${UPDATER_VERSION}"
+      [[ "${UPDATER_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]] || die option_invalid "invalid --updater-version: ${UPDATER_VERSION}"
       if [ -n "${url_version}" ] && [ "${url_version}" != "${UPDATER_VERSION}" ]; then
         die option_conflict "--updater-version ${UPDATER_VERSION} and the version in --updater-url (${url_version}) differ"
       fi
@@ -492,12 +492,17 @@ cosign_version_problem() { # path
   out="$("$1" version 2>&1)" || { printf 'cosign "%s version" failed' "$1"; return 1; }
   ver="$(printf '%s\n' "${out}" | awk '/^GitVersion:/ { print $2; exit }')"
   ver="${ver#v}"
-  if ! [[ "${ver}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+  if ! [[ "${ver}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-[^+]+)?(\+.*)?$ ]]; then
     printf 'cosign "%s" reports no usable version' "$1"; return 1
   fi
-  local want="${MIN_COSIGN_VERSION}" got_major="${BASH_REMATCH[1]}" got_minor="${BASH_REMATCH[2]}" got_patch="${BASH_REMATCH[3]}"
+  local want="${MIN_COSIGN_VERSION}" got_major="${BASH_REMATCH[1]}" got_minor="${BASH_REMATCH[2]}" got_patch="${BASH_REMATCH[3]}" got_pre="${BASH_REMATCH[4]}"
   local want_major="${want%%.*}" rest="${want#*.}"
   local want_minor="${rest%%.*}" want_patch="${rest#*.}"
+  # a pre-release of the minimum (3.0.4-rc.1) sorts before it
+  if [ -n "${got_pre}" ] && [ "${got_major}.${got_minor}.${got_patch}" = "${want}" ]; then
+    printf 'cosign %s.%s.%s%s at "%s" is too old (a pre-release of the minimum)' "${got_major}" "${got_minor}" "${got_patch}" "${got_pre}" "$1"
+    return 1
+  fi
   if [ "${got_major}" -gt "${want_major}" ] \
     || { [ "${got_major}" -eq "${want_major}" ] && [ "${got_minor}" -gt "${want_minor}" ]; } \
     || { [ "${got_major}" -eq "${want_major}" ] && [ "${got_minor}" -eq "${want_minor}" ] && [ "${got_patch}" -ge "${want_patch}" ]; }; then
@@ -505,6 +510,12 @@ cosign_version_problem() { # path
   fi
   printf 'cosign %s.%s.%s at "%s" is too old' "${got_major}" "${got_minor}" "${got_patch}" "$1"
   return 1
+}
+
+# Any binary whose name starts with "cosign" (cosign, cosign-linux-amd64, ...) is treated as cosign; everything else is
+# called as "myriarch-updater verify-bundle".
+is_cosign() { # path
+  case "$(basename "$1")" in cosign*) return 0 ;; *) return 1 ;; esac
 }
 
 die_cosign_outdated() { # reason
@@ -515,7 +526,7 @@ resolve_verifier() {
   [ "${VERIFY_SIGNATURES}" = skip ] && return 0
   local problem=""
   if [ -n "${VERIFIER}" ]; then
-    if [ "$(basename "${VERIFIER}")" = cosign ]; then
+    if is_cosign "${VERIFIER}"; then
       problem="$(cosign_version_problem "${VERIFIER}")" || die_cosign_outdated "${problem}"
     fi
     return 0
@@ -537,7 +548,7 @@ verify_signature() { # asset-file bundle-url identity-regexp version
   local bundle
   bundle="${TMP_DIR}/$(basename "${file}").sigstore.json"
   download "${bundle_url}" "${bundle}"
-  if [ "$(basename "${VERIFIER}")" = cosign ]; then
+  if is_cosign "${VERIFIER}"; then
     local args=(verify-blob --bundle "${bundle}" --certificate-identity-regexp "${identity}" --certificate-oidc-issuer "${CERT_ISSUER}")
     [ -n "${TRUSTED_ROOT}" ] && args+=(--trusted-root "${TRUSTED_ROOT}")
     "${VERIFIER}" "${args[@]}" "${file}" >/dev/null 2>&1 || die sigstore_verification_failed "Sigstore verification of $(basename "${file}") failed"

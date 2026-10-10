@@ -73,13 +73,14 @@ What the script verifies, and why you may be asked for more options:
     `https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/v<version>`, so a genuine but older release,
     another workflow or another repository is refused. The version is `--updater-version`, or the one in the file name
     `myriarch-updater_<version>_linux_<arch>` of `--updater-url`; if both are given they must agree. The verifier of
-    `checksums.txt` is `cosign` 3.0.4 or newer or the updater that is already installed on the host (`--verifier`), never
-    the updater that is being installed.
+    `checksums.txt` is the file given with `--verifier`, otherwise `cosign` 3.0.4 or newer if it is in `PATH`, otherwise the updater
+    that is already installed on the host; it is never the updater that is being installed.
   - **Hosts without a verifier** (no `cosign`, no installed updater) verify `checksums.txt` on an admin host, as described in
     [Verify releases](../security/verify-releases.md), and pass the hash of the updater as `--updater-sha256`. The installer
     then checks the downloaded updater against that hash and also uses it to verify the collector and supervisor bundles.
-  - **Upgrades:** run the script again with the new version and URLs. The updater that is installed verifies the bundle of the
-    new release, and then the new updater replaces it.
+  - **Upgrades:** run the script again with the new version and URLs. On Linux a `cosign` 3.0.4 or newer in `PATH` verifies the
+    bundle of the new release, and the updater that is already installed does so on a host without `cosign` (on Windows the
+    installed updater comes before `cosign.exe`); then the new updater replaces it.
   - **Removed options:** `--signing-key` and `--updater-checksums-sig-url` (the key-signed `checksums.txt.sig` of earlier
     builds) fail with the code `option_removed`; the message names the replacement.
   - **Verify the download first.** The release archive of the updater contains the installation scripts. Verify the archive
@@ -106,12 +107,13 @@ blueprint) go into `/etc/myriarch/myriarch.env`. Then restart with `systemctl re
   -CollectorVersion 0.162.0 -WithUpdater `
   -UpdaterUrl https://mirror.example.com/myriarch-releases/v<ver>/myriarch-updater_<ver>_windows_amd64.exe `
   -UpdaterChecksumsUrl https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt `
-  -Verifier C:\Tools\cosign.exe
+  -Verifier 'C:\Program Files\cosign\cosign.exe'
 ```
 
 The trust model is the same as on Linux: `-VerifySignatures`, `-Verifier`, `-Insecure`, `-UpdaterChecksumsUrl` with
 `-UpdaterVersion` and `-UpdaterBundleUrl`, or `-UpdaterSha256` for a host without a verifier. `cosign.exe` must be 3.0.4 or
-newer and is only taken from a directory that only administrators can write (or pass it with `-Verifier`). `-SigningKey` and
+newer and is only taken from a directory that only administrators can write; a verifier passed with `-Verifier` must be in such a
+directory too (`directory_unsafe` otherwise). `-SigningKey` and
 `-UpdaterChecksumsSigUrl` were removed. Extract the release archive and run `Unblock-File` on the script **only after** you
 verified the archive ([Verify releases](../security/verify-releases.md)). In addition `-UpdaterSignerThumbprint` requires the
 Authenticode signature of the updater to come from one certificate; a pinned thumbprint breaks whenever that certificate is

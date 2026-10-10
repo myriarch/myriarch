@@ -104,6 +104,9 @@ $script:SupervisorService = 'otelcol-supervisor'
 $script:UpdaterService = 'myriarch-updater'
 $script:CollectorBinary = 'otelcol-contrib.exe'
 $script:StagingMode = $false
+# the parameters that were passed (inside a function $PSBoundParameters is the function's own); the removed options are
+# detected by their presence, not by their value
+$script:BoundParameters = $PSBoundParameters
 # SIDs instead of names (language independent)
 $script:SidSystem = 'S-1-5-18'
 $script:SidAdmins = 'S-1-5-32-544'
@@ -131,7 +134,8 @@ $script:MinCosignVersion = [Version]'3.0.4'
 # updater_unauthenticated) is at the top of install-linux.sh.
 # Windows-only codes:
 #   authenticode_invalid      the Authenticode signature of the updater is invalid or from another certificate
-#   directory_unsafe          reparse point, wrong owner, unexpected ACE, or not a directory
+#   directory_unsafe          reparse point, wrong owner, unexpected ACE, or not a directory; also a -Verifier in a directory
+#                             that unprivileged accounts can change
 #   acl_failed                icacls failed
 #   service_config_failed     sc.exe failed
 #   updater_install_failed    "myriarch-updater install" failed
@@ -293,16 +297,23 @@ function Test-AdminOnlyDirectory {
   }
 }
 
+# True where directory ACLs exist (Windows). Other platforms only run the test suites, which replace this function.
+function Test-AclEnforced {
+  return [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+}
+
 # Returns an empty string when the cosign binary reports MinCosignVersion or newer, otherwise the reason.
 function Get-CosignVersionProblem {
   param([string]$Path)
   $r = Invoke-Native -File $Path -Arguments @('version')
   if ($r.ExitCode -ne 0) { return "cosign `"$Path`" failed to report its version" }
-  $found = $null
+  $found = $null; $pre = ''
   foreach ($line in ($r.Output -split "`r?`n")) {
-    if ($line -match '^GitVersion:\s+v?(\d+\.\d+\.\d+)') { $found = [Version]$Matches[1]; break }
+    if ($line -match '^GitVersion:\s+v?(\d+\.\d+\.\d+)(-[^+\s]+)?') { $found = [Version]$Matches[1]; $pre = $Matches[2]; break }
   }
   if (-not $found) { return "cosign `"$Path`" reports no usable version" }
+  # a pre-release of the minimum (3.0.4-rc.1) sorts before it
+  if ($pre -and $found -eq $script:MinCosignVersion) { return "cosign $found$pre at `"$Path`" is too old (a pre-release of the minimum)" }
   if ($found -lt $script:MinCosignVersion) { return "cosign $found at `"$Path`" is too old" }
   return ''
 }
@@ -312,7 +323,7 @@ function Stop-CosignOutdated {
   Stop-Install 'sigstore_verifier_outdated' "${Reason}: cosign $($script:MinCosignVersion) or newer is required (older versions have known verification flaws); update cosign, pass -Verifier <installed myriarch-updater.exe>, or verify checksums.txt on an admin host and pass -UpdaterSha256"
 }
 
-# Sigstore verifier, in this order: -Verifier (a cosign must be 3.0.4 or newer), the SHA-256 checked updater from
+# Sigstore verifier, in this order: -Verifier (in a directory only Administrators can write; a cosign must be 3.0.4 or newer), the SHA-256 checked updater from
 # -WithUpdater (only with -UpdaterSha256 and without -UpdaterChecksumsUrl: with a checksums.txt the verifier is resolved
 # BEFORE the updater is downloaded and that updater is never used, because its hash comes from the file that this verifier
 # has to check), an already installed myriarch-updater, cosign.exe 3.0.4 or newer from PATH - but only from a directory that
@@ -322,6 +333,12 @@ function Resolve-Verifier {
   param($L)
   if ($VerifySignatures -eq 'skip') { return }
   if ($Verifier) {
+    # an elevated installer must not run a verifier that unprivileged accounts can replace (the verifier decides whether
+    # checksums.txt, and with it the SYSTEM updater, is trusted)
+    $verifierDir = Split-Path -Parent ([IO.Path]::GetFullPath($Verifier))
+    if ((Test-AclEnforced) -and -not (Test-AdminOnlyDirectory -Path $verifierDir)) {
+      Stop-Install 'directory_unsafe' "-Verifier is in $verifierDir, which unprivileged accounts can change; copy it into a directory only Administrators can write (for example C:\Program Files\cosign) and pass that path"
+    }
     if ((Split-Path -Leaf $Verifier) -like 'cosign*') {
       $problem = Get-CosignVersionProblem -Path $Verifier
       if ($problem) { Stop-CosignOutdated -Reason $problem }
@@ -593,7 +610,7 @@ function Test-Inputs {
   if (-not $SiteType) { Stop-Install 'option_missing' '-SiteType is missing' }
   if (-not $SiteId) { Stop-Install 'option_missing' '-SiteId is missing' }
   if (-not $CollectorVersion) { Stop-Install 'option_missing' '-CollectorVersion is missing' }
-  $verRe = '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+  $verRe = '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
   $script:CollectorVersion = $CollectorVersion.TrimStart('v')
   if ($script:CollectorVersion -notmatch $verRe) { Stop-Install 'option_invalid' "invalid -CollectorVersion: $CollectorVersion" }
   $script:SupervisorVersion = $(if ($SupervisorVersion) { $SupervisorVersion.TrimStart('v') } else { $script:CollectorVersion })
@@ -625,12 +642,12 @@ function Test-Inputs {
     $asset = (($UpdaterUrl -replace '[?#].*$', '') -split '[/\\]') | Select-Object -Last 1
     if (-not $asset) { Stop-Install 'option_invalid' "no file name in -UpdaterUrl: $UpdaterUrl" }
     $urlVersion = ''
-    if ($asset -match '^myriarch-updater_([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)_windows_(amd64|arm64)\.exe$') { $urlVersion = $Matches[1] }
+    if ($asset -cmatch '^myriarch-updater_([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?)_windows_(amd64|arm64)\.exe$') { $urlVersion = $Matches[1] }
     $script:UpdaterResolvedVersion = $urlVersion
     if ($UpdaterVersion) {
       $given = $UpdaterVersion.TrimStart('v')
       if ($given -notmatch $verRe) { Stop-Install 'option_invalid' "invalid -UpdaterVersion: $UpdaterVersion" }
-      if ($urlVersion -and $urlVersion -ne $given) {
+      if ($urlVersion -and $urlVersion -cne $given) {
         Stop-Install 'option_conflict' "-UpdaterVersion $given and the version in -UpdaterUrl ($urlVersion) differ"
       }
       $script:UpdaterResolvedVersion = $given
@@ -986,10 +1003,10 @@ function Invoke-Uninstall {
 }
 
 function Invoke-Main {
-  if ($SigningKey) {
+  if ($script:BoundParameters.ContainsKey('SigningKey')) {
     Stop-Install 'option_removed' '-SigningKey was removed: releases are signed keyless. Pass -UpdaterChecksumsUrl (its Sigstore bundle is verified against the release identity, verifier: cosign 3.0.4 or newer or an installed myriarch-updater) or -UpdaterSha256'
   }
-  if ($UpdaterChecksumsSigUrl) {
+  if ($script:BoundParameters.ContainsKey('UpdaterChecksumsSigUrl')) {
     Stop-Install 'option_removed' '-UpdaterChecksumsSigUrl was removed: use -UpdaterBundleUrl (default: <checksums-url>.sigstore.json) with -UpdaterChecksumsUrl'
   }
   $staging = [bool]$Root
