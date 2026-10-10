@@ -376,12 +376,21 @@ guidance after each item names what to do.
 
 ### Build and release
 
-- **Release signing is key-based for now.** Until the keyless release workflow exists
-  ([ADR-0023](../adr/0023-keyless-release-signing.md)), the project's own artifacts are signed with a key and verified
-  against the committed `deploy/release/cosign.pub`, without a transparency log. The installers no longer accept this
-  key-based signature: they take the hash of the updater only from `--updater-sha256` or from a `checksums.txt` that
-  is authenticated by its keyless bundle `checksums.txt.sigstore.json` (see Supply chain of the installers above). The
-  key-based files remain only for `contrib/enterprise-mirror` until the release workflow lands.
+- **No signing key in the release build.** goreleaser signs nothing, `ci/build-release.sh` has only the snapshot mode, and the
+  hook for a PFX file is removed. Releases are signed keyless by the release workflow
+  ([ADR-0023](../adr/0023-keyless-release-signing.md)), which is not in the repository yet. The installers authenticate the
+  updater through that keyless bundle only (see Supply chain of the installers above). The key-based toolkit for organizations
+  that mirror releases is in `contrib/enterprise-mirror/`.
+- **Acceptance check of signed Windows files.** A signing provider is not trusted with the content of a release. Stage apply of
+  the release build (`deploy/release/README.md`) requires that the rebuilt file equals the unsigned build, extracts the signature
+  from the provider's file and attaches it to the job's own build, and verifies the result against the committed chain: subject,
+  SHA-256 digest and RFC 3161 timestamp (the output of osslsigncode is parsed, because it exits 0 for a missing timestamp). The
+  text of the two PowerShell scripts before the signature block must equal the repository file. The trust anchors can be replaced
+  only in snapshot builds, and test signing with a throwaway CA is refused on tags and in `release.yml`. osslsigncode runs only
+  at the version pinned in `ci/versions.env`, built from a verified source archive and taken from the tool cache, never from
+  `PATH` (the distribution package predates verification fixes for crafted files). Staging happens only in git-ignored paths.
+  `ci/tests/windows-hook-test.sh` covers the failure cases. The decision is
+  [ADR-0034](../adr/0034-authenticode-signing-of-windows-release-artifacts.md).
 - **CI controls.** The GitHub Actions workflows ([ADR-0032](../adr/0032-continuous-integration-on-github-actions.md)) use only
   GitHub-owned actions, each pinned to a full commit SHA (the one exception is `ossf/scorecard-action`, see "One third-party
   action: OpenSSF Scorecard" below), a read-only token (`permissions: contents: read`), no `pull_request_target` or
@@ -443,8 +452,8 @@ guidance after each item names what to do.
   Windows evaluates (App Control for Business or AppLocker publisher rules, Smart App Control, the execution policy for the
   two PowerShell scripts). The target is a signature by the SignPath Foundation with a manual approval of every release in a
   second system, so that a leaked token or a compromised CI step cannot sign alone; the release workflow holds no long-lived
-  signing secret ([ADR-0034](../adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Release builds will no longer
-  accept a PFX file.
+  signing secret ([ADR-0034](../adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Release builds accept no PFX
+  file any more.
 - **Exception for v0.1.0: unsigned Windows files.** `v0.1.0` ships `myriarch-updater.exe`, `myrctl.exe` and the two PowerShell
   scripts without Authenticode signatures, under a reviewed exception for exactly that tag; the release notes carry an
   "unsigned" banner. Residual risk: Windows itself does not tell an operator who built an unsigned file, so integrity rests on

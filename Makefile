@@ -13,7 +13,7 @@
 #   make validate-examples  myrctl validate --strict on examples/quickstart (and the gitops-template)
 #   make e2e          end-to-end test (scripts/e2e.sh; E2E_REAL=1, load run: E2E_AGENTS=1000 scripts/e2e.sh, ... see docs/development.md)
 #   make release      cross-compiled binaries for all target platforms into ./dist (build tags: embedui only, deliberately WITHOUT devpg; see docs/development.md)
-#   make release-snapshot  goreleaser snapshot of the full release matrix (unsigned, NOT for releases; needs goreleaser and a git checkout)
+#   make release-snapshot  goreleaser snapshot of the full release matrix (unsigned, nothing published; local test only; ci/build-release.sh snapshot)
 #   make ci-test      script tests of ci/ and contrib/enterprise-mirror/ (ci/tests/run-all.sh)
 #   make image-crane  container image WITHOUT a container runtime (crane) and FROM scratch: build and push to IMAGE_REPO (required), print the digest (scripts/build-image-crane.sh; IMAGE_PLATFORM=linux/arm64 builds for arm64)
 #   make collector-image-crane  collector image (upstream opampsupervisor + otelcol-contrib of the same version + myriarch-updater) WITHOUT a container runtime: build and push to IMAGE_REPO (required); OTELCOL_VERSION=0.162.0 (default: ci/versions.env)
@@ -162,9 +162,10 @@ release:
 		done; \
 	done
 
-# Snapshot of the complete release matrix (deploy/release/goreleaser.yaml): local test only, unsigned, never for releases.
+# Snapshot of the complete release matrix (deploy/release/goreleaser.yaml): local test only, unsigned, never for releases. Needs the built
+# UI (make web-build).
 release-snapshot:
-	goreleaser release --snapshot --clean --skip=sign,publish -f deploy/release/goreleaser.yaml
+	ci/build-release.sh snapshot
 
 # Script tests of ci/ and contrib/enterprise-mirror/ (needs bash, openssl, python3; cosign/helm/crane/pwsh extend the scope)
 ci-test:
@@ -249,4 +250,4 @@ check-local:
 	SKIP='$(SKIP)' ONLY='$(ONLY)' LANGUAGE_GUARD='$(LANGUAGE_GUARD)' LANGUAGE_GUARD_PATHS='$(LANGUAGE_GUARD_PATHS)' ci/check-local.sh
 
 clean:
-	rm -rf bin dist
+	rm -rf bin dist .cache/release .cache/release-rehearsal cmd/myriarch-updater/rsrc_windows_*.syso cmd/myrctl/rsrc_windows_*.syso

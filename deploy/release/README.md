@@ -1,84 +1,167 @@
-# Release signing (cosign with a key)
+# Release build
 
-> **Interim.** Releases are currently signed with a **cosign key pair** (ECDSA P-256). Upstream releases of the project
-> switch to **keyless Sigstore signing** in the GitHub release workflow (ADR-0023). The key-based toolkit
-> stays available in [`contrib/enterprise-mirror/`](../../contrib/enterprise-mirror) for organizations that mirror releases
-> and re-sign them with their own keys.
+`goreleaser.yaml` in this directory describes the release build of all four programs for every platform. It holds **no signing
+key** and has no `signs:` block: releases are signed keyless by the release workflow
+([ADR-0023](../../docs/adr/0023-keyless-release-signing.md)), and the Windows files get an Authenticode signature through the hook
+described below ([ADR-0034](../../docs/adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Nothing in this directory publishes anything.
 
-Releases are signed with a cosign key pair (ECDSA P-256) **without** an entry in a public transparency log (no repository or
-workflow identities in the public Rekor, verification also works offline). The public key belongs into this directory as
-**`deploy/release/cosign.pub`**; as long as it is missing, release builds abort (`ci/build-release.sh`) and hosts cannot
-verify anything. There is deliberately no placeholder file.
+## Commands
 
-## Signature format contract
+| Command | What it does |
+|---|---|
+| `make release-snapshot` (`ci/build-release.sh snapshot`) | A goreleaser snapshot of the whole matrix, unsigned, for a local test. Windows files stay as built (stage `off`). |
+| `make release-rehearsal` (`ci/release/rehearsal.sh`) | The path of a release in a snapshot: stage `collect`, one signing pass with a throwaway test CA, stage `apply`, checks of `dist/` and a comparison of both builds. |
 
-For `checksums.txt`, every bare binary and every archive of a release there is a `<file>.sig` next to it:
+Prerequisites: the built web UI (`make web-build`; the release build never runs Node), the tools of `ci/install-tools.sh` (goreleaser,
+syft, go-winres and yq; the commands install them), python3, and for the rehearsal `osslsigncode`, which is built from a pinned
+source archive and needs a C compiler with the OpenSSL 3 and zlib headers (`docs/development.md`, section on tools). Releases are
+built only by the release workflow; `ci/build-release.sh release` does not exist any more.
 
-* Content: **base64** (one line) of an **ASN.1 DER ECDSA signature** (P-256) over the **SHA-256** of the file.
-* Verify without cosign:
+## Assets
 
-  ```bash
-  openssl dgst -sha256 -verify cosign.pub -signature <(openssl base64 -d -A -in checksums.txt.sig) checksums.txt   # -> Verified OK
-  ```
+* Archives: `myriarchd_<version>_<os>_<arch>.tar.gz`, `myriarch-updater_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows),
+  `myrctl_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows) and `myriarch-sim_<version>_<os>_<arch>.tar.gz`: 16 archives.
+* The bare updater binaries `myriarch-updater_<version>_<os>_<arch>[.exe]` (the target of `--updater-url` / `-UpdaterUrl`).
+* One SBOM per archive, `<archive>.sbom.json`, and `myriarch-webui_<version>.sbom.json` for the web UI (SPDX 2.3 JSON).
+* `checksums.txt` lists all of them and also `LICENSE` and `THIRD_PARTY_NOTICES`: 39 entries for a release (16 archives, 4 bare
+  binaries, 16 archive SBOMs, the web UI SBOM and the two license files). goreleaser does not copy the two license files into
+  `dist/`; the release workflow uploads them from the repository root.
+* The Windows scripts (`install-windows.ps1`, `Set-ServiceEnvironment.ps1`) are in the Windows updater archives only.
 
-* Verify with cosign: `cosign verify-blob --key cosign.pub --signature checksums.txt.sig --insecure-ignore-tlog=true checksums.txt`.
-* A whole release (mirror or artifact repository):
-  `contrib/enterprise-mirror/verify-release.sh --public-key cosign.pub --base-url <url> --assets`.
+## Reproducibility
 
-The contract, not a cosign version, is binding. `contrib/enterprise-mirror/sign-blob.sh` creates the signature with the pinned
-cosign version (`ci/versions.env`) and re-verifies it with `openssl` immediately; if a later cosign drops the deprecated
-flags (`--output-signature`), it switches to bundle mode automatically and reads the signature from the bundle.
+Binaries and archives are identical across two builds of a commit with the same Go toolchain and the same goreleaser, because
+timestamps come from the commit (`mod_timestamp`, `{{ .CommitDate }}`), the builds use `-trimpath`, the Windows version resources
+are deterministic, and the generated `.syso` files are git-ignored (so Go stamps `vcs.modified=false`).
 
-## Generating the key pair (once, by the people who own the release)
+The SBOMs are not reproducible: syft writes a random `documentNamespace`, the creation time and an entry for its own temporary
+directory, even with `SOURCE_DATE_EPOCH`. `checksums.txt` differs between two builds for that reason. The rehearsal compares SBOMs
+without these fields.
 
-On a trusted machine, not in CI:
+## SBOMs
 
-```bash
-export COSIGN_PASSWORD='<long passphrase>'            # keep it out of the shell history: read it from a password manager
-cosign generate-key-pair                              # writes cosign.key (encrypted) and cosign.pub
+`sbom.sh` runs the pinned syft (it checks the version) with `syft.yaml`: no network access, no `--enrich`, `SYFT_CHECK_FOR_APP_UPDATE=false`,
+and no `SYFT_*` variable of the caller. `-c` also stops syft from reading a `.syft.yaml` of the working directory. goreleaser
+calls the script with the working directory `dist/`.
+
+The web UI SBOM is made from `web/pnpm-lock.yaml` reduced to the production dependencies of the root project
+(`ci/release/pnpm-prod-lock.py`): syft cannot drop the dev dependencies of a pnpm lockfile (`javascript.include-dev-dependencies`
+has no effect on lockfile version 9), so without the reduction the SBOM would list the test and build tools as well.
+
+## Windows version resources
+
+`windows-signed.sh prepare` runs the pinned go-winres for `myriarch-updater` and `myrctl`: product "Myriarch", file and product
+version from the tag, the original file name `<program>.exe` and the copyright line. It writes
+`cmd/<program>/rsrc_windows_<arch>.syso`, which Go links into the Windows builds only. The files are git-ignored, are generated
+in an empty working directory (no stray icon is picked up), use no manifest (the runtime behavior is unchanged) and are removed by
+`ci/build-release.sh`, `ci/release/rehearsal.sh`, `windows-signed.sh clean` and `make clean`.
+
+## Windows signing hook
+
+The build cannot sign: it runs without a key, and the signature comes from a provider after the unsigned files exist. The hook
+splits the release into three steps that may run in different jobs, with the files travelling as plain directories.
+
+### Stages
+
+`MYRIARCH_WINDOWS_STAGE` is required; unset or any other value fails.
+
+| Stage | Who runs it | What the hooks do |
+|---|---|---|
+| `off` | `make release-snapshot`, snapshots only | Nothing is collected or checked. A release build refuses it (`[stage_off_release]`). |
+| `collect` | the build job: `goreleaser build --id myriarch-updater --id myrctl`, then `windows-signed.sh seal` | The post-build hook copies the four `.exe` files to the unsigned directory; `seal` adds the two scripts and `SHA256SUMS`. |
+| `apply` | the packaging job: `goreleaser release --skip=publish`, then `windows-signed.sh check-dist` | The post-build hook accepts the four `.exe` files and the before hook the two scripts from the signed directory (acceptance check below). |
+
+Between the stages the sign job runs `ci/release/windows-sign-hook.sh`. `windows-signed.sh check-dist` follows a goreleaser run in
+`collect` or `apply` and checks `dist/` (below). The build and packaging jobs have to use the same Go toolchain and the same
+goreleaser; otherwise stage `apply` fails with `[not_reproducible]`.
+
+### Environment
+
+| Variable | Meaning |
+|---|---|
+| `MYRIARCH_WINDOWS_STAGE` | `off`, `collect` or `apply` |
+| `MYRIARCH_WINDOWS_UNSIGNED_DIR` | the unsigned set, default `.cache/release/windows-unsigned` |
+| `MYRIARCH_WINDOWS_SIGNED_DIR` | the signed set, default `.cache/release/windows-signed` |
+| `MYRIARCH_AUTHENTICODE_DIR` | the trust anchors, default `deploy/release/authenticode`; only snapshot builds may set it |
+| `WINDOWS_SIGNING` | the mode of the hook: `off` (or `signpath`, `kms`, `test`, see below); the release workflow takes it from `deploy/release/windows-signing.env` |
+| `TOOLS_BIN` | where go-winres and osslsigncode are found, default `.cache/bin` |
+
+The unsigned and signed directories are staging areas: inside the work tree they have to be git-ignored (use `.cache/` or a path
+outside the repository), otherwise `[staging_dir]`. The state of the hooks is in `.cache/release/windows`.
+
+### Hook contract
+
+`WINDOWS_SIGNING=<mode> ci/release/windows-sign-hook.sh --in <unsigned-dir> --out <signed-dir>`
+
+* **Input:** the four files `myriarch-updater_windows_amd64.exe`, `myriarch-updater_windows_arm64.exe`,
+  `myrctl_windows_amd64.exe` and `myrctl_windows_arm64.exe`, plus `install-windows.ps1`, `Set-ServiceEnvironment.ps1` and
+  `SHA256SUMS` (`sha256sum` format, sorted by name). Anything else is `[set_incomplete]`, a wrong hash `[sums_mismatch]`.
+* **Output:** the same seven names (`SHA256SUMS` over the outputs) plus `signer.json`. The output directory has to be new or empty.
+* **Modes:** `off` copies the files unchanged. `signpath` and `kms` fail with `[provider_unavailable]` until the provider pull request
+  adds the clients. `test` signs with a throwaway CA from `WINDOWS_SIGNING_TEST_DIR` and exists for the rehearsal; it is not a
+  committed mode and is refused on tags (`GITHUB_REF`, `GITHUB_REF_TYPE`) and in `release.yml` (`GITHUB_WORKFLOW_REF`) with
+  `[test_mode_on_tag]`. An unset mode is `[mode_missing]`, an unknown one `[mode_invalid]`.
+* The hook never reads `windows-signing.env` itself.
+
+`signer.json` (schema 1, keys sorted, indent 2) is read by stage `apply` and by the release notes:
+
+```json
+{
+  "files": {
+    "Set-ServiceEnvironment.ps1": {"sha256": "<hex>", "unsigned_sha256": "<hex>", "subject": "...", "issuer": "...", "serial": "...", "timestamp": "..."},
+    "install-windows.ps1": { "...": "the same fields" },
+    "myrctl_windows_amd64.exe": { "...": "" },
+    "myrctl_windows_arm64.exe": {},
+    "myriarch-updater_windows_amd64.exe": {},
+    "myriarch-updater_windows_arm64.exe": {}
+  },
+  "provider": "off",
+  "schema": 1,
+  "signed": false,
+  "subject": null
+}
 ```
 
-1. Commit `cosign.pub` as `deploy/release/cosign.pub` (reviewed change).
-2. Store the secrets in the secret store of the release system so that **only the release job on protected tags** can read
-   them (not the test jobs, which run third-party code such as npm packages, and not jobs on ordinary branches):
-   * `COSIGN_KEY` - the content or path of `cosign.key` (the alias `COSIGN_PRIVATE_KEY` is accepted too)
-   * `COSIGN_PASSWORD` - the passphrase, masked
-   * for a private PKI only: `AUTHENTICODE_PFX` and `AUTHENTICODE_PFX_PASSWORD_FILE` (see "Authenticode" below)
-3. Back up `cosign.key` offline (safe, stored separately from the passphrase) and delete it from the machine. Protect the tags
-   `v*` (maintainers only), otherwise the secrets are not available to the release job. The tagged commit must be on the
-   release branch (`ci/build-release.sh` checks this, see `RELEASE_BRANCH` in `ci/lib.sh`): a protected tag only restricts who
-   may create it, not which commit it points to.
-4. Before every signing run the script checks that the key matches `deploy/release/cosign.pub` (a wrong or rotated secret
-   aborts instead of producing a wrong signature).
+`provider` is `off`, `test`, `signpath` or `kms`; `off` and `signed: false` belong together, and then `subject` is `null` and the
+per-file entries have only `sha256` and `unsigned_sha256`. When signed, `subject` is the RFC 2253 subject of the signing certificate,
+and every file entry adds `subject`, `issuer`, `serial` and `timestamp`.
 
-Getting the key to hosts: `cosign.pub` is also published next to the release files (`.../v<ver>/cosign.pub`); for a host's
-trust base verify the **fingerprint over a second channel**
-(`openssl pkey -pubin -in cosign.pub -outform DER | openssl dgst -sha256`).
+### Acceptance check (stage `apply`)
 
-## Rotation
+A provider's files are not shipped as they are. For every `.exe` the post-build hook does the following (`ci/release/authenticode.py`,
+the only code that runs osslsigncode):
 
-1. Generate a new key pair (as above), commit the new `cosign.pub` in a reviewed change, replace the secrets.
-2. From the next release on the new key signs. The installers no longer take a key (`--signing-key`/`-SigningKey` were
-   removed; they verify the keyless bundle of the release, see
-   [Verify releases](../../docs/security/verify-releases.md)), so the key only matters for files that you verify
-   yourself, for example with `contrib/enterprise-mirror/verify-release.sh`.
-3. Old releases stay verifiable with the old key (keep the old `cosign.pub`, for example as `cosign-<year>.pub` next to the
-   release files).
-4. Compromise: delete the secrets immediately, rotate the key, withdraw the affected releases (remove the published files and
-   the release page entry) and rebuild them; re-assess hosts that were installed with the compromised key.
+1. The rebuilt file must equal the unsigned build (`SHA256SUMS` of the unsigned directory), else `[not_reproducible]`.
+2. `signer.json` is validated against both sets (`[signer_json]`); a `test` provider is refused in release builds
+   (`[provider_test_release]`).
+3. If nothing is signed, the file in the signed directory must still equal the unsigned build (`[unsigned_changed]`).
+4. If signed, the signature is extracted from the provider's file and attached to the packaging job's own build (a signature that
+   does not cover that build is `[signature_mismatch]`), and the result is verified with osslsigncode against `ca.pem` and
+   `tsa-ca.pem`: exactly one signature (`[signature_count]`), digest SHA-256 (`[digest_weak]`), the expected subject
+   (`[subject_mismatch]`), a valid RFC 3161 timestamp (`[timestamp_missing]`, `[timestamp_invalid]`) and a valid chain
+   (`[signature_invalid]`). osslsigncode exits 0 for a missing or invalid timestamp as long as the certificate is valid, so the output
+   is parsed. The verified file replaces the rebuilt one.
 
-## Target before production: a KMS-held key
+The scripts take the same path. In addition, the text before `# SIG # Begin signature block` must equal the repository file
+(`[script_changed]`). The accepted files are staged in `.cache/release/windows/archive/windows/`, from where the Windows archives pick
+them up; the tracked scripts are never modified. `windows-signed.sh check-dist` then verifies that `dist/` holds exactly the accepted
+files (also in the zip archives and in `checksums.txt`), that the Windows scripts are in the Windows updater archives only, that the
+binaries carry the version resources, and that every archive, bare binary, SBOM, `LICENSE` and `THIRD_PARTY_NOTICES` is listed in
+`checksums.txt` with the right hash (`[dist_mismatch]`). It also catches a skipped post-build hook (`--skip=post-hooks`).
 
-A key in a secret store is accepted for the early phase; before production it belongs in a KMS so that the private key never
-leaves it. Any KMS that cosign supports works (AWS KMS, Google Cloud KMS, Azure Key Vault, HashiCorp Vault); the project does
-not depend on a single vendor.
+### Trust anchors
 
-* Create an ECDSA P-256 signing key in the KMS and allow the release job the sign operation only (no get/export).
-* Set `COSIGN_KEY` to the KMS URI (`awskms://...`, `gcpkms://...`, `azurekms://...`, `hashivault://...`) instead of a key file;
-  the scripts stay the same (`contrib/enterprise-mirror/sign-blob.sh`), `COSIGN_PASSWORD` is not needed. Authenticate the job
-  with the provider's workload identity (or the provider's usual credentials as protected secrets).
-* `cosign public-key --key <kms-uri> > deploy/release/cosign.pub` and commit it.
-* Not exercised by the project's own tests (they use key files).
+`deploy/release/authenticode/` holds the chain, the timestamp roots and the expected subject
+([`authenticode/README.md`](authenticode/README.md)). Until the provider pull request commits them, only unsigned files are accepted.
+
+### Rehearsal
+
+`make release-rehearsal` runs the path above in a snapshot. The signing pass uses a throwaway CA that `ci/release/authenticode-test-ca.sh`
+creates in a temporary directory outside the repository (RSA 3072, valid for seven days, no network access) and deletes on exit; the key
+is never published and never trusted anywhere else. The timestamp comes from the built-in RFC 3161 time stamping authority of
+osslsigncode, so the rehearsal runs offline. The tests of the hook (`ci/tests/windows-hook-test.sh`) cover the failure cases: a changed
+byte, a foreign CA, a missing timestamp, a foreign timestamp authority, a wrong subject, a weak digest, an unsigned file that was
+changed, and the staging rules.
 
 ## Authenticode (Windows)
 
@@ -104,17 +187,13 @@ with the keyless release workflow ([ADR-0023](../../docs/adr/0023-keyless-releas
 that tag (`WINDOWS_UNSIGNED_FINAL_TAG` in `deploy/release/windows-signing.env`). Verify them with cosign before you run
 them; the release notes say so.
 
-**Status of this tree.** The settings file arrives with the release tag guard and the release build change; the signing hook contract, the version
-resources and the acceptance check arrive with the release build change. Until then `authenticode.sh` signs with a PFX file and a password file, and
-`ci/build-release.sh` still requires `AUTHENTICODE_PFX` in release mode. A public certificate authority cannot deliver such a
-file, so this path is for private PKIs only (`deploy/release/authenticode.sh`; it may move to `contrib/enterprise-mirror/` with the release build change), with these settings: `AUTHENTICODE_PFX` (file),
-`AUTHENTICODE_PFX_PASSWORD_FILE` (file) and optionally `AUTHENTICODE_TIMESTAMP_URL`. `AUTHENTICODE_CA_FILE` and
-`AUTHENTICODE_TSA_CA_FILE` (default: `EXTRA_CA_FILE`) name the trust anchors of the verification step. The installer option
-`-UpdaterSignerThumbprint` pins the leaf certificate of the updater for operators with a private PKI; it breaks at every
-certificate renewal (at most every 460 days).
+**In this tree.** The build holds no key. The signing hook contract, the Windows version resources and the acceptance check are
+described above; the clients of the providers and the trust anchors in `authenticode/` arrive with the provider change, until then only the
+modes `off` and `test` work and only unsigned files are accepted. The installer option `-UpdaterSignerThumbprint` pins the leaf
+certificate of the updater for operators with a private PKI; it breaks at every certificate renewal (at most every 460 days).
 
-## Outlook: keyless signing
+## Key-based signatures (enterprise mirrors)
 
-Releases of the project move to keyless Sigstore signing (ADR-0023): the GitHub release workflow signs with its workflow
-identity, and verification checks that identity instead of a long-lived key. The key-based toolkit remains in
-[`contrib/enterprise-mirror/`](../../contrib/enterprise-mirror).
+The project's releases carry no key-based `.sig` files. The format contract of those signatures and the handling of keys and rotation
+moved to [`contrib/enterprise-mirror/signing.md`](../../contrib/enterprise-mirror/signing.md) for organizations that mirror releases
+and re-sign them.

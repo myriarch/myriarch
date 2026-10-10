@@ -15,7 +15,7 @@ Operations artifacts. All supervisor configurations use exactly the keys of opam
 | [`updater/container/`](updater/container) | `updater.yaml` for container mode (`myriarch-updater container`) |
 | [`compose/`](compose) | docker-compose: `docker-compose.yaml` builds PostgreSQL 17 + myriarchd (+ optional myriarch-sim) from source for development; `quickstart.yaml` runs the same system from the release images for an evaluation |
 | [`docker/`](docker) | `myriarchd.Dockerfile` (Node 24 + pnpm -> Go `-tags embedui` -> distroless) and `myriarch-sim.Dockerfile`, for local builds. The published images are not built from Dockerfiles (see "Published images") |
-| [`release/`](release) | `goreleaser.yaml`: release matrix of all binaries (key-based signatures until the keyless GitHub release workflow), `authenticode.sh`, `README.md` (generating/rotating the signing key, signature format contract) |
+| [`release/`](release) | `goreleaser.yaml` (release matrix, SBOMs, Windows hook; no signing key), `windows-signed.sh`, `sbom.sh`, `README.md` (release build, SBOMs, Windows signing hook) |
 
 CI scripts and local gates: [`../ci`](../ci) (`make check-local`); enterprise mirror tools: [`../contrib/enterprise-mirror`](../contrib/enterprise-mirror).
 
@@ -155,20 +155,14 @@ PVC/hostPath, version changes through the image tag).
 
 ```bash
 make release                                   # all binaries for all five platforms (check) -> dist/
-make release-snapshot                          # goreleaser snapshot of the matrix (local test ONLY, unsigned; needs a Git checkout)
-goreleaser release --snapshot --clean --skip=sign,publish -f deploy/release/goreleaser.yaml    # local snapshot test ONLY
+make release-snapshot                          # goreleaser snapshot of the matrix (local test ONLY, unsigned; needs a Git checkout and the built UI)
+make release-rehearsal                         # the path of a release in a snapshot, with a signing pass by a throwaway test CA (nothing is published)
 ```
 
-Official releases are built from a tagged commit by `ci/build-release.sh release` (goreleaser, nothing is published by
-the script) and are **always signed**. Key-based signing is the interim path; the GitHub release workflow replaces it with
-keyless Sigstore signing (ADR-0023).
+Releases are built and signed keyless by the release workflow (ADR-0023). This tree has no key-based release path: goreleaser
+signs nothing, and `ci/build-release.sh` only builds snapshots. The build, the SBOMs and the Windows signing hook are described
+in [`release/README.md`](release/README.md).
 
-* **cosign with a key** (ECDSA P-256, no entry in a public transparency log) for `checksums.txt`, every binary and every
-  archive: `<file>.sig` is the base64 encoding of an ASN.1 DER ECDSA signature over the SHA-256 of the file and can be
-  verified with `openssl` (`openssl dgst -sha256 -verify cosign.pub -signature <(openssl base64 -d -A -in x.sig) x`).
-  Generating, storing and rotating the key and the path to a KMS-held key: [`release/README.md`](release/README.md).
-  The install scripts verify `checksums.txt` with it and take the updater hash from it (see above).
-* **Authenticode** for the Windows binaries (`release/authenticode.sh`; release builds abort without a certificate).
 * The published images (`ghcr.io/myriarch/myriarch`, `ghcr.io/myriarch/myriarch-updater`) contain exactly the binaries and
   example files of the release archives that `checksums.txt` lists (see "Published images"); base images are pinned by digest in the local
   Dockerfiles (maintenance: `ci/versions.env`, `ci/pin-images.sh`). The upstream
@@ -182,8 +176,8 @@ keyless Sigstore signing (ADR-0023).
   `ci/release/push-images.sh` from `release.yml`.
 
 The `myriarch-updater` archives additionally contain `deploy/` (scripts, templates, units) - the package is self-contained
-on the host. In addition, bare binaries `myriarch-updater_<ver>_<os>_<arch>[.exe]` are produced for
-`--updater-url`/`-UpdaterUrl`. The host artifacts are also copied to the mirror repository `myriarch-releases`
+on the host. The Windows scripts (`install-windows.ps1`, `Set-ServiceEnvironment.ps1`) are in the Windows zip archives only. In
+addition, bare binaries `myriarch-updater_<ver>_<os>_<arch>[.exe]` are produced for `--updater-url`/`-UpdaterUrl`. The host artifacts are also copied to the mirror repository `myriarch-releases`
 (`<mirror>/myriarch-releases/v<ver>/<file>`, `contrib/enterprise-mirror/publish-mirror.sh`), because hosts download from
 there without credentials.
 

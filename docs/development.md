@@ -95,7 +95,7 @@ licensed, but `xi2/xz` is public domain (not on the license allowlist), and the 
 runtime (see below), which is not wanted in a release artifact. `ci/check-release-deps.sh` verifies this with `go list -deps`
 for linux, windows and darwin and fails if one of the forbidden modules is linked. The same script checks that the UI
 bundle contains no font files and that `web/package.json` has no `@fontsource` dependency (the UI uses system font
-stacks). `make check-local` runs it as part of the `go` gate. `ci/build-release.sh release` runs it, and the drift check of `THIRD_PARTY_NOTICES`, before goreleaser and aborts on a finding.
+stacks). `make check-local` runs it as part of the `go` gate. The release build runs it, and the drift check of `THIRD_PARTY_NOTICES`, before goreleaser.
 
 ### License check of the release builds
 
@@ -196,7 +196,7 @@ ships:
   program, upstream publishes no Linux binary, and the build needs no cmake: one `cc` call over the C files and a minimal
   `config.h`. It is not part of the default `TOOLS`, because it needs a C compiler, the OpenSSL 3 headers and zlib (Debian and
   Ubuntu: `libssl-dev` and `zlib1g-dev`, for example `ci/install-tools.sh apt:libssl-dev apt:zlib1g-dev`; macOS: the Xcode command
-  line tools and Homebrew `openssl@3`, or `OSSLSIGNCODE_OPENSSL_PREFIX`). The CI jobs `build` and `scripts` install it on demand.
+  line tools and Homebrew `openssl@3`, or `OSSLSIGNCODE_OPENSSL_PREFIX`). `ci/release/rehearsal.sh` and the CI jobs `build` and `scripts` install it on demand.
   A distribution package is never used, because Ubuntu 24.04 ships 2.8, which predates the verification fixes of 2.12 and 2.13, and
   the release build runs it on files that a signing provider returns.
 

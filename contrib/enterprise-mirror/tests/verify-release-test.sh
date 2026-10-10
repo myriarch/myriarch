@@ -8,7 +8,7 @@
 #  - verify-release.sh follows the 302 redirects and verifies checksums.txt, every file and every signature
 #  - the files really come from the storage listener
 #  - the Authorization header (VERIFY_AUTH_HEADER) reaches the origin but never the host a redirect points to
-# Signatures are made with openssl (format contract: base64 DER-ECDSA over SHA-256, see deploy/release/README.md), so
+# Signatures are made with openssl (format contract: base64 DER-ECDSA over SHA-256, see contrib/enterprise-mirror/signing.md), so
 # cosign is not needed.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MIRROR_DIR="$(cd "${HERE}/.." && pwd)"
