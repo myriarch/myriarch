@@ -1,0 +1,22 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Keeps the pinned GitHub Actions current (ADR-0032). Dependabot rewrites both the commit SHA and the "# vX.Y.Z" comment, which
+# is the format that ci/check-workflows.py requires. Only GitHub-owned actions are used, so every update comes from actions/*.
+# An update arrives as a pull request that goes through the same checks as any other change; read the release notes before
+# merging a major version.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/setup
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ['*']
+    commit-message:
+      prefix: 'ci:'
+    labels: [dependencies]
