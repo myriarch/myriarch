@@ -1,0 +1,1 @@
+.github/workflows/scorecard.yml:8: R12: the trigger 'pull_request' is not allowed (only push to main and schedule)

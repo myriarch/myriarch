@@ -1,0 +1,1 @@
+.github/workflows/scorecard.yml:15: R12: cannot read the workflow: an anchor, alias or tag (rule R12 reads block style, one key per line)

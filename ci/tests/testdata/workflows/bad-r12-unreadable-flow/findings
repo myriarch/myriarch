@@ -1,0 +1,1 @@
+.github/workflows/scorecard.yml:22: R12: cannot read the workflow: a flow collection that does not end on its line (write a flow collection on one line) (rule R12 reads block style, one key per line)

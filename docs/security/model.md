@@ -378,15 +378,16 @@ guidance after each item names what to do.
   ([ADR-0023](../adr/0023-keyless-release-signing.md)), the project's own artifacts are signed with a key and verified
   against the committed `deploy/release/cosign.pub`, without a transparency log.
 - **CI controls.** The GitHub Actions workflows ([ADR-0032](../adr/0032-continuous-integration-on-github-actions.md)) use only
-  GitHub-owned actions, each pinned to a full commit SHA, a read-only token (`permissions: contents: read`), no
-  `pull_request_target` or `workflow_run` trigger, checkouts without persisted credentials, no secrets outside the listed
-  deployment jobs (next item), and untrusted expressions only through `env:`. Caches that a pull request writes are scoped
-  to it and never restored on `main`; the artifacts of a failed run are an allow-list of log files (no tokens, cookies or
-  database files), because any signed-in user can download the artifacts of a public repository. Tools are built from
-  `ci/tools` with `go.sum` or downloaded with a SHA-256 check, never installed by a third-party action, and the collector
-  binaries of the end-to-end test are checked against the SHA-256 that the upstream release publishes. The `workflows` gate
-  (`ci/check-workflows.py`, `actionlint`) enforces these rules, and the commits of a pull request are scanned for secrets. A
-  change of a workflow is a security-relevant change and is reviewed as one.
+  GitHub-owned actions, each pinned to a full commit SHA (the one exception is `ossf/scorecard-action`, see "One third-party
+  action: OpenSSF Scorecard" below), a read-only token (`permissions: contents: read`), no `pull_request_target` or
+  `workflow_run` trigger, checkouts without persisted credentials, no secrets outside the listed deployment jobs (next item),
+  and untrusted expressions only through `env:`. Caches that a pull request writes are scoped to it and never restored on
+  `main`; the artifacts of a failed run are an allow-list of log files (no tokens, cookies or database files), because any
+  signed-in user can download the artifacts of a public repository. Tools are built from `ci/tools` with `go.sum` or
+  downloaded with a SHA-256 check, never installed by a third-party action, and the collector binaries of the end-to-end
+  test are checked against the SHA-256 that the upstream release publishes. The `workflows` gate (`ci/check-workflows.py`,
+  `actionlint`) enforces these rules, and the commits of a pull request are scanned for secrets. A change of a workflow is a
+  security-relevant change and is reviewed as one.
 - **Secrets in deployment jobs.** A deployment job that `ci/workflow-secrets.txt` lists (workflow file, job, secret name)
   may read an environment secret. The job must declare `environment:`, so that the protection rules of the environment apply
   before it starts, and the secret must be the whole value of a key, `KEY: ${{ secrets.NAME }}`, in the `env:` of the job or
@@ -397,6 +398,25 @@ guidance after each item names what to do.
   `.github/workflows` and every action file below `.github/actions` with the extension `.yml` or `.yaml` (hidden names and
   upper-case spellings included), so the name of a file is no way around it. Residual risk: the check sees that a job
   declares an environment, not where the secret is defined, and it reads the text of a workflow, not the parsed YAML.
+- **One third-party action: OpenSSF Scorecard.** [ADR-0033](../adr/0033-openssf-scorecard-as-the-only-third-party-action.md)
+  allows `ossf/scorecard-action`, pinned to a commit SHA, in `.github/workflows/scorecard.yml`, job `analysis`, and nowhere
+  else. `ci/check-workflows.py` enforces the place (rule R1) and the shape that the Scorecard API requires for published
+  results (rule R12): triggers `push` to `main` and `schedule`, one job on a GitHub-hosted Ubuntu runner with exactly the
+  permissions `contents: read`, `actions: read`, `security-events: write` and `id-token: write`, only `uses:` steps from a
+  fixed list, no secrets, no caches, no environment. Residual risk: the action runs third-party code with `id-token: write`
+  and `security-events: write`; a compromised release could request tokens for the identity of that workflow or change
+  code-scanning alerts. That identity (`scorecard.yml` on `refs/heads/main`) is not the release identity and is never
+  accepted where the release identity is required. The pin is changed only by a reviewed update.
+- **Rules for the release workflow (R13) exist before the workflow.** `ci/check-workflows.py` already requires of
+  `.github/workflows/release.yml`: a trigger for pushed `v*` tags only, no caches and no local actions, the literal environment
+  `release`, a `guard` job that every other job needs, no Node.js, Go, pnpm, npm, goreleaser, make or similar build tool
+  (the list is in the docstring of the check) in a job with a write scope, `id-token`, `attestations` or an environment, and
+  an approval (a job with the environment `release`) before every privileged job. Two constructs that make `needs:`
+  ineffective are rejected in every job: an `if:` that tests the status of other jobs (`always()`, `failure()`,
+  `cancelled()`, `success()`) and `continue-on-error`. A privileged job may not use a shell that reads its script from
+  standard input (here-document, `| sh`, `bash -s`) or a `shell:` other than `bash` or `sh`. The check reads the text of the
+  workflow; it does not see a program that a privileged job starts through a variable, a script, an interpreter that is not
+  a shell or a wrapper that it does not know.
 - **Release pipeline controls are pending.** Protected release environments, signing jobs without caches, SBOM and
   provenance attestations and a verification step before publishing belong to the release workflow, which does not
   exist yet. No release has been published.

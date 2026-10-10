@@ -1,0 +1,1 @@
+.github/actions/scan/action.yml:9: R1: uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc is allowed only in .github/workflows/scorecard.yml, job analysis (ADR-0033)

@@ -1,0 +1,1 @@
+.github/workflows/scorecard.yml:26: R12: job analysis: ossf/scorecard-action needs 'publish_results: true' (without it there is no badge and the API check does not apply)

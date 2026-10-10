@@ -1,0 +1,1 @@
+.github/workflows/scorecard.yml:8: R12: the trigger 'workflow_dispatch' is not allowed (only push to main and schedule)

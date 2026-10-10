@@ -1,0 +1,1 @@
+.github/workflows/release.yml:64: R13: job sign (id-token: write, attestations: write, environment): actions/setup-node must not run in a job with these privileges (build code runs only in jobs with contents: read)

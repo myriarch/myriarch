@@ -2,9 +2,10 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Test of the workflow policy check ci/check-workflows.py: the fixture under ci/tests/testdata/workflows/good passes, and
-# every ci/tests/testdata/workflows/bad-* case breaks exactly the rule named in its `expect` file. The cases are small
-# repository trees (.github/ and, where needed, ci/workflow-permissions.txt and ci/workflow-secrets.txt); the gate list
+# Test of the workflow policy check ci/check-workflows.py: the fixture under ci/tests/testdata/workflows/good and every
+# good-* tree pass, and every ci/tests/testdata/workflows/bad-* case breaks exactly the rule or rules named in its `expect`
+# file (a case for rule R1 may break R12 as well when the action sits in the wrong job of the Scorecard workflow). The
+# cases are small repository trees (.github/ and, where needed, ci/workflow-permissions.txt and ci/workflow-secrets.txt); the gate list
 # that rule R8 compares with is passed through CHECK_WORKFLOWS_GATES. A case may also have a `findings` file with the exact
 # output of the check, so that it cannot fail for another reason than its own. Two more cases: a link that leads nowhere is
 # no workflow, and ci/lint-workflows.sh (run with stubs for actionlint and ShellCheck) hands actionlint the workflow files
@@ -21,9 +22,15 @@ run_check() { python3 -I "${CHECK}" --root "$1"; }
 
 expect_ok "the good fixture passes" run_check "${DATA}/good"
 
+# more trees that must pass: the shapes of rules R12 and R13 in other spellings, words in comments and prose
+for d in "${DATA}"/good-*; do
+  expect_ok "${d##*/} passes" run_check "${d}"
+done
+
 for d in "${DATA}"/bad-*; do
   name="${d##*/}"
-  want="$(tr -d '[:space:]' < "${d}/expect")"
+  want="$(tr -s '[:space:]' '\n' < "${d}/expect" | sed '/^$/d' | sort -u | tr '\n' ' ')"
+  want="${want% }"
   OUT="$(run_check "${d}" 2>&1)"; rc=$?
   rules="$(printf '%s\n' "${OUT}" | sed -n 's/^[^:]*:[0-9]*: \(R[0-9]*\):.*/\1/p' | sort -u | tr '\n' ' ')"
   if [ "${rc}" != 1 ] || [ "${rules}" != "${want} " ]; then

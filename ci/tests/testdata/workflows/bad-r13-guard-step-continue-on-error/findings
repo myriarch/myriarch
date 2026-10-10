@@ -1,0 +1,1 @@
+.github/workflows/release.yml:23: R13: job guard: 'continue-on-error' lets a failed step count as passed, so that a check (the tag guard, a verification) cannot stop the workflow

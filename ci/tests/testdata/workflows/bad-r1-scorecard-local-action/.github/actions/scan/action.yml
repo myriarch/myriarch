@@ -1,0 +1,9 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+name: scan
+description: Scan
+runs:
+  using: composite
+  steps:
+    - uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4

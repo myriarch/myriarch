@@ -201,7 +201,7 @@ make docs-check                                   # when you touched documentati
 | `build` | `make build` |
 | `examples` | `make validate-examples` (`myrctl validate --strict` on `examples/quickstart`, `gitops-template/config` and `hack/kind/gitops`) |
 | `shellcheck` | `ci/lint-shell.sh` over all shell scripts we ship or run |
-| `workflows` | `ci/lint-workflows.sh`: `actionlint` over `.github/workflows` and the policy check `ci/check-workflows.py` (pinned actions, read-only token, forbidden triggers, secrets only for listed deployment jobs, a timeout per job, parity with the gates; see [Continuous integration](#continuous-integration)) |
+| `workflows` | `ci/lint-workflows.sh`: `actionlint` over `.github/workflows` and the policy check `ci/check-workflows.py` (pinned actions, read-only token, forbidden triggers, secrets only for listed deployment jobs, a timeout per job, parity with the gates, the shape of the Scorecard and release workflows; see [Continuous integration](#continuous-integration)) |
 | `helm` | `ci/lint-helm.sh` and `ci/helm-conform.sh` (renders the chart with the example values and validates it against the schemas of Kubernetes 1.30.0, the chart floor, and 1.34.12) |
 | `language` | the language guard for English (see below) |
 | `docs` | `make docs-check`: generated CLI reference up to date, links, front matter |
@@ -342,7 +342,29 @@ both, so a rule does not depend on how a file is named:
 
 - **Only GitHub-owned actions** (`actions/*`, `github/*`), each pinned to a full commit SHA with the release in a comment:
   `uses: actions/checkout@<40 hex> # v7.0.1`. The same action has the same pin everywhere. Everything else comes from the
-  repository's own installer (`ci/install-tools.sh`) or corepack.
+  repository's own installer (`ci/install-tools.sh`) or corepack. The one exception is `ossf/scorecard-action`
+  ([ADR-0033](adr/0033-openssf-scorecard-as-the-only-third-party-action.md)): pinned the same way, and only in
+  `.github/workflows/scorecard.yml`, job `analysis` (rule R1).
+- **The Scorecard workflow has a fixed shape** (rule R12). `.github/workflows/scorecard.yml` runs on a push to `main` and on a
+  schedule, has one job `analysis` on a GitHub-hosted `ubuntu-NN.NN` runner, no `env`, `defaults`, `container`, `services`
+  or `environment`, only `uses:` steps (`actions/checkout`, `ossf/scorecard-action` with `publish_results: true`,
+  `github/codeql-action/upload-sarif`, optionally `actions/upload-artifact`) and exactly the job permissions `contents: read`,
+  `actions: read`, `security-events: write` and `id-token: write`. These are the restrictions of the Scorecard API for
+  published results; the two write scopes need lines in `ci/workflow-permissions.txt`. A change to the shape starts with the
+  README of `ossf/scorecard-action` ("Workflow Restrictions") and a change of rule R12.
+- **The release workflow keeps build code away from privileges** (rule R13). `.github/workflows/release.yml` runs only for a
+  pushed tag `v*` (no `workflow_dispatch`); uses no cache (no `actions/cache`, no `cache:` input, `cache: false` for
+  `actions/setup-go`, `package-manager-cache: false` for `actions/setup-node`, no local action or called workflow); names
+  only the literal environment `release`; has a job `guard` that every other job needs; and runs `setup-node`, `setup-go`
+  and the build commands listed in the docstring of `ci/check-workflows.py` (`pnpm`, `npm`, `node`, `go`, `goreleaser`,
+  `make` and similar) only in jobs without a write scope, `id-token`, `attestations` or an environment. Every such
+  privileged job has the environment `release` itself or needs a job that has it. No job has an `if:` with `always()`,
+  `failure()`, `cancelled()` or `success()` and none uses `continue-on-error`, because either makes `needs:` ineffective. A
+  privileged job uses no shell that reads its script from standard input (`bash <<EOF`, `| sh`) and no `shell:` other than
+  `bash` or `sh`. The check matches a command at the start of a command, so comments, quoted text, here-documents, `case`
+  patterns and arrays that mention `go` or `make` are fine; a program started through a variable, a script or an interpreter
+  that is not a shell is out of reach, so the scripts that privileged jobs call are tested with a `PATH` without `go`, `node`
+  and `pnpm`.
 - **A read-only token**: `permissions: contents: read` at the top of every workflow. A job-level write scope needs a line in
   `ci/workflow-permissions.txt` (`<workflow file> <job> <scope>`) and a review of the job.
 - **No `pull_request_target` and no `workflow_run`**, `persist-credentials: false` on every checkout, a timeout on
@@ -359,7 +381,7 @@ both, so a rule does not depend on how a file is named:
   `secrets.GITHUB_TOKEN`) when a step needs the token of the job.
 - **Toolchains from the repository**: `go-version-file: go.mod` and `node-version-file: .node-version`, never a literal version.
 - **Caches** come from `actions/cache` and the `setup-*` actions only. A cache written by a pull request is not restored on `main`.
-  A release workflow must not use caches (`TOOLS_NO_CACHE=1`).
+  A release workflow must not use caches (`TOOLS_NO_CACHE=1`; rule R13).
 - **Artifacts** of a failed run are an allow-list of log files. Artifacts of a public repository can be downloaded by any signed-in
   user, so they never contain tokens, cookies or database files.
 - First-time contributors' pull requests wait for a maintainer to approve the workflow run.
@@ -385,6 +407,10 @@ the action is used (`ci/check-workflows.py` fails when the pins differ):
 git ls-remote --tags https://github.com/actions/checkout.git 'refs/tags/v7.0.1' 'refs/tags/v7.0.1^{}'   # the ^{} line, if present, is the commit
 python3 -I ci/check-workflows.py --remote        # compares every pin with its tag on GitHub (needs network)
 ```
+
+The pin of `ossf/scorecard-action` is updated the same way (Dependabot's `github-actions` entry, or by hand with the tag of
+the release); the SHA must be a commit of `ossf/scorecard-action` itself, which the Scorecard API verifies and `--remote`
+checks through the tag.
 
 Moving `.node-version` to a Node.js release without corepack (Node.js 25 and later) needs a pinned `npm install -g corepack@<version>`
 step in `.github/actions/setup/action.yml`. Move it to the next LTS line only after its first LTS release.

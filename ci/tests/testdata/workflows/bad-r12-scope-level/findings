@@ -1,0 +1,1 @@
+.github/workflows/scorecard.yml:19: R12: job analysis: the permission 'actions' must be 'read'

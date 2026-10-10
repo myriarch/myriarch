@@ -1,0 +1,6 @@
+ci.yml publish pages
+scorecard.yml analysis security-events
+scorecard.yml analysis id-token
+release.yaml sign id-token
+release.yaml sign attestations
+release.yaml finalize contents

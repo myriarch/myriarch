@@ -1,0 +1,2 @@
+.github/workflows/release.yml:34: R13: job build: actions/setup-go caches by default: set 'cache: false'
+.github/workflows/release.yml:37: R13: job build: 'cache:' restores a cache: the release workflow uses none

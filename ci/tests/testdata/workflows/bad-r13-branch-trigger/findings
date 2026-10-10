@@ -1,0 +1,1 @@
+.github/workflows/release.yml:6: R13: push must have 'tags:' and nothing else (no branches, paths or ignore lists)

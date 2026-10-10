@@ -1,6 +1,6 @@
 # 0032. Continuous integration on GitHub Actions with GitHub-owned, SHA-pinned actions and one aggregate check
 
-- Status: Accepted
+- Status: Accepted, amended by [ADR-0033](0033-openssf-scorecard-as-the-only-third-party-action.md) (one third-party action, rule R1)
 - Date: 2026-10-10
 - Related: [ADR-0011](0011-no-containers-for-local-development-and-tests.md), [ADR-0019](0019-developer-certificate-of-origin.md), [ADR-0021](0021-publication-gates-and-v0-1-0-scope.md), [ADR-0023](0023-keyless-release-signing.md), [ADR-0029](0029-host-under-the-myriarch-organization.md), [ADR-0030](0030-reuse-compliance-and-third-party-notices.md), [ADR-0031](0031-website-with-hugo-and-docsy.md)
 

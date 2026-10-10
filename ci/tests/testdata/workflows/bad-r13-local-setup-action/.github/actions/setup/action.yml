@@ -1,0 +1,10 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+name: setup
+description: Toolchain
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: echo ok

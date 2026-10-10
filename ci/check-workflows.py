@@ -2,7 +2,7 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Policy check of the GitHub Actions workflows (ADR-0032), the part that actionlint does not cover.
+"""Policy check of the GitHub Actions workflows (ADR-0032 and ADR-0033), the part that actionlint does not cover.
 
     python3 -I ci/check-workflows.py [--root DIR] [--remote]
 
@@ -16,7 +16,9 @@ finding, 2 on a usage error and 0 otherwise.
 Rules
   R1  `uses:` is a local path (./...) or an action of the owners actions or github, pinned to a full commit SHA with
       the release in a trailing comment: `uses: actions/checkout@<40 hex> # v1.2.3`. No docker:// references, no
-      tags, no branches, no other owners.
+      tags, no branches, no other owners. The one exception (ADR-0033) is ossf/scorecard-action, pinned the same way,
+      in .github/workflows/scorecard.yml, job `analysis`, and nowhere else (not in another job, another workflow or a
+      local action; the action has no subpath).
   R2  The same action is pinned to the same SHA and release everywhere.
   R3  Every workflow has a top-level `permissions:` with exactly `contents: read`. A job-level scope with `write`
       (or `write-all`) is allowed only when ci/workflow-permissions.txt lists "<workflow file> <job> <scope>".
@@ -47,6 +49,43 @@ Rules
   R11 A workflow that has both `workflow_call` and `schedule` triggers: inside a called workflow `github.event_name` is the
       event of the caller, so an `if:` that tests `github.event_name == 'schedule'` must also test `inputs.<name> == ''`
       (true only for the workflow's own schedule run).
+  R12 .github/workflows/scorecard.yml has the shape that the OpenSSF Scorecard API accepts for published results, and
+      no more (ADR-0033). Top level: only name, on, permissions and jobs; no env and no defaults. Triggers: push with
+      `branches: [main]` and schedule (a list of `- cron:` entries), nothing else. Exactly one job, `analysis`, with
+      only the keys name, runs-on, timeout-minutes, permissions and steps (so no env, defaults, container, services,
+      environment, strategy or needs), on one GitHub-hosted Ubuntu runner (ubuntu-NN.NN, 22.04 or later), with exactly
+      the permissions contents: read, actions: read, security-events: write and id-token: write. Every step has
+      `uses:` and only the keys name, id, uses, with and if (no run, shell or env); the actions are actions/checkout,
+      ossf/scorecard-action, github/codeql-action/upload-sarif and optionally actions/upload-artifact, and the first
+      three must all be there. The Scorecard step sets `publish_results: true`. No secrets expression anywhere. The
+      workflow-level `contents: read` is R3's. The restrictions come from the Scorecard API (README of
+      ossf/scorecard-action, "Workflow Restrictions", and verify_workflow.go in ossf/scorecard-infra); this rule is
+      stricter where it can be (no harden-runner, no ubuntu-latest, no -arm runners, a fixed set of permissions).
+  R13 .github/workflows/release.yml (and release.yaml) keeps build code away from the privileges (ADR-0033). Trigger:
+      only `push` with `tags:` whose patterns start with v; no branches, pull_request or workflow_dispatch. No caches:
+      no actions/cache, no `cache:` input other than `false`, `cache: false` on actions/setup-go and
+      `package-manager-cache: false` on actions/setup-node (both cache by default), and no local action or reusable
+      workflow (`uses: ./...`), which could restore one. An `environment:` is the literal `release`, never an
+      expression. A privileged job (any write scope, `write-all`, id-token or attestations, or an environment) runs
+      neither actions/setup-node nor actions/setup-go, and no `run:` text of it starts one of pnpm, pnpx, npm, npx,
+      corepack, node, nodejs, yarn, go, goreleaser, make or gmake. A command counts at the start of a simple command: at
+      the beginning of a line or after `|`, `;`, `&`, `&&`, `||`, a parenthesis, `then`, `do` and similar, behind
+      assignments and wrappers (`sudo`, `doas`, `env` also with `-S`, `exec`, `time`, `builtin`, `coproc`, `timeout 5`,
+      ...), inside `$(...)`, backticks, `sh -c '...'`, `eval` and `find -exec`; words in comments, quoted strings,
+      here-documents, the patterns of a `case` clause, the members of an array (`tools=(go node)`) and arguments
+      (`echo go`, `command -v go`) are no commands. A shell that reads its script from standard input (`bash <<EOF`,
+      `bash <<< text`, `echo ... | sh`, `bash -s`, `. /dev/stdin`) is a finding in a privileged job, because its script
+      is not in the run text. A `shell:` (of a step in a privileged job, of the `defaults: run:` of a privileged job, and of
+      the workflow `defaults: run:`) is bash or sh: another interpreter (`node {0}`, `python {0}`) would read the run
+      text as its own language. A program started through a variable, an interpreter that is not a shell or a script is
+      out of reach: the scripts that privileged jobs call are tested with a PATH that has no go, node or pnpm. The job
+      `guard` exists, every other job needs it (directly or through other jobs), and every privileged job either has the
+      environment release itself or needs a job that has it, so that an approval gates it. Two constructs would make
+      `needs:` ineffective and are findings in every job: an `if:` that calls always(), failure(), cancelled() or
+      success() (the job runs although a job in `needs:` failed or was not approved) and `continue-on-error` other than
+      `false`, at job and at step level (a failed guard, approval or verification counts as passed). R12 and R13 read the
+      YAML with a small reader for block style (anchors, aliases, tags, multi-line flow collections and multi-line
+      scalars are findings of their own).
 
 --remote (needs network, for updating pins): `git ls-remote` for every pinned action and a comparison of the SHA with
 the tag that the comment names.
@@ -58,6 +97,7 @@ The environment variable CHECK_WORKFLOWS_GATES (space-separated) replaces the ou
 import bisect
 import os
 import re
+import shlex
 import subprocess
 import sys
 
@@ -67,6 +107,19 @@ DEFAULT_ROOT = os.path.dirname(HERE)
 USES = re.compile(r"^(\s*)(?:-\s+)?uses:\s*(\S+)(?:\s+(#.*))?\s*$")
 USES_ANY = re.compile(r"^(\s*)(?:-\s+)?uses:")
 PINNED = re.compile(r"^(actions|github)/([A-Za-z0-9._-]+)(/[A-Za-z0-9._/-]+)?@([0-9a-f]{40})$")
+PINNED_ANY = re.compile(r"^([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)(/[A-Za-z0-9._/-]+)?@([0-9a-f]{40})$")
+# The actions of another owner than actions and github (ADR-0033): "owner/name" -> (workflow file, job) in which it may appear.
+THIRD_PARTY_ACTIONS = {"ossf/scorecard-action": ("scorecard.yml", "analysis")}
+# R12: the workflow and the job of the Scorecard analysis
+SCORECARD_STEP_ACTIONS = ("actions/checkout", "ossf/scorecard-action", "github/codeql-action/upload-sarif", "actions/upload-artifact")
+SCORECARD_REQUIRED = ("actions/checkout", "ossf/scorecard-action", "github/codeql-action/upload-sarif")
+SCORECARD_PERMISSIONS = {"contents": "read", "actions": "read", "security-events": "write", "id-token": "write"}
+UBUNTU_RUNNER = re.compile(r"^ubuntu-(\d{2})\.(\d{2})$")
+# R13: programs that build code; a job with a write scope, id-token or the environment release does not start them
+RELEASE_FORBIDDEN_COMMANDS = frozenset(["pnpm", "pnpx", "npm", "npx", "corepack", "node", "nodejs", "yarn", "go", "goreleaser", "make", "gmake"])
+# R13: a function that tests the status of other jobs or steps; in an `if:` it lets a job run although `needs:` did not succeed
+STATUS_FUNCTION = re.compile(r"\b(?:always|failure|cancelled|success)\s*\(", re.I)
+RELEASE_SHELLS = frozenset(["bash", "sh"])  # the values of `shell:` that R13 accepts (first word)
 VERSION_COMMENT = re.compile(r"^#\s*(v\d+\.\d+\.\d+)\s*$")
 EXPR_UNSAFE = re.compile(r"\$\{\{[^}]*\b(github\.event\.|github\.head_ref|github\.ref_name|inputs\.)")
 SECRETS_WORD = re.compile(r"\bsecrets\b", re.I)  # GitHub resolves context names without regard to case
@@ -204,6 +257,673 @@ def find_files(directory, name, recursive=False):
     return sorted(found)
 
 
+# ---- a small reader for the YAML that rules R12 and R13 look at -------------------------------------------------------------
+# Block mappings and sequences, plain and quoted scalars, block scalars and one-line flow collections, with the line of every
+# value. Anchors, aliases, tags, multi-line flow collections and multi-line scalars are not read: the reader reports them, and
+# the rules turn that into a finding, so that a layout the reader cannot follow fails the check instead of passing it.
+
+
+class Node:
+    """A value of the document and the number of the line it starts on (the line of its key or of its list marker)."""
+    __slots__ = ("v", "line")
+
+    def __init__(self, v, line):
+        self.v = v  # dict (key -> Node), list (of Node) or str
+        self.line = line
+
+
+class Block(str):
+    """The text of a block scalar (`|` or `>`), for example the script of a `run:` step."""
+
+
+def skip_spaces(s, i):
+    while i < len(s) and s[i] in " \t":
+        i += 1
+    return i
+
+
+def read_quoted(s, i):
+    """The quoted scalar that starts at s[i]. Returns (text, index behind the closing quote) or raises ValueError."""
+    q, out, j = s[i], [], i + 1
+    while j < len(s):
+        c = s[j]
+        if q == "'" and c == "'":
+            if s[j + 1:j + 2] == "'":
+                out.append("'")
+                j += 2
+                continue
+            return "".join(out), j + 1
+        if q == '"' and c == "\\":
+            out.append(s[j + 1:j + 2])
+            j += 2
+            continue
+        if q == '"' and c == '"':
+            return "".join(out), j + 1
+        out.append(c)
+        j += 1
+    raise ValueError("a quoted scalar that does not end on its line")
+
+
+def read_flow(s, i, line):
+    """The flow value (a one-line collection or a scalar) at s[i]. Returns (Node, index behind it) or raises ValueError."""
+    i = skip_spaces(s, i)
+    if i >= len(s):
+        raise ValueError("a flow collection that does not end on its line")
+    c = s[i]
+    if c == "[":
+        items, i = [], i + 1
+        while True:
+            i = skip_spaces(s, i)
+            if i >= len(s):
+                raise ValueError("a flow collection that does not end on its line")
+            if s[i] == "]":
+                return Node(items, line), i + 1
+            node, i = read_flow(s, i, line)
+            items.append(node)
+            i = skip_spaces(s, i)
+            if i < len(s) and s[i] == ",":
+                i += 1
+            elif i >= len(s) or s[i] != "]":
+                raise ValueError("a flow sequence that is not well formed")
+    if c == "{":
+        pairs, i = {}, i + 1
+        while True:
+            i = skip_spaces(s, i)
+            if i >= len(s):
+                raise ValueError("a flow collection that does not end on its line")
+            if s[i] == "}":
+                return Node(pairs, line), i + 1
+            if s[i] in "\"'":
+                key, i = read_quoted(s, i)
+            else:
+                j = i
+                while j < len(s) and s[j] not in ":,}":
+                    j += 1
+                key, i = s[i:j].strip(), j
+            i = skip_spaces(s, i)
+            if i < len(s) and s[i] == ":":
+                i = skip_spaces(s, i + 1)
+                if i < len(s) and s[i] in ",}":
+                    value = Node("", line)
+                else:
+                    value, i = read_flow(s, i, line)
+            else:
+                value = Node("", line)
+            if key in pairs:
+                raise ValueError("the key '%s' twice" % key)
+            pairs[key] = value
+            i = skip_spaces(s, i)
+            if i < len(s) and s[i] == ",":
+                i += 1
+            elif i >= len(s) or s[i] != "}":
+                raise ValueError("a flow mapping that is not well formed")
+    if c in "\"'":
+        text, i = read_quoted(s, i)
+        return Node(text, line), i
+    j = i
+    while j < len(s) and s[j] not in ",]}":
+        j += 1
+    return Node(s[i:j].strip(), line), j
+
+
+def fold_block(text):
+    """The text of a folded block scalar (`>`): lines of equal indentation are joined by a space."""
+    out = []
+    for row in text.split("\n"):
+        if out and row.strip() and not row.startswith((" ", "\t")) and out[-1].strip() and not out[-1].startswith((" ", "\t")):
+            out[-1] += " " + row
+        else:
+            out.append(row)
+    return "\n".join(out)
+
+
+class MiniYaml:
+    """Reads the lines of one YAML file into Node objects. parse() returns (root Node, [(line number, problem)])."""
+
+    def __init__(self, lines):
+        self.lines = [x.rstrip("\r") for x in lines]  # a file with Windows line ends is read like any other
+        lines = self.lines
+        self.errors = []
+        self.rows = []  # [indent, text, line number] of every line that is neither blank nor a comment
+        for no, raw in enumerate(lines, 1):
+            text = raw.strip()
+            if text and not text.startswith("#"):
+                self.rows.append([indent_of(raw), text, no, raw])
+        self.i = 0
+
+    def err(self, no, msg):
+        self.errors.append((no, msg))
+
+    def peek(self):
+        return self.rows[self.i] if self.i < len(self.rows) else None
+
+    def parse(self):
+        if self.peek() is not None and self.peek()[1] == "---":
+            self.i += 1
+        row = self.peek()
+        if row is None:
+            return Node({}, 1), self.errors
+        root = self.block(row[0])
+        while self.peek() is not None:
+            self.err(self.peek()[2], "unexpected content")
+            self.i += 1
+        return root, self.errors
+
+    def block(self, indent):
+        text = self.peek()[1]
+        if text == "-" or text.startswith("- "):
+            return self.sequence(indent)
+        return self.mapping(indent)
+
+    def mapping(self, indent):
+        pairs, first = {}, self.peek()[2]
+        while True:
+            row = self.peek()
+            if row is None or row[0] < indent:
+                break
+            if row[0] > indent:
+                self.err(row[2], "unexpected indentation")
+                self.i += 1
+                continue
+            text, no = row[1], row[2]
+            if text == "-" or text.startswith("- "):
+                break  # a sequence at the indent of the key above belongs to that key; anything else is reported by the caller
+            if "\t" in row[3][:indent + 1]:
+                self.err(no, "a tab in the indentation")
+            m = MAPPING_KEY.match(text)
+            if not m:
+                self.err(no, "not a 'key: value' line")
+                self.i += 1
+                continue
+            key = next(g for g in m.groups()[:3] if g is not None)
+            self.i += 1
+            if key == "<<":
+                self.err(no, "a merge key (<<)")
+            if key in pairs:
+                self.err(no, "the key '%s' twice" % key)
+            pairs[key] = self.value(m.group(4) or "", indent, no, True)
+        return Node(pairs, first)
+
+    def sequence(self, indent):
+        items, first = [], self.peek()[2]
+        while True:
+            row = self.peek()
+            if row is None or row[0] < indent:
+                break
+            if row[0] > indent:
+                self.err(row[2], "unexpected indentation")
+                self.i += 1
+                continue
+            text, no = row[1], row[2]
+            if not (text == "-" or text.startswith("- ")):
+                break
+            rest = text[1:].lstrip(" ")
+            column = indent + len(text) - len(rest)
+            if rest == "" or rest.startswith("#"):
+                self.i += 1
+                nxt = self.peek()
+                if nxt is not None and nxt[0] > indent:
+                    node = self.block(nxt[0])
+                    node.line = no
+                else:
+                    node = Node("", no)
+            elif rest == "-" or rest.startswith("- "):
+                self.err(no, "a list inside a list item")
+                self.i += 1
+                node = Node("", no)
+            elif rest[0] not in "[{\"'" and MAPPING_KEY.match(rest):
+                row[0], row[1] = column, rest  # the rest of the line is the first key of the mapping that the item holds
+                node = self.mapping(column)
+                node.line = no
+            else:
+                self.i += 1
+                node = self.value(rest, indent, no, False)
+            items.append(node)
+        return Node(items, first)
+
+    def value(self, rest, indent, no, in_mapping):
+        """The value that follows `key:` (or `-`) on line `no`; `indent` is the indent of the key (or of the marker)."""
+        rest = rest.strip()
+        if rest == "" or rest.startswith("#"):
+            nxt = self.peek()
+            if nxt is not None and nxt[0] > indent:
+                node = self.block(nxt[0])
+                node.line = no
+                return node
+            if in_mapping and nxt is not None and nxt[0] == indent and (nxt[1] == "-" or nxt[1].startswith("- ")):
+                node = self.sequence(indent)
+                node.line = no
+                return node
+            return Node("", no)
+        if BLOCK_SCALAR.match(rest):
+            return self.block_scalar(rest, indent, no)
+        if rest[0] in "&*!":
+            self.err(no, "an anchor, alias or tag")
+            return Node(rest, no)
+        if rest[0] in "[{":
+            try:
+                node, end = read_flow(rest, 0, no)
+                if rest[end:].strip() and not rest[end:].strip().startswith("#"):
+                    raise ValueError("text behind a flow collection")
+                return node
+            except ValueError as e:
+                self.err(no, "%s (write a flow collection on one line)" % e)
+                return Node("", no)
+        if rest[0] in "\"'":
+            try:
+                text, end = read_quoted(rest, 0)
+                if rest[end:].strip() and not rest[end:].strip().startswith("#"):
+                    raise ValueError("text behind a quoted scalar")
+                return Node(text, no)
+            except ValueError as e:
+                self.err(no, str(e))
+                return Node("", no)
+        nxt = self.peek()
+        if nxt is not None and nxt[0] > indent:
+            self.err(no, "a scalar that continues on the next line")
+        return Node(re.split(r"\s#", rest, maxsplit=1)[0].rstrip(), no)
+
+    def block_scalar(self, header, indent, no):
+        j = no  # self.lines[j] is the line after the header
+        while j < len(self.lines) and (self.lines[j].strip() == "" or indent_of(self.lines[j]) > indent):
+            j += 1
+        body = self.lines[no:j]
+        while body and body[-1].strip() == "":
+            body.pop()
+        width = min([indent_of(x) for x in body if x.strip()] or [0])
+        text = "\n".join(x[width:] for x in body)
+        if header[0] == ">":
+            text = fold_block(text)
+        while self.peek() is not None and self.peek()[2] <= j:
+            self.i += 1
+        return Node(Block(text), no)
+
+
+def as_map(node):
+    return node.v if node is not None and isinstance(node.v, dict) else None
+
+
+def as_list(node):
+    return node.v if node is not None and isinstance(node.v, list) else None
+
+
+def as_text(node):
+    """The text of a scalar (None for a collection and for a missing node)."""
+    return node.v if node is not None and isinstance(node.v, str) else None
+
+
+# ---- the shell commands of a `run:` text (rule R13) --------------------------------------------------------------------------
+
+ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+SHELL_SKIP = frozenset(["!", "{", "}", "if", "then", "else", "elif", "while", "until", "do"])  # words in front of a command
+# a redirection in front of a command (`2>&1 go`, `> log make`, `<<< text bash`); the target may be a word of its own
+REDIRECTION = re.compile(r"^(?:[0-9]*|&)(?:<<<|<<-?|<>|>>|>&|<&|>\||>|<)")
+ARRAY_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=$")  # `tools=` in front of `(go node)`
+SHELLS = frozenset(["sh", "bash", "dash", "zsh", "ksh", "ash"])
+SHELL_OPTIONS_WITH_VALUE = frozenset(["-o", "+o", "-O", "+O", "--rcfile", "--init-file"])
+FIND_EXEC = frozenset(["-exec", "-execdir", "-ok", "-okdir"])
+# a shell that reads its script from standard input (`bash <<EOF`, `echo ... | sh`, `bash -s`, `. /dev/stdin`): its text is not in the run text
+STDIN_SHELL = "a shell that reads its script from standard input"
+# wrappers that start another command: the options that take a value, and the number of positional arguments in front of it
+WRAPPERS = {
+    "env": (frozenset(["-u", "-C"]), 0),
+    "sudo": (frozenset(["-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U"]), 0),
+    "exec": (frozenset(["-a"]), 0),
+    "nohup": (frozenset(), 0),
+    "command": (frozenset(), 0),
+    "nice": (frozenset(["-n"]), 0),
+    "ionice": (frozenset(["-c", "-n", "-p"]), 0),
+    "timeout": (frozenset(["-s", "-k"]), 1),
+    "xargs": (frozenset(["-I", "-L", "-n", "-P", "-s", "-d", "-E", "-a"]), 0),
+    "stdbuf": (frozenset(["-i", "-o", "-e"]), 0),
+    "setsid": (frozenset(), 0),
+    "time": (frozenset(["-f", "-o", "--format", "--output"]), 0),
+    "builtin": (frozenset(), 0),
+    "coproc": (frozenset(), 0),
+    "doas": (frozenset(["-u", "-C", "-a"]), 0),
+}
+
+
+def matching_paren(text, i):
+    """The index just behind the `)` that closes the `(` before text[i] (the end of the text when it is not closed)."""
+    depth = 1
+    while i < len(text):
+        c = text[i]
+        if c == "\\":
+            i += 1
+        elif c == "'":
+            j = text.find("'", i + 1)
+            i = j if j >= 0 else len(text)
+        elif c == '"':
+            j = i + 1
+            while j < len(text) and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            i = j
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return len(text)
+
+
+def skip_blank(text, i):
+    """The index of the next character that is no white space and not part of a comment line."""
+    n = len(text)
+    while i < n:
+        if text[i] in " \t\n":
+            i += 1
+        elif text[i] == "#":
+            while i < n and text[i] != "\n":
+                i += 1
+        else:
+            break
+    return i
+
+
+def end_of_case_pattern(text, i):
+    """The index just behind the `)` that ends the pattern list of a `case` clause that starts at text[i]."""
+    n = len(text)
+    if text[i:i + 1] == "(":
+        i += 1
+    depth = 0
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "'":
+            j = text.find("'", i + 1)
+            i = (j if j >= 0 else n) + 1
+            continue
+        if c == '"':
+            i += 1
+            while i < n and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+            i += 1
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            if depth == 0:
+                return i + 1
+            depth -= 1
+        i += 1
+    return n
+
+
+def is_case_header(words):
+    """True for `case WORD in` (behind reserved words such as `then`)."""
+    k = 0
+    while k < len(words) and words[k] in SHELL_SKIP:
+        k += 1
+    return len(words) == k + 3 and words[k] == "case" and words[k + 2] == "in"
+
+
+def shell_commands(text, depth=0):
+    """The simple commands of a shell script as [(words, line offset)]: quotes removed, a command ends at a newline, `;`, `&`,
+    `|`, `&&`, `||` or a parenthesis. Comments, the bodies of here-documents, the text of quotes, the patterns of a `case`
+    clause and the members of an array assignment (`tools=(go node)`) are no commands; the text of a command substitution
+    (`$(...)` and backticks) is scanned as well."""
+    cmds, words, cur = [], [], None
+    here = []  # delimiters of the here-documents that start on the current line
+    cmd_line = 0
+    case_depth = 0  # the number of open `case` commands
+    patterns = False  # the next text is the pattern list of a case clause
+    i, n = 0, len(text)
+
+    def end_word():
+        nonlocal cur, case_depth, patterns
+        if cur is not None:
+            words.append(cur)
+            cur = None
+            if is_case_header(words):
+                cmds.append((list(words), cmd_line))
+                del words[:]
+                case_depth += 1
+                patterns = True
+
+    def end_command():
+        nonlocal cmd_line, case_depth
+        end_word()
+        if words:
+            if words[0] == "esac" and case_depth > 0:
+                case_depth -= 1
+            cmds.append((list(words), cmd_line))
+            del words[:]
+
+    def add(s):
+        nonlocal cur, cmd_line
+        if cur is None:
+            if not words:
+                cmd_line = text.count("\n", 0, i)
+            cur = ""
+        cur += s
+
+    def substitution(inner):
+        if depth < 8:
+            base = text.count("\n", 0, i)
+            cmds.extend((w, base + off) for w, off in shell_commands(inner, depth + 1))
+
+    while i < n:
+        if patterns and cur is None and not words and not here:
+            patterns = False
+            j = skip_blank(text, i)
+            if not (text.startswith("esac", j) and text[j + 4:j + 5] in ("", " ", "\t", "\n", ";", "&", "|", "(", ")")):
+                i = end_of_case_pattern(text, j)
+                continue
+        c = text[i]
+        if c == "\\":
+            if text[i + 1:i + 2] == "\n":
+                i += 2
+            else:
+                add(text[i + 1:i + 2])
+                i += 2
+        elif c == "'":
+            j = text.find("'", i + 1)
+            j = n if j < 0 else j
+            add(text[i + 1:j])
+            i = j + 1
+        elif c == '"':
+            i += 1
+            buf = []
+            while i < n and text[i] != '"':
+                if text[i] == "\\":
+                    buf.append(text[i + 1:i + 2])
+                    i += 2
+                elif text.startswith("$((", i):
+                    i = matching_paren(text, i + 2)
+                elif text.startswith("$(", i):
+                    end = matching_paren(text, i + 2)
+                    substitution(text[i + 2:end - 1])
+                    i = end
+                elif text[i] == "`":
+                    end = text.find("`", i + 1)
+                    end = n if end < 0 else end
+                    substitution(text[i + 1:end])
+                    i = end + 1
+                else:
+                    buf.append(text[i])
+                    i += 1
+            i += 1
+            add("".join(buf))
+        elif text.startswith("$((", i):
+            i = matching_paren(text, i + 2)
+            add("0")
+        elif text.startswith("$(", i):
+            end = matching_paren(text, i + 2)
+            substitution(text[i + 2:end - 1])
+            i = end
+            add("x")
+        elif c == "`":
+            end = text.find("`", i + 1)
+            end = n if end < 0 else end
+            substitution(text[i + 1:end])
+            i = end + 1
+            add("x")
+        elif c in " \t":
+            end_word()
+            i += 1
+        elif c == "\n":
+            end_command()
+            i += 1
+            while here:
+                delimiter = here.pop(0)
+                while i < n:
+                    j = text.find("\n", i)
+                    j = n if j < 0 else j
+                    line = text[i:j].strip()
+                    i = j + 1
+                    if line == delimiter:
+                        break
+        elif c == "#" and cur is None:
+            while i < n and text[i] != "\n":
+                i += 1
+        elif c == "&" and ((cur or "")[-1:] in ("<", ">") or text[i + 1:i + 2] == ">"):
+            add(c)  # a redirection: 2>&1, &>file
+            i += 1
+        elif c == ";" and case_depth > 0 and text[i + 1:i + 2] in (";", "&"):  # the end of a case clause: `;;`, `;&`, `;;&`
+            end_command()
+            i += 3 if text.startswith(";;&", i) else 2
+            patterns = True
+        elif c == "(" and cur is not None and ARRAY_ASSIGNMENT.match(cur):  # tools=(go node): the members are words
+            end = matching_paren(text, i + 1)
+            substitution("echo " + text[i + 1:end - 1].replace("\n", "\necho "))
+            i = end
+            add("x")
+        elif c in ";&|()":
+            end_command()
+            i += 1
+        elif text.startswith("<<", i) and not text.startswith("<<<", i):
+            j = skip_spaces(text, i + 2 + (1 if text[i + 2:i + 3] == "-" else 0))
+            m = re.match(r"""(['"]?)([^\s'"<>|&;()]+)\1""", text[j:])
+            if m:
+                here.append(m.group(2))
+                i = j + len(m.group(0))
+            else:
+                i += 2
+            end_word()
+        else:
+            add(c)
+            i += 1
+    end_command()
+    return cmds
+
+
+def command_word(words):
+    """The words of the command that starts a simple command, without assignments (FOO=1), reserved words (`then`) and
+    wrappers (`sudo`, `env`, `time -p`, `timeout 5`; `env -S 'go build'` is split into words); None when it starts none
+    (`command -v go` only looks a program up)."""
+    i = 0
+    while i < len(words):
+        w = words[i]
+        if ASSIGNMENT.match(w) or w in SHELL_SKIP:
+            i += 1
+            continue
+        redirection = REDIRECTION.match(w)
+        if redirection:
+            i += 2 if redirection.end() == len(w) else 1  # the target of a lone `>` is the next word
+            continue
+        base = w.rsplit("/", 1)[-1]
+        wrapper = WRAPPERS.get(base)
+        if wrapper is None:
+            return words[i:]
+        with_value, positional = wrapper
+        if base == "command" and any(x in ("-v", "-V") for x in words[i + 1:i + 3]):
+            return None
+        i += 1
+        while i < len(words):
+            x = words[i]
+            if x == "--":
+                i += 1
+                break
+            if base == "env" and (x.startswith("-S") or x.startswith("--split-string")):
+                if x.startswith("--split-string="):
+                    value, used = x.split("=", 1)[1], 1
+                elif x in ("-S", "--split-string"):
+                    value, used = (words[i + 1] if i + 1 < len(words) else ""), 2
+                else:
+                    value, used = x[2:], 1
+                try:
+                    split = shlex.split(value)
+                except ValueError:
+                    split = value.split()
+                return command_word(split + words[i + used:])
+            if ASSIGNMENT.match(x):
+                i += 1
+            elif x.startswith("-") and len(x) > 1:
+                i += 2 if x in with_value else 1
+            else:
+                break
+        i += positional
+    return None
+
+
+def shell_script_source(args):
+    """How a shell that is started with `args` gets its script: ("c", text) for `-c text`, ("file", None) for a file operand
+    and ("stdin", None) when there is neither (or `-s`)."""
+    has_s, k = False, 0
+    while k < len(args):
+        x = args[k]
+        redirection = REDIRECTION.match(x)
+        if redirection:
+            k += 2 if redirection.end() == len(x) else 1
+        elif x == "--":
+            k += 1
+            break
+        elif x in SHELL_OPTIONS_WITH_VALUE:
+            k += 2
+        elif x[:1] in ("-", "+") and len(x) > 1:
+            if x[0] == "-" and not x.startswith("--") and "c" in x[1:]:
+                return ("c", args[k + 1]) if k + 1 < len(args) else ("file", None)
+            has_s = has_s or (x[0] == "-" and not x.startswith("--") and "s" in x[1:])
+            k += 1
+        else:
+            break
+    while k < len(args) and REDIRECTION.match(args[k]):  # redirections behind `--` are no operands
+        k += 2 if REDIRECTION.match(args[k]).end() == len(args[k]) else 1
+    return ("stdin", None) if has_s or k >= len(args) else ("file", None)
+
+
+def programs_of_words(words, depth):
+    """The names of the programs that one simple command starts: the command itself and what it runs through `sh -c '...'`,
+    `eval` and `find -exec`. The name is the last component of the path."""
+    rest = command_word(words)
+    if not rest:
+        return []
+    name = rest[0].rsplit("/", 1)[-1]
+    found = []
+    if name in SHELLS and depth < 4:
+        kind, script = shell_script_source(rest[1:])
+        if kind == "c":
+            found.extend(p for p, _ in started_programs(script, depth + 1))
+        elif kind == "stdin":
+            found.append(STDIN_SHELL)
+    elif name in ("source", ".") and any(x.startswith(("/dev/", "/proc/")) for x in rest[1:]):
+        found.append(STDIN_SHELL)
+    elif name == "eval" and depth < 4:
+        found.extend(p for p, _ in started_programs(" ".join(rest[1:]), depth + 1))
+    elif name == "find" and depth < 4:
+        for k, x in enumerate(rest):
+            if x in FIND_EXEC:
+                end = next((j for j in range(k + 1, len(rest)) if rest[j] in (";", "+")), len(rest))
+                found.extend(programs_of_words(rest[k + 1:end], depth + 1))
+    found.append(name)
+    return found
+
+
+def started_programs(text, depth=0):
+    """[(program name, line offset)] of every command that the shell script starts: the first word of each simple command, also
+    behind a wrapper and inside `sh -c '...'`, `eval` and `find -exec`. The name is the last component of the path. A shell
+    that reads its script from standard input is reported as STDIN_SHELL."""
+    found = []
+    for words, offset in shell_commands(text):
+        found.extend((program, offset) for program in programs_of_words(words, depth))
+    return found
+
+
 class Checker:
     def __init__(self, root):
         self.root = root
@@ -260,7 +980,7 @@ class Checker:
     def check_file(self, path, is_workflow):
         with open(path, encoding="utf-8") as f:
             lines = f.read().split("\n")
-        self.rule_uses(path, lines)
+        self.rule_uses(path, lines, is_workflow)
         self.rule_triggers(path, lines)
         self.rule_checkout(path, lines)
         self.rule_run_injection(path, lines)
@@ -270,8 +990,19 @@ class Checker:
             self.rule_schedule_conditions(path, lines)
             self.rule_permissions(path, lines)
             self.rule_timeouts(path, lines)
+            if os.path.basename(path) == "scorecard.yml":
+                self.rule_scorecard(path, lines)
+            if os.path.basename(path).lower() in ("release.yml", "release.yaml"):
+                self.rule_release(path, lines)
 
-    def rule_uses(self, path, lines):
+    def job_at(self, lines, index):
+        """The id of the job that contains the line with the index `index`, or None."""
+        for name, (start, end) in self.jobs(lines).items():
+            if start <= index < end:
+                return name
+        return None
+
+    def rule_uses(self, path, lines, is_workflow):
         for i, line in enumerate(lines, 1):
             if is_blank_or_comment(line) or not USES_ANY.match(line):
                 continue
@@ -284,8 +1015,15 @@ class Checker:
                 continue
             p = PINNED.match(ref)
             if not p:
-                self.add(path, i, "R1", "uses: %s is not a local path or an actions/* or github/* action pinned to a full commit SHA" % ref)
-                continue
+                p = PINNED_ANY.match(ref)
+                key = "%s/%s" % (p.group(1), p.group(2)) if p else ""
+                if not p or key not in THIRD_PARTY_ACTIONS or p.group(3):
+                    self.add(path, i, "R1", "uses: %s is not a local path or an actions/* or github/* action pinned to a full commit SHA" % ref)
+                    continue
+                wf, job = THIRD_PARTY_ACTIONS[key]
+                if not is_workflow or os.path.basename(path) != wf or self.job_at(lines, i - 1) != job:
+                    self.add(path, i, "R1", "uses: %s is allowed only in .github/workflows/%s, job %s (ADR-0033)" % (ref, wf, job))
+                    continue
             vm = VERSION_COMMENT.match(comment or "")
             if not vm:
                 self.add(path, i, "R1", "uses: %s needs a trailing comment with the release, for example '# v1.2.3'" % ref)
@@ -622,6 +1360,305 @@ class Checker:
                 continue
             if not any(re.match(r"^    timeout-minutes\s*:", x) for x in block):
                 self.add(path, start + 1, "R6", "job %s has no timeout-minutes" % name)
+
+    # ---- the Scorecard workflow (R12) and the release workflow (R13) ---------------------------------------------------------
+    def read_tree(self, path, lines, rule):
+        """The parsed workflow, or None (after a finding of `rule`) when the reader cannot follow its layout."""
+        root, errors = MiniYaml(lines).parse()
+        if errors:  # the first problem is the cause, the others follow from it
+            no, problem = min(errors)
+            self.add(path, no, rule, "cannot read the workflow: %s (rule %s reads block style, one key per line)" % (problem, rule))
+            return None
+        return as_map(root)
+
+    def job_list(self, path, rule, top):
+        """The jobs of the workflow as {id: Node}; a job that is not a mapping is a finding."""
+        jobs = {}
+        for job, node in (as_map(top.get("jobs")) or {}).items():
+            if as_map(node) is None:
+                self.add(path, node.line, rule, "job %s: cannot read the job" % job)
+            else:
+                jobs[job] = node
+        return jobs
+
+    def step_list(self, path, rule, job, body):
+        """The steps of a job as [{key: Node}]; a `steps:` value or a step that is not a block list or mapping is a finding."""
+        steps = []
+        node = body.get("steps")
+        if node is None:
+            return steps
+        items = as_list(node)
+        if items is None:
+            self.add(path, node.line, rule, "job %s: steps: must be a block list" % job)
+            return steps
+        for item in items:
+            if as_map(item) is None:
+                self.add(path, item.line, rule, "job %s: cannot read the step" % job)
+            else:
+                steps.append(as_map(item))
+        return steps
+
+    def rule_scorecard(self, path, lines):
+        """R12: the shape of .github/workflows/scorecard.yml (ADR-0033)."""
+        top = self.read_tree(path, lines, "R12")
+        if top is None:
+            return
+
+        def add(line, msg):
+            self.add(path, line, "R12", msg)
+
+        for key, node in top.items():
+            if key == "env":
+                add(node.line, "the workflow has no top-level env: (the Scorecard API rejects the results)")
+            elif key == "defaults":
+                add(node.line, "the workflow has no top-level defaults: (the Scorecard API rejects the results)")
+            elif key not in ("name", "on", "permissions", "jobs"):
+                add(node.line, "the key '%s' is not allowed at the top level (only name, on, permissions and jobs)" % key)
+        text = "\n".join(self.structure(lines)[1])  # without comments
+        for start, expr in expressions(text):
+            if SECRETS_WORD.search(expr):
+                add(text.count("\n", 0, start) + 1, "the workflow uses no secrets")
+        self.scorecard_triggers(top, add)
+        jobs = as_map(top.get("jobs")) or {}
+        if "analysis" not in jobs:
+            add(top["jobs"].line if "jobs" in top else 1, "the workflow needs the job 'analysis'")
+        for job, body in jobs.items():
+            if job != "analysis":
+                add(body.line, "job %s: the workflow has exactly one job, 'analysis'" % job)
+        if "analysis" in jobs:
+            self.scorecard_job(path, as_map(jobs["analysis"]), jobs["analysis"].line, add)
+
+    def scorecard_triggers(self, top, add):
+        node = top.get("on")
+        if node is None:
+            add(1, "the workflow needs an on: mapping with push (branches: [main]) and schedule")
+            return
+        triggers = as_map(node)
+        if triggers is None:
+            add(node.line, "on: must be a block mapping with push (branches: [main]) and schedule")
+            return
+        for key, value in triggers.items():
+            if key not in ("push", "schedule"):
+                add(value.line, "the trigger '%s' is not allowed (only push to main and schedule)" % key)
+        for key in ("push", "schedule"):
+            if key not in triggers:
+                add(node.line, "the trigger '%s' is missing" % key)
+        push = triggers.get("push")
+        if push is not None:
+            pushed = as_map(push)
+            branches = as_list(pushed.get("branches")) if pushed else None
+            if pushed is None or set(pushed) != {"branches"} or branches is None or [as_text(b) for b in branches] != ["main"]:
+                add(push.line, "push must have exactly 'branches: [main]': the Scorecard API accepts results of the default branch only")
+        schedule = triggers.get("schedule")
+        if schedule is not None:
+            entries = as_list(schedule)
+            if not entries or any(as_map(e) is None or set(as_map(e)) != {"cron"} for e in entries):
+                add(schedule.line, "schedule must be a list of '- cron: ...' entries")
+
+    def scorecard_job(self, path, job, line, add):
+        if job is None:
+            add(line, "job analysis: cannot read the job")
+            return
+        for key, node in job.items():
+            if key in ("env", "defaults", "container", "services", "environment", "strategy"):
+                add(node.line, "job analysis: %s: is not allowed (the Scorecard API rejects it or the job would get more than it needs)" % key)
+            elif key not in ("name", "runs-on", "timeout-minutes", "permissions", "steps"):
+                add(node.line, "job analysis: the key '%s' is not allowed (only name, runs-on, timeout-minutes, permissions and steps)" % key)
+        runs_on = job.get("runs-on")
+        label = as_text(runs_on)
+        m = UBUNTU_RUNNER.match(label or "")
+        if not m or (int(m.group(1)), int(m.group(2))) < (22, 4):
+            add(runs_on.line if runs_on else line, "job analysis: runs-on must be one GitHub-hosted Ubuntu runner, ubuntu-NN.NN with 22.04 or later")
+        perms = job.get("permissions")
+        scopes = as_map(perms)
+        if scopes is None:
+            add(perms.line if perms else line, "job analysis: permissions must list exactly contents: read, actions: read, security-events: write and id-token: write")
+        else:
+            for scope, node in scopes.items():
+                if scope not in SCORECARD_PERMISSIONS:
+                    add(node.line, "job analysis: the permission '%s' is not allowed" % scope)
+            for scope, level in SCORECARD_PERMISSIONS.items():
+                if scope not in scopes:
+                    add(perms.line, "job analysis: the permission '%s: %s' is missing" % (scope, level))
+                elif as_text(scopes[scope]) != level:
+                    add(scopes[scope].line, "job analysis: the permission '%s' must be '%s'" % (scope, level))
+        seen = set()
+        for step in self.step_list(path, "R12", "analysis", job):
+            uses = as_text(step.get("uses"))
+            where = (step.get("uses") or Node("", line)).line
+            for key, node in step.items():
+                if key == "run" or key == "shell" or key == "env" or key == "working-directory":
+                    add(node.line, "job analysis: a step may only use an action (%s: is not allowed)" % key)
+                elif key not in ("name", "id", "uses", "with", "if"):
+                    add(node.line, "job analysis: the step key '%s' is not allowed (only name, id, uses, with and if)" % key)
+            if uses is None:
+                if "run" not in step:
+                    add(line, "job analysis: every step must have uses:")
+                continue
+            name = uses.split("@", 1)[0]
+            if name not in SCORECARD_STEP_ACTIONS:
+                add(where, "job analysis: the action %s is not allowed (only %s)" % (name, ", ".join(SCORECARD_STEP_ACTIONS)))
+                continue
+            seen.add(name)
+            if name == "ossf/scorecard-action":
+                options = as_map(step.get("with")) or {}
+                if as_text(options.get("publish_results")) != "true":
+                    add(where, "job analysis: ossf/scorecard-action needs 'publish_results: true' (without it there is no badge and the API check does not apply)")
+        for name in SCORECARD_REQUIRED:
+            if name not in seen:
+                add(line, "job analysis: a step must use %s" % name)
+
+    def rule_release(self, path, lines):
+        """R13: .github/workflows/release.yml (ADR-0033)."""
+        top = self.read_tree(path, lines, "R13")
+        if top is None:
+            return
+
+        def add(line, msg):
+            self.add(path, line, "R13", msg)
+
+        self.release_triggers(top, add)
+        shell = self.default_shell(top.get("defaults"))
+        if shell is not None and not self.plain_shell(shell):
+            add(shell.line, "defaults: run: shell: must be bash or sh (a script interpreter would read the run text as its own language)")
+        jobs = self.job_list(path, "R13", top)
+        info = {}
+        for job, body in jobs.items():
+            info[job] = self.release_job(path, job, body, add)
+        if "guard" not in jobs:
+            add(top["jobs"].line if "jobs" in top else 1, "the workflow needs a job 'guard' that checks the tag before any other job runs")
+
+        def closure(job, seen=None):
+            seen = set() if seen is None else seen
+            for need in info[job]["needs"]:
+                if need in info and need not in seen:
+                    seen.add(need)
+                    closure(need, seen)
+            return seen
+
+        for job, data in info.items():
+            needs = closure(job)
+            if job != "guard" and "guard" in jobs and "guard" not in needs:
+                add(data["line"], "job %s: it must need the job guard (directly or through another job)" % job)
+            if data["privileged"] and not data["release"] and not any(info[n]["release"] for n in needs):
+                add(data["line"], "job %s (%s): it must run after a job that uses environment release (needs:), so that the approval gates it" % (job, data["privileged"]))
+
+    @staticmethod
+    def default_shell(defaults):
+        """The node of `defaults: run: shell:` (None when there is none)."""
+        return ((as_map((as_map(defaults) or {}).get("run")) or {}).get("shell"))
+
+    @staticmethod
+    def plain_shell(node):
+        """True when a `shell:` value starts a POSIX shell that reads the run text as shell commands: bash or sh."""
+        words = (as_text(node) or "").split()
+        return bool(words) and words[0] in RELEASE_SHELLS
+
+    def release_triggers(self, top, add):
+        node = top.get("on")
+        triggers = as_map(node)
+        if triggers is None:
+            add(node.line if node else 1, "on: must be a block mapping with push of tags only")
+            return
+        for key, value in triggers.items():
+            if key != "push":
+                add(value.line, "the trigger '%s' is not allowed: the release workflow runs only for a pushed tag" % key)
+        push = triggers.get("push")
+        if push is None:
+            add(node.line, "the trigger push (tags) is missing")
+            return
+        pushed = as_map(push)
+        tags = as_list(pushed.get("tags")) if pushed else None
+        if pushed is None or set(pushed) != {"tags"} or not tags:
+            add(push.line, "push must have 'tags:' and nothing else (no branches, paths or ignore lists)")
+        elif any(not (as_text(t) or "").startswith("v") for t in tags):
+            add(push.line, "the tag patterns must start with v")
+
+    def release_job(self, path, job, node, add):
+        """Checks one job of the release workflow and returns {line, needs, release, privileged}."""
+        body, line = as_map(node), node.line
+        for key in ("uses",):
+            if key in body:
+                add(body[key].line, "job %s: a job that calls a workflow is not allowed (it could restore a cache or hold a secret)" % job)
+        # a job that runs although its needs: failed, and a failure that does not stop the job
+        node = body.get("if")
+        if node is not None and (as_text(node) is None or STATUS_FUNCTION.search(as_text(node))):
+            add(node.line, "job %s: 'if:' must not test the status of other jobs (always(), failure(), cancelled(), success()): the job would run although a job in needs: failed or was not approved" % job)
+        if "continue-on-error" in body and as_text(body["continue-on-error"]) != "false":
+            add(body["continue-on-error"].line, "job %s: 'continue-on-error' lets a failed job count as passed, so that needs: does not gate the jobs behind it" % job)
+        # needs
+        needs = set()
+        node = body.get("needs")
+        if node is not None:
+            if as_text(node) is not None:
+                needs.add(as_text(node))
+            elif as_list(node) is not None:
+                needs.update(as_text(n) or "" for n in as_list(node))
+            else:
+                add(node.line, "job %s: cannot read needs:" % job)
+        # environment: a literal name
+        release = False
+        node = body.get("environment")
+        if node is not None:
+            name = as_text(node) if as_text(node) is not None else as_text((as_map(node) or {}).get("name"))
+            if not name:
+                add(node.line, "job %s: environment: needs a name" % job)
+            elif "${{" in name:
+                add(node.line, "job %s: the name of the environment must be a literal, not an expression" % job)
+            elif name != "release":
+                add(node.line, "job %s: the only environment is release (not '%s')" % (job, name))
+            release = bool(name)  # a job with an environment waits for its approval, whatever the finding about its name
+        # privileges
+        reasons = []
+        perms = body.get("permissions")
+        if perms is not None:
+            scopes = as_map(perms)
+            if scopes is None:
+                if as_text(perms) not in ("read-all", "{}"):
+                    reasons.append("permissions: %s" % (as_text(perms) or "?"))
+            else:
+                reasons.extend("%s: %s" % (scope, as_text(level) or "?") for scope, level in scopes.items() if as_text(level) not in ("read", "none"))
+        if release:
+            reasons.append("environment")
+        privileged = ", ".join(reasons)
+        job_shell = self.default_shell(body.get("defaults"))
+        if privileged and job_shell is not None and not self.plain_shell(job_shell):
+            add(job_shell.line, "job %s (%s): defaults: run: shell: must be bash or sh (a script interpreter would read the run text as its own language)" % (job, privileged))
+        for step in self.step_list(path, "R13", job, body):
+            self.release_step(job, step, privileged, line, add)
+        return {"line": line, "needs": needs, "release": release, "privileged": privileged}
+
+    def release_step(self, job, step, privileged, line, add):
+        uses = as_text(step.get("uses"))
+        where = (step.get("uses") or step.get("run") or Node("", line)).line
+        options = as_map(step.get("with")) or {}
+        name = (uses or "").split("@", 1)[0]
+        if uses is not None and (uses.startswith("./") or uses.startswith("../")):
+            add(where, "job %s: a local action is not allowed (it could restore a cache)" % job)
+        if name.startswith("actions/cache"):
+            add(where, "job %s: %s: the release workflow uses no cache" % (job, name))
+        if "cache" in options and as_text(options["cache"]) != "false":
+            add(options["cache"].line, "job %s: 'cache:' restores a cache: the release workflow uses none" % job)
+        if name == "actions/setup-go" and as_text(options.get("cache")) != "false":
+            add(where, "job %s: actions/setup-go caches by default: set 'cache: false'" % job)
+        if name == "actions/setup-node" and as_text(options.get("package-manager-cache")) != "false":
+            add(where, "job %s: actions/setup-node caches by default: set 'package-manager-cache: false'" % job)
+        if "continue-on-error" in step and as_text(step["continue-on-error"]) != "false":
+            add(step["continue-on-error"].line, "job %s: 'continue-on-error' lets a failed step count as passed, so that a check (the tag guard, a verification) cannot stop the workflow" % job)
+        if not privileged:
+            return
+        if "shell" in step and not self.plain_shell(step["shell"]):
+            add(step["shell"].line, "job %s (%s): shell: must be bash or sh (a script interpreter would read the run text as its own language)" % (job, privileged))
+        if name in ("actions/setup-go", "actions/setup-node"):
+            add(where, "job %s (%s): %s must not run in a job with these privileges (build code runs only in jobs with contents: read)" % (job, privileged, name))
+        script = step.get("run")
+        if script is not None and as_text(script) is not None:
+            base = script.line + (1 if isinstance(script.v, Block) else 0)
+            for program, offset in started_programs(script.v):
+                if program == STDIN_SHELL:
+                    add(base + offset, "job %s (%s): %s: the check cannot read it (write the commands into the run text or call a script)" % (job, privileged, program))
+                elif program in RELEASE_FORBIDDEN_COMMANDS:
+                    add(base + offset, "job %s (%s): the command %s must not run in a job with these privileges (build code runs only in jobs with contents: read)" % (job, privileged, program))
 
     # ---- repository level -------------------------------------------------------------------------------------
     def rule_parity(self, ci_path):

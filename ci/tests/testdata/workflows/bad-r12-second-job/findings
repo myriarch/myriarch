@@ -1,0 +1,1 @@
+.github/workflows/scorecard.yml:34: R12: job lint: the workflow has exactly one job, 'analysis'

@@ -1,0 +1,1 @@
+.github/workflows/scorecard.yml:6: R12: push must have exactly 'branches: [main]': the Scorecard API accepts results of the default branch only
