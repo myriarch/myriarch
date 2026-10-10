@@ -11,7 +11,7 @@
 #                      website-test.sh (unit tests of the website checks in website/scripts, ci/website.sh arguments),
 #                      check-workflows-test.sh (workflow policy check ci/check-workflows.py),
 #                      e2e-real-download-test.sh (download and checksum check of the real binaries, scripts/lib/real-binaries.sh)
-#   installers         installer-verify.sh (signature verification in install-linux.sh/.ps1), install-tools-test.sh (stamps of
+#   installers         installer-verify.sh (bundle verification in install-linux.sh/.ps1), install-tools-test.sh (stamps of
 #                      ci/install-tools.sh), verify-testenv-test.sh, release-guard-test.sh (tag-on-release-branch guard of ci/lib.sh)
 #   enterprise-mirror  contrib/enterprise-mirror/tests: sign-blob-test.sh, publish-mirror-test.sh, verify-release-test.sh,
 #                      ca-env-test.sh
@@ -33,7 +33,7 @@ for g in "${groups[@]}"; do
     enterprise-mirror) run "${mirror_tests}/sign-blob-test.sh"; run "${mirror_tests}/publish-mirror-test.sh"; run "${mirror_tests}/verify-release-test.sh"; run "${mirror_tests}/ca-env-test.sh" ;;
     pwsh)              work="$(mktemp -d)"
                        run pwsh -NoProfile -NonInteractive -File "${CI_DIR}/tests/installer-verify.ps1" \
-                         -Installer "${ROOT}/deploy/scripts/install-windows.ps1" -Templates "${ROOT}/deploy" -Work "${work}/win" -SignBlob "${ROOT}/contrib/enterprise-mirror/sign-blob.sh"
+                         -Installer "${ROOT}/deploy/scripts/install-windows.ps1" -Templates "${ROOT}/deploy" -Work "${work}/win"
                        rm -rf "${work}" ;;
     *) echo "unknown group: ${g}" >&2; rc=1 ;;
   esac

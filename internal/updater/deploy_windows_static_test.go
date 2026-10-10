@@ -107,8 +107,8 @@ func TestInstallWindowsScriptTrustModel(t *testing.T) {
 func TestInstallWindowsScriptDoesNotTrustUserControllableLocations(t *testing.T) {
 	script := string(readDeploy(t, "scripts/install-windows.ps1"))
 
-	// the verifier: -Verifier, the SHA-256 checked updater, an installed updater, and only then cosign.exe from an
-	// administrator-only directory
+	// the verifier: -Verifier, the SHA-256 checked updater (only with -UpdaterSha256 and without -UpdaterChecksumsUrl), an
+	// installed updater, and only then cosign.exe from an administrator-only directory
 	body := psFunctionBody(t, script, "Resolve-Verifier")
 	iExplicit := strings.Index(body, "$Verifier)")
 	iDownload := strings.Index(body, "$script:UpdaterDownload")
@@ -117,6 +117,10 @@ func TestInstallWindowsScriptDoesNotTrustUserControllableLocations(t *testing.T)
 	require.True(t, iExplicit >= 0 && iDownload > iExplicit && iInstalled > iDownload && iCosign > iInstalled,
 		"verifier order: -Verifier, verified updater, installed updater, cosign.exe")
 	assert.Contains(t, body, "Test-AdminOnlyDirectory", "cosign.exe is only accepted from an administrator-only directory")
+	assert.Regexp(t, `\$script:UpdaterDownload -and -not \$UpdaterChecksumsUrl -and \$UpdaterSha256`, body,
+		"the downloaded updater verifies only when its hash does not come from the file that the verifier has to check")
+	assert.Contains(t, body, "Get-CosignVersionProblem", "a cosign must be 3.0.4 or newer")
+	assert.Contains(t, script, "$script:MinCosignVersion = [Version]'3.0.4'")
 
 	// the work directory has a protected DACL before anything is written to it
 	work := psFunctionBody(t, script, "New-WorkDirectory")
@@ -139,4 +143,36 @@ func TestInstallWindowsScriptDoesNotTrustUserControllableLocations(t *testing.T)
 	// the CA bundle is copied into the protected configuration directory
 	assert.Contains(t, psFunctionBody(t, script, "Install-CaFile"), `config\ca.pem`)
 	assert.Contains(t, psFunctionBody(t, script, "Grant-ServiceAccountAccess"), "ca.pem")
+}
+
+// With a checksums.txt the verifier exists before the updater is downloaded, the file is checked through the same
+// function as the upstream bundles, and the removed key options fail before anything else happens.
+func TestInstallWindowsScriptKeylessChecksumsFlow(t *testing.T) {
+	script := string(readDeploy(t, "scripts/install-windows.ps1"))
+	main := psFunctionBody(t, script, "Invoke-Main")
+	iVerifier := strings.Index(main, "Resolve-Verifier -L $L")
+	iDownload := strings.Index(main, "Get-UpdaterDownload -TmpDir $tmpDir")
+	require.True(t, iVerifier > 0 && iDownload > iVerifier, "with -UpdaterChecksumsUrl the verifier is resolved first")
+	assert.Contains(t, main, "if ($WithUpdater -and $UpdaterChecksumsUrl) {")
+	iRemoved := strings.Index(main, "'option_removed'")
+	iPriv := strings.Index(main, "'privilege_required'")
+	require.True(t, iRemoved > 0 && iPriv > iRemoved, "removed options are reported before the privilege check")
+
+	sums := psFunctionBody(t, script, "Get-UpdaterSha256FromChecksums")
+	assert.Contains(t, sums, "Confirm-Signature")
+	assert.Contains(t, sums, "Get-ReleaseCertIdentity -Version $script:UpdaterResolvedVersion")
+	assert.Less(t, strings.Index(sums, "Confirm-Signature"), strings.Index(sums, "Get-ChecksumFromFile"), "the hash is read after the bundle is verified")
+	identity := psFunctionBody(t, script, "Get-ReleaseCertIdentity")
+	assert.Contains(t, identity, `[regex]::Escape($Version) + '$'`, "the tag is escaped and the pattern is anchored")
+	assert.Contains(t, identity, `release\.yml@refs/tags/v`)
+
+	inputs := psFunctionBody(t, script, "Test-Inputs")
+	assert.Contains(t, inputs, `"$UpdaterChecksumsUrl.sigstore.json"`, "the bundle defaults to <checksums-url>.sigstore.json")
+	assert.Contains(t, inputs, "-VerifySignatures skip: checksums.txt would not be authenticated")
+
+	// the key-based checks are gone; the parameters remain only to produce option_removed
+	for _, gone := range []string{"Confirm-BlobSignature", "New-EcdsaVerifier", "ConvertFrom-DerEcdsaSignature", "signing_key_invalid", "signature_invalid", "signature_malformed"} {
+		assert.NotContains(t, script, gone)
+	}
+	assert.Contains(t, script, "-UpdaterSignerThumbprint", "the Authenticode pin stays for private PKIs")
 }

@@ -19,6 +19,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/myriarch/myriarch/internal/brand"
 )
 
 // These tests keep the deployment artifacts (deploy/) consistent with the
@@ -221,6 +223,29 @@ func runInstall(t *testing.T, root string, rel *fakeRelease, extra ...string) (s
 
 func runInstallRaw(t *testing.T, root string, extra ...string) (string, error) {
 	t.Helper()
+	return runInstallEnv(t, root, nil, extra...)
+}
+
+// installerTools are the tools that install-linux.sh needs besides a download tool.
+var installerTools = []string{"bash", "sh", "tar", "gzip", "install", "cmp", "awk", "sed", "tr", "cut", "grep", "mktemp", "date", "id", "uname",
+	"sha256sum", "shasum", "mv", "cp", "ln", "rm", "mkdir", "dirname", "basename", "cat", "head", "readlink", "chmod", "sort", "wc", "sleep", "seq", "env", "curl"}
+
+// restrictedPath returns the value for PATH that offers the tools of the installer and nothing else: in particular no cosign,
+// however the host is set up. A directory per call.
+func restrictedPath(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, tool := range installerTools {
+		if p, err := exec.LookPath(tool); err == nil {
+			require.NoError(t, os.Symlink(p, filepath.Join(dir, tool)))
+		}
+	}
+	return dir
+}
+
+// runInstallEnv runs the installer with additional environment variables (for example PATH=restrictedPath(t)).
+func runInstallEnv(t *testing.T, root string, env []string, extra ...string) (string, error) {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("bash installer")
 	}
@@ -231,6 +256,7 @@ func runInstallRaw(t *testing.T, root string, extra ...string) (string, error) {
 		"--root", root, "--arch", "amd64", "--templates-dir", deployDir,
 	}, extra...)
 	cmd := exec.Command("bash", args...)
+	cmd.Env = append(os.Environ(), env...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
@@ -603,25 +629,19 @@ func TestInstallLinuxScriptFailsClosedWithoutBundleOrVerifier(t *testing.T) {
 	require.Error(t, err, "a missing bundle is not skipped")
 	assert.Contains(t, out, "[download_failed]")
 
-	if _, lerr := exec.LookPath("cosign"); lerr == nil {
-		t.Skip("cosign is installed: the no-verifier case cannot be provoked")
-	}
-	out, err = runInstallRaw(t, t.TempDir(), append([]string{"--insecure", "--release-base-url", rel.base}, baseArgs()...)...)
+	out, err = runInstallEnv(t, t.TempDir(), []string{"PATH=" + restrictedPath(t)}, append([]string{"--insecure", "--release-base-url", rel.base}, baseArgs()...)...)
 	require.Error(t, err)
 	assert.Contains(t, out, "[sigstore_verifier_missing]")
 }
 
 func TestInstallLinuxScriptUsesDownloadedUpdaterAsVerifier(t *testing.T) {
-	if _, lerr := exec.LookPath("cosign"); lerr == nil {
-		t.Skip("cosign is installed and would be preferred")
-	}
 	rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
 	addBundles(t, rel)
 	calls := filepath.Join(t.TempDir(), "calls.log")
 	updater := []byte("#!/bin/sh\necho \"$@\" >> " + calls + "\nexit 0\n")
 	require.NoError(t, os.WriteFile(filepath.Join(rel.dir, "myriarch-updater_linux_amd64"), updater, 0o755))
 	root := t.TempDir()
-	out, err := runInstallRaw(t, root, append([]string{"--insecure", "--release-base-url", rel.base,
+	out, err := runInstallEnv(t, root, []string{"PATH=" + restrictedPath(t)}, append([]string{"--insecure", "--release-base-url", rel.base,
 		"--with-updater", "--updater-url", rel.base + "/myriarch-updater_linux_amd64", "--updater-sha256", hex.EncodeToString(sha(updater))}, baseArgs()...)...)
 	require.NoError(t, err, out)
 	raw, _ := os.ReadFile(calls)
@@ -681,4 +701,287 @@ func TestSupervisorUnitIsHardened(t *testing.T) {
 		assert.True(t, lines[want], "otelcol-supervisor.service lacks %q", want)
 	}
 	assert.NotContains(t, sup, "ProtectSystem=strict", "file exporters need to write below /var and the data directories")
+}
+
+// --- keyless release bundle of checksums.txt (updater hash source) -----------
+
+// updaterRelease is a fake Myriarch release next to the collector mirror: the updater (a script that leaves a mark when it
+// is executed), checksums.txt with the entries of the release and a placeholder bundle.
+type updaterRelease struct {
+	version   string
+	name      string
+	url       string
+	checksums string // URL of checksums.txt
+	ran       string // file that the updater creates when it is executed (that is: used as a verifier)
+	content   []byte
+}
+
+func addUpdaterRelease(t *testing.T, rel *fakeRelease, version string) *updaterRelease {
+	t.Helper()
+	u := &updaterRelease{version: version, name: "myriarch-updater_" + version + "_linux_amd64", ran: filepath.Join(t.TempDir(), "ran")}
+	u.content = []byte("#!/bin/sh\necho ran >> " + u.ran + "\n")
+	require.NoError(t, os.WriteFile(filepath.Join(rel.dir, u.name), u.content, 0o755))
+	other := []byte("not the updater")
+	require.NoError(t, os.WriteFile(filepath.Join(rel.dir, "myriarch-updater_"+version+"_linux_amd64.tar.gz"), other, 0o644))
+	sums := hex.EncodeToString(sha(u.content)) + "  " + u.name + "\n" +
+		hex.EncodeToString(sha(other)) + "  myriarch-updater_" + version + "_linux_amd64.tar.gz\n"
+	require.NoError(t, os.WriteFile(filepath.Join(rel.dir, "checksums.txt"), []byte(sums), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(rel.dir, "checksums.txt.sigstore.json"), []byte(`{"bundle":true}`), 0o644))
+	u.url = rel.base + "/" + u.name
+	u.checksums = rel.base + "/checksums.txt"
+	return u
+}
+
+// releaseArgs: lab transport (file://) with the signature checks of checksums.txt, collector and supervisor in force.
+func releaseArgs(rel *fakeRelease, u *updaterRelease, extra ...string) []string {
+	return append(append([]string{"--insecure", "--release-base-url", rel.base, "--with-updater", "--updater-url", u.url,
+		"--updater-checksums-url", u.checksums}, baseArgs()...), extra...)
+}
+
+// writeFakeCosign writes a script named cosign that reports the given version and records the other calls.
+func writeFakeCosign(t *testing.T, version string, code int) (path, logFile string) {
+	t.Helper()
+	dir := t.TempDir()
+	logFile = filepath.Join(dir, "calls.log")
+	path = filepath.Join(dir, "cosign")
+	script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'GitVersion:    " + version + "'; exit 0; fi\necho \"$@\" >> " + logFile + "\nexit " + strconv.Itoa(code) + "\n"
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o755))
+	return path, logFile
+}
+
+func readCalls(t *testing.T, logFile string) []string {
+	t.Helper()
+	raw, _ := os.ReadFile(logFile)
+	var lines []string
+	for _, l := range strings.Split(string(raw), "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
+}
+
+func TestInstallLinuxScriptVerifiesTheKeylessBundleOfChecksums(t *testing.T) {
+	rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+	addBundles(t, rel)
+	u := addUpdaterRelease(t, rel, "0.1.0-rc.1")
+	verifier, calls := writeFakeVerifier(t, 0)
+	root := t.TempDir()
+	out, err := runInstallRaw(t, root, releaseArgs(rel, u, "--verifier", verifier, "--trusted-root", writeTrustedRoot(t))...)
+	require.NoError(t, err, out)
+
+	lines := readCalls(t, calls)
+	require.Len(t, lines, 3, "checksums.txt, collector and supervisor: %v", lines)
+	first := lines[0]
+	assert.Contains(t, first, "verify-bundle")
+	assert.Contains(t, first, "checksums.txt.sigstore.json", "the bundle defaults to <checksums-url>.sigstore.json")
+	assert.Contains(t, first, "--version v0.1.0-rc.1")
+	assert.Contains(t, first, `--identity-regexp ^https://github\.com/myriarch/myriarch/\.github/workflows/release\.yml@refs/tags/v0\.1\.0-rc\.1$`)
+	assert.Contains(t, first, "--issuer https://token.actions.githubusercontent.com")
+	assert.Contains(t, first, "--trusted-root")
+	assert.Contains(t, lines[1], "base-release", "the collector follows")
+	got, err := os.ReadFile(filepath.Join(root, "opt/myriarch/updater/myriarch-updater"))
+	require.NoError(t, err)
+	assert.Equal(t, u.content, got, "the verified updater is installed")
+	assert.NoFileExists(t, u.ran, "the updater that is being installed never verifies anything")
+
+	// the hash from the verified checksums.txt and --updater-sha256 may be given together, and must agree
+	out, err = runInstallRaw(t, t.TempDir(), releaseArgs(rel, u, "--verifier", verifier, "--updater-sha256", hex.EncodeToString(sha(u.content)))...)
+	require.NoError(t, err, out)
+	out, err = runInstallRaw(t, t.TempDir(), releaseArgs(rel, u, "--verifier", verifier, "--updater-sha256", strings.Repeat("0", 64))...)
+	require.Error(t, err)
+	assert.Contains(t, out, "[checksum_conflict]")
+}
+
+func TestInstallLinuxScriptRejectsAChecksumsFileThatTheBundleDoesNotAuthenticate(t *testing.T) {
+	rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+	addBundles(t, rel)
+	u := addUpdaterRelease(t, rel, "0.1.0")
+	verifier, calls := writeFakeVerifier(t, 1) // the bundle does not authenticate checksums.txt (tampered file, wrong identity, wrong version)
+	root := t.TempDir()
+	out, err := runInstallRaw(t, root, releaseArgs(rel, u, "--verifier", verifier)...)
+	require.Error(t, err)
+	assert.Contains(t, out, "[sigstore_verification_failed]")
+	assert.Contains(t, out, "checksums.txt")
+	assert.Len(t, readCalls(t, calls), 1, "nothing is verified or downloaded after checksums.txt")
+	assert.NoFileExists(t, filepath.Join(root, "opt/myriarch/updater/myriarch-updater"))
+	assert.NoFileExists(t, filepath.Join(root, "etc/myriarch/supervisor.yaml"))
+	assert.NoFileExists(t, u.ran)
+
+	// a missing bundle is not skipped
+	require.NoError(t, os.Remove(filepath.Join(rel.dir, "checksums.txt.sigstore.json")))
+	verifier, _ = writeFakeVerifier(t, 0)
+	out, err = runInstallRaw(t, t.TempDir(), releaseArgs(rel, u, "--verifier", verifier)...)
+	require.Error(t, err)
+	assert.Contains(t, out, "[download_failed]")
+}
+
+func TestInstallLinuxScriptBindsTheUpdaterVersion(t *testing.T) {
+	rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+	addBundles(t, rel)
+	u := addUpdaterRelease(t, rel, "0.1.0")
+	verifier, calls := writeFakeVerifier(t, 0)
+	run := func(extra ...string) (string, error) {
+		return runInstallRaw(t, t.TempDir(), releaseArgs(rel, u, append([]string{"--verifier", verifier}, extra...)...)...)
+	}
+
+	out, err := run("--updater-version", "0.1.1")
+	require.Error(t, err)
+	assert.Contains(t, out, "[option_conflict]", "--updater-version and the version in the file name must agree")
+
+	out, err = run("--updater-version", "not-a-version")
+	require.Error(t, err)
+	assert.Contains(t, out, "[option_invalid]")
+
+	// a file name without a version needs --updater-version, and then the identity is bound to it
+	plain := filepath.Join(rel.dir, "myriarch-updater-plain")
+	require.NoError(t, os.WriteFile(plain, u.content, 0o755))
+	sums, err := os.ReadFile(filepath.Join(rel.dir, "checksums.txt"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(rel.dir, "checksums.txt"), append(sums, []byte(hex.EncodeToString(sha(u.content))+"  myriarch-updater-plain\n")...), 0o644))
+	args := releaseArgs(rel, u, "--verifier", verifier)
+	for i, a := range args {
+		if a == u.url {
+			args[i] = rel.base + "/myriarch-updater-plain"
+		}
+	}
+	out, err = runInstallRaw(t, t.TempDir(), args...)
+	require.Error(t, err)
+	assert.Contains(t, out, "[option_missing]")
+	assert.Contains(t, out, "--updater-version")
+	out, err = runInstallRaw(t, t.TempDir(), append(args, "--updater-version", "v0.1.0")...)
+	require.NoError(t, err, out)
+	assert.Contains(t, readCalls(t, calls)[0], `@refs/tags/v0\.1\.0$`)
+}
+
+func TestInstallLinuxScriptRequiresCosign304OrNewer(t *testing.T) {
+	rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+	addBundles(t, rel)
+	u := addUpdaterRelease(t, rel, "0.1.0")
+	for version, ok := range map[string]bool{"v3.0.3": false, "v2.4.1": false, "v3.0.4": true, "v3.1.3": true, "v4.0.0": true, "devel": false} {
+		t.Run(version, func(t *testing.T) {
+			cosign, calls := writeFakeCosign(t, version, 0)
+			root := t.TempDir()
+			out, err := runInstallRaw(t, root, releaseArgs(rel, u, "--verifier", cosign)...)
+			if ok {
+				require.NoError(t, err, out)
+				assert.Contains(t, readCalls(t, calls)[0], "verify-blob", "cosign is called with verify-blob --bundle")
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, out, "[sigstore_verifier_outdated]")
+			assert.Contains(t, out, "3.0.4")
+			assert.Empty(t, readCalls(t, calls), "an outdated cosign verifies nothing")
+			assert.NoFileExists(t, filepath.Join(root, "opt/myriarch/updater/myriarch-updater"))
+		})
+	}
+
+	// an outdated cosign in PATH does not hide an installed updater, and without one the installation stops
+	cosign, _ := writeFakeCosign(t, "v3.0.3", 0)
+	path := restrictedPath(t)
+	require.NoError(t, os.Symlink(cosign, filepath.Join(path, "cosign")))
+	out, err := runInstallEnv(t, t.TempDir(), []string{"PATH=" + path}, releaseArgs(rel, u)...)
+	require.Error(t, err)
+	assert.Contains(t, out, "[sigstore_verifier_outdated]")
+	root := t.TempDir()
+	installed, calls := writeFakeVerifier(t, 0)
+	data, err := os.ReadFile(installed)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "opt/myriarch/updater"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "opt/myriarch/updater/myriarch-updater"), data, 0o755))
+	out, err = runInstallEnv(t, root, []string{"PATH=" + path}, releaseArgs(rel, u)...)
+	require.NoError(t, err, out)
+	assert.Contains(t, readCalls(t, calls)[0], "verify-bundle")
+}
+
+func TestInstallLinuxScriptNeverVerifiesWithTheUpdaterItInstalls(t *testing.T) {
+	rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+	addBundles(t, rel)
+	u := addUpdaterRelease(t, rel, "0.1.0")
+	root := t.TempDir()
+	out, err := runInstallEnv(t, root, []string{"PATH=" + restrictedPath(t)}, releaseArgs(rel, u)...)
+	require.Error(t, err)
+	assert.Contains(t, out, "[sigstore_verifier_missing]")
+	assert.Contains(t, out, "--updater-sha256", "the message names the way for hosts without a verifier")
+	assert.NotContains(t, out, "downloading "+u.url, "no verifier: the updater is not even downloaded")
+	assert.NoFileExists(t, u.ran)
+	assert.NoFileExists(t, filepath.Join(root, "opt/myriarch/updater/myriarch-updater"))
+	assert.NoFileExists(t, filepath.Join(root, "etc/myriarch/supervisor.yaml"))
+
+	// with --updater-sha256 and without checksums.txt the hash-checked updater is the verifier (documented path for such hosts)
+	out, err = runInstallEnv(t, t.TempDir(), []string{"PATH=" + restrictedPath(t)}, append([]string{"--insecure", "--release-base-url", rel.base,
+		"--with-updater", "--updater-url", u.url, "--updater-sha256", hex.EncodeToString(sha(u.content))}, baseArgs()...)...)
+	require.NoError(t, err, out)
+	assert.FileExists(t, u.ran)
+}
+
+func TestInstallLinuxScriptRemovedKeyOptionsNameTheirReplacement(t *testing.T) {
+	cases := map[string]struct {
+		args        []string
+		replacement string
+	}{
+		"--signing-key":               {[]string{"--signing-key", "cosign.pub"}, "--updater-checksums-url"},
+		"--signing-key without value": {[]string{"--signing-key"}, "--updater-checksums-url"},
+		"--updater-checksums-sig-url": {[]string{"--updater-checksums-sig-url", "https://mirror.example.com/checksums.txt.sig"}, "--updater-bundle-url"},
+		"--signing-key with the rest": {append(baseArgs(), "--with-updater", "--updater-url", "https://mirror.example.com/myriarch-updater_0.1.0_linux_amd64", "--updater-checksums-url", "https://mirror.example.com/checksums.txt", "--signing-key", "cosign.pub"), "--updater-checksums-url"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			out, err := runInstallRaw(t, root, c.args...)
+			require.Error(t, err, out)
+			assert.Contains(t, out, "[option_removed]")
+			assert.Contains(t, out, c.replacement)
+			assert.NotContains(t, out, "[usage_error]")
+			assert.NoFileExists(t, filepath.Join(root, "etc/myriarch/supervisor.yaml"))
+		})
+	}
+}
+
+func TestInstallLinuxScriptRejectsInconsistentUpdaterOptions(t *testing.T) {
+	rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+	u := addUpdaterRelease(t, rel, "0.1.0")
+	verifier, _ := writeFakeVerifier(t, 0)
+	cases := map[string]struct {
+		args []string
+		want string
+	}{
+		"bundle URL without checksums URL": {append([]string{"--insecure", "--release-base-url", rel.base, "--with-updater", "--updater-url", u.url,
+			"--updater-sha256", hex.EncodeToString(sha(u.content)), "--updater-bundle-url", rel.base + "/checksums.txt.sigstore.json"}, baseArgs()...), "[option_conflict]"},
+		"checksums URL with --verify-signatures skip": {append(releaseArgs(rel, u), "--verify-signatures", "skip"), "[option_conflict]"},
+		"checksums URL without --with-updater": {append([]string{"--insecure", "--release-base-url", rel.base, "--verifier", verifier,
+			"--updater-checksums-url", u.checksums}, baseArgs()...), "[option_conflict]"},
+		"version without --with-updater": {append([]string{"--insecure", "--release-base-url", rel.base, "--verifier", verifier,
+			"--updater-version", "0.1.0"}, baseArgs()...), "[option_conflict]"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			out, err := runInstallRaw(t, root, c.args...)
+			require.Error(t, err, out)
+			assert.Contains(t, out, c.want)
+			assert.NoFileExists(t, filepath.Join(root, "etc/myriarch/supervisor.yaml"))
+		})
+	}
+}
+
+// The identity of the release workflow has one source of truth in Go (internal/brand.Repository, ADR-0029). The installers
+// carry a copy that this test pins to it, to the ADR and to the issuer that the updater uses.
+func TestInstallersReleaseIdentityMatchesTheRepository(t *testing.T) {
+	repo := strings.TrimPrefix(brand.Repository, "https://github.com/")
+	require.NotEqual(t, brand.Repository, repo)
+	linux := string(readDeploy(t, "scripts/install-linux.sh"))
+	win := string(readDeploy(t, "scripts/install-windows.ps1"))
+	assert.Contains(t, linux, `readonly RELEASE_REPOSITORY="`+repo+`"`)
+	assert.Contains(t, win, `$script:ReleaseRepository = '`+repo+`'`)
+	assert.Contains(t, linux, `readonly CERT_ISSUER="`+DefaultCertificateOIDCIssuer+`"`)
+	assert.Contains(t, win, `$script:CertIssuer = '`+DefaultCertificateOIDCIssuer+`'`)
+	assert.Contains(t, linux, `release\\.yml@refs/tags/v%s$`, "the workflow file of the identity")
+	assert.Contains(t, win, `\.github/workflows/release\.yml@refs/tags/v`)
+	adr, err := os.ReadFile("../../docs/adr/0029-host-under-the-myriarch-organization.md")
+	require.NoError(t, err)
+	assert.Contains(t, string(adr), "https://github.com/"+repo+"/.github/workflows/release.yml@refs/tags/v*")
+	assert.Contains(t, string(adr), DefaultCertificateOIDCIssuer)
+	assert.Contains(t, linux, `readonly MIN_COSIGN_VERSION="3.0.4"`)
+	assert.Contains(t, win, `[Version]'3.0.4'`)
 }

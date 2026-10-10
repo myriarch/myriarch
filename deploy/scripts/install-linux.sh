@@ -30,15 +30,18 @@
 #
 # Trust model: all downloads use https only (redirects included). Collector and supervisor are
 # verified with SHA-256 AND a Sigstore bundle before they are executed (default: require; the
-# verifier is cosign v3 or myriarch-updater verify-bundle). The myriarch-updater (the project's own
-# binary, runs as root) needs a trusted hash source, at least one of
-#   --updater-sha256 HEX                                    (hash from another trusted source)
-#   --updater-checksums-url URL + --signing-key cosign.pub  (checksums.txt of the release; its signature URL.sig is
-#                                                            verified with the public key - openssl, otherwise
-#                                                            cosign - and the hash is the line whose file name
-#                                                            matches the one in --updater-url)
-# Both together are allowed (then both must match). The signature check also applies with --insecure.
-# --insecure disables the remaining checks for lab/tests only.
+# verifier is cosign 3.0.4 or newer, or myriarch-updater verify-bundle). The myriarch-updater (the
+# project's own binary, runs as root) needs a trusted hash source, at least one of
+#   --updater-sha256 HEX                    (hash from another trusted source, for example verified on an admin host)
+#   --updater-checksums-url URL             (checksums.txt of the release; its keyless Sigstore bundle, by default
+#                                            URL.sigstore.json or --updater-bundle-url, is verified against the release
+#                                            identity of the requested version before the hash is read: the line
+#                                            whose file name matches the one in --updater-url)
+# The version comes from --updater-version or from the file name myriarch-updater_<version>_linux_<arch> in
+# --updater-url; when both are given they must agree. The verifier of checksums.txt is cosign 3.0.4 or newer or an
+# already installed myriarch-updater (--verifier or /opt/myriarch/updater), never the binary that is being installed.
+# Both hash sources together are allowed (then both must match). The check of checksums.txt also applies with
+# --insecure, but not with --verify-signatures skip. --insecure disables the remaining checks for lab/tests only.
 #
 # ---- Error code catalog (stable interface; install-windows.ps1 uses the same codes) ----------------
 # Every fatal error prints exactly one line to stderr and exits with status 1:
@@ -54,18 +57,20 @@
 #   option_invalid                  malformed value (versions, arch, verify-signatures mode, SHA-256 format,
 #                                   control characters, token characters, endpoint scheme, no file name
 #                                   in --updater-url; a non-https --release-base-url raises https_required)
+#   option_removed                  a removed option (--signing-key, --updater-checksums-sig-url); the message
+#                                   names the replacement
 #   option_conflict                 mutually exclusive or dependent options (--token + --token-file;
-#                                   checksums/signature/key options without --with-updater; signature URL
-#                                   without checksums URL; checksums URL without signing key; signing key
-#                                   without checksums URL)
-#   updater_hash_source_missing     --with-updater without --updater-sha256 or a signed checksums.txt
+#                                   updater options without --with-updater; --updater-bundle-url without
+#                                   checksums URL; --updater-version and the version in --updater-url differ;
+#                                   --updater-checksums-url with --verify-signatures skip)
+#   updater_hash_source_missing     --with-updater without --updater-sha256 or --updater-checksums-url
 #   insecure_required               plain ws/http endpoint or --verify-signatures skip without --insecure
 #   https_required                  non-https download URL (or redirect) without --insecure
-#   file_unreadable                 token file, CA file, trusted root, signing key or verifier is unusable
+#   file_unreadable                 token file, CA file, trusted root or verifier is unusable
 #   tool_missing                    a required tool is absent (sha256sum/shasum, curl/wget, tar, gzip, install,
 #                                   cmp, systemctl, useradd/adduser); the message names the tool
-#   sigstore_verifier_missing       no Sigstore verifier (cosign or myriarch-updater verify-bundle)
-#   signature_verifier_missing      neither openssl nor cosign available to verify checksums.txt
+#   sigstore_verifier_missing       no Sigstore verifier (cosign or an installed myriarch-updater)
+#   sigstore_verifier_outdated      cosign is older than 3.0.4 or reports no usable version
 #   privilege_required              not running as root
 #   unsupported_platform            not Linux, or unsupported CPU architecture
 #   download_failed                 a download did not succeed
@@ -75,9 +80,7 @@
 #   checksum_mismatch               SHA-256 of a downloaded file differs (the message names the file)
 #   checksum_entry_count            checksums.txt has N != 1 lines for the asset (the message contains N)
 #   checksum_conflict               --updater-sha256 contradicts the signed checksums.txt
-#   signature_malformed             signature is not valid base64 / not a valid DER signature
-#   signature_invalid               signature does not verify (wrong key or tampered file)
-#   sigstore_verification_failed    Sigstore bundle verification failed
+#   sigstore_verification_failed    Sigstore bundle verification failed (wrong identity or version, tampered file)
 #   archive_invalid                 collector archive has no regular binary in its root
 #   collector_start_failed          the new collector binary cannot be started
 #   collector_version_mismatch      the collector reports another version than requested
@@ -85,9 +88,9 @@
 #   token_on_command_line           WARNING: --token is visible in the process list and shell history
 #   updater_unauthenticated         WARNING: the updater binary has no trusted hash (--insecure)
 #
-# Windows-only codes (see install-windows.ps1 and deploy/windows/README.md): signing_key_invalid,
-# authenticode_invalid, directory_unsafe, acl_failed, service_config_failed, updater_install_failed,
-# group_membership_failed, unexpected_error; service_not_running is fatal there.
+# Windows-only codes (see install-windows.ps1 and deploy/windows/README.md): authenticode_invalid,
+# directory_unsafe, acl_failed, service_config_failed, updater_install_failed, group_membership_failed,
+# unexpected_error; service_not_running is fatal there.
 # ---- End of error code catalog ---------------------------------------------------------------------
 set -euo pipefail
 
@@ -95,6 +98,10 @@ readonly DEFAULT_RELEASE_BASE_URL="https://github.com/open-telemetry/opentelemet
 readonly COLLECTOR_ASSET_PREFIX="otelcol-contrib"
 readonly SUPERVISOR_ASSET_PREFIX="opampsupervisor"
 readonly CERT_ISSUER="https://token.actions.githubusercontent.com"
+# Keyless identity of the Myriarch release workflow (ADR-0029, frozen from v0.1.0 on: release.yml is never renamed).
+# The repository must equal internal/brand.Repository; a Go test compares both.
+readonly RELEASE_REPOSITORY="myriarch/myriarch"
+readonly MIN_COSIGN_VERSION="3.0.4"
 readonly SERVICE_USER="otelcol"
 
 # bash >= 5.2 expands "&" in ${var//pat/repl}; turn that off so values stay literal
@@ -116,16 +123,16 @@ SUPERVISOR_VERSION=""
 RELEASE_BASE_URL="${DEFAULT_RELEASE_BASE_URL}"
 UPDATER_URL=""
 UPDATER_SHA256=""
+UPDATER_VERSION=""
 UPDATER_CHECKSUMS_URL=""
-UPDATER_CHECKSUMS_SIG_URL=""
-SIGNING_KEY=""
+UPDATER_BUNDLE_URL=""
 WITH_UPDATER=0
 UNINSTALL=0
 PURGE=0
 CA_FILE=""
 TRUSTED_ROOT=""
 VERIFY_SIGNATURES="require"   # require | skip (skip only with --insecure)
-VERIFIER=""                # cosign (PATH) or myriarch-updater binary for "verify-bundle"
+VERIFIER=""                # cosign (3.0.4 or newer) or an installed myriarch-updater binary for "verify-bundle"
 INSECURE=0                 # allows http://, file:// and --verify-signatures skip (lab/tests only)
 ARCH=""
 ROOT_PREFIX=""             # staging mode (image build/tests): all paths under DIR, no useradd/systemctl
@@ -155,16 +162,19 @@ Optional:
   --with-updater            install the myriarch-updater (requires --updater-url)
   --updater-url URL         download URL of the myriarch-updater binary (linux, matching architecture)
   --updater-sha256 HEX      expected SHA-256 of the updater binary
-  --updater-checksums-url URL  checksums.txt of the myriarch release (signature: URL.sig); the expected hash is
-                            the line whose file name equals the last path segment of --updater-url
-  --updater-checksums-sig-url URL  different location of the checksums.txt signature (default: <checksums-url>.sig)
-  --signing-key FILE        public key cosign.pub (PEM, ECDSA P-256) used to verify checksums.txt
-                            With --with-updater, --updater-sha256 OR (--updater-checksums-url + --signing-key)
-                            is mandatory; both together are allowed (then both must match)
+  --updater-version X.Y.Z   release version of the updater (default: the version in the file name
+                            myriarch-updater_<version>_linux_<arch> of --updater-url; both must agree)
+  --updater-checksums-url URL  checksums.txt of the myriarch release; the expected hash is the line whose file
+                            name equals the last path segment of --updater-url. Its keyless Sigstore bundle is
+                            verified against the release identity of the updater version first
+  --updater-bundle-url URL  different location of that bundle (default: <checksums-url>.sigstore.json)
+                            With --with-updater, --updater-sha256 OR --updater-checksums-url is mandatory;
+                            both together are allowed (then both must match)
   --trusted-root FILE       Sigstore trusted_root.json for offline verification (installer and myriarch-updater)
   --verify-signatures MODE  require (default: the Sigstore bundle must be valid) | skip (only with --insecure)
-  --verifier FILE           myriarch-updater binary for "verify-bundle" if cosign is missing (default: the updater
-                            downloaded with --with-updater and checked by SHA-256)
+  --verifier FILE           cosign (3.0.4 or newer) or an installed myriarch-updater for "verify-bundle" (default: cosign
+                            in PATH, then /opt/myriarch/updater/myriarch-updater; with --updater-sha256 and without
+                            --updater-checksums-url also the updater downloaded here and checked by that hash)
   --insecure                lab/tests: allows http://, file:// and --verify-signatures skip
   --arch amd64|arm64        default: derived from uname -m
   --templates-dir DIR       directory with supervisor/, systemd/, updater/ (default: <script>/..)
@@ -207,9 +217,11 @@ while [ "$#" -gt 0 ]; do
     --release-base-url)   need_arg "$@"; RELEASE_BASE_URL="${2%/}"; shift 2 ;;
     --updater-url)        need_arg "$@"; UPDATER_URL="$2"; shift 2 ;;
     --updater-sha256)     need_arg "$@"; UPDATER_SHA256="$2"; shift 2 ;;
-    --updater-checksums-url)     need_arg "$@"; UPDATER_CHECKSUMS_URL="$2"; shift 2 ;;
-    --updater-checksums-sig-url) need_arg "$@"; UPDATER_CHECKSUMS_SIG_URL="$2"; shift 2 ;;
-    --signing-key)        need_arg "$@"; SIGNING_KEY="$2"; shift 2 ;;
+    --updater-version)    need_arg "$@"; UPDATER_VERSION="${2#v}"; shift 2 ;;
+    --updater-checksums-url) need_arg "$@"; UPDATER_CHECKSUMS_URL="$2"; shift 2 ;;
+    --updater-bundle-url) need_arg "$@"; UPDATER_BUNDLE_URL="$2"; shift 2 ;;
+    --signing-key)        die option_removed "--signing-key was removed: releases are signed keyless. Pass --updater-checksums-url (its Sigstore bundle is verified against the release identity, verifier: cosign 3.0.4 or newer or an installed myriarch-updater) or --updater-sha256" ;;
+    --updater-checksums-sig-url) die option_removed "--updater-checksums-sig-url was removed: use --updater-bundle-url (default: <checksums-url>.sigstore.json) with --updater-checksums-url" ;;
     --with-updater)       WITH_UPDATER=1; shift ;;
     --ca-file)            need_arg "$@"; CA_FILE="$2"; shift 2 ;;
     --trusted-root)       need_arg "$@"; TRUSTED_ROOT="$2"; shift 2 ;;
@@ -255,6 +267,16 @@ cert_identity() { # workflow version
   local workflow="$1" version="$2" esc
   esc="$(printf '%s' "${version}" | sed -e 's/[][\\.*+?(){}|^$]/\\&/g')"
   printf '^https://github\\.com/open-telemetry/opentelemetry-collector-releases/\\.github/workflows/%s\\.yaml@refs/tags/v%s$' "${workflow}" "${esc}"
+}
+
+# Certificate identity (SAN) of the Sigstore bundle of checksums.txt of one Myriarch release, bound to the version:
+# the workflow release.yml of this repository, run for the tag v<version>. The tag is escaped and the pattern is
+# anchored at both ends, so that v0.1.0 does not accept v0.1.01, v10.1.0 or another workflow or repository.
+cert_identity_release() { # version
+  local esc repo
+  esc="$(printf '%s' "$1" | sed -e 's/[][\\.*+?(){}|^$]/\\&/g')"
+  repo="$(printf '%s' "${RELEASE_REPOSITORY}" | sed -e 's/[][\\.*+?(){}|^$]/\\&/g')"
+  printf '^https://github\\.com/%s/\\.github/workflows/release\\.yml@refs/tags/v%s$' "${repo}" "${esc}"
 }
 
 # https only (also after redirects); --insecure allows lab sources.
@@ -388,24 +410,36 @@ validate_inputs() {
     *) die option_invalid "--verify-signatures must be require or skip" ;;
   esac
   if [ -n "${VERIFIER}" ]; then [ -x "${VERIFIER}" ] || die file_unreadable "--verifier is not executable: ${VERIFIER}"; fi
-  if [ -n "${UPDATER_CHECKSUMS_URL}${UPDATER_CHECKSUMS_SIG_URL}${SIGNING_KEY}" ] && [ "${WITH_UPDATER}" = 0 ]; then
-    die option_conflict "--updater-checksums-url/--updater-checksums-sig-url/--signing-key only apply together with --with-updater"
+  if [ -n "${UPDATER_VERSION}${UPDATER_CHECKSUMS_URL}${UPDATER_BUNDLE_URL}" ] && [ "${WITH_UPDATER}" = 0 ]; then
+    die option_conflict "--updater-version/--updater-checksums-url/--updater-bundle-url only apply together with --with-updater"
   fi
   if [ "${WITH_UPDATER}" = 1 ]; then
     [ -n "${UPDATER_URL}" ] || die option_missing "--with-updater requires --updater-url"
     require_https "${UPDATER_URL}" "--updater-url"
-    if [ -n "${UPDATER_CHECKSUMS_SIG_URL}" ] && [ -z "${UPDATER_CHECKSUMS_URL}" ]; then die option_conflict "--updater-checksums-sig-url requires --updater-checksums-url"; fi
-    if [ -n "${UPDATER_CHECKSUMS_URL}" ]; then
-      [ -n "${SIGNING_KEY}" ] || die option_conflict "--updater-checksums-url requires --signing-key (public key cosign.pub): without a signature check checksums.txt is not trustworthy"
-      require_https "${UPDATER_CHECKSUMS_URL}" "--updater-checksums-url"
-      [ -n "${UPDATER_CHECKSUMS_SIG_URL}" ] || UPDATER_CHECKSUMS_SIG_URL="${UPDATER_CHECKSUMS_URL}.sig"
-      require_https "${UPDATER_CHECKSUMS_SIG_URL}" "--updater-checksums-sig-url"
-    elif [ -n "${SIGNING_KEY}" ]; then
-      die option_conflict "--signing-key requires --updater-checksums-url"
+    local updater_asset url_version=""
+    updater_asset="${UPDATER_URL%%[?#]*}"; updater_asset="${updater_asset##*/}"
+    [ -n "${updater_asset}" ] || die option_invalid "no file name in --updater-url: ${UPDATER_URL}"
+    if [[ "${updater_asset}" =~ ^myriarch-updater_([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)_linux_(amd64|arm64)$ ]]; then
+      url_version="${BASH_REMATCH[1]}"
     fi
-    if [ -n "${SIGNING_KEY}" ]; then [ -r "${SIGNING_KEY}" ] || die file_unreadable "signing key file is not readable: ${SIGNING_KEY}"; fi
+    if [ -n "${UPDATER_VERSION}" ]; then
+      [[ "${UPDATER_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die option_invalid "invalid --updater-version: ${UPDATER_VERSION}"
+      if [ -n "${url_version}" ] && [ "${url_version}" != "${UPDATER_VERSION}" ]; then
+        die option_conflict "--updater-version ${UPDATER_VERSION} and the version in --updater-url (${url_version}) differ"
+      fi
+    else
+      UPDATER_VERSION="${url_version}"
+    fi
+    if [ -n "${UPDATER_BUNDLE_URL}" ] && [ -z "${UPDATER_CHECKSUMS_URL}" ]; then die option_conflict "--updater-bundle-url requires --updater-checksums-url"; fi
+    if [ -n "${UPDATER_CHECKSUMS_URL}" ]; then
+      [ "${VERIFY_SIGNATURES}" = require ] || die option_conflict "--updater-checksums-url cannot be combined with --verify-signatures skip: checksums.txt would not be authenticated (pass --updater-sha256 instead)"
+      [ -n "${UPDATER_VERSION}" ] || die option_missing "--updater-version is missing: the file name in --updater-url does not carry the version (myriarch-updater_<version>_linux_<arch>) and the identity of the release is bound to it"
+      require_https "${UPDATER_CHECKSUMS_URL}" "--updater-checksums-url"
+      [ -n "${UPDATER_BUNDLE_URL}" ] || UPDATER_BUNDLE_URL="${UPDATER_CHECKSUMS_URL}.sigstore.json"
+      require_https "${UPDATER_BUNDLE_URL}" "--updater-bundle-url"
+    fi
     if [ -z "${UPDATER_SHA256}" ] && [ -z "${UPDATER_CHECKSUMS_URL}" ] && [ "${INSECURE}" = 0 ]; then
-      die updater_hash_source_missing "--with-updater requires --updater-sha256 or (--updater-checksums-url and --signing-key) - the binary runs as root and needs a trusted hash source (signed checksums.txt of the release)"
+      die updater_hash_source_missing "--with-updater requires --updater-sha256 or --updater-checksums-url - the binary runs as root and needs a trusted hash source (checksums.txt of the release, verified with its Sigstore bundle)"
     fi
     if [ -n "${UPDATER_SHA256}" ] && ! [[ "${UPDATER_SHA256}" =~ ^[0-9a-fA-F]{64}$ ]]; then die option_invalid "--updater-sha256 is not a SHA-256 (64 hex characters)"; fi
   fi
@@ -446,16 +480,55 @@ check_prereqs() {
 }
 
 # ---------------------------------------------------------------- Signature verification (Sigstore, fail-closed)
-# Verifier: cosign v3 (PATH) or "myriarch-updater verify-bundle" (--verifier, the SHA-256 checked
-# updater from --with-updater, or an already installed one). Without a verifier the installation
-# aborts, except with --insecure --verify-signatures skip.
+# Verifier: cosign 3.0.4 or newer (PATH or --verifier) or "myriarch-updater verify-bundle" (--verifier, an already
+# installed one, or - only with --updater-sha256 and without --updater-checksums-url - the updater downloaded here and
+# checked by that hash). With --updater-checksums-url the verifier is resolved BEFORE the updater is downloaded and the
+# downloaded updater is never used: its hash comes from the file that the verifier has to check. Without a verifier the
+# installation aborts, except with --insecure --verify-signatures skip.
+
+# Succeeds when the cosign binary reports a version of MIN_COSIGN_VERSION or newer; otherwise prints the reason.
+cosign_version_problem() { # path
+  local out ver
+  out="$("$1" version 2>&1)" || { printf 'cosign "%s version" failed' "$1"; return 1; }
+  ver="$(printf '%s\n' "${out}" | awk '/^GitVersion:/ { print $2; exit }')"
+  ver="${ver#v}"
+  if ! [[ "${ver}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+    printf 'cosign "%s" reports no usable version' "$1"; return 1
+  fi
+  local want="${MIN_COSIGN_VERSION}" got_major="${BASH_REMATCH[1]}" got_minor="${BASH_REMATCH[2]}" got_patch="${BASH_REMATCH[3]}"
+  local want_major="${want%%.*}" rest="${want#*.}"
+  local want_minor="${rest%%.*}" want_patch="${rest#*.}"
+  if [ "${got_major}" -gt "${want_major}" ] \
+    || { [ "${got_major}" -eq "${want_major}" ] && [ "${got_minor}" -gt "${want_minor}" ]; } \
+    || { [ "${got_major}" -eq "${want_major}" ] && [ "${got_minor}" -eq "${want_minor}" ] && [ "${got_patch}" -ge "${want_patch}" ]; }; then
+    return 0
+  fi
+  printf 'cosign %s.%s.%s at "%s" is too old' "${got_major}" "${got_minor}" "${got_patch}" "$1"
+  return 1
+}
+
+die_cosign_outdated() { # reason
+  die sigstore_verifier_outdated "$1: cosign ${MIN_COSIGN_VERSION} or newer is required (older versions have known verification flaws); update cosign, pass --verifier <installed myriarch-updater>, or verify checksums.txt on an admin host and pass --updater-sha256"
+}
+
 resolve_verifier() {
   [ "${VERIFY_SIGNATURES}" = skip ] && return 0
-  if [ -n "${VERIFIER}" ]; then return 0; fi
-  if have cosign; then VERIFIER="$(command -v cosign)"; return 0; fi
-  if [ -n "${UPDATER_BIN:-}" ] && [ -x "${UPDATER_BIN}" ]; then VERIFIER="${UPDATER_BIN}"; return 0; fi
+  local problem=""
+  if [ -n "${VERIFIER}" ]; then
+    if [ "$(basename "${VERIFIER}")" = cosign ]; then
+      problem="$(cosign_version_problem "${VERIFIER}")" || die_cosign_outdated "${problem}"
+    fi
+    return 0
+  fi
+  if have cosign; then
+    if problem="$(cosign_version_problem "$(command -v cosign)")"; then VERIFIER="$(command -v cosign)"; return 0; fi
+  fi
   if [ -x "${P_UPDATER}/myriarch-updater" ]; then VERIFIER="${P_UPDATER}/myriarch-updater"; return 0; fi
-  die sigstore_verifier_missing "no Sigstore verifier found: install cosign (v3), pass --verifier <myriarch-updater>, or use --with-updater with --updater-sha256"
+  # the updater downloaded here only counts when its hash comes from --updater-sha256 and not from a file that this
+  # verifier is needed for
+  if [ -z "${UPDATER_CHECKSUMS_URL}" ] && [ -n "${UPDATER_BIN:-}" ] && [ -x "${UPDATER_BIN}" ] && [ -n "${UPDATER_SHA256}" ]; then VERIFIER="${UPDATER_BIN}"; return 0; fi
+  if [ -n "${problem}" ]; then die_cosign_outdated "${problem}"; fi
+  die sigstore_verifier_missing "no Sigstore verifier found: install cosign ${MIN_COSIGN_VERSION} or newer, or pass --verifier <installed myriarch-updater>; a host without a verifier can use --with-updater with --updater-sha256 (verify checksums.txt on an admin host first)"
 }
 
 verify_signature() { # asset-file bundle-url identity-regexp version
@@ -626,25 +699,6 @@ install_units() {
   rm -f "${P_UNITS}/otelcol-supervisor.service.bak"
 }
 
-# Verifies a blob signature of our releases: <sig> holds the base64 encoding of an ASN.1 DER ECDSA signature
-# (P-256) over the SHA-256 of the file (cosign sign-blob, without transparency log). Verifier: openssl, else cosign.
-verify_blob_signature() { # file sig-file public-key
-  local file="$1" sig="$2" key="$3" name der
-  name="$(basename "${file}")"
-  if have openssl; then
-    der="${TMP_DIR}/${name}.sig.der"
-    openssl base64 -d -A -in "${sig}" -out "${der}" 2>/dev/null || die signature_malformed "signature of ${name} is not valid base64"
-    openssl dgst -sha256 -verify "${key}" -signature "${der}" "${file}" >/dev/null 2>&1 \
-      || die signature_invalid "signature of ${name} is invalid (wrong key or tampered file)"
-  elif have cosign; then
-    cosign verify-blob --key "${key}" --signature "${sig}" --insecure-ignore-tlog=true "${file}" >/dev/null 2>&1 \
-      || die signature_invalid "signature of ${name} is invalid (wrong key or tampered file)"
-  else
-    die signature_verifier_missing "no verifier for the signature of ${name}: install openssl (or cosign)"
-  fi
-  log "signature of ${name} ok"
-}
-
 # SHA-256 of the line "<hex>  <file name>" in a goreleaser checksums.txt; exactly one match.
 checksum_from_file() { # checksums-file filename
   local hits count
@@ -655,20 +709,20 @@ checksum_from_file() { # checksums-file filename
   printf '%s' "${hits}" | tr 'A-F' 'a-f'
 }
 
-# Downloads and verifies checksums.txt (+ signature) and prints the expected SHA-256 of the updater on stdout.
+# Downloads checksums.txt and its keyless Sigstore bundle, verifies the bundle against the release identity of
+# UPDATER_VERSION (VERIFIER is resolved before) and prints the expected SHA-256 of the updater on stdout.
 updater_sha256_from_checksums() {
-  local sums="${TMP_DIR}/checksums.txt" sig="${TMP_DIR}/checksums.txt.sig" asset
+  local sums="${TMP_DIR}/checksums.txt" asset
   asset="${UPDATER_URL%%[?#]*}"; asset="${asset##*/}"
   [ -n "${asset}" ] || die option_invalid "no file name in --updater-url: ${UPDATER_URL}"
   download "${UPDATER_CHECKSUMS_URL}" "${sums}" >&2
-  download "${UPDATER_CHECKSUMS_SIG_URL}" "${sig}" >&2
-  verify_blob_signature "${sums}" "${sig}" "${SIGNING_KEY}" >&2
+  verify_signature "${sums}" "${UPDATER_BUNDLE_URL}" "$(cert_identity_release "${UPDATER_VERSION}")" "${UPDATER_VERSION}" >&2
   checksum_from_file "${sums}" "${asset}"
 }
 
-# Downloads the myriarch-updater and checks its SHA-256 before anything is executed (it also serves as the
-# Sigstore verifier for collector and supervisor). The expected hash comes from --updater-sha256 and/or the
-# signed checksums.txt. Result: UPDATER_BIN
+# Downloads the myriarch-updater and checks its SHA-256 before anything is executed (with --updater-sha256 and without
+# --updater-checksums-url it also serves as the Sigstore verifier for collector and supervisor). The expected hash comes
+# from --updater-sha256 and/or the verified checksums.txt. Result: UPDATER_BIN
 UPDATER_BIN=""
 fetch_updater() {
   [ "${WITH_UPDATER}" = 1 ] || return 0
@@ -773,8 +827,14 @@ main() {
   check_prereqs
   TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/myriarch-install.XXXXXX")"
   log "installing: collector v${COLLECTOR_VERSION}, supervisor v${SUPERVISOR_VERSION}, linux/${ARCH}, site ${SITE_TYPE}/${SITE_ID}"
-  fetch_updater
-  resolve_verifier
+  if [ "${WITH_UPDATER}" = 1 ] && [ -n "${UPDATER_CHECKSUMS_URL}" ]; then
+    # the verifier of checksums.txt must exist before the updater is downloaded, and it is never that updater
+    resolve_verifier
+    fetch_updater
+  else
+    fetch_updater
+    resolve_verifier
+  fi
   ensure_user
   ensure_dirs
   install_collector
