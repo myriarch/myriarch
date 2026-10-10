@@ -41,6 +41,9 @@ type CollectorAgent struct {
 	sim  *Simulator
 	spec AgentSpec
 
+	// lifecycle serializes Start against Stop, so that Stop never stops a client whose Start is still running (opamp-go
+	// does not allow Start and Stop of one client to overlap). It is taken before mu.
+	lifecycle   sync.Mutex
 	statusMu    sync.Mutex // serializes reportRemoteStatus; taken before mu
 	mu          sync.Mutex
 	uid         uuid.UUID
@@ -133,6 +136,8 @@ func (a *CollectorAgent) healthMsg() *protobufs.ComponentHealth {
 
 // Start connects the agent (idempotent).
 func (a *CollectorAgent) Start(ctx context.Context) error {
+	a.lifecycle.Lock()
+	defer a.lifecycle.Unlock()
 	a.mu.Lock()
 	if a.running {
 		a.mu.Unlock()
@@ -220,9 +225,13 @@ func (a *CollectorAgent) Start(ctx context.Context) error {
 
 // Stop disconnects the agent (sends AgentDisconnect) and invalidates timers.
 func (a *CollectorAgent) Stop(ctx context.Context) {
+	// Wait for a Start in progress: the client it publishes is stopped only after its Start returned. The lock is
+	// released before the callbacks run and the client stops; a later Start creates a new client.
+	a.lifecycle.Lock()
 	a.mu.Lock()
 	if !a.running {
 		a.mu.Unlock()
+		a.lifecycle.Unlock()
 		return
 	}
 	a.running = false
@@ -235,6 +244,7 @@ func (a *CollectorAgent) Stop(ctx context.Context) {
 	a.pendingCallbacks = nil
 	a.restarting = false
 	a.mu.Unlock()
+	a.lifecycle.Unlock()
 	if was {
 		a.sim.connectedCollectors.Add(-1)
 		a.sim.metrics.agentsConnected.Dec()

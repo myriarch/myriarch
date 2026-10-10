@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -489,6 +490,50 @@ func TestSimChurnReconnects(t *testing.T) {
 		st := r.Stats()
 		return st.ConnectedCollectors == st.Collectors
 	}, "agents reconnect: %+v", r.Stats())
+}
+
+// Stop must not stop the client of a Start that is still running: opamp-go does not allow Start and Stop of one
+// client to overlap, and under -race the overlap is reported as a data race. A churn reconnect (goOffline) and the
+// shutdown of the simulator are such a pair. The test overlaps Start and Stop of the same agents on purpose.
+func TestSimStartAndStopOfOneAgentDoNotOverlap(t *testing.T) {
+	f := newFakeMyriarchd(t)
+	r := startSim(t, f, 2, fastProfile(t, nil), nil)
+	waitAllConnected(t, r, 20*time.Second)
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	for _, c := range r.Collectors() {
+		for i := 0; i < 20; i++ {
+			wg.Add(2)
+			go func() { defer wg.Done(); _ = c.Start(ctx) }()
+			go func() { defer wg.Done(); c.Stop(ctx) }()
+			if c.updater != nil {
+				wg.Add(2)
+				go func() { defer wg.Done(); _ = c.updater.Start(ctx) }()
+				go func() { defer wg.Done(); c.updater.Stop(ctx) }()
+			}
+		}
+	}
+	wg.Wait()
+	// Whatever the interleaving ended in, the agents can be stopped and brought back to a connected state. (The
+	// connection counters of Stats are not checked: a late OnConnect of a stopped client may still count.)
+	for _, c := range r.Collectors() {
+		c.Stop(ctx)
+		if c.updater != nil {
+			c.updater.Stop(ctx)
+		}
+		require.NoError(t, c.Start(ctx))
+		if c.updater != nil {
+			require.NoError(t, c.updater.Start(ctx))
+		}
+	}
+	eventually(t, 20*time.Second, func() bool {
+		for _, c := range r.Collectors() {
+			if !c.State().Connected || (c.updater != nil && !c.updater.State().Connected) {
+				return false
+			}
+		}
+		return true
+	}, "every agent reconnects")
 }
 
 func TestSimRemoteConfigSurvivesReconnect(t *testing.T) {
