@@ -489,7 +489,8 @@ func TestDevComposePublishesOnlyOnLoopback(t *testing.T) {
 
 // The Compose quickstart runs the release image (FROM scratch, non-root, no writable directory except /tmp) in dev mode
 // against a PostgreSQL container. The default image tag follows the chart, the postgres image is the one of the dev
-// compose file, and the paths it uses exist in the image contract (/opt/myriarch/examples/...).
+// compose file, and the paths it uses below /opt/myriarch/examples map to repository paths that the release image copies
+// there (examples/quickstart and examples/sim in scripts/build-image-crane.sh).
 func TestQuickstartCompose(t *testing.T) {
 	type service struct {
 		Image       string   `yaml:"image"`

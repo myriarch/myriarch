@@ -39,8 +39,8 @@ services:
       - dev
       - --dsn=postgres://myriarch:myriarch-dev-password@postgres:5432/myriarch?sslmode=disable
       - --gitops-dir=/gitops
-      # the image is built FROM scratch and runs as a non-root user: /tmp is the only writable directory, all state lives in
-      # the database (the artifact cache is rebuilt on demand)
+      # the image runs as a non-root user (65532) and has no /var/lib/myriarchd, so a named volume there would be owned by
+      # root and not writable; /tmp is writable. All state lives in the database (the artifact cache is rebuilt on demand)
       - --data-dir=/tmp/myriarchd
       - --listen=:8080
       # inside the container myriarchd listens on all interfaces and talks to the Postgres container: dev mode
