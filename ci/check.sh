@@ -57,6 +57,8 @@ check_tool cosign      github.com/sigstore/cosign/v3          COSIGN_VERSION
 check_tool goreleaser  github.com/goreleaser/goreleaser/v2   GORELEASER_VERSION
 check_tool kind        sigs.k8s.io/kind                       KIND_VERSION
 check_tool actionlint  github.com/rhysd/actionlint            ACTIONLINT_VERSION
+check_tool gh          github.com/cli/cli/v2                  GH_VERSION
+check_tool go-winres   github.com/tc-hib/go-winres            GOWINRES_VERSION
 
 # reuse (a Python tool, ci/tools/reuse/): the input files and the hash-pinned requirements agree with REUSE_VERSION
 pins() { # file requirement - the file has a line that starts with the requirement as its first word
@@ -134,9 +136,15 @@ for v in SHELLCHECK_SHA256_DARWIN_ARM64 SHELLCHECK_SHA256_DARWIN_AMD64 SHELLCHEC
          KUBECTL_SHA256_DARWIN_ARM64 KUBECTL_SHA256_DARWIN_AMD64 KUBECTL_SHA256_LINUX_ARM64 KUBECTL_SHA256_LINUX_AMD64 \
          HUGO_SHA256_DARWIN_UNIVERSAL HUGO_SHA256_LINUX_ARM64 HUGO_SHA256_LINUX_AMD64 \
          DART_SASS_SHA256_DARWIN_ARM64 DART_SASS_SHA256_DARWIN_AMD64 DART_SASS_SHA256_LINUX_ARM64 DART_SASS_SHA256_LINUX_AMD64 \
-         LYCHEE_SHA256_DARWIN_ARM64 LYCHEE_SHA256_DARWIN_AMD64 LYCHEE_SHA256_LINUX_ARM64 LYCHEE_SHA256_LINUX_AMD64; do
+         LYCHEE_SHA256_DARWIN_ARM64 LYCHEE_SHA256_DARWIN_AMD64 LYCHEE_SHA256_LINUX_ARM64 LYCHEE_SHA256_LINUX_AMD64 \
+         SYFT_SHA256_DARWIN_ARM64 SYFT_SHA256_DARWIN_AMD64 SYFT_SHA256_LINUX_ARM64 SYFT_SHA256_LINUX_AMD64 \
+         ZIZMOR_SHA256_DARWIN_ARM64 ZIZMOR_SHA256_DARWIN_AMD64 ZIZMOR_SHA256_LINUX_ARM64 ZIZMOR_SHA256_LINUX_AMD64; do
   printf '%s' "${!v:-}" | grep -Eq '^[0-9a-f]{64}$' || bad "${v} is missing or not a SHA-256 in ci/versions.env"
 done
+# syft and zizmor are release downloads: the version has no "v" prefix (the asset URLs use it with one), and the pins above are the digests of that release
+printf '%s' "${SYFT_VERSION:-}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || bad "SYFT_VERSION in ci/versions.env is missing or not a plain version (for example 1.54.1)"
+printf '%s' "${ZIZMOR_VERSION:-}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || bad "ZIZMOR_VERSION in ci/versions.env is missing or not a plain version (for example 1.30.1)"
+[ ! -e ci/tools/syft ] || bad "ci/tools/syft exists: syft is a release download pinned in ci/versions.env, not a Go module"
 case "${OTELCOL_CONTRIB_IMAGE}"    in *":${OTELCOL_VERSION}@sha256:"*) ;; *) bad "OTELCOL_CONTRIB_IMAGE does not match OTELCOL_VERSION" ;; esac
 case "${OTELCOL_SUPERVISOR_IMAGE}" in *":${OTELCOL_VERSION}@sha256:"*) ;; *) bad "OTELCOL_SUPERVISOR_IMAGE does not match OTELCOL_VERSION" ;; esac
 

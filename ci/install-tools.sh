@@ -4,7 +4,7 @@
 
 # Installs the CI tools into ${TOOLS_BIN} (default: .cache/bin, safe to cache between runs).
 #
-#   ci/install-tools.sh goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee actionlint
+#   ci/install-tools.sh goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee actionlint syft gh go-winres zizmor
 #   ci/install-tools.sh apt:osslsigncode apt:python3
 #
 # Go tools are built from ci/tools/<tool>/ (go.mod + go.sum in the repository) through the configured GOPROXY (no
@@ -17,7 +17,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 load_versions
 
-[ "$#" -gt 0 ] || die "usage: ci/install-tools.sh <tool>... (goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee actionlint apt:<package>)"
+[ "$#" -gt 0 ] || die "usage: ci/install-tools.sh <tool>... (goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee actionlint syft gh go-winres zizmor apt:<package>)"
 mkdir -p "${TOOLS_BIN}"
 
 # Built from ci/tools/<tool>/ (a separate Go module per tool with go.mod AND go.sum in the repository): the hashes of all
@@ -398,6 +398,89 @@ release_install_lychee() {
   log "lychee ${version}: installed (sha256 verified)"
 }
 
+# syft (SBOM generation) is a release download like zizmor, verified against the SHA-256 pinned in ci/versions.env
+# (SYFT_SHA256_<OS>_<ARCH>; the environment cannot override it). It is not built with go build: only the release binaries carry
+# their version, which syft writes into the SBOMs it makes. The assets are syft_<version>_<os>_<arch>.tar.gz with the file syft
+# next to LICENSE and README.md. SYFT_BASE_URL points the download at an internal mirror (the path below it is v<version>/<asset>).
+release_install_syft() {
+  local version="${SYFT_VERSION}" bin="${TOOLS_BIN}/syft"
+  local stamp="${TOOLS_BIN}/.stamp-syft-${version}"
+  if [ "${TOOLS_NO_CACHE:-0}" != 1 ] && [ -x "${bin}" ] && [ -f "${stamp}" ]; then
+    log "syft ${version}: cached"
+    return 0
+  fi
+  local os arch key_arch
+  arch="$(uname -m)"
+  case "$(uname -s)" in
+    Darwin) os=darwin ;;
+    Linux)  os=linux ;;
+    *)      die "syft: unsupported platform $(uname -s)" ;;
+  esac
+  case "${arch}" in
+    arm64|aarch64) arch=arm64; key_arch=ARM64 ;;
+    x86_64|amd64)  arch=amd64; key_arch=AMD64 ;;
+    *)             die "syft: unsupported platform ${os}/${arch}" ;;
+  esac
+  website_pin syft SYFT "${os}" "${key_arch}"
+  need_cmd curl tar
+  local asset="syft_${version}_${os}_${arch}.tar.gz"
+  local url="${SYFT_BASE_URL:-https://github.com/anchore/syft/releases/download}/v${version}/${asset}" tmp got
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "${tmp}"' EXIT
+  log "downloading syft ${version} (${os}/${arch})"
+  website_download syft "${url}" "${tmp}/${asset}" "${PIN_SHA}"
+  tar -xzf "${tmp}/${asset}" -C "${tmp}" syft || die "syft: cannot extract ${asset}"
+  install -m 755 "${tmp}/syft" "${bin}"
+  rm -rf "${tmp}"; trap - EXIT
+  # SYFT_CHECK_FOR_APP_UPDATE=false: the version command must not reach out to look for a newer release
+  got="$(SYFT_CHECK_FOR_APP_UPDATE=false "${bin}" version 2>/dev/null | awk '$1 == "Version:" { print $2; exit }')" || got=""
+  [ "${got}" = "${version}" ] || { rm -f "${bin}"; die "syft: 'syft version' reports '${got:-nothing}', expected ${version}"; }
+  rm -f "${TOOLS_BIN}/.stamp-syft-"*
+  : > "${stamp}"
+  log "syft ${version}: installed (sha256 verified)"
+}
+
+# zizmor (static analysis of the GitHub Actions workflows) is a release download like lychee, verified against the SHA-256 pinned
+# in ci/versions.env (ZIZMOR_SHA256_<OS>_<ARCH>; the environment cannot override it). The assets are zizmor-<target>.tar.gz with the
+# single file zizmor; Linux gets the glibc ("gnu") build, the release has no musl build. ZIZMOR_BASE_URL points the download at an
+# internal mirror (the path below it is v<version>/<asset>).
+release_install_zizmor() {
+  local version="${ZIZMOR_VERSION}" bin="${TOOLS_BIN}/zizmor"
+  local stamp="${TOOLS_BIN}/.stamp-zizmor-${version}"
+  if [ "${TOOLS_NO_CACHE:-0}" != 1 ] && [ -x "${bin}" ] && [ -f "${stamp}" ]; then
+    log "zizmor ${version}: cached"
+    return 0
+  fi
+  local os arch target key_arch
+  arch="$(uname -m)"
+  case "$(uname -s)" in
+    Darwin) os=darwin; target=apple-darwin ;;
+    Linux)  os=linux;  target=unknown-linux-gnu ;;
+    *)      die "zizmor: unsupported platform $(uname -s)" ;;
+  esac
+  case "${arch}" in
+    arm64|aarch64) target="aarch64-${target}"; key_arch=ARM64 ;;
+    x86_64|amd64)  target="x86_64-${target}";  key_arch=AMD64 ;;
+    *)             die "zizmor: unsupported platform ${os}/${arch}" ;;
+  esac
+  website_pin zizmor ZIZMOR "${os}" "${key_arch}"
+  need_cmd curl tar
+  local asset="zizmor-${target}.tar.gz"
+  local url="${ZIZMOR_BASE_URL:-https://github.com/zizmorcore/zizmor/releases/download}/v${version}/${asset}" tmp got
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "${tmp}"' EXIT
+  log "downloading zizmor ${version} (${target})"
+  website_download zizmor "${url}" "${tmp}/${asset}" "${PIN_SHA}"
+  tar -xzf "${tmp}/${asset}" -C "${tmp}" zizmor || die "zizmor: cannot extract ${asset}"
+  install -m 755 "${tmp}/zizmor" "${bin}"
+  rm -rf "${tmp}"; trap - EXIT
+  got="$("${bin}" --version 2>/dev/null | head -n 1)" || got=""
+  [ "${got}" = "zizmor ${version}" ] || { rm -f "${bin}"; die "zizmor: 'zizmor --version' reports '${got:-nothing}', expected 'zizmor ${version}'"; }
+  rm -f "${TOOLS_BIN}/.stamp-zizmor-"*
+  : > "${stamp}"
+  log "zizmor ${version}: installed (sha256 verified)"
+}
+
 apt_install() { # package
   local pkg="$1"
   # A command of the same name is already present (for example in the job image or locally), or the package is installed: nothing to do
@@ -427,6 +510,10 @@ for t in "$@"; do
     go-licenses)  go_install go-licenses  github.com/google/go-licenses/v2             GOLICENSES_VERSION go-licenses no-trimpath main-toolchain ;;
     reuse)        py_install_reuse ;;
     actionlint)   go_install actionlint   github.com/rhysd/actionlint/cmd/actionlint   ACTIONLINT_VERSION actionlint ;;
+    syft)         release_install_syft ;;
+    gh)           go_install gh           github.com/cli/cli/v2/cmd/gh                 GH_VERSION         gh ;;
+    go-winres)    go_install go-winres    github.com/tc-hib/go-winres                  GOWINRES_VERSION   go-winres ;;
+    zizmor)       release_install_zizmor ;;
     kind)         go_install kind         sigs.k8s.io/kind                             KIND_VERSION       kind ;;
     kubectl)      release_install_kubectl ;;
     shellcheck)   release_install_shellcheck ;;
