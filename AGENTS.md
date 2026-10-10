@@ -35,7 +35,7 @@ website/                  project website (Hugo + Docsy), built from docs/ and t
 
 ## Toolchain
 
-Go (the version in `go.mod`), Node.js (the version in `.node-version`; 22.12 or newer works) and pnpm (the version in `web/package.json`, through corepack). No container runtime is
+Go (the version in `go.mod`), Node.js (the version in `.node-version`; 22.22.2, 24.15 or newer works) and pnpm (the version in `web/package.json`, through corepack). No container runtime is
 needed for development or tests. `make tools` installs the pinned CI tools into `.cache/bin`.
 
 ## Commands and gates
