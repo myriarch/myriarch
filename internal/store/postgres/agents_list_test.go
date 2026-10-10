@@ -240,11 +240,15 @@ func TestAgentListFilterSortPaginate(t *testing.T) {
 	if len(byIDs) != 2 {
 		t.Fatalf("filter by ids: %d", len(byIDs))
 	}
-	before := time.Now().Add(-100 * time.Second)
+	// The seed sets last_seen_at = now() - g seconds on the database clock (g = 1..200). Measure "older than 100 s"
+	// from the seed time, not from the end of this test, which takes seconds on a slow runner.
+	var newest time.Time
+	mustNoErr(t, db.Pool().QueryRow(ctx, `SELECT max(last_seen_at) FROM agents`).Scan(&newest))
+	before := newest.Add(-99 * time.Second) // newest is the seed time minus 1 s
 	old, err := ag.ListAll(ctx, store.AgentFilter{LastSeenBefore: &before})
 	mustNoErr(t, err)
-	if len(old) < 99 || len(old) > 101 {
-		t.Fatalf("LastSeenBefore: %d", len(old))
+	if len(old) != 100 {
+		t.Fatalf("LastSeenBefore: %d, want the 100 agents seen more than 100 s before the seed", len(old))
 	}
 }
 
