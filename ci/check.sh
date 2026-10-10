@@ -149,6 +149,9 @@ done
 # syft and zizmor are release downloads: the version has no "v" prefix (the asset URLs use it with one), and the pins above are the digests of that release
 printf '%s' "${SYFT_VERSION:-}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || bad "SYFT_VERSION in ci/versions.env is missing or not a plain version (for example 1.54.1)"
 printf '%s' "${ZIZMOR_VERSION:-}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || bad "ZIZMOR_VERSION in ci/versions.env is missing or not a plain version (for example 1.30.1)"
+# osslsigncode is built from a source archive: the pin is a SHA-256 of the archive and the version a plain version
+printf '%s' "${OSSLSIGNCODE_SOURCE_SHA256:-}" | grep -Eq '^[0-9a-f]{64}$' || bad "OSSLSIGNCODE_SOURCE_SHA256 is missing or not a SHA-256 in ci/versions.env"
+printf '%s' "${OSSLSIGNCODE_VERSION:-}" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$' || bad "OSSLSIGNCODE_VERSION in ci/versions.env is missing or not a plain version (for example 2.14)"
 [ ! -e ci/tools/syft ] || bad "ci/tools/syft exists: syft is a release download pinned in ci/versions.env, not a Go module"
 case "${OTELCOL_CONTRIB_IMAGE}"    in *":${OTELCOL_VERSION}@sha256:"*) ;; *) bad "OTELCOL_CONTRIB_IMAGE does not match OTELCOL_VERSION" ;; esac
 case "${OTELCOL_SUPERVISOR_IMAGE}" in *":${OTELCOL_VERSION}@sha256:"*) ;; *) bad "OTELCOL_SUPERVISOR_IMAGE does not match OTELCOL_VERSION" ;; esac

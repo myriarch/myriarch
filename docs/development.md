@@ -191,6 +191,14 @@ ships:
   only the upstream release binaries carry their version, which syft records in every SBOM it makes (a `go build` reports
   "[not provided]"), and a Go module for it would bring its whole dependency graph into the repository. No gate runs zizmor yet.
   The SBOM jobs run syft with `SYFT_CHECK_FOR_APP_UPDATE=false`, so that it does not look for a newer release.
+- `osslsigncode` (signs and verifies the Authenticode signatures of the Windows release files) is built from the source archive of
+  the pinned tag, verified against `OSSLSIGNCODE_SOURCE_SHA256` in `ci/versions.env` (`ci/install-tools.sh osslsigncode`). It is a C
+  program, upstream publishes no Linux binary, and the build needs no cmake: one `cc` call over the C files and a minimal
+  `config.h`. It is not part of the default `TOOLS`, because it needs a C compiler, the OpenSSL 3 headers and zlib (Debian and
+  Ubuntu: `libssl-dev` and `zlib1g-dev`, for example `ci/install-tools.sh apt:libssl-dev apt:zlib1g-dev`; macOS: the Xcode command
+  line tools and Homebrew `openssl@3`, or `OSSLSIGNCODE_OPENSSL_PREFIX`). The CI jobs `build` and `scripts` install it on demand.
+  A distribution package is never used, because Ubuntu 24.04 ships 2.8, which predates the verification fixes of 2.12 and 2.13, and
+  the release build runs it on files that a signing provider returns.
 
 `ci/tools/update.sh gh go-winres` regenerates the modules after a version change. It also raises dependencies for which
 `govulncheck -mode=binary -show verbose .cache/bin/<tool>` lists a fixed version (see `raised()` in the script: `golang.org/x/net`
