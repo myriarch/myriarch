@@ -400,6 +400,16 @@ guidance after each item names what to do.
 - **Release pipeline controls are pending.** Protected release environments, signing jobs without caches, SBOM and
   provenance attestations and a verification step before publishing belong to the release workflow, which does not
   exist yet. No release has been published.
+- **Release tag guard.** `ci/release/guard.sh` is meant to run before any other step of a release. It refuses a tag that is
+  not `vX.Y.Z` or `vX.Y.Z-rc.N`, a lightweight tag, a tag that points at another commit than the run's, a commit that is
+  not on `origin/main`, a `VERSION` or a copy of it that differs from the tag, a final tag without a dated `CHANGELOG.md`
+  heading, an rc tag with an empty "Unreleased" section, and a commit without a successful `ci-ok` check run of GitHub
+  Actions. It takes its inputs from the environment only, sends the token to `curl` through standard input, never prints it,
+  and fails closed on any API error. The Windows signing rule is part of it: `deploy/release/windows-signing.env` names the
+  mode (`off`, `signpath`, `kms`; anything else fails), and a final tag with `off` passes only when
+  `WINDOWS_UNSIGNED_FINAL_TAG` is exactly that tag, so an unsigned final release needs a reviewed change for that one tag.
+  Residual risk: the guard is a script of the repository and protects only as far as the release workflow runs it first and
+  the tag ruleset limits who can push `v*` tags; the check of `ci-ok` trusts the check-run name and the GitHub Actions app.
 - **Website deployment uses a team-scoped Vercel token.** The token and the Vercel IDs exist only as secrets of the GitHub
   environments `website-preview` and `website-production`; the build job of `.github/workflows/website.yml`, which runs
   repository code, has no secrets, and the deploy job installs the pinned Vercel CLI without lifecycle scripts and uploads

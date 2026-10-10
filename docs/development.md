@@ -195,7 +195,7 @@ make docs-check                                   # when you touched documentati
 
 | Gate | What it runs |
 |---|---|
-| `go` | `go build ./...` with and without the `devpg` tag, vet for Windows and macOS, `ci/lint-go.sh` (go mod verify, vet, gofmt), the release dependency check and the license check |
+| `go` | `go build ./...` with and without the `devpg` tag, vet for Windows and macOS, `ci/lint-go.sh` (go mod verify, vet, gofmt), the version check (`ci/check-versions.sh`: `VERSION` and its copies agree, see [Releasing](releasing.md#one-version-source)), the release dependency check and the license check |
 | `go-test` | `go test -race -count=1 ./...`, the tagged tests of `internal/devpg` and the render budget test of `internal/blueprint` in a run of its own without `-race` (`GO_TEST_RACE=0` drops `-race`, `GO_TEST_DEVPG=0` leaves out the `devpg` tests, `GO_TEST_PERF=0` leaves out the budget test) |
 | `web` | `pnpm install --frozen-lockfile`, a check that `web/src/api/schema.d.ts` matches `pnpm gen:api`, typecheck, lint, the formatting check (`pnpm format:check`; `pnpm format` fixes it), tests and the production build |
 | `build` | `make build` |
@@ -735,7 +735,7 @@ project documents. The site structure follows these sections:
 | `reference/` | Reference | GitOps schema, generated command-line reference, REST contract, Helm chart | 40 |
 | `operations/` | Operations | authentication, production checklist, troubleshooting | 50 |
 | `security/` | Security | security model | 60 |
-| `architecture.md`, `adr/`, `design/`, `development.md` | Project | architecture, decision records, design contracts, this guide | 70, 80, 90, 100 |
+| `architecture.md`, `adr/`, `design/`, `development.md`, `releasing.md` | Project | architecture, decision records, design contracts, this guide, versioning and release tags | 70, 80, 90, 100, 110 |
 
 The directory `tasks/` keeps its name, because links and the URLs derived from it should stay stable; its title is "How-to
 guides". The website adds pages that exist only there (placeholders for pages that are still being
