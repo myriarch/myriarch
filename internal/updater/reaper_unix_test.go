@@ -137,7 +137,7 @@ func TestReaperCollectsRealChildrenViaSpawn(t *testing.T) {
 		t.Fatalf("exit of pid %d not delivered", pid)
 	}
 	// no zombie left behind
-	assert.Eventually(t, func() bool { return !pidAlive(pid) }, 5*time.Second, 10*time.Millisecond)
+	assert.Eventually(t, func() bool { return !pidExists(pid) }, 5*time.Second, 10*time.Millisecond)
 }
 
 func TestReaperExecutorOutputAndExit(t *testing.T) {
@@ -225,12 +225,22 @@ func TestReaperCollectsAdoptedOrphansOnLinux(t *testing.T) {
 	go func() { defer close(done); rp.Run(ctx) }()
 	defer func() { cancel(); <-done }()
 	dir := t.TempDir()
+	t.Setenv("ORPHAN", filepath.Join(dir, "orphan"))
 	// the shell starts a background child and exits: the child is re-parented to us and exits later
-	script := writeScript(t, dir, "orphan.sh", "(sleep 0.3; exit 0) &\nexit 0\n")
+	script := writeScript(t, dir, "orphan.sh", "(sleep 0.3; exit 0) &\necho $! > \"$ORPHAN\"\nexit 0\n")
 	_, exit, err := rp.Spawn(spawnSpec{Path: script, Stdout: os.Stderr, Stderr: os.Stderr})
 	require.NoError(t, err)
 	<-exit
-	require.Eventually(t, func() bool { return rp.Reaped() >= 1 }, 10*time.Second, 20*time.Millisecond, "the adopted orphan was reaped")
+	orphan := readPids(t, filepath.Join(dir, "orphan"))
+	require.Len(t, orphan, 1)
+	// Zombies that earlier tests left behind are adopted by this process as well (it stays a subreaper) and
+	// collected at once, so a count of reaped orphans would not tell whether this orphan was reaped.
+	require.Eventually(t, func() bool {
+		rp.mu.Lock()
+		defer rp.mu.Unlock()
+		_, ok := rp.orphans[orphan[0]]
+		return ok
+	}, 10*time.Second, 20*time.Millisecond, "the adopted orphan was reaped")
 }
 
 // A child without explicit stdin gets /dev/null (reads return EOF), not a closed descriptor.

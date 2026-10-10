@@ -171,7 +171,7 @@ func TestContainerModeSeedsStartsAndUpdates(t *testing.T) {
 	childPids := readPids(t, h.starts)
 	require.NoError(t, h.shutdown())
 	for _, p := range childPids {
-		assert.False(t, pidAlive(p), "child %d is gone", p)
+		assert.False(t, pidExists(p), "child %d is gone", p)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"archive/tar"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,7 +35,10 @@ func TestExtractBinaryTarGzOK(t *testing.T) {
 	got, err := os.ReadFile(filepath.Join(dest, testBinary))
 	require.NoError(t, err)
 	assert.Equal(t, body, got)
-	if st, _ := os.Stat(res.Path); st != nil {
+	st, err := os.Stat(res.Path)
+	require.NoError(t, err)
+	assert.True(t, st.Mode().IsRegular(), "binary must be a regular file")
+	if runtime.GOOS != "windows" { // Windows has no execute permission bit
 		assert.NotZero(t, st.Mode()&0o100, "binary must be executable")
 	}
 	entries, _ := os.ReadDir(dest)
