@@ -30,6 +30,7 @@ path = [
   "**/.prettierignore",
   ".editorconfig",
   ".node-version",
+  "VERSION",
   ".github/CODEOWNERS",
   "**/*.env",
   "**/requirements*.txt",

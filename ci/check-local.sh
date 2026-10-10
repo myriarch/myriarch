@@ -110,6 +110,7 @@ gate_go() {
   GOOS=windows GOARCH=amd64 go test -c -o /dev/null ./internal/updater
   GOOS=darwin GOARCH=arm64 go vet ./...
   ci/lint-go.sh
+  ci/check-versions.sh
   ci/check-release-deps.sh
   ci/install-tools.sh go-licenses
   ci/check-release-licenses.sh

@@ -57,7 +57,8 @@ authentication, artifact verification, outbound connections and network policy. 
 ## Project: why and how it is built
 
 The [decision records](adr/README.md) explain why the system is built the way it is. The [development guide](development.md)
-covers the toolchain, the gates, the web UI and the end-to-end tests. The [roadmap](../ROADMAP.md) lists what is planned, and
+covers the toolchain, the gates, the web UI and the end-to-end tests, and [releasing](releasing.md) describes the versioning
+and the checks that a release tag must pass. The [roadmap](../ROADMAP.md) lists what is planned, and
 the community files are [CONTRIBUTING.md](../CONTRIBUTING.md), [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md),
 [GOVERNANCE.md](../GOVERNANCE.md), [MAINTAINERS.md](../MAINTAINERS.md) and [CHANGELOG.md](../CHANGELOG.md).
 

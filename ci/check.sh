@@ -12,6 +12,7 @@
 #    requirements pin poetry-core, and every pinned package carries hashes
 #  - .node-version holds one exact Node.js release of 22 or newer
 #  - goreleaser.yaml references the signing script, which exists
+#  - one version source: VERSION and every copy of the product version agree (ci/check-versions.sh)
 #  - ci/ and contrib/enterprise-mirror/ script paths mentioned in the Makefile, goreleaser.yaml and the scripts exist
 #    (scripts/ is deliberately not covered here)
 set -euo pipefail
@@ -22,8 +23,8 @@ cd "${ROOT}"
 status=0
 bad() { printf '[ci] ERROR: %s\n' "$*" >&2; status=1; }
 
-for f in ci/*.sh ci/tests/*.sh ci/tools/*.sh contrib/enterprise-mirror/*.sh contrib/enterprise-mirror/tests/*.sh \
-         deploy/scripts/install-linux.sh deploy/release/authenticode.sh hack/kind/*.sh hack/kind/fault/*.sh; do
+for f in ci/*.sh ci/release/*.sh ci/tests/*.sh ci/tools/*.sh contrib/enterprise-mirror/*.sh contrib/enterprise-mirror/tests/*.sh \
+         scripts/set-version.sh deploy/scripts/install-linux.sh deploy/release/authenticode.sh hack/kind/*.sh hack/kind/fault/*.sh; do
   case "${f}" in
     contrib/enterprise-mirror/ca-env.sh) ;;   # sourced, not executed: syntax only (below)
     *) [ -x "${f}" ] || bad "${f} is not executable (chmod +x)" ;;
@@ -150,6 +151,9 @@ while IFS= read -r f; do
     [ -f "${p}" ] || bad "${f} references ${p}, but the file does not exist"
   done < <(grep -Eo '(^|[^A-Za-z0-9_./-])(ci|contrib/enterprise-mirror)/[A-Za-z0-9_./-]+\.(sh|py|env)' "${f}" | sed -E 's|^[^cC]*||' | sort -u)
 done < <({ printf '%s\n' Makefile deploy/release/goreleaser.yaml; find ci contrib -name '*.sh' -type f; } | sort -u)
+
+# one version source: VERSION and every copy of the product version (chart, web UI, OpenAPI, examples) agree
+"${CI_DIR}/check-versions.sh" || status=1
 
 # build contexts: Dockerfiles that copy the whole context have an ignore file that covers .gitignore
 "${CI_DIR}/check-dockerignore.sh" || status=1
