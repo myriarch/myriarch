@@ -8,8 +8,10 @@ Every use of osslsigncode goes through this file. It is called by deploy/release
 ci/release/windows-sign-hook.sh (the hook between them); always as `python3 -I ci/release/authenticode.py <command>`.
 
   sign          --provider off|test --in DIR --out DIR [--material DIR]    the hook: copy the unsigned set, or sign it with a test CA
-  accept-exe    --name N --fresh FILE --state S --unsigned U --signed S --trust T [--release]    stage apply, per rebuilt .exe
-  accept-scripts --root R --state S --unsigned U --signed S --trust T [--release]    stage apply, the two Windows scripts
+  accept-exe    --name N --fresh FILE --state S --unsigned U --signed S --trust T [--release] [--expect-provider P]
+                                                                  stage apply, per rebuilt .exe
+  accept-scripts --root R --state S --unsigned U --signed S --trust T [--release] [--expect-provider P]
+                                                                  stage apply, the two Windows scripts
   seal          --root R --state S --dir U     stage collect: complete the unsigned set (scripts, SHA256SUMS)
   verify        --trust T FILE...               verify files against a trust directory and print what was found
 
@@ -266,8 +268,10 @@ def attach_signature(tool, work, name, signed_file, unsigned_file, error_token):
 # ---- signer.json ------------------------------------------------------------------------------------------------------------------
 
 
-def check_signed(unsigned, signed, trust_dir, release):
-    """Validates signer.json against both sets. Returns (info dict, trust or None)."""
+def check_signed(unsigned, signed, trust_dir, release, expect_provider=""):
+    """Validates signer.json against both sets. Returns (info dict, trust or None). expect_provider is the configured signing mode
+    (deploy/release/windows-signing.env, passed as MYRIARCH_WINDOWS_SIGNING by deploy/release/windows-signed.sh): a release build
+    requires it and signer.json has to name the same provider, so that a hook cannot downgrade a signed release to an unsigned one."""
     try:
         doc = json.loads(signed.files[SIGNER].read_bytes().decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as e:
@@ -288,6 +292,13 @@ def check_signed(unsigned, signed, trust_dir, release):
         bad("provider off and signed false belong together")
     if release and doc["provider"] == "test":
         fail("provider_test_release", "signer.json names the test provider; a release build accepts only off, signpath or kms")
+    if expect_provider and expect_provider not in PROVIDERS:
+        fail("mode_invalid", "MYRIARCH_WINDOWS_SIGNING=%s is not one of %s" % (expect_provider, ", ".join(PROVIDERS)))
+    if release and not expect_provider:
+        fail("mode_missing", "MYRIARCH_WINDOWS_SIGNING is not set: a release build has to know the configured signing mode "
+                             "(deploy/release/windows-signing.env) to check what the hook returned")
+    if expect_provider and doc["provider"] != expect_provider:
+        fail("provider_mismatch", "signer.json names the provider '%s', but the configured signing mode is '%s'" % (doc["provider"], expect_provider))
     trust = None
     if doc["signed"]:
         trust = load_trust(trust_dir)
@@ -348,7 +359,7 @@ def cmd_accept_exe(a):
         fail("not_reproducible", "the rebuilt %s (sha256 %s) differs from the unsigned build (%s): the build is not reproducible or its "
                                  "inputs changed" % (name, fresh_sha, unsigned.sums[name]))
     signed = load_set(a.signed, "signed")
-    doc, trust = check_signed(unsigned, signed, a.trust, a.release)
+    doc, trust = check_signed(unsigned, signed, a.trust, a.release, a.expect_provider)
     if not doc["signed"]:
         if sha256_file(signed.path(name)) != fresh_sha:
             fail("unsigned_changed", "signer.json says unsigned, but %s differs from the unsigned build" % name)
@@ -391,7 +402,7 @@ def cmd_accept_scripts(a):
     root = Path(a.root)
     unsigned = load_set(a.unsigned, "unsigned")
     signed = load_set(a.signed, "signed")
-    doc, trust = check_signed(unsigned, signed, a.trust, a.release)
+    doc, trust = check_signed(unsigned, signed, a.trust, a.release, a.expect_provider)
     for name, rel in sorted(SCRIPTS.items()):
         repo = root / rel
         repo_bytes = repo.read_bytes()
@@ -541,12 +552,14 @@ def main(argv=None):
     p.add_argument("--signed", required=True)
     p.add_argument("--trust", required=True)
     p.add_argument("--release", action="store_true")
+    p.add_argument("--expect-provider", default="")
     p = add("accept-scripts", cmd_accept_scripts)
     p.add_argument("--state", required=True)
     p.add_argument("--unsigned", required=True)
     p.add_argument("--signed", required=True)
     p.add_argument("--trust", required=True)
     p.add_argument("--release", action="store_true")
+    p.add_argument("--expect-provider", default="")
     p = add("seal", cmd_seal)
     p.add_argument("--state", required=True)
     p.add_argument("--dir", required=True)

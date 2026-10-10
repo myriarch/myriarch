@@ -79,7 +79,7 @@ printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("hello") }\n' 
 
 # runs a command in the scratch repository with the stage variables cleared; leading VAR=value arguments set variables
 ws() {
-  ( cd "${S}" && env -u MYRIARCH_WINDOWS_STAGE -u MYRIARCH_AUTHENTICODE_DIR -u WINDOWS_SIGNING -u WINDOWS_SIGNING_TEST_DIR \
+  ( cd "${S}" && env -u MYRIARCH_WINDOWS_STAGE -u MYRIARCH_AUTHENTICODE_DIR -u WINDOWS_SIGNING -u MYRIARCH_WINDOWS_SIGNING -u WINDOWS_SIGNING_TEST_DIR \
       -u GITHUB_REF -u GITHUB_REF_TYPE -u GITHUB_WORKFLOW_REF \
       TOOLS_BIN="${TB}" MYRIARCH_WINDOWS_UNSIGNED_DIR="${U}" MYRIARCH_WINDOWS_SIGNED_DIR="${TEST_TMP}/signed-default" "$@" )
 }
@@ -178,6 +178,8 @@ mkdir -p "${TEST_TMP}/outside"; cp "${TEST_TMP}/hello.exe" "${TEST_TMP}/outside/
 expect_fail "a path outside dist/"                     "\\[unexpected_target\\]" ws MYRIARCH_WINDOWS_STAGE=off bash "${WSH}" build myrctl "${TEST_TMP}/outside/myrctl.exe" windows amd64 true "${VER}"
 expect_fail "an unknown build id"                      "\\[unexpected_target\\] build id 'myriarch-sim'" ws MYRIARCH_WINDOWS_STAGE=off bash "${WSH}" build myriarch-sim dist/myrctl_windows_amd64_v1/myrctl.exe windows amd64 true "${VER}"
 expect_fail "a file with another name than the id"     "\\[unexpected_target\\]" ws MYRIARCH_WINDOWS_STAGE=off bash "${WSH}" build myriarch-updater dist/myrctl_windows_amd64_v1/myrctl.exe windows amd64 true "${VER}"
+mkdir -p "${S}/dist/sym_windows_amd64_v1"; ln -sf "${TEST_TMP}/outside/myrctl.exe" "${S}/dist/sym_windows_amd64_v1/myrctl.exe"
+expect_fail "a build target that is a symbolic link"   "\\[unexpected_target\\] dist/sym_windows_amd64_v1/myrctl.exe is not a regular file" ws MYRIARCH_WINDOWS_STAGE=off bash "${WSH}" build myrctl dist/sym_windows_amd64_v1/myrctl.exe windows amd64 true "${VER}"
 expect_ok "a non-Windows target is ignored"            ws MYRIARCH_WINDOWS_STAGE=off bash "${WSH}" build myrctl dist/x/myrctl linux amd64 true "${VER}"
 
 # helpers for crafted signed sets and for the acceptance check
@@ -187,10 +189,19 @@ cat > "${TEST_TMP}/tamper.py" <<'PY'
 import hashlib, json, os, sys
 # tamper.py rewrite DIR UNSIGNED_DIR PROVIDER SIGNED SUBJECT: SHA256SUMS and signer.json that match the files in DIR
 # tamper.py flip FILE: changes one byte in the middle
+# tamper.py checksum FILE: flips one byte of the PE CheckSum field (e_lfanew + 24 + 64), which the signature does not cover
+# tamper.py sigspace FILE: appends a space to the first base64 line of a script's signature block, which the decoder ignores
 def sha(p): return hashlib.sha256(open(p, "rb").read()).hexdigest()
 cmd = sys.argv[1]
 if cmd == "flip":
   b = bytearray(open(sys.argv[2], "rb").read()); b[len(b) // 2] ^= 1; open(sys.argv[2], "wb").write(bytes(b))
+elif cmd == "checksum":
+  b = bytearray(open(sys.argv[2], "rb").read()); off = int.from_bytes(b[0x3c:0x40], "little") + 24 + 64; b[off] ^= 0x5a; open(sys.argv[2], "wb").write(bytes(b))
+elif cmd == "sigspace":
+  ls = open(sys.argv[2], "rb").read().split(b"\n"); i = next(n for n, l in enumerate(ls) if l.startswith(b"# SIG # Begin signature block"))
+  assert ls[i + 1].startswith(b"# "), ls[i + 1][:20]
+  ls[i + 1] = ls[i + 1][:-1] + b" \r" if ls[i + 1].endswith(b"\r") else ls[i + 1] + b" "
+  open(sys.argv[2], "wb").write(b"\n".join(ls))
 elif cmd == "rewrite":
   d, u, provider, signed, subject = sys.argv[2:7]
   signed = signed == "true"
@@ -264,7 +275,7 @@ assert all(set(v) == {"sha256", "unsigned_sha256"} and v["sha256"] == v["unsigne
 assert open(os.path.join(o, "signer.json")).read() == json.dumps(d, indent=2, sort_keys=True) + "\n"
 PY
 
-if needs_ossl 24; then
+if needs_ossl 30; then
   # ---- throwaway CAs ---------------------------------------------------------------------------------------------------------------
   CA="${S}/ci/release/authenticode-test-ca.sh"
   expect_fail "test CA: a directory inside the repository is refused" "\\[inside_repository\\]" bash "${CA}" init "${S}/ca-here"
@@ -296,9 +307,11 @@ PY
   before="$(sha256_of "${TEST_TMP}/hello.exe")"
   expect_ok "apply with the output of mode off (snapshot)" apply_flow "${SG_OFF}" true
   [ "$(sha256_of "${S}/dist/myrctl_windows_amd64_v1/myrctl.exe")" = "${before}" ] && ok "... the file is unchanged" || fail "an unsigned file was changed"
-  expect_ok "apply with the output of mode off (release)" apply_flow "${SG_OFF}" false
+  expect_ok "apply with the output of mode off (release)" apply_flow "${SG_OFF}" false MYRIARCH_WINDOWS_SIGNING=off
   cmp -s "${S}/.cache/release/windows/archive/windows/scripts/install-windows.ps1" "${S}/deploy/scripts/install-windows.ps1" \
     && ok "... the staged script is the repository file" || fail "the staged script differs from the repository file"
+  expect_fail "apply: a release build without the configured mode" "\\[mode_missing\\]" apply_flow "${SG_OFF}" false
+  expect_fail "apply: the configured mode is signpath, the hook returned unsigned files" "\\[provider_mismatch\\]" apply_flow "${SG_OFF}" false MYRIARCH_WINDOWS_SIGNING=signpath
 
   # ---- 11: stage apply with test signatures -----------------------------------------------------------------------------------------
   expect_ok "apply with test signatures and the test trust anchors (snapshot)" apply_flow "${SG_TEST}" true MYRIARCH_AUTHENTICODE_DIR="${T}/ca/trust"
@@ -350,6 +363,31 @@ PY
   TAMPER rewrite "${TEST_TMP}/c-plain" "${U}" test true "CN=Myriarch Test Signer,O=Myriarch Test"
   expect_fail "an unsigned file in a signed set" "\\[signature_unreadable\\]" acc "${NAME}" "${TEST_TMP}/c-plain" "${T}/ca/trust"
   expect_ok "a correct signed copy is accepted again (control)" acc "${NAME}" "${SG_TEST}" "${T}/ca/trust"
+  # the release ships the job's own build with the provider's signature attached, never the provider's file: a provider file that
+  # differs in a region that no signature covers (the PE CheckSum field) still verifies, but must not be what is staged
+  reattach() { # provider-file unsigned-file out - the signature of the first attached to a copy of the second
+    local w="${TEST_TMP}/reattach"; rm -rf "${w}"; mkdir -p "${w}"
+    rm -f "$3"
+    { "${OSSL}" extract-signature -in "$1" -out "${w}/sig.p7" > "${w}/log" 2>&1 && "${OSSL}" attach-signature -sigin "${w}/sig.p7" -in "$2" -out "$3" >> "${w}/log" 2>&1; } \
+      || { cat "${w}/log" >&2; return 1; }
+  }
+  rm -rf "${TEST_TMP}/c-cks"; cp -R "${SG_TEST}" "${TEST_TMP}/c-cks"; TAMPER checksum "${TEST_TMP}/c-cks/${NAME}"
+  TAMPER rewrite "${TEST_TMP}/c-cks" "${U}" test true "CN=Myriarch Test Signer,O=Myriarch Test"
+  expect_ok "the provider file with another PE checksum still verifies" env TOOLS_BIN="${TB}" python3 -I "${AUTHPY}" verify --root "${S}" --trust "${T}/ca/trust" "${TEST_TMP}/c-cks/${NAME}"
+  [ "$(sha256_of "${TEST_TMP}/c-cks/${NAME}")" != "$(sha256_of "${SG_TEST}/${NAME}")" ] && ok "... and differs from the correct provider file" || fail "the PE checksum was not changed"
+  expect_ok "accept: a provider file with another PE checksum" acc "${NAME}" "${TEST_TMP}/c-cks" "${T}/ca/trust"
+  reattach "${TEST_TMP}/c-cks/${NAME}" "${U}/${NAME}" "${TEST_TMP}/cks-want" || fail "the signature could not be re-attached"
+  [ "$(sha256_of "${TEST_TMP}/fresh-${NAME}")" = "$(sha256_of "${TEST_TMP}/cks-want")" ] \
+    && ok "... the staged file is the signature attached to the job's own build" || fail "the staged file is not the re-attach output"
+  [ "$(sha256_of "${TEST_TMP}/fresh-${NAME}")" != "$(sha256_of "${TEST_TMP}/c-cks/${NAME}")" ] \
+    && ok "... and not the provider's file" || fail "the provider's file was staged"
+  # exactly one signature (a nested signature over a signed file is a second one)
+  rm -rf "${TEST_TMP}/c-nest"; cp -R "${SG_TEST}" "${TEST_TMP}/c-nest"; rm "${TEST_TMP}/c-nest/${NAME}"
+  "${OSSL}" sign -nest -certs "${T}/ca/signing/signer.pem" -key "${T}/ca/signing/signer.key" -h sha256 -n Myriarch \
+    -TSA-certs "${T}/ca/signing/tsa.pem" -TSA-key "${T}/ca/signing/tsa.key" -TSA-time "$(date +%s)" \
+    -in "${SG_TEST}/${NAME}" -out "${TEST_TMP}/c-nest/${NAME}" > "${TEST_TMP}/sign.log" 2>&1 || cat "${TEST_TMP}/sign.log" >&2
+  TAMPER rewrite "${TEST_TMP}/c-nest" "${U}" test true "CN=Myriarch Test Signer,O=Myriarch Test"
+  expect_fail "a file with two signatures" "\\[signature_count\\]" env TOOLS_BIN="${TB}" python3 -I "${AUTHPY}" verify --root "${S}" --trust "${T}/ca/trust" "${TEST_TMP}/c-nest/${NAME}"
   rm -rf "${TEST_TMP}/c-sj"; cp -R "${SG_TEST}" "${TEST_TMP}/c-sj"; TAMPER rewrite "${TEST_TMP}/c-sj" "${U}" test true "CN=Someone Else"
   expect_fail "a signer.json with another subject than the trust anchor" "\\[signer_json\\] subject" acc "${NAME}" "${TEST_TMP}/c-sj" "${T}/ca/trust"
 fi
@@ -378,9 +416,24 @@ expect_ok "unsigned: the unchanged copy is accepted"         acc "${NAME}" "${SG
 cp "${TEST_TMP}/hello.exe" "${TEST_TMP}/not-the-build.exe"; TAMPER flip "${TEST_TMP}/not-the-build.exe"
 expect_fail "unsigned: a rebuilt file that differs (accept-exe directly)" "\\[not_reproducible\\]" env TOOLS_BIN="${TB}" python3 -I "${AUTHPY}" accept-exe --root "${S}" --name "${NAME}" \
   --fresh "${TEST_TMP}/not-the-build.exe" --state "${ST}" --unsigned "${U}" --signed "${SG_OFF}" --trust "${S}/deploy/release/authenticode"
+# the binding of the signing mode: a release build has to know the configured mode and signer.json has to name the same provider
+AUTHDIR="${S}/deploy/release/authenticode"
+expect_fail "mode: a release build without MYRIARCH_WINDOWS_SIGNING" "\\[mode_missing\\] MYRIARCH_WINDOWS_SIGNING is not set" acc "${NAME}" "${SG_OFF}" "${AUTHDIR}" --release
+expect_fail "mode: the hook returned off, the configuration says signpath" "\\[provider_mismatch\\].*'off'.*'signpath'" acc "${NAME}" "${SG_OFF}" "${AUTHDIR}" --release --expect-provider signpath
+expect_fail "mode: the hook returned off, the configuration says kms (snapshot)" "\\[provider_mismatch\\]" acc "${NAME}" "${SG_OFF}" "${AUTHDIR}" --expect-provider kms
+expect_fail "mode: a configured mode that does not exist" "\\[mode_invalid\\] MYRIARCH_WINDOWS_SIGNING=bogus" acc "${NAME}" "${SG_OFF}" "${AUTHDIR}" --release --expect-provider bogus
+expect_ok "mode: off and off in a release build" acc "${NAME}" "${SG_OFF}" "${AUTHDIR}" --release --expect-provider off
+
+# stage collect: seal compares the files with the record of the build hook
+rm -rf "${S}/.cache" "${U}"; fresh_dist
+ws MYRIARCH_WINDOWS_STAGE=collect bash "${WSH}" prepare "${VER}" true >/dev/null 2>&1
+build_all MYRIARCH_WINDOWS_STAGE=collect >/dev/null 2>&1
+TAMPER flip "${U}/${NAME}"
+expect_fail "seal: an .exe that changed after the build hook" "\\[not_reproducible\\] ${NAME} differs from the build recorded" ws MYRIARCH_WINDOWS_STAGE=collect bash "${WSH}" seal
+make_unsigned >/dev/null 2>&1 || fail "the unsigned set could not be made again"
 
 # ---- 21: the scripts in stage apply -----------------------------------------------------------------------------------------------
-if needs_ossl 8; then
+if needs_ossl 14; then
   accs() { # signed-dir trust-dir [extra]
     local d="$1" trust="$2"; shift 2
     rm -rf "${ST}"; mkdir -p "${ST}"
@@ -396,6 +449,18 @@ if needs_ossl 8; then
   rm -rf "${TEST_TMP}/s-foreign"; cp -R "${SG_TEST}" "${TEST_TMP}/s-foreign"
   sign_as "${T}/foreign" "${S}/deploy/scripts/install-windows.ps1" "${TEST_TMP}/s-foreign/install-windows.ps1" 1 sha256 && TAMPER rewrite "${TEST_TMP}/s-foreign" "${U}" test true "CN=Myriarch Test Signer,O=Myriarch Test"
   expect_fail "scripts: signed by a foreign CA" "\\[signature_invalid\\]" accs "${TEST_TMP}/s-foreign" "${T}/ca/trust"
+  rm -rf "${TEST_TMP}/s-space"; cp -R "${SG_TEST}" "${TEST_TMP}/s-space"; TAMPER sigspace "${TEST_TMP}/s-space/install-windows.ps1"
+  TAMPER rewrite "${TEST_TMP}/s-space" "${U}" test true "CN=Myriarch Test Signer,O=Myriarch Test"
+  expect_ok "scripts: the provider file with whitespace in its signature block still verifies" env TOOLS_BIN="${TB}" python3 -I "${AUTHPY}" verify --root "${S}" \
+    --trust "${T}/ca/trust" "${TEST_TMP}/s-space/install-windows.ps1"
+  expect_ok "scripts: ... and is accepted" accs "${TEST_TMP}/s-space" "${T}/ca/trust"
+  reattach "${TEST_TMP}/s-space/install-windows.ps1" "${S}/deploy/scripts/install-windows.ps1" "${TEST_TMP}/space-want.ps1" || fail "the signature could not be re-attached"
+  [ "$(sha256_of "${ST}/archive/windows/scripts/install-windows.ps1")" = "$(sha256_of "${TEST_TMP}/space-want.ps1")" ] \
+    && ok "... the staged script is the signature attached to the repository file" || fail "the staged script is not the re-attach output"
+  [ "$(sha256_of "${ST}/archive/windows/scripts/install-windows.ps1")" != "$(sha256_of "${TEST_TMP}/s-space/install-windows.ps1")" ] \
+    && ok "... and not the provider's file" || fail "the provider's script was staged"
+  expect_fail "scripts: a release build without the configured mode" "\\[mode_missing\\]" accs "${SG_OFF}" "${AUTHDIR}" --release
+  expect_fail "scripts: the configured mode is kms, the hook returned unsigned files" "\\[provider_mismatch\\]" accs "${SG_OFF}" "${AUTHDIR}" --release --expect-provider kms
   expect_ok "scripts: an unsigned set is accepted without trust anchors" accs "${SG_OFF}" "${S}/deploy/release/authenticode"
   expect_fail "scripts: a signed set without trust anchors" "\\[trust_missing\\]" accs "${SG_TEST}" "${S}/deploy/release/authenticode"
 fi
@@ -429,7 +494,7 @@ for i in ("myriarch-updater", "myrctl"):
         add(i + ".exe", d + "/" + i + ".exe", "Binary", {"Binary": i + ".exe", "ID": i}, goos="windows", goarch=a)
         if i == "myriarch-updater":
             bare = "myriarch-updater_%s_windows_%s.exe" % (ver, a)
-            add(bare, d + "/" + i + ".exe", "Binary", {"Format": "binary", "ID": "myriarch-updater-binary", "Checksum": "sha256:" + h}, goos="windows", goarch=a)
+            add(bare, d + "/" + i + ".exe", "Binary", {"Format": "binary", "ID": "myriarch-updater-binary", "Checksum": "sha256:" + ("0" * 64 if variant == "badchecksum" and a == "amd64" else h)}, goos="windows", goarch=a)
             sums[bare] = h
         z = io.BytesIO()
         with zipfile.ZipFile(z, "w") as zf:
@@ -444,8 +509,11 @@ with tarfile.open(fileobj=t, mode="w:gz") as tf:
         ti = tarfile.TarInfo(n); ti.size = 4; tf.addfile(ti, io.BytesIO(b"abcd"))
 name = "myriarch-updater_%s_linux_amd64.tar.gz" % ver
 sums[name] = write(name, t.getvalue()); add(name, name, "Archive", {"ID": "myriarch-updater"}, goos="linux", goarch="amd64")
-for n in [a["name"] for a in arts if a["type"] == "Archive"] + ["myriarch-webui_%s" % ver]:
+names = [a["name"] for a in arts if a["type"] == "Archive"]
+if variant == "nosbom": names = names[1:]
+for n in names + ["myriarch-webui_%s" % ver]:
     sn = n + ".sbom.json"; sums[sn] = write(sn, b'{"spdxVersion": "SPDX-2.3"}'); add(sn, sn, "SBOM", {"ID": "archives" if "webui" not in n else "webui"})
+if variant == "extrasum": sums["unexpected.txt"] = "0" * 64
 sums["LICENSE"] = sha(b"license\n"); sums["THIRD_PARTY_NOTICES"] = sha(b"notices\n")
 open(os.path.join(out, "checksums.txt"), "w").write("".join("%s  %s\n" % (sums[n], n) for n in sorted(sums)))
 open(os.path.join(out, "artifacts.json"), "w").write(json.dumps(arts))
@@ -477,6 +545,10 @@ b = b"MZ" + b"nothing here"
 open(sys.argv[1], "wb").write(b); open(sys.argv[2], "w").write(hashlib.sha256(b).hexdigest() + "\n")
 PY
 expect_fail "check-dist: a binary without version resources" "\\[dist_mismatch\\] myriarch-updater_windows_amd64.exe carries no version resource string" dist_check
+mkdist badchecksum; expect_fail "check-dist: a bare binary whose recorded checksum is not the accepted one" "\\[dist_mismatch\\] the checksum goreleaser recorded for myriarch-updater_.*windows_amd64.exe" dist_check
+mkdist extrasum; expect_fail "check-dist: an unexpected entry in checksums.txt" "\\[dist_mismatch\\] checksums.txt lists unexpected entries: unexpected.txt" dist_check
+mkdist nosbom; expect_fail "check-dist: an archive without its SBOM" "\\[dist_mismatch\\] [0-9]+ SBOMs for [0-9]+ archives" dist_check
+expect_fail "check-dist: stage off is refused" "\\[stage_invalid\\] check-dist needs stage collect or apply" ws MYRIARCH_WINDOWS_STAGE=off bash "${WSH}" check-dist
 
 if [ "${SKIPPED}" -gt 0 ]; then echo "SKIPPED ${SKIPPED} cases: osslsigncode ${OSSLSIGNCODE_VERSION} missing in ${TOOLS_BIN}"; fi
 finish_tests "windows-hook-test"

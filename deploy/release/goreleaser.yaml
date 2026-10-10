@@ -61,7 +61,8 @@ builds:
       - {goos: darwin, goarch: amd64}
     hooks:
       pre:
-        # the release build never runs Node: the UI comes prebuilt (make web-build, or the ui job of the release workflow)
+        # the release build never runs Node: the UI comes prebuilt (make web-build, or the ui job of the release workflow). The check is
+        # a hook of this build only (not of `before:`), because the Windows build job of the release workflow builds without the UI.
         - cmd: "bash -c 'test -f internal/webui/dist/index.html || { echo \"internal/webui/dist/index.html is missing: build the web UI first (make web-build)\" >&2; exit 1; }'"
     ldflags: &ldflags
       - -s -w

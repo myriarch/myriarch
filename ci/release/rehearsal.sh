@@ -35,7 +35,7 @@ cleanup() {
   deploy/release/windows-signed.sh clean
 }
 trap cleanup EXIT
-unset MYRIARCH_WINDOWS_STAGE MYRIARCH_WINDOWS_UNSIGNED_DIR MYRIARCH_WINDOWS_SIGNED_DIR MYRIARCH_AUTHENTICODE_DIR WINDOWS_SIGNING WINDOWS_SIGNING_TEST_DIR
+unset MYRIARCH_WINDOWS_STAGE MYRIARCH_WINDOWS_UNSIGNED_DIR MYRIARCH_WINDOWS_SIGNED_DIR MYRIARCH_AUTHENTICODE_DIR MYRIARCH_WINDOWS_SIGNING WINDOWS_SIGNING WINDOWS_SIGNING_TEST_DIR
 
 section_start collect "pass 1: snapshot in stage collect"
 MYRIARCH_WINDOWS_STAGE=collect MYRIARCH_WINDOWS_UNSIGNED_DIR="${R}/windows-unsigned" \
@@ -49,7 +49,7 @@ ci/release/authenticode-test-ca.sh init "${K}/ca"
 WINDOWS_SIGNING=test WINDOWS_SIGNING_TEST_DIR="${K}/ca" ci/release/windows-sign-hook.sh --in "${R}/windows-unsigned" --out "${R}/windows-signed"
 
 section_start apply "pass 2: snapshot in stage apply"
-MYRIARCH_WINDOWS_STAGE=apply MYRIARCH_WINDOWS_UNSIGNED_DIR="${R}/windows-unsigned" MYRIARCH_WINDOWS_SIGNED_DIR="${R}/windows-signed" \
+MYRIARCH_WINDOWS_STAGE=apply MYRIARCH_WINDOWS_UNSIGNED_DIR="${R}/windows-unsigned" MYRIARCH_WINDOWS_SIGNED_DIR="${R}/windows-signed" MYRIARCH_WINDOWS_SIGNING=test \
   MYRIARCH_AUTHENTICODE_DIR="${K}/ca/trust" goreleaser release --snapshot --clean --skip=publish -f "${cfg}"
 MYRIARCH_WINDOWS_STAGE=apply deploy/release/windows-signed.sh check-dist
 

@@ -386,9 +386,11 @@ guidance after each item names what to do.
   from the provider's file and attaches it to the job's own build, and verifies the result against the committed chain: subject,
   SHA-256 digest and RFC 3161 timestamp (the output of osslsigncode is parsed, because it exits 0 for a missing timestamp). The
   text of the two PowerShell scripts before the signature block must equal the repository file. The trust anchors can be replaced
-  only in snapshot builds, and test signing with a throwaway CA is refused on tags and in `release.yml`. osslsigncode runs only
-  at the version pinned in `ci/versions.env`, built from a verified source archive and taken from the tool cache, never from
-  `PATH` (the distribution package predates verification fixes for crafted files). Staging happens only in git-ignored paths.
+  only in snapshot builds, and test signing with a throwaway CA is refused on tags and in `release.yml`. A release build requires
+  the configured signing mode (`MYRIARCH_WINDOWS_SIGNING`) and refuses a `signer.json` that names another provider, so a hook
+  cannot turn a configured signature into an unsigned release. osslsigncode runs only at the version pinned in
+  `ci/versions.env`, built from a verified source archive (with fortified libc calls and a stack protector) and taken from the tool
+  cache, never from `PATH` (the distribution package predates verification fixes for crafted files). Staging happens only in git-ignored paths.
   `ci/tests/windows-hook-test.sh` covers the failure cases. The decision is
   [ADR-0034](../adr/0034-authenticode-signing-of-windows-release-artifacts.md).
 - **CI controls.** The GitHub Actions workflows ([ADR-0032](../adr/0032-continuous-integration-on-github-actions.md)) use only

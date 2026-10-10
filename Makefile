@@ -153,6 +153,7 @@ validate-examples:
 	$(GO) run ./cmd/myrctl validate --strict --components examples/sim/components-otelcol-contrib-0.162.0.json hack/kind/gitops
 
 release:
+	@deploy/release/windows-signed.sh clean
 	@mkdir -p dist
 	@for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; ext=$$( [ $$os = windows ] && echo .exe ); \

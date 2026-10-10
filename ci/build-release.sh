@@ -6,9 +6,11 @@
 #
 #   ci/build-release.sh snapshot   --snapshot, unsigned, nothing published (LOCAL TEST ONLY; make release-snapshot)
 #
-# Releases are built only by the release workflow, which signs keyless (ADR-0023) and runs the license gates of
-# ci/check-release-licenses.sh and scripts/gen-third-party-notices.sh --check itself. This script has no key, no signing and no release
-# mode. The full path of a release (stage collect, signing hook, stage apply) is rehearsed by ci/release/rehearsal.sh
+# Releases are built only by the release workflow, which signs keyless (ADR-0023). This script has no key, no signing and no release
+# mode, and it does not run the release gates ci/check-release-deps.sh, ci/check-release-licenses.sh and
+# scripts/gen-third-party-notices.sh --check: the gates `go` and `licenses` of ci-ok (make check-local) run them on every commit, the
+# release guard requires ci-ok on the tagged commit, and the release workflow runs them again before it packages
+# (deploy/release/README.md). The full path of a release (stage collect, signing hook, stage apply) is rehearsed by ci/release/rehearsal.sh
 # (make release-rehearsal).
 #
 # The web UI has to be built already (make web-build): the release build never runs Node. The Windows files are not signed

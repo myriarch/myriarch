@@ -24,6 +24,9 @@
 #   MYRIARCH_WINDOWS_UNSIGNED_DIR   default <root>/.cache/release/windows-unsigned
 #   MYRIARCH_WINDOWS_SIGNED_DIR     default <root>/.cache/release/windows-signed
 #   MYRIARCH_AUTHENTICODE_DIR       trust anchors, default <root>/deploy/release/authenticode; only snapshot builds may set it
+#   MYRIARCH_WINDOWS_SIGNING        stage apply: the configured signing mode (off, signpath or kms; the release workflow parses it from
+#                                   deploy/release/windows-signing.env). Required for release builds; signer.json has to name the same
+#                                   provider ([mode_missing], [provider_mismatch]). Snapshots may leave it unset.
 #   TOOLS_BIN                       default <root>/.cache/bin (go-winres, osslsigncode)
 # The unsigned and signed directories are staging areas: inside the work tree they have to be git-ignored (use .cache/ or a path
 # outside the repository).
@@ -142,7 +145,7 @@ cmd_prepare() {
       local rel_flag=()
       [ "${snapshot}" = true ] || rel_flag=(--release)
       python3 -I "${AUTH}" accept-scripts --root "${ROOT}" --state "${STATE}" --unsigned "${UNSIGNED_DIR}" --signed "${SIGNED_DIR}" \
-        --trust "${TRUST_DIR}" ${rel_flag[@]+"${rel_flag[@]}"} ;;
+        --trust "${TRUST_DIR}" --expect-provider "${MYRIARCH_WINDOWS_SIGNING-}" ${rel_flag[@]+"${rel_flag[@]}"} ;;
   esac
   printf 'stage=%s\nversion=%s\nsnapshot=%s\n' "${MYRIARCH_WINDOWS_STAGE}" "${version}" "${snapshot}" > "${STATE}/stage"
 }
@@ -172,7 +175,7 @@ cmd_build() {
       local rel_flag=()
       [ "${snapshot}" = true ] || rel_flag=(--release)
       python3 -I "${AUTH}" accept-exe --root "${ROOT}" --name "${name}" --fresh "${path}" --state "${STATE}" --unsigned "${UNSIGNED_DIR}" \
-        --signed "${SIGNED_DIR}" --trust "${TRUST_DIR}" ${rel_flag[@]+"${rel_flag[@]}"} ;;
+        --signed "${SIGNED_DIR}" --trust "${TRUST_DIR}" --expect-provider "${MYRIARCH_WINDOWS_SIGNING-}" ${rel_flag[@]+"${rel_flag[@]}"} ;;
   esac
 }
 

@@ -95,7 +95,10 @@ licensed, but `xi2/xz` is public domain (not on the license allowlist), and the 
 runtime (see below), which is not wanted in a release artifact. `ci/check-release-deps.sh` verifies this with `go list -deps`
 for linux, windows and darwin and fails if one of the forbidden modules is linked. The same script checks that the UI
 bundle contains no font files and that `web/package.json` has no `@fontsource` dependency (the UI uses system font
-stacks). `make check-local` runs it as part of the `go` gate. The release build runs it, and the drift check of `THIRD_PARTY_NOTICES`, before goreleaser.
+stacks). `make check-local` runs it as part of the `go` gate, and the aggregate CI job `ci-ok`, which the release guard requires on the tagged commit,
+covers it, so a released commit has passed it. The release build itself (`ci/build-release.sh`, goreleaser) does not run it again; the release
+workflow has to run it, `ci/check-release-licenses.sh` and `scripts/gen-third-party-notices.sh --check` before it packages
+(`deploy/release/README.md`, section on the release workflow).
 
 ### License check of the release builds
 

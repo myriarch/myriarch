@@ -34,9 +34,10 @@ Binaries and archives are identical across two builds of a commit with the same 
 timestamps come from the commit (`mod_timestamp`, `{{ .CommitDate }}`), the builds use `-trimpath`, the Windows version resources
 are deterministic, and the generated `.syso` files are git-ignored (so Go stamps `vcs.modified=false`).
 
-The SBOMs are not reproducible: syft writes a random `documentNamespace`, the creation time and an entry for its own temporary
-directory, even with `SOURCE_DATE_EPOCH`. `checksums.txt` differs between two builds for that reason. The rehearsal compares SBOMs
-without these fields.
+The SBOMs are not reproducible: syft writes a random `documentNamespace` and the creation time, even with `SOURCE_DATE_EPOCH`.
+`checksums.txt` differs between two builds for that reason. The rehearsal compares SBOMs without these two fields. `sbom.sh` removes the
+file entry that syft adds for its own temporary extraction directory of an archive (it names the build host's `TMPDIR` and is not in the
+archive) together with the relationships that name it.
 
 ## SBOMs
 
@@ -54,7 +55,9 @@ has no effect on lockfile version 9), so without the reduction the SBOM would li
 version from the tag, the original file name `<program>.exe` and the copyright line. It writes
 `cmd/<program>/rsrc_windows_<arch>.syso`, which Go links into the Windows builds only. The files are git-ignored, are generated
 in an empty working directory (no stray icon is picked up), use no manifest (the runtime behavior is unchanged) and are removed by
-`ci/build-release.sh`, `ci/release/rehearsal.sh`, `windows-signed.sh clean` and `make clean`.
+`ci/build-release.sh`, `ci/release/rehearsal.sh`, `windows-signed.sh clean`, `make release` (at its start) and `make clean`. A direct
+`goreleaser` call, as in the release workflow, leaves them in place; run `windows-signed.sh clean` before any other Windows build in the
+same work tree, because Go links whatever `rsrc_windows_*.syso` it finds.
 
 ## Windows signing hook
 
@@ -83,6 +86,7 @@ goreleaser; otherwise stage `apply` fails with `[not_reproducible]`.
 | `MYRIARCH_WINDOWS_UNSIGNED_DIR` | the unsigned set, default `.cache/release/windows-unsigned` |
 | `MYRIARCH_WINDOWS_SIGNED_DIR` | the signed set, default `.cache/release/windows-signed` |
 | `MYRIARCH_AUTHENTICODE_DIR` | the trust anchors, default `deploy/release/authenticode`; only snapshot builds may set it |
+| `MYRIARCH_WINDOWS_SIGNING` | stage `apply`: the configured signing mode (`off`, `signpath` or `kms`), parsed by the release workflow from `deploy/release/windows-signing.env` and set in the packaging job. Required for release builds (`[mode_missing]`); `signer.json` has to name the same provider (`[provider_mismatch]`). Snapshots may leave it unset. |
 | `WINDOWS_SIGNING` | the mode of the hook: `off` (or `signpath`, `kms`, `test`, see below); the release workflow takes it from `deploy/release/windows-signing.env` |
 | `TOOLS_BIN` | where go-winres and osslsigncode are found, default `.cache/bin` |
 
@@ -133,7 +137,8 @@ the only code that runs osslsigncode):
 
 1. The rebuilt file must equal the unsigned build (`SHA256SUMS` of the unsigned directory), else `[not_reproducible]`.
 2. `signer.json` is validated against both sets (`[signer_json]`); a `test` provider is refused in release builds
-   (`[provider_test_release]`).
+   (`[provider_test_release]`). In a release build `MYRIARCH_WINDOWS_SIGNING` has to be set and equal to the provider in
+   `signer.json` (`[mode_missing]`, `[provider_mismatch]`), so a hook cannot turn a signed release into an unsigned one.
 3. If nothing is signed, the file in the signed directory must still equal the unsigned build (`[unsigned_changed]`).
 4. If signed, the signature is extracted from the provider's file and attached to the packaging job's own build (a signature that
    does not cover that build is `[signature_mismatch]`), and the result is verified with osslsigncode against `ca.pem` and
@@ -161,7 +166,23 @@ creates in a temporary directory outside the repository (RSA 3072, valid for sev
 is never published and never trusted anywhere else. The timestamp comes from the built-in RFC 3161 time stamping authority of
 osslsigncode, so the rehearsal runs offline. The tests of the hook (`ci/tests/windows-hook-test.sh`) cover the failure cases: a changed
 byte, a foreign CA, a missing timestamp, a foreign timestamp authority, a wrong subject, a weak digest, an unsigned file that was
-changed, and the staging rules.
+changed, a provider file that differs only in a region that no signature covers (the PE checksum, whitespace in a script's signature
+block; the staged file is still the job's own build with the signature attached), a nested second signature, a mode that differs from
+`signer.json`, and the staging rules.
+
+## What the release workflow has to do
+
+The release workflow (not part of this directory) connects to the build through these points:
+
+* **Mode binding.** The sign job exports `WINDOWS_SIGNING` for the hook, and the packaging job exports `MYRIARCH_WINDOWS_SIGNING` for
+  stage `apply`, both parsed (as data, not as shell) from `deploy/release/windows-signing.env`. Without the second variable a release
+  build fails, and `signer.json` has to name the configured provider.
+* **Release gates.** `ci/build-release.sh` and goreleaser do not run `ci/check-release-deps.sh`, `ci/check-release-licenses.sh` or
+  `scripts/gen-third-party-notices.sh --check`. The release workflow has to run them (the `ui` and `tools` jobs) before it packages. They
+  also run on every commit in the gates `go` and `licenses` of `ci-ok`, which the release guard requires on the tagged commit.
+* **No UI in the `before:` hook.** The check for `internal/webui/dist/index.html` is a pre-build hook of `myriarchd` only. The `before:`
+  hook runs `windows-signed.sh prepare`, because the job that builds the Windows files (stage `collect`) builds without the web UI.
+* **Direct goreleaser calls** leave the generated `rsrc_windows_*.syso` files in place; see the section on version resources.
 
 ## Authenticode (Windows)
 
