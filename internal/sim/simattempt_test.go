@@ -103,19 +103,21 @@ func TestSimUpdaterReportsStepsOfASuccessfulUpdate(t *testing.T) {
 			}
 		}
 		_, phases := componentOf(f, c.updater)
-		// the phases appear in order (other health reports in between are fine)
-		idx := -1
-		for _, want := range []string{"downloading", "verifying", "installing", "restarting", "health_check", "succeeded"} {
-			next := -1
-			for i := idx + 1; i < len(phases); i++ {
-				if phases[i] == want {
-					next = i
-					break
-				}
+		// The phases that reached the server follow the order of an attempt, which begins in verifying before the download,
+		// and end with succeeded. OpAMP reports health as state, not as a stream of events: the client sends its latest
+		// health, so a phase that the next one replaced before the report left can be missing (seen with installing on a
+		// slow runner). The final component above lists every step.
+		want := []string{"verifying", "downloading", "verifying", "installing", "restarting", "health_check", "succeeded"}
+		j := 0
+		for _, p := range phases {
+			for j < len(want) && want[j] != p {
+				j++
 			}
-			require.Greater(t, next, idx, "phase %s after index %d in %v", want, idx, phases)
-			idx = next
+			require.Less(t, j, len(want), "phase %s out of order in %v", p, phases)
+			j++
 		}
+		require.NotEmpty(t, phases)
+		require.Equal(t, "succeeded", phases[len(phases)-1], "the last phase in %v", phases)
 	}
 }
 
