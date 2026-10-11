@@ -918,6 +918,8 @@ common_checks() { # name file tag
   contains "$1: the provenance asset" "myriarch_${3#v}_provenance.intoto.jsonl" "${t}"
   contains "$1: the Linux updater" "myriarch-updater_${3#v}_linux_amd64" "${t}"
   contains "$1: the sha256- tags warning" "sha256-<hex>" "${t}"
+  contains "$1: cosign verify accepts attestations, the cosign signature is the entry of type sign/v1" "also accepts the attestations of the same identity; the JSON entry of the type \`https://sigstore.dev/cosign/sign/v1\` is the cosign signature. " "${t}"
+  contains "$1: verify-asset is the proof of release, in a sentence of its own" ". \`gh release verify-asset\` (membership of a file in this immutable release) is the proof that a file was released." "${t}"
   [ "$(tail -c 1 "$2" | od -An -c | tr -d ' ')" = '\n' ] && [ "$(tail -c 2 "$2" | od -An -c | tr -d ' ')" != '\n\n' ] && ok "$1: ends with one newline" || fail "$1: does not end with exactly one newline"
 }
 expect_ok "rc, unsigned" notes_run v0.1.0-rc.1 off "" "${NT}/signer-off.json" "${NT}/rc.md"
