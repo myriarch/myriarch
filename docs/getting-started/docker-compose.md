@@ -46,8 +46,8 @@ docker compose -f quickstart.yaml logs -f myriarchd
 ```
 
 The file is self-contained. Its default image tag is the version of the release it belongs to, so the file of every tag,
-release candidates included, starts the image of that tag (`ghcr.io/myriarch/myriarch:0.1.0` in the file of `v0.1.0`; use
-`v<version>` in the URL for a release candidate, with the tag of that candidate). `QUICKSTART_IMAGE` selects any other image, for example one that you
+release candidates included, starts the image of that tag (`ghcr.io/myriarch/myriarch:0.1.0` in the file of `v0.1.0`; for a
+release candidate, put its tag `v<version>` in the URL). `QUICKSTART_IMAGE` selects any other image, for example one that you
 pinned by digest (`ghcr.io/myriarch/myriarch@sha256:...`) or copied to your own registry:
 
 ```bash
