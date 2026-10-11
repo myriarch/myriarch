@@ -35,10 +35,11 @@ a fix needs a coordinated change in an upstream project.
 
 ## Supported versions
 
-myriarch is in alpha and **no release has been published yet**. Interfaces and configuration keys may still change.
+myriarch is in alpha. Interfaces and configuration keys may still change. v0.1.0 is published first as release candidates
+(`v0.1.0-rc.N`, GitHub pre-releases).
 
-**Until the first release (v0.1.0):** security fixes are made on the `main` branch only. There are no release
-branches, packages or images to patch; build from the latest commit of `main`.
+**Until v0.1.0:** security fixes are made on the `main` branch and go into the next release candidate; a published candidate is
+never patched. Use the newest candidate or build from the latest commit of `main`.
 
 **From v0.1.0 on:**
 

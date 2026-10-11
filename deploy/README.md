@@ -343,7 +343,8 @@ build of the matrix, mirror upload and signing scripts against throw-away server
 covered by automated tests: Docker image builds from the Dockerfiles, service creation/registry/ACLs on Windows, systemd integration on a real host, applying the
 manifests to a cluster. The release images are covered up to the registry: the build from release archives (contract, determinism,
 SBOMs) and the push by digest run against a registry on `127.0.0.1` in `ci/tests/image-crane-test.sh`; whether ghcr.io accepts
-a tag-less push by digest and rejects a wrong digest is checked with the first release candidate: the job `push-images` fails
-when it does not, and the job `verify` then checks the pushed images. The scripts of the release workflow are covered by
+a tag-less push by digest is shown by the first release candidate (the job `push-images` fails when it does not); whether
+ghcr.io rejects a wrong digest is not tested against ghcr.io, which is why the script computes the digest before the push
+and reads the index back afterwards. The job `verify` then checks the pushed images. The scripts of the release workflow are covered by
 `ci/tests/release-scripts-test.sh`, `ci/tests/release-smoke-test.sh` and `ci/tests/release-workflow-test.sh`; the smoke jobs
 after publication test the release as a user installs it.

@@ -45,10 +45,10 @@ Myriarch closes that gap and keeps operators in control:
 
 ## Status
 
-Myriarch is **alpha**. **No release has been published yet**: the container images named below appear with the first
-release (v0.1.0). Interfaces, configuration and the GitOps format (`myriarch.dev/v1alpha1`) can
-still change. Every release is signed keyless and carries build provenance; [verify it](docs/security/verify-releases.md)
-before you run it.
+Myriarch is **alpha**. v0.1.0 is published first as release candidates (`v0.1.0-rc.N`, GitHub pre-releases on the
+[releases page](https://github.com/myriarch/myriarch/releases)); v0.1.0 follows as the first final release. Interfaces,
+configuration and the GitOps format (`myriarch.dev/v1alpha1`) can still change. Every release, release candidates
+included, is signed keyless and carries build provenance; [verify it](docs/security/verify-releases.md) before you run it.
 
 | Component | Support level |
 |---|---|
@@ -119,7 +119,7 @@ numbered checks of the whole flow, including a collector version update. It need
 [Install with Helm](docs/operations/install-helm.md).
 
 With Docker Compose, [docs/getting-started/docker-compose.md](docs/getting-started/docker-compose.md) starts the server,
-PostgreSQL and 200 simulated collectors from the release images (available from v0.1.0); the Compose files in
+PostgreSQL and 200 simulated collectors from the release images (published from v0.1.0-rc.1 on); the Compose files in
 `deploy/compose/` are meant for evaluation and development only. For a guided first session from source, with
 a fleet and a rollout policy of your own, read
 [docs/getting-started/first-fleet-and-rollout.md](docs/getting-started/first-fleet-and-rollout.md).
@@ -186,7 +186,7 @@ parallel. Details: [docs/architecture.md](docs/architecture.md).
 | `myriarch-updater` | Host agent for collector binary updates (systemd, Windows service, container mode) |
 | `myriarch-sim` | Load simulator (1,000 and more simulated supervisors and updaters) |
 | Helm chart | [`deploy/helm/myriarch`](deploy/helm/myriarch/README.md); install it from the repository, a signed OCI chart is planned for v0.2.0 |
-| Container images | `ghcr.io/myriarch/myriarch` (the server, with `myrctl`, `myriarch-sim` and the example repositories) and `ghcr.io/myriarch/myriarch-updater`, for `linux/amd64` and `linux/arm64`; published with the first release. `myrctl` and the simulator are also in the release archives |
+| Container images | `ghcr.io/myriarch/myriarch` (the server, with `myrctl`, `myriarch-sim` and the example repositories) and `ghcr.io/myriarch/myriarch-updater`, for `linux/amd64` and `linux/arm64`; published with every release, release candidates included (tags `X.Y.Z` and `X.Y`, `X.Y.Z-rc.N` for a candidate, no `latest`). `myrctl` and the simulator are also in the release archives |
 
 ## Documentation
 

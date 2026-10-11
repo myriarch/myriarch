@@ -37,6 +37,7 @@ config/_default/            hugo.yaml (site), module.yaml (mounts), params.yaml,
 content/                    pages that exist only on the website, content adapters (_content.gotmpl)
 data/repo_pages.yaml        repository files that adapters render (the root files)
 data/third_party.yaml       the notices of /legal/third-party/
+data/release.yaml           the release status (latest final release or newest candidate): the one value behind the status chip of the landing page; set by hand after a publication (docs/releasing.md)
 layouts/                    render hooks (_markup), partials (repo/*, csp.html), shortcodes, overrides of Docsy files, 404.html, robots.txt
 assets/scss/                brand tokens (_variables_project.scss) and project styles
 assets/js/                  landing-mark.js: the loop of the mark on the landing page and its click-to-pause behaviour (the site's own script; the rest comes with the theme)
@@ -200,6 +201,7 @@ paragraph as the reason.
 | `check-indexing.py` | a preview that can be indexed (no `Disallow: /`, a sitemap line, a page without `noindex`) or a production site that hides itself; the mode comes from `WEBSITE_ENV` |
 | `check-placeholders.py` | a placeholder whose page now exists, or a malformed placeholder |
 | `check-api-spec.py` | a missing API reference page, a download that is not exactly one fingerprinted copy of `api/openapi.yaml`, a page that loads a script of an API viewer, or a number of operation sections that differs from the contract |
+| `check-landing.py` | a missing or malformed screenshot, a section or the mark of the landing page that is broken, an image without size or alt text, or a status chip that differs from `data/release.yaml` (or a malformed `release.yaml`) |
 | `check-notices.py` | a shipped dependency without a notice, with another version in `data/third_party.yaml`, or without a published license text |
 
 A new check is a file `scripts/check-<name>.py` that takes the built site as its argument; the runner finds it. Outside the gate:

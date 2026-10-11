@@ -3,16 +3,17 @@
 
 # Compose quickstart: PostgreSQL 17 + myriarchd + 200 simulated collectors from the release image, on one machine.
 #
-#   curl -fsSLO https://raw.githubusercontent.com/myriarch/myriarch/v0.1.0/deploy/compose/quickstart.yaml
+#   curl -fsSLO https://raw.githubusercontent.com/myriarch/myriarch/v<version>/deploy/compose/quickstart.yaml   # the tag of this file
 #   docker compose -f quickstart.yaml up -d
 #   docker compose -f quickstart.yaml logs -f myriarchd
 #   docker compose -f quickstart.yaml down -v           # stop and delete the database and the data directory
 #
 # The file needs no repository checkout: the image carries the example GitOps repository (examples/quickstart) and the
-# simulator profiles (examples/sim) below /opt/myriarch. The image is published from the first release on
-# (ghcr.io/myriarch/myriarch, tags X.Y.Z and X.Y, no "latest"); QUICKSTART_IMAGE selects another one, for example a
-# release candidate or an image pinned by digest. SIM_AGENTS sets the number of simulated collectors, and
-# QUICKSTART_GITOPS_DIR the GitOps directory inside the container (see docs/getting-started/docker-compose.md).
+# simulator profiles (examples/sim) below /opt/myriarch. The image is published with every release, release
+# candidates included (ghcr.io/myriarch/myriarch, tags X.Y.Z and X.Y, X.Y.Z-rc.N for a candidate, no "latest");
+# QUICKSTART_IMAGE selects another one, for example an image pinned by digest or a copy in your own registry. SIM_AGENTS sets the
+# number of simulated collectors, and QUICKSTART_GITOPS_DIR the GitOps directory inside the container (see
+# docs/getting-started/docker-compose.md).
 #
 # UI/REST: http://localhost:8080 (dev login admin/admin, operator/operator, viewer/viewer)
 # OpAMP:   ws://localhost:8080/v1/opamp (in dev mode without a mandatory enrollment token)
