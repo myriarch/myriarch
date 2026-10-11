@@ -432,17 +432,22 @@ both, so a rule does not depend on how a file is named:
   persona reports, and that an ignore covers only its audit and file; with a stub it checks which options and environment
   variables reach zizmor.
 - **CodeQL scans the code** (`.github/workflows/codeql.yml`, results in the code scanning alerts of the repository). One matrix
-  job `analyze` per language, with the `security-extended` queries: `go` with a manual build that CodeQL traces (`go build ./...`,
-  then with the tags `embedui,devpg` and a placeholder page for the git-ignored `internal/webui/dist`, then for `GOOS=windows`
-  and `GOOS=darwin`, so that the code behind the build tags and the Windows-only code of the updater are analysed),
+  job `analyze` per language, with the `security-extended` queries: `go` with a manual build that CodeQL traces
+  (`go build ./...`, then with the tags `embedui,devpg` and a placeholder page for the git-ignored `internal/webui/dist`, then
+  for `GOOS=windows` (also with the tags, because `internal/devpg/lock_other.go` is `devpg && !unix` and no other build compiles
+  it) and `GOOS=darwin`, so that the code behind the build tags and the Windows-only code of the updater are analysed),
   `javascript-typescript` (the web UI and the JavaScript scripts of the website), `python` (`ci/`, `scripts/`,
-  `website/scripts/`, `assets/brand/source`) and `actions` (the workflows and the local action). It runs on pushes to `main`, on
-  every pull request to `main` and weekly. Pull requests from forks and from Dependabot are analysed too, because GitHub always
-  lets code scanning upload the results of a `pull_request` run (default setup would skip forks; advanced setup does not). The
-  job's one write scope, `security-events`, is listed in `ci/workflow-permissions.txt`. Default setup of code scanning must stay
-  off in the repository settings, because this workflow replaces it. `init`, `analyze` and the `upload-sarif` step of
-  `scorecard.yml` use the same pin of `github/codeql-action` (rule R2). A new language, build tag or operating system goes into
-  the matrix and into the build step; a new build tag in `ci/check-local.sh` goes into the build step as well.
+  `website/scripts/`, `assets/brand/source`, `contrib/enterprise-mirror`) and `actions` (the workflows and the local action). It
+  runs on pushes to `main`, on every pull request to `main` and weekly. Pull requests from forks and from Dependabot are
+  analysed too, because GitHub always lets code scanning upload the results of a `pull_request` run (default setup would skip
+  forks; advanced setup does not). The job's one write scope, `security-events`, is listed in `ci/workflow-permissions.txt` with
+  its review: the token of a fork run is read-only, a Dependabot run receives the scope (the `permissions` key raises the
+  read-only default of Dependabot), and the scope also allows dismissing alerts. That stays harmless because the steps of the
+  job compile the code and run none of it, and the job has no secret. Default setup of code scanning must stay off in the
+  repository settings, because this workflow replaces it. `init`, `analyze` and the `upload-sarif` step of `scorecard.yml` use
+  the same pin of `github/codeql-action` (rule R2). A new language, build tag or operating system goes into the matrix and into
+  the build step, and the first run has to show that the extractor saw the new files; a new build tag in `ci/check-local.sh`
+  goes into the build step as well.
 - **A read-only token**: `permissions: contents: read` at the top of every workflow. A job-level write scope needs a line in
   `ci/workflow-permissions.txt` (`<workflow file> <job> <scope>`) and a review of the job.
 - **No `pull_request_target` and no `workflow_run`**, `persist-credentials: false` on every checkout, a timeout on

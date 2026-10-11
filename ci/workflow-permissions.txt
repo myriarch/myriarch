@@ -9,11 +9,13 @@
 # does not run code of a pull request or why the scope is harmless there.
 
 # CodeQL (.github/workflows/codeql.yml). The job `analyze` uploads the SARIF results of the analysis to code scanning, which needs
-# security-events: write; contents is read-only. The job builds and analyses the code of every pull request to main, also from
-# forks and from Dependabot (GitHub always lets code scanning upload the results of a pull_request run). The scope is harmless
-# there: for a pull request from a fork GitHub makes the token read-only whatever the workflow asks for, a branch of this
-# repository needs write access to the repository anyway, the job has no secret, and the scope lets it write code scanning alerts
-# only: no contents, packages, releases or deployments.
+# security-events: write; contents is read-only. The job analyses the code of every pull request to main. The token of a pull
+# request from a fork is read-only whatever the workflow asks for (GitHub still lets code scanning upload the results of such a
+# run). A Dependabot pull request does receive the scope: the token of Dependabot is read-only by default, and the permissions key
+# of the job raises it. The scope writes code scanning alerts and also dismisses them; it gives no access to contents, packages,
+# releases or deployments. That is harmless because the steps of the job compile the code and run none of it (no test, no package
+# installation, no generator) and the job has no secret and no other scope; a branch of this repository needs write access to the
+# repository anyway.
 codeql.yml analyze security-events
 
 # OpenSSF Scorecard (ADR-0033; .github/workflows/scorecard.yml, the shape is fixed by rule R12). The job `analysis` runs on pushes

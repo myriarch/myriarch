@@ -425,18 +425,26 @@ guidance after each item names what to do.
   accepted where the release identity is required. The pin is changed only by a reviewed update.
 - **Static analysis in CI: CodeQL, Scorecard and zizmor.** Three controls look at the code and the pipeline, none replaces review:
   - *CodeQL* (`.github/workflows/codeql.yml`) analyses the Go code (built for Linux with and without the `embedui` and `devpg`
-    build tags, and for Windows and macOS, so that the Windows-only code of the updater, which runs as SYSTEM, is included),
-    the web UI and the JavaScript scripts of the website, the Python scripts of the repository and the workflows, with the
-    `security-extended` queries, on pushes to `main`, on every pull request to `main` and weekly; results are code scanning
-    alerts. Pull requests from forks and from Dependabot are analysed too. The job holds `security-events: write` (listed in
-    `ci/workflow-permissions.txt`) and builds the code of the pull request; the scope lets it write alerts only, no contents,
-    packages or releases, GitHub makes the token of a fork pull request read-only, and the job has no secrets. Alerts do not
-    block a merge until a ruleset requires them. It finds known classes of defects in code it can model; it does not find logic
-    errors, design flaws, problems in dependencies (`govulncheck` covers called vulnerabilities) or the configuration of the
-    repository and the organization. It analyses what the build and the extractor see: Go files for operating systems other than
-    Linux, Windows and macOS, build tags other than `embedui` and `devpg`, and the compiled web UI are not covered, and the shell
-    scripts, the Helm chart and the PowerShell installers are no CodeQL language (ShellCheck, the chart gate, the installer
-    tests and review cover them).
+    build tags, for Windows with and without them and for macOS, so that the Windows-only code of the updater, which runs as
+    SYSTEM, and the `devpg` file for systems other than unix are included), the web UI and the JavaScript scripts of the
+    website, the Python scripts of the repository (`ci/`, `scripts/`, `website/scripts/`, `assets/brand/source`,
+    `contrib/enterprise-mirror`) and the workflows, with the `security-extended` queries, on pushes to `main`, on every pull
+    request to `main` and weekly; results are code scanning alerts. Pull requests from forks and from Dependabot are analysed
+    too. The job holds `security-events: write` (listed in `ci/workflow-permissions.txt` with its review) and builds the code of
+    the pull request. The scope lets it write code scanning alerts and dismiss them, and gives no access to contents, packages
+    or releases. The token of a fork pull request is read-only whatever the workflow asks for; a Dependabot pull request does
+    receive the scope, because the `permissions` key of the job raises the read-only default of Dependabot. That stays harmless
+    because the steps of the job compile the code and run none of it (no test, no package installation, no generator) and the
+    job has no secret. Alerts do not block a merge until a ruleset requires them. It finds known classes of defects in code it
+    can model; it does not find logic errors, design flaws, problems in dependencies (`govulncheck` covers called
+    vulnerabilities) or the configuration of the repository and the organization. It analyses what the build and the extractor
+    see: Go files for operating systems other than Linux, Windows and macOS, build tags other than `embedui` and `devpg`, and
+    the compiled web UI are not covered, and the shell scripts, the Helm chart and the PowerShell installers are no CodeQL
+    language (ShellCheck, the chart gate, the installer tests and review cover them). That the extractor follows the `GOOS` of
+    the traced build is assumed, not proven: the first run of the workflow must confirm, in its logs or on the tool status page
+    of code scanning, that the `*_windows.go` files (`internal/updater/service_windows.go`, `internal/artifact/open_windows.go`,
+    `internal/deps/deps_windows.go`) and `internal/devpg/lock_other.go` were extracted; if they were not, the Windows build
+    needs a job of its own.
   - *OpenSSF Scorecard* (`scorecard.yml`, ADR-0033) scores repository practices (token permissions, pinned dependencies, branch
     protection, review, signed releases, dependency update tooling, security policy) weekly and on pushes to `main` and publishes
     the result. It runs without `repo_token`, so checks that need administrative access (branch protection) are partly
