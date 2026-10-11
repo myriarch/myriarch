@@ -1,0 +1,66 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# OpenSSF Scorecard (ADR-0033). Scores the repository against the Scorecard checks, publishes the result to the Scorecard API (the
+# badge and the public score) and uploads the findings to code scanning.
+#
+# The shape of this file is dictated by the Scorecard API, which refuses to publish results of a workflow that differs: no top-level
+# env or defaults, no workflow-level write permission, one job without env, defaults, container or services on a GitHub-hosted
+# Ubuntu runner, and only `uses:` steps from a short list. Rule R12 of ci/check-workflows.py checks exactly this shape and nothing in
+# this workflow may be added without reading that rule and ADR-0033. ossf/scorecard-action is the only third-party action of the
+# repository and may appear only here.
+#
+# The job has no secrets. publish_results sends the result with the OIDC token of the run (id-token: write); no repo_token is set,
+# so the checks that need administrative access to the repository (branch protection) score as unknown instead of being fed with a
+# personal access token. Results are accepted only for the default branch, hence the triggers push to main and a schedule.
+name: scorecard
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # weekly, off the full hour
+    - cron: '37 6 * * 3'
+
+permissions:
+  contents: read
+
+jobs:
+  analysis:
+    name: analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      # read the repository and the workflow runs (reviewed in ci/workflow-permissions.txt for the two write scopes below)
+      contents: read
+      actions: read
+      # upload the findings to code scanning
+      security-events: write
+      # the OIDC token that authenticates the published result at the Scorecard API
+      id-token: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run the Scorecard analysis
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Keep the results as an artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 5
+          if-no-files-found: error
+
+      - name: Upload the findings to code scanning
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: results.sarif
+          category: scorecard

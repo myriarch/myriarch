@@ -13,3 +13,11 @@
 # of a pull request from a branch of this repository (its if: keeps forks and Dependabot out), it has no secret, and the scope
 # lets it write code scanning alerts only: no contents, packages, releases or deployments.
 codeql.yml analyze security-events
+
+# OpenSSF Scorecard (ADR-0033; .github/workflows/scorecard.yml, the shape is fixed by rule R12). The job `analysis` runs on pushes
+# to main and on a schedule, never on a pull request, and has no secret. security-events: write uploads the findings to code
+# scanning; id-token: write gives ossf/scorecard-action the OIDC token that authenticates the published result at the Scorecard API.
+# The token is bound to this workflow (scorecard.yml on refs/heads/main), which no verification of a release accepts (ADR-0029).
+# The job has no write access to contents, packages or releases.
+scorecard.yml analysis security-events
+scorecard.yml analysis id-token
