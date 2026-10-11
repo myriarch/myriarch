@@ -125,7 +125,7 @@ func TestReleaseImageKindsMatchTheReleaseArchives(t *testing.T) {
 	assert.Contains(t, string(readDeploy(t, "k8s/collector/Dockerfile")), "ARG UPDATER_IMAGE=scratch", "no default image: the digest of a release is passed on purpose")
 
 	// the archives that the builder reads: <binary>_<version>_<os>_<arch>.tar.gz of the goreleaser archives
-	assert.Contains(t, oci, `"%s_%s_%s_%s.tar.gz" % (binary, args.version, os_name, arch)`)
+	assert.Contains(t, oci, `"%s_%s_%s_%s.tar.gz" % (program, args.version, os_name, arch)`)
 	var g struct {
 		Archives []struct {
 			ID           string   `yaml:"id"`
@@ -143,6 +143,57 @@ func TestReleaseImageKindsMatchTheReleaseArchives(t *testing.T) {
 		}
 	}
 	assert.Len(t, found, 2, "goreleaser archives of the two published binaries")
+}
+
+// The server image holds myriarchd, myrctl and myriarch-sim, the example repositories and the data directory of the server. The
+// example files come from the release archives (everything in the image is then covered by checksums.txt), so the archives must
+// carry them.
+func TestServerImageContentComesFromTheReleaseArchives(t *testing.T) {
+	oci := readRepoFile(t, "scripts/lib/oci_image.py")
+	server := regexp.MustCompile(`(?s)"server": \{.*?\n    \},`).FindString(oci)
+	require.NotEmpty(t, server, "scripts/lib/oci_image.py: kind server")
+	assert.Contains(t, server, `"companions": ["`+brand.CLIBinary+`", "`+brand.SimBinary+`"]`)
+	assert.Contains(t, server, `("`+brand.ServerBinary+`", "examples/quickstart", "opt/myriarch/examples/quickstart")`)
+	assert.Contains(t, server, `("`+brand.SimBinary+`", "examples/sim", "opt/myriarch/examples/sim")`)
+	assert.Contains(t, server, `"dirs": [("var/lib/myriarchd", 0o750)]`, "the data directory of the server")
+	updater := regexp.MustCompile(`(?s)"updater": \{.*?\n    \},`).FindString(oci)
+	require.NotEmpty(t, updater)
+	assert.Contains(t, updater, `"companions": []`)
+	assert.Contains(t, updater, `"trees": []`)
+	assert.Contains(t, updater, `"dirs": []`, "the updater image needs no state directory: container mode keeps it on the volume of the collector image")
+
+	var g struct {
+		Archives []struct {
+			ID           string   `yaml:"id"`
+			Formats      []string `yaml:"formats"`
+			NameTemplate string   `yaml:"name_template"`
+			Files        []struct {
+				Src string `yaml:"src"`
+			} `yaml:"files"`
+		} `yaml:"archives"`
+	}
+	require.NoError(t, yaml.Unmarshal(readDeploy(t, "release/goreleaser.yaml"), &g))
+	srcs := map[string][]string{}
+	for _, a := range g.Archives {
+		for _, f := range a.Files {
+			srcs[a.ID] = append(srcs[a.ID], f.Src)
+		}
+		if a.ID == brand.CLIBinary || a.ID == brand.SimBinary {
+			assert.Equal(t, []string{"tar.gz"}, a.Formats[:1], "%s: the image reads the tar.gz archive", a.ID)
+			assert.Equal(t, a.ID+"_{{ .Version }}_{{ .Os }}_{{ .Arch }}", a.NameTemplate, a.ID)
+		}
+	}
+	assert.Contains(t, srcs[brand.ServerBinary], "examples/quickstart", "the myriarchd archive carries the quickstart repository for the image")
+	assert.Contains(t, srcs[brand.SimBinary], "examples/sim/*", "the myriarch-sim archive carries the simulator profiles for the image")
+	for _, id := range []string{brand.ServerBinary, brand.CLIBinary, brand.SimBinary} {
+		assert.Contains(t, srcs[id], "LICENSE", id)
+		assert.Contains(t, srcs[id], "THIRD_PARTY_NOTICES", id)
+	}
+
+	// the build script describes what the image holds
+	crane := readRepoFile(t, "scripts/build-image-crane.sh")
+	assert.Contains(t, crane, "myriarchd + myrctl + myriarch-sim and the example repositories")
+	assert.Contains(t, crane, "an empty data directory /var/lib/myriarchd for the user 65532")
 }
 
 func TestPublishedRepositoriesAndLabels(t *testing.T) {

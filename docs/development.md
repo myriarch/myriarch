@@ -82,7 +82,9 @@ Further places:
   respect `DOCKER_CONFIG` without setting it. These builds run as user and group 65532 and never push to `ghcr.io/myriarch/*`.
   The published images are built from the release archives instead: `make release-snapshot`, then
   `ALLOW_DIRTY=1 IMAGE_SOURCE=dist IMAGE_KIND=server scripts/build-image-crane.sh` (and `IMAGE_KIND=updater`) writes the OCI
-  layouts and SBOMs below `.cache/image-dist/`; `ci/release/push-images.sh` pushes a layout by digest. The image contract, the
+  layouts and SBOMs below `.cache/image-dist/`; `ci/release/push-images.sh` pushes a layout by digest. The server image holds
+  `myriarchd`, `myrctl`, `myriarch-sim`, the example repositories and the data directory `/var/lib/myriarchd` (owned by
+  65532:65532); all of it is read from the release archives. The image contract, the
   Dockerfile build contexts and the image license paths are described in [deploy/README.md](../deploy/README.md).
 - `deploy/release/goreleaser.yaml` builds `myriarchd` with `embedui` only.
 

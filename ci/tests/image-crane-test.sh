@@ -325,9 +325,11 @@ for r in ghcr.io/other/x registry.example.com/myriarch/x 127.0.0.1:5000/myriarch
 done
 
 # ---- (m) release images from the release archives (IMAGE_SOURCE=dist) ---------------------------------------------------
-# Stand-ins for the release archives of goreleaser: small static linux binaries built from this repository (myrctl for
-# myriarchd: same embedded roots, time zone database and build tags; the real myriarch-updater), archives with the files of
-# the real ones, checksums.txt and metadata.json. Nothing is pushed anywhere in this section except to a registry on 127.0.0.1.
+# Stand-ins for the release archives of goreleaser: small static linux binaries built from this repository (myrctl with the
+# tag embedui for myriarchd: same embedded roots, time zone database and build tags; the real myrctl, myriarch-sim and
+# myriarch-updater), archives with the files of the real ones (including examples/quickstart in the myriarchd archive and
+# examples/sim in the myriarch-sim archive), checksums.txt and metadata.json. Nothing is pushed anywhere in this section except
+# to a registry on 127.0.0.1.
 TOOLS_BIN="${TOOLS_BIN:-${REPO}/.cache/bin}"
 export TOOLS_BIN
 "${REPO}/ci/install-tools.sh" crane >/dev/null 2>&1
@@ -344,6 +346,8 @@ build_bin() { # out goarch package tags version; BUILD_GOOS, BUILD_CGO and BUILD
 built=1
 for arch in amd64 arm64; do
   build_bin "${BIN}/${arch}/myriarchd" "${arch}" ./cmd/myrctl embedui || built=0
+  build_bin "${BIN}/${arch}/myrctl" "${arch}" ./cmd/myrctl "" || built=0
+  build_bin "${BIN}/${arch}/myriarch-sim" "${arch}" ./cmd/myriarch-sim "" || built=0
   build_bin "${BIN}/${arch}/myriarch-updater" "${arch}" ./cmd/myriarch-updater || built=0
 done
 build_bin "${BIN}/amd64/devpg" amd64 ./cmd/myrctl embedui,devpg || built=0
@@ -370,36 +374,88 @@ printf 'package main\n\nfunc main() {}\n' > "${W}/noroots/main.go"
 if [ "${built}" = 1 ]; then ok "stand-in binaries for the release archives are built"; else fail "stand-in binaries could not be built"; fi
 
 cat > "${W}/mkdist.py" <<'PY'
+# usage: mkdist.py <dist> <version> <commit> <repo> <name>:<amd64 binary>:<arm64 binary>... [-- option...]
+# One archive per name and architecture (<name>_<version>_linux_<arch>.tar.gz) with the files of the real archive: the binary,
+# LICENSE, THIRD_PARTY_NOTICES, README.md and, for myriarchd and myriarch-sim, the example tree of the repository
+# (examples/quickstart, examples/sim). checksums.txt lists all archives, metadata.json names version and commit.
+# Options (<name>. is optional and means the first archive): omit=<file> drops a file from the archive, notree=1 leaves the example
+# tree out, link=<path> adds a symbolic link in the tree, dotdot=1 adds an entry that leaves the tree, notices=other replaces
+# THIRD_PARTY_NOTICES by another text.
 import hashlib, io, json, os, sys, tarfile
 
-dist, version, commit, name = sys.argv[1:5]
-amd64, arm64 = sys.argv[5:7]
-repo = sys.argv[7]
-extra = sys.argv[8:]  # "omit=LICENSE" drops a file from the archives
-omit = [e.split("=", 1)[1] for e in extra if e.startswith("omit=")]
+dist, version, commit, repo = sys.argv[1:5]
+rest = sys.argv[5:]
+extras = rest[rest.index("--") + 1:] if "--" in rest else []
+specs = [a.split(":") for a in (rest[:rest.index("--")] if "--" in rest else rest)]
+first = specs[0][0]
+opts = {}
+for e in extras:
+    key, _, value = e.partition("=")
+    name, _, opt = key.rpartition(".")
+    opts.setdefault(name or first, {}).setdefault(opt, []).append(value)
+trees = {"myriarchd": "examples/quickstart", "myriarch-sim": "examples/sim"}
 os.makedirs(dist, exist_ok=True)
 sums = []
-for arch, binary in (("amd64", amd64), ("arm64", arm64)):
-    archive = "%s_%s_linux_%s.tar.gz" % (name, version, arch)
-    with tarfile.open(os.path.join(dist, archive), "w:gz") as tar:
-        def add(arcname, data, mode):
-            ti = tarfile.TarInfo(arcname)
-            ti.size = len(data)
-            ti.mode = mode
-            ti.mtime = 1700000000
-            tar.addfile(ti, io.BytesIO(data))
-        add(name, open(binary, "rb").read(), 0o755)
-        for f in ("LICENSE", "THIRD_PARTY_NOTICES"):
-            if f not in omit:
-                add(f, open(os.path.join(repo, f), "rb").read(), 0o644)
-        add("README.md", b"readme\n", 0o644)
-    sums.append("%s  %s\n" % (hashlib.sha256(open(os.path.join(dist, archive), "rb").read()).hexdigest(), archive))
+for name, amd64, arm64 in specs:
+    o = opts.get(name, {})
+    for arch, binary in (("amd64", amd64), ("arm64", arm64)):
+        archive = "%s_%s_linux_%s.tar.gz" % (name, version, arch)
+        with tarfile.open(os.path.join(dist, archive), "w:gz") as tar:
+            def add(arcname, data, mode):
+                ti = tarfile.TarInfo(arcname)
+                ti.size = len(data)
+                ti.mode = mode
+                ti.mtime = 1700000000
+                tar.addfile(ti, io.BytesIO(data))
+            add(name, open(binary, "rb").read(), 0o755)
+            for f in ("LICENSE", "THIRD_PARTY_NOTICES"):
+                if f in o.get("omit", []):
+                    continue
+                data = open(os.path.join(repo, f), "rb").read()
+                if f == "THIRD_PARTY_NOTICES" and "other" in o.get("notices", []):
+                    data = b"notices of another build\n"
+                add(f, data, 0o644)
+            add("README.md", b"readme\n", 0o644)
+            tree = trees.get(name)
+            if tree and "notree" not in o:
+                for dirpath, dirnames, filenames in os.walk(os.path.join(repo, tree)):
+                    dirnames.sort()
+                    for fn in sorted(filenames):
+                        full = os.path.join(dirpath, fn)
+                        add(os.path.relpath(full, repo).replace(os.sep, "/"), open(full, "rb").read(), 0o644)
+            for link in o.get("link", []):
+                ti = tarfile.TarInfo(tree + "/" + link)
+                ti.type = tarfile.SYMTYPE
+                ti.linkname = "/etc/passwd"
+                ti.mtime = 1700000000
+                tar.addfile(ti)
+            if "dotdot" in o:
+                add(tree + "/../escape.txt", b"outside\n", 0o644)
+        sums.append("%s  %s\n" % (hashlib.sha256(open(os.path.join(dist, archive), "rb").read()).hexdigest(), archive))
 open(os.path.join(dist, "checksums.txt"), "w").write("".join(sums))
 json.dump({"project_name": "myriarch", "version": version, "commit": commit}, open(os.path.join(dist, "metadata.json"), "w"))
 PY
 HEAD_SHA="$(git -C "${REPO}" rev-parse HEAD)"
-mkdist() { # dist name amd64-binary arm64-binary [version] [extra]; MKDIST_COMMIT overrides the commit of metadata.json
-  python3 -I "${W}/mkdist.py" "$1" "${5:-${RV}}" "${MKDIST_COMMIT:-${HEAD_SHA}}" "$2" "$3" "$4" "${REPO}" "${@:6}"
+mkdist() { # dist name amd64-binary arm64-binary [version] [option...]; MKDIST_COMMIT overrides the commit of metadata.json
+  # the archives of the server image: myriarchd with myrctl and myriarch-sim of MKDIST_BIN (default ${BIN})
+  local specs=("$2:$3:$4") bins="${MKDIST_BIN:-${BIN}}"
+  if [ "$2" = myriarchd ] && [ -z "${MKDIST_ONLY:-}" ]; then
+    specs+=("myrctl:${bins}/amd64/myrctl:${bins}/arm64/myrctl" "myriarch-sim:${bins}/amd64/myriarch-sim:${bins}/arm64/myriarch-sim")
+  fi
+  python3 -I "${W}/mkdist.py" "$1" "${5:-${RV}}" "${MKDIST_COMMIT:-${HEAD_SHA}}" "${REPO}" "${specs[@]}" -- "${@:6}"
+}
+swap_archive() { # dist name amd64-binary arm64-binary: replaces the amd64 archive of <name> in dist by one made from the binary
+  local dist="$1" name="$2" tmp="${W}/swap-$2"
+  rm -rf "${tmp}"
+  MKDIST_ONLY=1 mkdist "${tmp}" "${name}" "$3" "$4"
+  cp "${tmp}/${name}_${RV}_linux_amd64.tar.gz" "${dist}/"
+  python3 -I - "${dist}" "${name}_${RV}_linux_amd64.tar.gz" <<'PY'
+import hashlib, os, sys
+d, archive = sys.argv[1:3]
+new = hashlib.sha256(open(os.path.join(d, archive), "rb").read()).hexdigest()
+lines = [("%s  %s\n" % (new, archive)) if l.split()[1] == archive else l for l in open(os.path.join(d, "checksums.txt"))]
+open(os.path.join(d, "checksums.txt"), "w").write("".join(lines))
+PY
 }
 mkdist "${W}/dist-ok-server" myriarchd "${BIN}/amd64/myriarchd" "${BIN}/arm64/myriarchd"
 mkdist "${W}/dist-ok-updater" myriarch-updater "${BIN}/amd64/myriarch-updater" "${BIN}/arm64/myriarch-updater"
@@ -411,19 +467,42 @@ run_dist() { # kind dist out [VAR=value ...]
 }
 value_of() { sed -n "s/^$1=//p" <<<"$2"; }
 
-# the contract of a built layout: platforms, user, entrypoint, one layer, no shell, licenses, labels, determinism of the layer
-check_layout() { # layout kind amd64-binary arm64-binary
-  python3 -I - "$1" "$2" "$3" "$4" "${REPO}" "${EPOCH}" "${RV}" <<'PY'
+# the contract of a built layout: platforms, user, entrypoint, one layer, no shell, programs, example trees, data directory,
+# licenses, labels, determinism of the layer. kind-specific files are derived from the repository, which the stand-in archives copy.
+check_layout() { # layout kind bin-dir (the directory with amd64/ and arm64/ that the archives were made from)
+  python3 -I - "$1" "$2" "$3" "${REPO}" "${EPOCH}" "${RV}" <<'PY'
 import gzip, hashlib, io, json, os, sys, tarfile
 
-layout, kind, bin_amd64, bin_arm64, repo, epoch, version = sys.argv[1:8]
+layout, kind, bindir, repo, epoch, version = sys.argv[1:7]
 epoch = int(epoch)
-binaries = {"amd64": bin_amd64, "arm64": bin_arm64}
-name = {"server": "myriarchd", "updater": "myriarch-updater"}[kind]
+programs = {"server": ["myriarchd", "myrctl", "myriarch-sim"], "updater": ["myriarch-updater"]}[kind]
+name = programs[0]
 errs = []
 
 def blob(d):
     return open(os.path.join(layout, "blobs", "sha256", d[7:]), "rb").read()
+
+def tree(src, dst):  # repository directory -> {archive path: bytes}
+    out = {}
+    for dirpath, _, filenames in os.walk(os.path.join(repo, src)):
+        for fn in filenames:
+            full = os.path.join(dirpath, fn)
+            out[dst + "/" + os.path.relpath(full, os.path.join(repo, src)).replace(os.sep, "/")] = open(full, "rb").read()
+    return out
+
+data_files = {}
+if kind == "server":
+    data_files.update(tree("examples/quickstart", "opt/myriarch/examples/quickstart"))
+    data_files.update(tree("examples/sim", "opt/myriarch/examples/sim"))
+want_dirs = {"tmp": (0o1777, 0, 0), "var": (0o755, 0, 0), "var/lib": (0o755, 0, 0)} if kind == "server" else {"tmp": (0o1777, 0, 0)}
+if kind == "server":
+    want_dirs["var/lib/myriarchd"] = (0o750, 65532, 65532)
+for plain in ("etc", "usr", "usr/local", "usr/local/bin", "usr/share", "usr/share/licenses", "usr/share/licenses/myriarch"):
+    want_dirs[plain] = (0o755, 0, 0)
+for path in list(data_files) + ["etc/passwd", "etc/group"]:
+    parts = path.split("/")
+    for i in range(1, len(parts)):
+        want_dirs.setdefault("/".join(parts[:i]), (0o755, 0, 0))
 
 raw_index = open(os.path.join(layout, "index.json"), "rb").read()
 index = json.loads(raw_index)
@@ -440,9 +519,11 @@ for k, v in {"org.opencontainers.image.source": "https://github.com/myriarch/myr
 for k in ("title", "description", "revision", "created"):
     if not ann.get("org.opencontainers.image." + k):
         errs.append("index annotation " + k)
-want_entries = {"etc", "etc/group", "etc/passwd", "tmp", "usr", "usr/local", "usr/local/bin", "usr/local/bin/" + name, "usr/share",
-                "usr/share/licenses", "usr/share/licenses/myriarch", "usr/share/licenses/myriarch/LICENSE",
-                "usr/share/licenses/myriarch/THIRD_PARTY_NOTICES"}
+if kind == "server":
+    desc = ann.get("org.opencontainers.image.description", "")
+    for word in ("myriarchd", "myrctl", "myriarch-sim", "example repositories"):
+        if word not in desc:
+            errs.append("the description does not name %r: %r" % (word, desc))
 for m in index["manifests"]:
     arch = m["platform"]["architecture"]
     man = json.loads(blob(m["digest"]))
@@ -458,10 +539,14 @@ for m in index["manifests"]:
         errs.append("%s: entrypoint %r" % (arch, c["Entrypoint"]))
     if kind == "server" and c.get("Cmd") != ["serve", "--config", "/etc/myriarchd/myriarchd.yaml"]:
         errs.append("%s: cmd %r" % (arch, c.get("Cmd")))
-    if kind == "updater" and c.get("Cmd"):
-        errs.append("%s: cmd %r" % (arch, c.get("Cmd")))
-    if "Shell" in c or "Healthcheck" in c:
-        errs.append("%s: shell or healthcheck set" % arch)
+    if kind == "server" and sorted(c.get("ExposedPorts", {})) != ["8080/tcp", "9090/tcp", "9464/tcp"]:
+        errs.append("%s: ports %r" % (arch, sorted(c.get("ExposedPorts", {}))))
+    if kind == "updater" and (c.get("Cmd") or c.get("ExposedPorts")):
+        errs.append("%s: cmd or ports %r %r" % (arch, c.get("Cmd"), c.get("ExposedPorts")))
+    if c.get("Env") != ["HOME=/tmp", "PATH=/usr/local/bin"] or c.get("WorkingDir") != "/":
+        errs.append("%s: env %r or workdir %r" % (arch, c.get("Env"), c.get("WorkingDir")))
+    if "Shell" in c or "Healthcheck" in c or "Volumes" in c:
+        errs.append("%s: shell, healthcheck or volumes set" % arch)
     for k, v in {"org.opencontainers.image.source": "https://github.com/myriarch/myriarch", "org.opencontainers.image.licenses": "Apache-2.0",
                  "org.opencontainers.image.version": version, "org.opencontainers.image.title": name if kind == "updater" else "myriarch",
                  "org.opencontainers.image.base.name": "scratch", "dev.myriarch.image.variant": "release"}.items():
@@ -470,6 +555,10 @@ for m in index["manifests"]:
     for k in ("org.opencontainers.image.revision", "org.opencontainers.image.created", "org.opencontainers.image.description"):
         if not c["Labels"].get(k):
             errs.append("%s: label %s" % (arch, k))
+    contents = c["Labels"].get("dev.myriarch.image.contents", "")
+    for word in (["myriarchd", "myrctl", "myriarch-sim", "example repositories", "/var/lib/myriarchd"] if kind == "server" else ["myriarch-updater"]):
+        if word not in contents:
+            errs.append("%s: dev.myriarch.image.contents does not name %r: %r" % (arch, word, contents))
     for k, v in ann.items():
         if c["Labels"].get(k) != v:
             errs.append("%s: index annotation %s differs from the label of the platform config" % (arch, k))
@@ -478,28 +567,42 @@ for m in index["manifests"]:
         errs.append("%s: diff id" % arch)
     tf = tarfile.open(fileobj=io.BytesIO(raw))
     members = {mem.name: mem for mem in tf.getmembers()}
-    if set(members) != want_entries:
-        errs.append("%s: layer entries %s" % (arch, sorted(set(members) ^ want_entries)))
+    files = {"usr/local/bin/" + prog: (0o755, open(os.path.join(bindir, arch, prog), "rb").read()) for prog in programs}
+    for f in ("LICENSE", "THIRD_PARTY_NOTICES"):
+        files["usr/share/licenses/myriarch/" + f] = (0o644, open(os.path.join(repo, f), "rb").read())
+    for path, data in data_files.items():
+        files[path] = (0o644, data)
+    want = set(files) | set(want_dirs) | {"etc/passwd", "etc/group"}
+    if set(members) != want:
+        errs.append("%s: layer entries %s" % (arch, sorted(set(members) ^ want)))
         continue
     for mem in members.values():
-        if (mem.uid, mem.gid, mem.mtime) != (0, 0, epoch):
-            errs.append("%s: %s owner or mtime" % (arch, mem.name))
-    if members["tmp"].mode != 0o1777 or not members["tmp"].isdir():
-        errs.append("%s: /tmp" % arch)
-    if members["usr/local/bin/" + name].mode != 0o755:
-        errs.append("%s: binary mode" % arch)
-    if tf.extractfile(members["usr/local/bin/" + name]).read() != open(binaries[arch], "rb").read():
-        errs.append("%s: the binary is not the one of the archive" % arch)
-    for f in ("LICENSE", "THIRD_PARTY_NOTICES"):
-        mem = members["usr/share/licenses/myriarch/" + f]
-        if mem.mode != 0o644 or tf.extractfile(mem).read() != open(os.path.join(repo, f), "rb").read():
-            errs.append("%s: %s" % (arch, f))
+        if mem.mtime != epoch:
+            errs.append("%s: %s mtime" % (arch, mem.name))
+        if mem.name in want_dirs:
+            mode, uid, gid = want_dirs[mem.name]
+            if not mem.isdir() or (mem.mode, mem.uid, mem.gid) != (mode, uid, gid):
+                errs.append("%s: directory %s is %o %d:%d, expected %o %d:%d" % (arch, mem.name, mem.mode, mem.uid, mem.gid, mode, uid, gid))
+        else:
+            if not mem.isreg() or (mem.uid, mem.gid) != (0, 0):
+                errs.append("%s: %s owner or type" % (arch, mem.name))
+    for path, (mode, data) in files.items():
+        if members[path].mode != mode:
+            errs.append("%s: %s mode %o, expected %o" % (arch, path, members[path].mode, mode))
+        if tf.extractfile(members[path]).read() != data:
+            errs.append("%s: %s is not the file of the archive" % (arch, path))
     passwd = tf.extractfile(members["etc/passwd"]).read().decode()
     group = tf.extractfile(members["etc/group"]).read().decode()
     if "myriarch:x:65532:65532:" not in passwd or "myriarch:x:65532:" not in group:
         errs.append("%s: passwd or group" % arch)
     if any(n.endswith(("/sh", "/bash", "/busybox")) for n in members):
         errs.append("%s: a shell" % arch)
+    # nothing but the programs is executable, and nothing is writable for group or others except /tmp
+    for mem in members.values():
+        if mem.mode & 0o022 and mem.name != "tmp":
+            errs.append("%s: %s is writable for group or others" % (arch, mem.name))
+        if mem.isreg() and mem.mode & 0o111 and not mem.name.startswith("usr/local/bin/"):
+            errs.append("%s: %s is executable" % (arch, mem.name))
 print("\n".join(errs) if errs else "contract ok")
 sys.exit(1 if errs else 0)
 PY
@@ -516,8 +619,8 @@ if [ "${built}" = 1 ]; then
     [[ "$(value_of "IMAGE_MANIFEST_DIGEST_${p}" "${S1}")" =~ ^sha256:[0-9a-f]{64}$ ]] && ok "the output names the manifest digest of ${p}" || fail "no manifest digest for ${p}"
   done
   [ "$(value_of IMAGE_LAYOUT "${S1}")" = "${W}/out1/server" ] && [ -f "${W}/out1/server.env" ] && ok "the layout and the .env file are in OUT_DIR" || fail "layout or .env file missing"
-  CL="$(check_layout "${W}/out1/server" server "${BIN}/amd64/myriarchd" "${BIN}/arm64/myriarchd" 2>&1)"
-  if [ "${CL}" = "contract ok" ]; then ok "server image: platforms, user 65532:65532, entrypoint, one layer, no shell, licenses, labels, annotations"; else fail "server image contract: ${CL}"; fi
+  CL="$(check_layout "${W}/out1/server" server "${BIN}" 2>&1)"
+  if [ "${CL}" = "contract ok" ]; then ok "server image: platforms, user 65532:65532, entrypoint, myrctl and myriarch-sim, example trees, data directory 0750 65532:65532, one layer, no shell, licenses, labels, annotations"; else fail "server image contract: ${CL}"; fi
   S2="$(run_dist server "${W}/dist-ok-server" "${W}/out2" IMAGE_SBOM=0 2>/dev/null)"
   if [ "$(value_of IMAGE_INDEX_DIGEST "${S2}")" = "${IDX1}" ] && diff -r "${W}/out1/server" "${W}/out2/server" >/dev/null; then ok "two builds give the same index digest and the same bytes"; else fail "dist mode is not deterministic"; fi
   S3="$(run_dist server "${W}/dist-ok-server" "${W}/out3" IMAGE_SBOM=0 SOURCE_DATE_EPOCH=1700000001 2>/dev/null)"
@@ -526,7 +629,7 @@ if [ "${built}" = 1 ]; then
   [ "$(value_of IMAGE_INDEX_DIGEST "${S4}")" = "${IDX1}" ] && ok "a build into an existing OUT_DIR replaces the old layout" || fail "rebuilding into the same OUT_DIR failed"
   SU="$(run_dist updater "${W}/dist-ok-updater" "${W}/out1" IMAGE_SBOM=0 2>"${W}/u1.err")"; rc=$?
   if [ "${rc}" = 0 ]; then ok "dist mode builds the updater image"; else fail "dist mode (updater) failed: $(cat "${W}/u1.err")"; fi
-  CL="$(check_layout "${W}/out1/updater" updater "${BIN}/amd64/myriarch-updater" "${BIN}/arm64/myriarch-updater" 2>&1)"
+  CL="$(check_layout "${W}/out1/updater" updater "${BIN}" 2>&1)"
   if [ "${CL}" = "contract ok" ]; then ok "updater image: platforms, user 65532:65532, entrypoint, one layer, no shell, licenses, labels, annotations"; else fail "updater image contract: ${CL}"; fi
   [ "$(value_of IMAGE_INDEX_DIGEST "${SU}")" != "${IDX1}" ] && ok "the two images have different digests" || fail "server and updater image have the same digest"
   t_one_platform() { run_dist server "${W}/dist-ok-server" "${W}/out4" IMAGE_SBOM=0 IMAGE_PLATFORMS=linux/arm64; }
@@ -620,7 +723,47 @@ PY
   else
     ok "no cross build with CGO_ENABLED=1 possible here: the CGO_ENABLED case is skipped"
   fi
-  cp -R "${W}/dist-ok-server" "${W}/dist-dup" && tail -n 1 "${W}/dist-ok-server/checksums.txt" >> "${W}/dist-dup/checksums.txt"
+  # --- the other archives of the server image: myrctl and myriarch-sim (programs) and the example trees
+  cp -R "${W}/dist-ok-server" "${W}/dist-nocli" && rm "${W}/dist-nocli/myrctl_${RV}_linux_amd64.tar.gz"
+  t_nocli() { run_dist server "${W}/dist-nocli" "${W}/outf"; }
+  expect_fail "a missing myrctl archive is refused" "myrctl_${RV}_linux_amd64.tar.gz is missing" t_nocli
+  cp -R "${W}/dist-ok-server" "${W}/dist-nosimsum" && grep -v "myriarch-sim_${RV}_linux_arm64" "${W}/dist-ok-server/checksums.txt" > "${W}/dist-nosimsum/checksums.txt"
+  t_nosimsum() { run_dist server "${W}/dist-nosimsum" "${W}/outf"; }
+  expect_fail "a myriarch-sim archive that checksums.txt does not list is refused" "does not list myriarch-sim_${RV}_linux_arm64.tar.gz" t_nosimsum
+  cp -R "${W}/dist-ok-server" "${W}/dist-clisum" && printf 'x' >> "${W}/dist-clisum/myrctl_${RV}_linux_arm64.tar.gz"
+  t_clisum() { run_dist server "${W}/dist-clisum" "${W}/outf"; }
+  expect_fail "a myrctl archive that differs from checksums.txt is refused" "myrctl_${RV}_linux_arm64.tar.gz: SHA-256 .* differs from checksums.txt" t_clisum
+  cp -R "${W}/dist-ok-server" "${W}/dist-clinoroots" && swap_archive "${W}/dist-clinoroots" myrctl "${BIN}/amd64/noroots" "${BIN}/arm64/myrctl"
+  t_clinoroots() { run_dist server "${W}/dist-clinoroots" "${W}/outf"; }
+  expect_fail "a myrctl without the embedded root CAs is refused" "myrctl \\(linux/amd64\\) does not embed the Mozilla root CAs" t_clinoroots
+  cp -R "${W}/dist-ok-server" "${W}/dist-clinotz" && swap_archive "${W}/dist-clinotz" myrctl "${BIN}/amd64/notz" "${BIN}/arm64/myrctl"
+  t_clinotz() { run_dist server "${W}/dist-clinotz" "${W}/outf"; }
+  expect_fail "a myrctl without the time zone database is refused" "myrctl \\(linux/amd64\\) does not embed the time zone database" t_clinotz
+  cp -R "${W}/dist-ok-server" "${W}/dist-simold" && swap_archive "${W}/dist-simold" myriarch-sim "${BIN}/amd64/oldversion" "${BIN}/arm64/myriarch-sim"
+  t_simold() { run_dist server "${W}/dist-simold" "${W}/outf"; }
+  expect_fail "a myriarch-sim of another release is refused" "myriarch-sim \\(linux/amd64\\) does not contain the release version '${RV}'" t_simold
+  mkdist "${W}/dist-clilic" myriarchd "${BIN}/amd64/myriarchd" "${BIN}/arm64/myriarchd" "${RV}" myrctl.omit=LICENSE
+  t_clilic() { run_dist server "${W}/dist-clilic" "${W}/outf"; }
+  expect_fail "a myrctl archive without a license file is refused" "myrctl_${RV}_linux_amd64.tar.gz lacks LICENSE" t_clilic
+  mkdist "${W}/dist-othernotices" myriarchd "${BIN}/amd64/myriarchd" "${BIN}/arm64/myriarchd" "${RV}" myriarch-sim.notices=other
+  t_othernotices() { run_dist server "${W}/dist-othernotices" "${W}/outf"; }
+  expect_fail "archives with different THIRD_PARTY_NOTICES are refused" "THIRD_PARTY_NOTICES differs from the one in myriarchd_${RV}_linux_amd64.tar.gz" t_othernotices
+  mkdist "${W}/dist-noquick" myriarchd "${BIN}/amd64/myriarchd" "${BIN}/arm64/myriarchd" "${RV}" notree=1
+  t_noquick() { run_dist server "${W}/dist-noquick" "${W}/outf"; }
+  expect_fail "a myriarchd archive without examples/quickstart is refused" "myriarchd_${RV}_linux_amd64.tar.gz holds no files below examples/quickstart" t_noquick
+  mkdist "${W}/dist-nosimtree" myriarchd "${BIN}/amd64/myriarchd" "${BIN}/arm64/myriarchd" "${RV}" myriarch-sim.notree=1
+  t_nosimtree() { run_dist server "${W}/dist-nosimtree" "${W}/outf"; }
+  expect_fail "a myriarch-sim archive without examples/sim is refused" "myriarch-sim_${RV}_linux_amd64.tar.gz holds no files below examples/sim" t_nosimtree
+  mkdist "${W}/dist-link" myriarchd "${BIN}/amd64/myriarchd" "${BIN}/arm64/myriarchd" "${RV}" link=evil.yaml
+  t_link() { run_dist server "${W}/dist-link" "${W}/outf"; }
+  expect_fail "a link in the example tree is refused" "examples/quickstart/evil.yaml is not a regular file" t_link
+  mkdist "${W}/dist-dotdot" myriarchd "${BIN}/amd64/myriarchd" "${BIN}/arm64/myriarchd" "${RV}" myriarch-sim.dotdot=1
+  t_dotdot() { run_dist server "${W}/dist-dotdot" "${W}/outf"; }
+  expect_fail "a path that leaves the example tree is refused" "is not a clean path below examples/sim" t_dotdot
+  # the updater image does not need the archives of the server image
+  t_updater_only() { run_dist updater "${W}/dist-ok-updater" "${W}/out9" IMAGE_SBOM=0; }
+  if [ ! -e "${W}/dist-ok-updater/myrctl_${RV}_linux_amd64.tar.gz" ] && OUT="$(t_updater_only 2>&1)"; then ok "the updater image needs the archive of the updater only"; else fail "updater image from a dist without the server archives: ${OUT:-}"; fi
+  cp -R "${W}/dist-ok-server" "${W}/dist-dup" && grep "myriarchd_${RV}_linux_arm64" "${W}/dist-ok-server/checksums.txt" >> "${W}/dist-dup/checksums.txt"
   t_dup() { run_dist server "${W}/dist-dup" "${W}/outf"; }
   expect_fail "an archive listed twice in checksums.txt is refused" "lists myriarchd_${RV}_linux_arm64.tar.gz 2 times" t_dup
   python3 -I -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["commit"]="0"*40; json.dump(d,open(p,"w"))' "${W}/dist-ok-server/metadata.json"
@@ -647,7 +790,10 @@ PY
     for arch in amd64 arm64; do
       mkdir -p "${W}/binc/${arch}"
       BUILD_DIR="${CL_REPO}" build_bin "${W}/binc/${arch}/myriarchd" "${arch}" ./cmd/myrctl embedui || sbuilt=0
+      BUILD_DIR="${CL_REPO}" build_bin "${W}/binc/${arch}/myrctl" "${arch}" ./cmd/myrctl "" || sbuilt=0
+      BUILD_DIR="${CL_REPO}" build_bin "${W}/binc/${arch}/myriarch-sim" "${arch}" ./cmd/myriarch-sim "" || sbuilt=0
     done
+    export MKDIST_BIN="${W}/binc"
     MKDIST_COMMIT="${CL_SHA}" mkdist "${W}/dist-strict" myriarchd "${W}/binc/amd64/myriarchd" "${W}/binc/arm64/myriarchd"
     run_strict() { # dist out [VAR=value ...]
       local dist="$1" out="$2"; shift 2
@@ -684,6 +830,19 @@ PY
       MKDIST_COMMIT="$(clone_git rev-parse HEAD)" mkdist "${W}/dist-strict-old" myriarchd "${W}/binc/amd64/myriarchd" "${W}/binc/arm64/myriarchd"
       t_strict_rev() { run_strict "${W}/dist-strict-old" "${W}/outs"; }
       expect_fail "the release mode refuses a binary that was built at another commit" "was built from commit '${CL_SHA}'" t_strict_rev
+      # the programs of the other archives are held to the same rule: myriarchd is from the current commit, myrctl and myriarch-sim are not
+      mkdir -p "${W}/binc2/amd64" "${W}/binc2/arm64"
+      c2built=1
+      for arch in amd64 arm64; do
+        BUILD_DIR="${CL_REPO}" build_bin "${W}/binc2/${arch}/myriarchd" "${arch}" ./cmd/myrctl embedui || c2built=0
+      done
+      if [ "${c2built}" = 1 ]; then
+        MKDIST_COMMIT="$(clone_git rev-parse HEAD)" mkdist "${W}/dist-strict-cli" myriarchd "${W}/binc2/amd64/myriarchd" "${W}/binc2/arm64/myriarchd"
+        t_strict_cli() { run_strict "${W}/dist-strict-cli" "${W}/outs"; }
+        expect_fail "the release mode checks the commit of myrctl as well" "myrctl \\(linux/amd64\\) was built from commit '${CL_SHA}'" t_strict_cli
+      else
+        fail "stand-in binaries could not be built at the second commit of the clone"
+      fi
     else
       fail "stand-in binaries could not be built in the clone"
     fi
@@ -710,6 +869,16 @@ PY
   [ "$(curl -fsS "http://${REG}/v2/myriarch/myriarch/tags/list" | tr -d ' \n')" = '{"name":"myriarch/myriarch","tags":null}' ] && ok "the push created no tag" || fail "tags after the push: $(curl -fsS "http://${REG}/v2/myriarch/myriarch/tags/list")"
   [ "$("${CRANE}" digest "${REG}/myriarch/myriarch@${IDX1}")" = "${IDX1}" ] && ok "the registry serves the index under the digest of index.json" || fail "digest in the registry"
   "${CRANE}" manifest "${REG}/myriarch/myriarch@$(value_of IMAGE_MANIFEST_DIGEST_LINUX_ARM64 "${S1}")" >/dev/null 2>&1 && ok "the platform manifests are in the registry" || fail "platform manifest missing in the registry"
+  # what a client gets when it pulls the image from the registry: the file system of the platform (crane export)
+  EXPORTED="$("${CRANE}" export --platform linux/arm64 "${REG}/myriarch/myriarch@${IDX1}" - 2>"${W}/export.err" | python3 -I -c '
+import sys, tarfile
+tf = tarfile.open(fileobj=sys.stdin.buffer, mode="r|")
+for m in tf:
+    if m.name in ("var/lib/myriarchd", "usr/local/bin/myriarchd", "usr/local/bin/myrctl", "usr/local/bin/myriarch-sim", "opt/myriarch/examples/quickstart/README.md", "opt/myriarch/examples/sim/mixed-fleet.yaml", "tmp"):
+        print("%s %o %d:%d" % (m.name, m.mode, m.uid, m.gid))
+')"
+  WANT_EXPORT="$(printf '%s\n' "opt/myriarch/examples/quickstart/README.md 644 0:0" "opt/myriarch/examples/sim/mixed-fleet.yaml 644 0:0" "tmp 1777 0:0" "usr/local/bin/myrctl 755 0:0" "usr/local/bin/myriarch-sim 755 0:0" "usr/local/bin/myriarchd 755 0:0" "var/lib/myriarchd 750 65532:65532")"
+  if [ "$(printf '%s\n' "${EXPORTED}" | LC_ALL=C sort)" = "${WANT_EXPORT}" ]; then ok "the image pulled from the registry has the programs, the examples and /var/lib/myriarchd (750, 65532:65532)"; else fail "pulled image: ${EXPORTED} $(cat "${W}/export.err")"; fi
   push "${SRV_LAYOUT}" "${REG}/myriarch/myriarch@${IDX1}" >/dev/null 2>&1 && ok "pushing the same digest again works" || fail "second push failed"
   push "${UPD_LAYOUT}" "${REG}/myriarch/myriarch-updater@${UPD_DIGEST}" >/dev/null 2>&1 && ok "push of the updater image" || fail "push of the updater image failed"
   [ "$(curl -fsS "http://${REG}/v2/myriarch/myriarch-updater/tags/list" | tr -d ' \n')" = '{"name":"myriarch/myriarch-updater","tags":null}' ] && ok "... also without a tag" || fail "tags of the updater repository"

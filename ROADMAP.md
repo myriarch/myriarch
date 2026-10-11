@@ -29,7 +29,7 @@ The scope of the first release is fixed by [ADR-0021](docs/adr/0021-publication-
 - CI and signed multi-architecture images (`linux/amd64` and `linux/arm64`) of the server and the updater, built from the release binaries and running as user 65532 ([ADR-0023](docs/adr/0023-keyless-release-signing.md), [ADR-0024](docs/adr/0024-container-registry-and-image-set.md)).
 - English README and quickstart, the community files, and the English core documentation.
 
-**Not in v0.1.0:** the signed OCI chart, the kind quickstart and the collector chart (see v0.2.0), a published collector image, an image of `myrctl` (the binary is in the release archives), the `gitops-pr` executor, and the MCP server.
+**Not in v0.1.0:** the signed OCI chart, the kind quickstart and the collector chart (see v0.2.0), a published collector image, a separate image of `myrctl` (the binary is in the release archives and in the server image), the `gitops-pr` executor, and the MCP server.
 
 ## Next
 

@@ -27,11 +27,11 @@
 # Two ways to build, selected with IMAGE_SOURCE:
 #   build (default)  compiles the binaries from this work tree and builds a single-platform image of the development and
 #                    test variants (myriarchd + myrctl + myriarch-sim); pushes it to IMAGE_REPO. Never to ghcr.io/myriarch.
-#   dist             builds the published images from the release binaries: ghcr.io/myriarch/myriarch (myriarchd) and
-#                    ghcr.io/myriarch/myriarch-updater (ADR-0024, ADR-0029), each an index for linux/amd64 and linux/arm64.
-#                    Nothing is compiled: the binaries are the ones in the goreleaser archives (listed in checksums.txt, which
-#                    the release workflow signs). The images are pushed by ci/release/push-images.sh, by digest, from the
-#                    release workflow only.
+#   dist             builds the published images from the release archives: ghcr.io/myriarch/myriarch (myriarchd, myrctl and
+#                    myriarch-sim with the example repositories) and ghcr.io/myriarch/myriarch-updater (ADR-0024, ADR-0029),
+#                    each an index for linux/amd64 and linux/arm64. Nothing is compiled: the binaries and the example files are
+#                    the ones in the goreleaser archives (listed in checksums.txt, which the release workflow signs). The images
+#                    are pushed by ci/release/push-images.sh, by digest, from the release workflow only.
 #
 # What it does
 #   1. builds static linux/<arch> binaries (IMAGE_PLATFORM, default linux/amd64) with the ldflags of the Makefile: myriarchd (-tags
@@ -54,11 +54,14 @@
 #
 # Release images (IMAGE_SOURCE=dist)
 #   Inputs: the goreleaser dist directory (DIST_DIR, default ./dist) with checksums.txt and the archives
-#   myriarchd_<version>_linux_<arch>.tar.gz (IMAGE_KIND=server) or myriarch-updater_<version>_linux_<arch>.tar.gz
-#   (IMAGE_KIND=updater). <version> is IMAGE_RELEASE_VERSION (default: "version" of DIST_DIR/metadata.json, which goreleaser
-#   derives from the tag without "v"). Each archive must be listed in checksums.txt with its SHA-256; its binary is checked
-#   (static ELF of the platform, embedded root CAs, and for the server the web UI and the time
-#   zone database; scripts/lib/oci_image.py). Dev build tags (devpg) are refused. Without ALLOW_DIRTY=1 (the release build) the
+#   myriarchd_<version>_linux_<arch>.tar.gz, myrctl_<version>_linux_<arch>.tar.gz and myriarch-sim_<version>_linux_<arch>.tar.gz
+#   (IMAGE_KIND=server) or myriarch-updater_<version>_linux_<arch>.tar.gz (IMAGE_KIND=updater). <version> is
+#   IMAGE_RELEASE_VERSION (default: "version" of DIST_DIR/metadata.json, which goreleaser derives from the tag without "v").
+#   Each archive must be listed in checksums.txt with its SHA-256; its binary is checked (static ELF of the platform, embedded
+#   root CAs, the release version, and for myriarchd the web UI, for myriarchd and myrctl the time zone database;
+#   scripts/lib/oci_image.py). Dev build tags (devpg) are refused. The example repositories come from the archives as well
+#   (examples/quickstart from the myriarchd archive, examples/sim from the myriarch-sim archive), so nothing of the image is
+#   taken from the work tree except the build scripts and the label values. Without ALLOW_DIRTY=1 (the release build) the
 #   work tree must be clean, DIST_DIR/metadata.json must exist with the commit of the work tree and a version, the binaries
 #   must record that commit of a clean tree, and the test knobs IMAGE_PLATFORMS (other than both platforms), IMAGE_SBOM=0 and a
 #   SOURCE_URL other than LABEL_SOURCE are refused.
@@ -71,7 +74,11 @@
 #     IMAGE_MANIFEST_DIGEST_LINUX_AMD64, IMAGE_MANIFEST_DIGEST_LINUX_ARM64, IMAGE_SBOM_LINUX_AMD64, IMAGE_SBOM_LINUX_ARM64
 #   Contract: FROM scratch, ONE layer per platform, user and group 65532 (numeric USER 65532:65532), entrypoint
 #   /usr/local/bin/myriarchd (CMD serve --config /etc/myriarchd/myriarchd.yaml) or /usr/local/bin/myriarch-updater, the
-#   licenses in /usr/share/licenses/myriarch, no shell. The OCI labels are in the platform configs, the title, description,
+#   licenses in /usr/share/licenses/myriarch, no shell. The server image also holds /usr/local/bin/myrctl and
+#   /usr/local/bin/myriarch-sim, /opt/myriarch/examples/quickstart and /opt/myriarch/examples/sim (0644) and the empty
+#   data directory /var/lib/myriarchd (0750, owned by 65532:65532: a named volume, an emptyDir or a PVC mounted there is
+#   writable for the non-root user); the updater image needs no state directory (its volume belongs to the image that
+#   runs it, see docs/design/container-mode.md). The OCI labels are in the platform configs, the title, description,
 #   source, version, revision, created, vendor and licenses also in the index annotations (ghcr.io reads them from there).
 #   The source is SOURCE_URL or LABEL_SOURCE of ci/image-labels.env, never the git remote.
 #
@@ -88,7 +95,7 @@
 #     time zones   time/tzdata (myriarchd: cmd/myriarchd and internal/blueprint, myrctl: internal/blueprint; myriarch-sim never
 #                  loads a zone)
 #     DNS          the pure Go resolver; /etc/resolv.conf and /etc/hosts are provided by the container runtime
-#   The image has no shell, no curl and no package manager: the only executables are the three Go binaries (the manifests
+#   The image has no shell, no curl and no package manager: the only executables are the Go binaries (the manifests
 #   use httpGet probes and no exec).
 #
 # Image contract (what deploy manifests may rely on)
@@ -734,9 +741,10 @@ cmd_dist() {
   case "${IMAGE_KIND}" in
     server)
       IMAGE_REPO_NAME="ghcr.io/myriarch/myriarch"
-      IMAGE_DESCRIPTION="OpAMP fleet manager for OpenTelemetry Collectors - myriarchd"
+      # label values must not contain commas (crane parses --label as CSV)
+      IMAGE_DESCRIPTION="OpAMP fleet manager for OpenTelemetry Collectors - myriarchd + myrctl + myriarch-sim and the example repositories"
       IMAGE_SUMMARY="OpAMP fleet manager for OpenTelemetry Collectors"
-      IMAGE_CONTENTS="the static Go binary myriarchd and the license files only; no OS packages; no shell; root CAs and time zones are embedded in the binary" ;;
+      IMAGE_CONTENTS="the static Go binaries myriarchd and myrctl and myriarch-sim and the example repositories (quickstart and sim) and the license files only; an empty data directory /var/lib/myriarchd for the user 65532; no OS packages; no shell; root CAs and time zones are embedded in the binaries" ;;
     updater)
       IMAGE_REPO_NAME="ghcr.io/myriarch/myriarch-updater"
       IMAGE_DESCRIPTION="Host agent that installs OpenTelemetry Collector binary updates - myriarch-updater"

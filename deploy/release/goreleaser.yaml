@@ -3,7 +3,8 @@
 # Release matrix of myriarch (authoritative for releases; "make release" builds all binaries for all five platforms as
 # a check):
 #
-#   myriarchd        linux amd64/arm64, darwin arm64            (with the embedded web UI, -tags embedui)
+#   myriarchd        linux amd64/arm64, darwin arm64            (with the embedded web UI, -tags embedui; the archive also holds
+#                                                               examples/quickstart for the server image)
 #   myriarch-updater linux amd64/arm64, windows amd64/arm64
 #   myrctl      linux, darwin, windows x amd64/arm64
 #   myriarch-sim     linux amd64/arm64, darwin arm64
@@ -119,6 +120,11 @@ archives:
         info:
           mtime: "{{ .CommitDate }}"
       - src: deploy/docker/*
+        info:
+          mtime: "{{ .CommitDate }}"
+      # the example GitOps repository: the published server image (scripts/build-image-crane.sh, IMAGE_SOURCE=dist) takes it
+      # from this archive, so everything in the image is covered by checksums.txt
+      - src: examples/quickstart
         info:
           mtime: "{{ .CommitDate }}"
 

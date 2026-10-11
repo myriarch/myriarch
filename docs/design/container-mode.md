@@ -24,7 +24,13 @@ you build yourself until the collector chart of v0.2.0: `deploy/k8s/collector/Do
 the entry point of the supervisor image (user 10001, the user of the upstream supervisor image, and group 0 for the volume).
 
 The updater in that image can be the released one. `ghcr.io/myriarch/myriarch-updater` is the published updater image (`FROM
-scratch`, user and group 65532, `/usr/local/bin/myriarch-updater`, built from the binary of the signed release archive). Build
+scratch`, user and group 65532, `/usr/local/bin/myriarch-updater`, built from the binary of the signed release archive). It is
+a source of the binary and not an image that runs container mode: it holds no supervisor and no collector, and it has no state
+directory of its own. The directories of container mode (`collector.installDir`, `stateDir`) are on the volume of the image that
+runs the updater, which is the collector image (`/var/lib/myriarch`, writable for its user 10001 and group 0, see
+`deploy/k8s/collector/Dockerfile`). The server image `ghcr.io/myriarch/myriarch` is a different case: it has the data directory
+`/var/lib/myriarchd` for the non-root user 65532, because the server writes the GitOps clone and the artifact cache there.
+Build
 the collector image with `--build-arg UPDATER_SOURCE=image --build-arg
 UPDATER_IMAGE=ghcr.io/myriarch/myriarch-updater@sha256:<digest>` to copy that binary instead of compiling the updater from your
 checkout; without the build arguments the Dockerfile compiles it. The digest is named in the release notes.

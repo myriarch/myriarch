@@ -8,8 +8,8 @@ Two subcommands:
   layout   Writes a layout from layer tars that already exist (the single-platform build from source). One layer per
            platform, `--platform linux/amd64=layer.tar` once per platform.
   dist     Builds the layers of a release image from the linux archives that goreleaser produced
-           (myriarchd_<version>_linux_<arch>.tar.gz, myriarch-updater_<version>_linux_<arch>.tar.gz in --dist) and writes
-           the layout of ALL platforms.
+           (<program>_<version>_linux_<arch>.tar.gz in --dist: myriarchd, myrctl and myriarch-sim for the server image,
+           myriarch-updater for the updater image) and writes the layout of ALL platforms.
 
 The layout is flat: index.json IS the image index (the manifests of the platforms and, optionally, annotations), so
 `crane push --index <layout> <repo>@sha256:<sha256 of index.json>` publishes exactly these bytes and the digest of the index
@@ -17,16 +17,23 @@ is known before anything is pushed (ci/release/push-images.sh). Nothing in it de
 entries are sorted with a fixed owner, mode and mtime (--epoch), the gzip header has no name and no timestamp, the JSON
 documents have sorted keys, the config carries the commit time. The same inputs give the same bytes.
 
-Release image contract (`dist`): FROM scratch, ONE layer; the program in /usr/local/bin, LICENSE and THIRD_PARTY_NOTICES in
-/usr/share/licenses/myriarch (0644), /etc/passwd and /etc/group with the user and group --uid (IMAGE_UID of the build script), an empty /tmp (1777);
-all files are owned by root and world readable, the image runs as <uid>:<uid>. There is no shell and no package database.
+Release image contract (`dist`): FROM scratch, ONE layer. The server image holds myriarchd (the entrypoint), myrctl and
+myriarch-sim in /usr/local/bin (each from the archive of that program), the example repositories /opt/myriarch/examples/quickstart
+(from the myriarchd archive) and /opt/myriarch/examples/sim (from the myriarch-sim archive), and the empty data directory
+/var/lib/myriarchd (0750, owned by --uid:--uid, so that a named volume or a PVC mounted there is writable for the non-root user).
+The updater image holds myriarch-updater only. Both hold LICENSE and THIRD_PARTY_NOTICES in /usr/share/licenses/myriarch (0644;
+every archive of the image must hold the same two files), /etc/passwd and /etc/group with the user and group --uid (IMAGE_UID of
+the build script) and an empty /tmp (1777). Everything else is owned by root and world readable (programs 0755, data 0644,
+directories 0755), the image runs as <uid>:<uid>. There is no shell and no package database.
 
 Each binary is checked before it goes into a layer: static ELF of the platform, a Go build for linux with the platform's
 GOARCH and CGO_ENABLED=0, the embedded Mozilla roots (no CA bundle in the image) and the release version (--version) as a
 string in the binary (the release build stamps it with -X; Go does not record the linker flags, so this is a plausibility check
-that the binary belongs to the archive name); the server additionally carries the web UI (-tags embedui, no devpg) and the time
-zone database. With --strict-vcs the binary must also record the build from the commit --revision of a clean tree (vcs.revision,
-vcs.modified=false). The archive itself must be listed in checksums.txt of --dist with its SHA-256.
+that the binary belongs to the archive name); myriarchd additionally carries the web UI (-tags embedui, no devpg), and myriarchd
+and myrctl the time zone database. With --strict-vcs the binary must also record the build from the commit --revision of a clean
+tree (vcs.revision, vcs.modified=false). Each archive must be listed in checksums.txt of --dist with its SHA-256. The example
+trees are read from the archives (regular files only: a link, device or path outside the tree is refused), so the whole image is
+covered by checksums.txt.
 
 Exit status: 0 = ok, 1 = a check failed (the message names the cause), 2 = usage error.
 """
@@ -53,18 +60,39 @@ OCI_LAYER = "application/vnd.oci.image.layer.v1.tar+gzip"
 ROOTS_PKG = "golang.org/x/crypto/x509roots/fallback"
 # e_machine of the supported platforms (ELF header)
 ELF_MACHINE = {"amd64": 62, "arm64": 183}
-# the contract of the images (what deploy manifests may rely on); the user is the same for every image
+# Checks that go beyond the common ones (static ELF, Go build settings, embedded roots, version) per program: "ui" = the web UI
+# (-tags embedui, never devpg), "tzdata" = the embedded time zone database (the image has no zoneinfo files).
+PROGRAMS = {
+    "myriarchd": {"ui": True, "tzdata": True},
+    "myrctl": {"ui": False, "tzdata": True},
+    "myriarch-sim": {"ui": False, "tzdata": False},
+    "myriarch-updater": {"ui": False, "tzdata": False},
+}
+# the contract of the images (what deploy manifests may rely on); the user is the same for every image.
+#   binary      the program of the entrypoint; its archive also holds the license files of the image
+#   companions  further programs of the image, each from the archive of the same name
+#   trees       (program of the archive, directory in the archive, directory in the image): data that is read from an archive
+#   dirs        (directory in the image, mode): empty directories that belong to the user of the image
 KINDS = {
     "server": {
         "binary": "myriarchd",
         "entrypoint": "/usr/local/bin/myriarchd",
+        "companions": ["myrctl", "myriarch-sim"],
+        "trees": [
+            ("myriarchd", "examples/quickstart", "opt/myriarch/examples/quickstart"),
+            ("myriarch-sim", "examples/sim", "opt/myriarch/examples/sim"),
+        ],
+        "dirs": [("var/lib/myriarchd", 0o750)],
         "cmd": ["serve", "--config", "/etc/myriarchd/myriarchd.yaml"],
-        "ports": ["8080/tcp", "9090/tcp"],
-        "history": "scripts/build-image-crane.sh (FROM scratch): myriarchd from the release archive",
+        "ports": ["8080/tcp", "9090/tcp", "9464/tcp"],
+        "history": "scripts/build-image-crane.sh (FROM scratch): myriarchd, myrctl and myriarch-sim and the examples from the release archives",
     },
     "updater": {
         "binary": "myriarch-updater",
         "entrypoint": "/usr/local/bin/myriarch-updater",
+        "companions": [],
+        "trees": [],
+        "dirs": [],
         "cmd": [],
         "ports": [],
         "history": "scripts/build-image-crane.sh (FROM scratch): myriarch-updater from the release archive",
@@ -228,7 +256,7 @@ def go_build_info(data, name):
     return res.stdout
 
 
-def check_binary(data, name, kind, arch, version, revision, strict_vcs):
+def check_binary(data, name, program, arch, version, revision, strict_vcs):
     check_elf(data, name, arch)
     info = go_build_info(data, name)
     settings = {}
@@ -253,13 +281,14 @@ def check_binary(data, name, kind, arch, version, revision, strict_vcs):
             raise CheckError("%s was built from commit '%s', the image from '%s'" % (name, settings.get("vcs.revision", "none"), revision))
         if settings.get("vcs.modified") != "false":
             raise CheckError("%s was built from a modified work tree (vcs.modified=%s)" % (name, settings.get("vcs.modified", "unknown")))
-    if kind == "server":
+    checks = PROGRAMS[program]
+    if checks["ui"]:
         tags = settings.get("-tags", "").split(",")
         if "embedui" not in tags or "devpg" in tags:
             raise CheckError("%s: build tags '%s' (the release server carries the web UI and not the embedded PostgreSQL: "
                              "embedui without devpg)" % (name, settings.get("-tags", "")))
-        if TZDATA_MARKER not in data:
-            raise CheckError("%s does not embed the time zone database (import _ \"time/tzdata\"; the image has no zoneinfo files)" % name)
+    if checks["tzdata"] and TZDATA_MARKER not in data:
+        raise CheckError("%s does not embed the time zone database (import _ \"time/tzdata\"; the image has no zoneinfo files)" % name)
 
 
 # ---- release archives -------------------------------------------------------------------------------------------------
@@ -281,10 +310,13 @@ def archive_checksum(dist, archive_name):
     return found[0]
 
 
-def read_archive(data, label, wanted):
+def read_archive(data, label, wanted, tree=None):
     """The regular files of the archive root named in wanted (name -> bytes); anything else in the archive is ignored.
+    tree: a directory of the archive (e.g. "examples/sim") whose files are returned as well, as {path relative to tree: bytes}.
+    Below the tree only regular files and directories are accepted, and no path may leave it. The tree must not be empty.
     data holds the bytes of the archive: the bytes that were checked against checksums.txt are the bytes that are read."""
     found = {}
+    files = {}
     try:
         tf = tarfile.open(fileobj=io.BytesIO(data), mode="r:gz")
     except (tarfile.TarError, OSError, EOFError, zlib.error) as e:
@@ -292,6 +324,23 @@ def read_archive(data, label, wanted):
     with tf:
         for member in tf.getmembers():
             name = member.name[2:] if member.name.startswith("./") else member.name
+            if tree and (name == tree or name.startswith(tree + "/")):
+                rel = name[len(tree) + 1:]
+                if not rel:
+                    if not member.isdir():
+                        raise CheckError("%s: %s is not a directory" % (label, tree))
+                    continue
+                parts = rel.rstrip("/").split("/")
+                if any(part in ("", ".", "..") for part in parts):
+                    raise CheckError("%s: %s is not a clean path below %s" % (label, name, tree))
+                if member.isdir():
+                    continue
+                if not member.isreg():
+                    raise CheckError("%s: %s is not a regular file" % (label, name))
+                if rel in files:
+                    raise CheckError("%s: %s occurs twice" % (label, name))
+                files[rel] = tf.extractfile(member).read()
+                continue
             if name not in wanted:
                 continue
             if not member.isreg():
@@ -302,38 +351,53 @@ def read_archive(data, label, wanted):
     missing = [n for n in wanted if n not in found]
     if missing:
         raise CheckError("%s lacks %s at its root" % (label, ", ".join(missing)))
-    return found
+    if tree is None:
+        return found
+    if not files:
+        raise CheckError("%s holds no files below %s" % (label, tree))
+    return found, files
 
 
-def build_layer(files, binary, uid, epoch, out_path):
-    """The single layer of a release image. files: name -> bytes (the binary and the license files)."""
+def build_layer(programs, licenses, trees, dirs, entrypoint_user, uid, epoch, out_path):
+    """The single layer of a release image.
+    programs: name -> bytes (installed in /usr/local/bin, 0755); licenses: name -> bytes (LICENSE_FILES, 0644);
+    trees: archive path of the directory in the image -> {relative path: bytes} (0644 below directories of 0755);
+    dirs: [(archive path, mode)], empty directories owned by uid:uid; entrypoint_user: the name in /etc/passwd."""
     entries = {}
 
-    def add_dir(path, mode=0o755):
+    def add_dir(path, mode=0o755, owner=0):
         parts = path.split("/")
         for i in range(1, len(parts)):
-            entries.setdefault("/".join(parts[:i]), ("dir", None, 0o755))
-        entries[path] = ("dir", None, mode)
+            entries.setdefault("/".join(parts[:i]), ("dir", None, 0o755, 0))
+        entries[path] = ("dir", None, mode, owner)
 
     def add_file(path, data, mode):
         add_dir(os.path.dirname(path))
-        entries[path] = ("file", data, mode)
+        entries[path] = ("file", data, mode, 0)
 
-    add_file("usr/local/bin/" + binary, files[binary], 0o755)
+    for name, data in programs.items():
+        add_file("usr/local/bin/" + name, data, 0o755)
     for name in LICENSE_FILES:
-        add_file(LICENSE_DIR + "/" + name, files[name], 0o644)
+        add_file(LICENSE_DIR + "/" + name, licenses[name], 0o644)
+    for root, files in trees.items():
+        add_dir(root)
+        for rel, data in files.items():
+            add_file(root + "/" + rel, data, 0o644)
+    for path, mode in dirs:
+        add_dir(path, mode, uid)
     # There is no base image to bring /etc/passwd: the user the image runs as, and a group of the same number.
-    add_file("etc/passwd", ("root:x:0:0:root:/root:/sbin/nologin\nmyriarch:x:%d:%d:myriarch:/tmp:/sbin/nologin\n" % (uid, uid)).encode(), 0o644)
-    add_file("etc/group", ("root:x:0:\nmyriarch:x:%d:\n" % uid).encode(), 0o644)
+    add_file("etc/passwd", ("root:x:0:0:root:/root:/sbin/nologin\n%s:x:%d:%d:%s:/tmp:/sbin/nologin\n"
+                            % (entrypoint_user, uid, uid, entrypoint_user)).encode(), 0o644)
+    add_file("etc/group", ("root:x:0:\n%s:x:%d:\n" % (entrypoint_user, uid)).encode(), 0o644)
     # empty, world writable with sticky bit (a read-only root file system still gets an emptyDir over it)
     add_dir("tmp", 0o1777)
 
     with tarfile.open(out_path, "w", format=tarfile.PAX_FORMAT) as tar:
         for path in sorted(entries):
-            kind, payload, mode = entries[path]
+            kind, payload, mode, owner = entries[path]
             ti = tarfile.TarInfo(path)
-            ti.uid = ti.gid = 0
-            ti.uname = ti.gname = "root"
+            ti.uid = ti.gid = owner
+            ti.uname = ti.gname = "root" if owner == 0 else entrypoint_user
             ti.mtime = epoch
             ti.mode = mode
             if kind == "dir":
@@ -359,9 +423,24 @@ def cmd_layout(args):
     print_meta(meta)
 
 
+def load_archive(args, program, os_name, arch):
+    """The bytes of the archive of the program for the platform, after the check against checksums.txt."""
+    name = "%s_%s_%s_%s.tar.gz" % (program, args.version, os_name, arch)
+    path = os.path.join(args.dist, name)
+    if not os.path.isfile(path):
+        raise CheckError("%s is missing: run the release build first (make release-snapshot, or goreleaser for a release)" % path)
+    want = archive_checksum(args.dist, name)
+    with open(path, "rb") as f:
+        archive = f.read()
+    got = sha256(archive)
+    if got != want:
+        raise CheckError("%s: SHA-256 %s differs from checksums.txt (%s)" % (name, got, want))
+    return name, archive
+
+
 def cmd_dist(args):
     kind = KINDS[args.kind]
-    binary = kind["binary"]
+    main_program = kind["binary"]
     platforms = []
     # The compressed layer (and with it the manifest and index digests) depends on the zlib implementation; the uncompressed
     # layer (diff_id) does not. The version is logged so that a rebuild with other digests can be traced to this cause.
@@ -369,21 +448,31 @@ def cmd_dist(args):
     with tempfile.TemporaryDirectory(prefix="myriarch-image-layers-") as tmp:
         for spec in args.platform:
             os_name, arch = parse_platform(spec)
-            name = "%s_%s_%s_%s.tar.gz" % (binary, args.version, os_name, arch)
-            path = os.path.join(args.dist, name)
-            if not os.path.isfile(path):
-                raise CheckError("%s is missing: run the release build first (make release-snapshot, or goreleaser for a release)" % path)
-            want = archive_checksum(args.dist, name)
-            with open(path, "rb") as f:
-                archive = f.read()
-            got = sha256(archive)
-            if got != want:
-                raise CheckError("%s: SHA-256 %s differs from checksums.txt (%s)" % (name, got, want))
-            files = read_archive(archive, name, (binary,) + LICENSE_FILES)
-            check_binary(files[binary], "%s (%s/%s)" % (binary, os_name, arch), args.kind, arch, args.version,
-                         args.revision, args.strict_vcs)
+            programs = {}
+            licenses = {}
+            trees = {}
+            for program in [main_program] + kind["companions"]:
+                name, archive = load_archive(args, program, os_name, arch)
+                tree_dirs = [t for t in kind["trees"] if t[0] == program]
+                if len(tree_dirs) > 1:
+                    raise CheckError("internal error: more than one tree of %s" % program)
+                if tree_dirs:
+                    files, tree_files = read_archive(archive, name, (program,) + LICENSE_FILES, tree_dirs[0][1])
+                    trees[tree_dirs[0][2]] = tree_files
+                else:
+                    files = read_archive(archive, name, (program,) + LICENSE_FILES)
+                check_binary(files[program], "%s (%s/%s)" % (program, os_name, arch), program, arch, args.version,
+                             args.revision, args.strict_vcs)
+                programs[program] = files[program]
+                # the license files of the image come from the archive of the entrypoint; the others must carry the same texts
+                for lic in LICENSE_FILES:
+                    if program == main_program:
+                        licenses[lic] = files[lic]
+                    elif files[lic] != licenses[lic]:
+                        raise CheckError("%s: %s differs from the one in %s_%s_%s_%s.tar.gz (the archives are not from one build)"
+                                         % (name, lic, main_program, args.version, os_name, arch))
             layer = os.path.join(tmp, "layer-%s-%s.tar" % (os_name, arch))
-            build_layer(files, binary, args.uid, args.epoch, layer)
+            build_layer(programs, licenses, trees, kind["dirs"], "myriarch", args.uid, args.epoch, layer)
             platforms.append((os_name, arch, layer))
         meta = write_layout(
             args.out, platforms, args.created, "%d:%d" % (args.uid, args.uid), kind["entrypoint"], kind["cmd"], ENV, WORKDIR,
