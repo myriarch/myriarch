@@ -718,6 +718,11 @@ notification; real supervisor (optional); two replicas with a configuration chan
 without duplicate agents; UI smoke test (optional); declarative enrollment tokens; log check. At the end, everything that was
 started is stopped again (myriarchd, simulators, supervisor, collector, embedded PostgreSQL).
 
+With more than 100 collectors (the load run), the script raises `maxConcurrent` of the `gateway` rollout policy from 1 to 10 in
+its working copy `.e2e/gitops` (never in `internal/testdata`): one gateway at a time, a rollout of the 125 gateways takes about
+13 minutes and exceeds `E2E_STEP_TIMEOUT`, and 10 equals the `batchSize` of the webhook executor, so the load run also sends
+batched webhook calls, which the serial smoke run never does.
+
 | Variable | Meaning |
 |---|---|
 | `E2E_AGENTS` | number of simulated collectors (default 32) |

@@ -16,6 +16,11 @@
 #   E2E_KEEP=1                     leave myriarchd/sim running at the end (clean up with scripts/e2e.sh --stop)
 #   NO_BUILD=1                     use the existing bin/ binaries
 #
+# A load run (more than 100 collectors) raises maxConcurrent of the gateway rollout policy from 1 to 10 in its working copy of
+# the test data: serially, one rollout of the 125 gateways takes about 13 minutes (a health wait of about 6 s per gateway) and
+# exceeds E2E_STEP_TIMEOUT, and 10 equals the batchSize of the webhook executor, so the load run also sends batched webhook
+# calls, which the serial smoke run never does.
+#
 # The run is self-contained: own ports (18080/18081, PostgreSQL 54339), own work dir .e2e/, a local release
 # mirror (no network access needed), a mock receiver for webhook/AWX/notifications. Every step prints
 # PASS/FAIL with the evidence; the exit code is 0 only if no step failed. Everything started is stopped again.
@@ -212,6 +217,17 @@ for b in myriarchd myriarch-sim myrctl; do [ -x "bin/$b" ] || { fail "binary bin
 section "1. myriarchd (dev mode, embedded PostgreSQL, test data repo)"
 rm -rf "$E2E_DIR/data" "$E2E_DIR/b" "$E2E_DIR/a2" "$E2E_DIR/fixtures" "$E2E_DIR/sim-state"
 python3 scripts/e2e/prepare_repo.py internal/testdata/gitops "$GITOPS" "$PORT_MOCK" || { fail "prepare repo" "script failed"; exit 1; }
+# Load run: one gateway at a time would exceed STEP_TIMEOUT (see the header). Only the working copy changes, never
+# internal/testdata; the smoke run, with few gateways, keeps maxConcurrent 1 and the serial path.
+if [ "$AGENTS" -gt 100 ]; then
+  GATEWAY_POLICY="$GITOPS/policies/gateway.yaml"
+  sed -i.bak 's/^  maxConcurrent: 1$/  maxConcurrent: 10/' "$GATEWAY_POLICY" && rm -f "$GATEWAY_POLICY.bak"
+  if [ "$(grep -c '^  maxConcurrent: 10$' "$GATEWAY_POLICY")" = 1 ]; then
+    pass "load run: gateway policy maxConcurrent 10 (batchSize of the webhook executor)" "$GATEWAY_POLICY"
+  else
+    fail "load run: gateway policy maxConcurrent 10" "the edit of $GATEWAY_POLICY did not apply (expected one line '  maxConcurrent: 1')"; exit 1
+  fi
+fi
 cp -R internal/release/testdata/fixtures "$E2E_DIR/fixtures"
 printf "%s" "$E2E_SECRET" > "$E2E_DIR/notify.secret"
 # generated credentials for the declarative configuration (mode 0600, never printed)
