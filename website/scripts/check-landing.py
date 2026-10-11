@@ -22,7 +22,10 @@ Fails when
     only when it can animate), the page still has a visible pause button (any element with the class landing-hero__motion), or the page
     does not load the script landing-mark (the loop of the mark and its role as the pause control need it) from the site,
   - index.html or a stylesheet that it links requests one of the files /brand/myriarch-icon*.svg (the mark is inline, so that it takes the
-    colour of the page and no file of the other appearance is fetched).
+    colour of the page and no file of the other appearance is fetched),
+  - website/data/release.yaml (the single source of the release status) does not have exactly the keys final and candidate, sets both,
+    or holds a tag in another form than vX.Y.Z (final) or vX.Y.Z-rc.N (candidate), or the status chip of the hero does not say what the
+    file says ("Latest release <tag>", "Release candidate <tag> (pre-release)" or "No release has been published yet").
 
 The output names the file and the problem. Exit status 0 = clean, 1 = findings, 2 = usage error.
 Python 3.9 compatible, standard library only.
@@ -38,6 +41,7 @@ from html.parser import HTMLParser
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEBSITE = os.path.dirname(HERE)
 LANDING_DATA = os.path.join(WEBSITE, "data", "landing.yaml")
+RELEASE_DATA = os.path.join(WEBSITE, "data", "release.yaml")
 SCREENSHOT_DIR = os.path.join(WEBSITE, "assets", "images", "screenshots")
 ICON = os.path.join(os.path.dirname(WEBSITE), "assets", "brand", "myriarch-icon.svg")
 EXPECTED_SIZE = (1440, 900)
@@ -70,6 +74,51 @@ def screenshot_names(data_path):
     return names
 
 
+FINAL_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+CANDIDATE_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$")
+NO_RELEASE_NOTE = "No release has been published yet"
+
+
+def read_release(path):
+    """(final, candidate, problems) of release.yaml, read as plain text: two top-level keys with a quoted or bare scalar."""
+    name = "website/data/" + os.path.basename(path)
+    values = {}
+    problems = []
+    with open(path, encoding="utf-8") as fh:
+        for number, line in enumerate(fh, 1):
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            m = re.match(r"^(\w+):[ \t]*(?:\"([^\"]*)\"|'([^']*)'|([^\s#\"']*))[ \t]*(?:#.*)?$", line.rstrip("\n"))
+            if not m:
+                problems.append("%s:%d: expected 'final: \"\"' or 'candidate: \"\"'" % (name, number))
+                continue
+            key = m.group(1)
+            if key in values:
+                problems.append("%s:%d: the key %s appears twice" % (name, number, key))
+            values[key] = next((g for g in m.groups()[1:] if g is not None), "")
+    for key in ("final", "candidate"):
+        if key not in values:
+            problems.append("%s: the key %s is missing" % (name, key))
+    for key in sorted(set(values) - {"final", "candidate"}):
+        problems.append("%s: unknown key %s (only final and candidate)" % (name, key))
+    final, candidate = values.get("final", ""), values.get("candidate", "")
+    if final and not FINAL_TAG.match(final):
+        problems.append("%s: final %r is not a tag of the form vX.Y.Z" % (name, final))
+    if candidate and not CANDIDATE_TAG.match(candidate):
+        problems.append("%s: candidate %r is not a tag of the form vX.Y.Z-rc.N" % (name, candidate))
+    if final and candidate:
+        problems.append("%s: final and candidate are both set; set only one (the latest final release wins, docs/releasing.md)" % name)
+    return final, candidate, problems
+
+
+def expected_note(final, candidate):
+    if final:
+        return "Latest release %s" % final
+    if candidate:
+        return "Release candidate %s (pre-release)" % candidate
+    return NO_RELEASE_NOTE
+
+
 def png_size(path):
     """(width, height) of a PNG file, or None when the file is not a PNG."""
     with open(path, "rb") as fh:
@@ -98,9 +147,17 @@ class LandingParser(HTMLParser):
         self._svg_has_title = False
         self._svg_role = None
         self._in_diagram_svg = False
+        self.chip_notes = []  # text of every element with the class landing-chip__note
+        self._chip_depth = 0
+        self._chip_text = []
 
     def handle_starttag(self, tag, attrs):
         a = {k: (v if v is not None else "") for k, v in attrs}
+        if self._chip_depth > 0:
+            self._chip_depth += 1
+        elif "landing-chip__note" in a.get("class", "").split():
+            self._chip_depth = 1
+            self._chip_text = []
         if a.get("id"):
             self.ids.add(a["id"])
         if "landing-hero__motion" in a.get("class", "").split():
@@ -133,7 +190,15 @@ class LandingParser(HTMLParser):
             self._svg_has_title = True
 
 
+    def handle_data(self, data):
+        if self._chip_depth > 0:
+            self._chip_text.append(data)
+
     def handle_endtag(self, tag):
+        if self._chip_depth > 0:
+            self._chip_depth -= 1
+            if self._chip_depth == 0:
+                self.chip_notes.append(" ".join("".join(self._chip_text).split()))
         if tag == "svg" and self._mark_depth > 0:
             self._mark_depth -= 1
         if tag == "svg" and self._in_diagram_svg:
@@ -338,7 +403,20 @@ def check_icon_requests(public, text, stylesheets):
     return problems
 
 
-def check_page(public, icon_path=ICON):
+def check_status_chip(parser, release_path):
+    final, candidate, problems = read_release(release_path)
+    problems = list(problems)
+    if problems:
+        return problems
+    want = expected_note(final, candidate)
+    if len(parser.chip_notes) != 1:
+        problems.append("index.html: the hero must contain exactly one status chip note (landing-chip__note), found %d" % len(parser.chip_notes))
+    elif parser.chip_notes[0] != want:
+        problems.append("index.html: the status chip says %r, website/data/release.yaml says %r" % (parser.chip_notes[0], want))
+    return problems
+
+
+def check_page(public, icon_path=ICON, release_path=RELEASE_DATA):
     problems = []
     index = os.path.join(public, "index.html")
     if not os.path.isfile(index):
@@ -365,6 +443,7 @@ def check_page(public, icon_path=ICON):
     problems += check_mark(parser, icon_path)
     problems += check_motion_control(parser)
     problems += check_icon_requests(public, text, parser.stylesheets)
+    problems += check_status_chip(parser, release_path)
 
     if not parser.images:
         problems.append("index.html: the page has no image")
@@ -414,6 +493,14 @@ def main(argv):
             return 2
         icon_path = args[i + 1]
         del args[i:i + 2]
+    release_path = RELEASE_DATA
+    if "--release" in args:
+        i = args.index("--release")
+        if i + 1 >= len(args):
+            print("usage: python3 -I website/scripts/check-landing.py [website/public]", file=sys.stderr)
+            return 2
+        release_path = args[i + 1]
+        del args[i:i + 2]
     if "--data" in args:
         i = args.index("--data")
         if i + 1 >= len(args):
@@ -428,11 +515,12 @@ def main(argv):
     if not os.path.isdir(public):
         print("check-landing: %s is not a directory (build the site first: make website)" % public, file=sys.stderr)
         return 2
-    if not os.path.isfile(data_path):
-        print("check-landing: %s does not exist" % data_path, file=sys.stderr)
-        return 2
+    for path in (data_path, release_path):
+        if not os.path.isfile(path):
+            print("check-landing: %s does not exist" % path, file=sys.stderr)
+            return 2
 
-    problems = check_screenshots(data_path, shot_dir) + check_page(public, icon_path)
+    problems = check_screenshots(data_path, shot_dir) + check_page(public, icon_path, release_path)
     for p in problems:
         print(p)
     print("check-landing: %d problems" % len(problems))

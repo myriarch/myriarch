@@ -1,9 +1,9 @@
 # Text of the landing page (layouts/home.html and layouts/_partials/landing/*). Sources: README.md, ROADMAP.md and the decision records;
-# nothing here claims more than the README status (alpha, no release yet). Links that start with "/" must name a page of the site
+# nothing here claims more than the README status (alpha; v0.1.0 is published first as release candidates). The release status in the
+# chip of the hero comes from data/release.yaml, not from this file. Links that start with "/" must name a page of the site
 # (with or without the .md suffix); the build fails when a page does not exist.
 hero:
   status: Alpha
-  status_note: No release has been published yet
   title: A GitOps-governed fleet manager for OpenTelemetry Collectors, built on OpAMP
   subline: Git sets the frame, the UI operates within it, every action is audited.
   ctas:
@@ -47,7 +47,7 @@ features:
       link_label: Track releases and notify
     - icon: fa-solid fa-shield-halved
       title: Signed artifacts
-      text: The updater verifies the Sigstore bundle of a collector package before it installs it, offline if needed. Keyless Sigstore signing of the project's own releases is planned for v0.1.0.
+      text: The updater verifies the Sigstore bundle of a collector package before it installs it, offline if needed. The project's own releases, release candidates included, are signed keyless with Sigstore and carry build provenance.
       link: /docs/adr/0007-package-offers-in-upstream-format-with-sigstore-bundles.md
       link_label: Package offers and Sigstore bundles
     - icon: fa-solid fa-layer-group

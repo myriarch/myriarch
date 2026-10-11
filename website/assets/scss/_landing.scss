@@ -185,6 +185,13 @@ $landing-blush: #fbf6f9;
     background: var(--landing-accent);
     border-radius: 999px;
   }
+
+  // the note links to the release page once a release exists (data/release.yaml)
+  &__note a {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
 }
 
 .landing-hero__title {

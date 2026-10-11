@@ -4,6 +4,8 @@ SPDX-License-Identifier: Apache-2.0
 */ -}}
 {{- /*
   Hero of the landing page: value proposition, status chip, the three calls to action (data/landing.yaml, key hero) and the mark.
+  The note of the status chip is derived from data/release.yaml (the single source of the release status; docs/releasing.md): the latest
+  final release, else the newest release candidate, else "No release has been published yet". scripts/check-landing.py checks the result.
   The mark is the inline SVG of assets/brand/myriarch-icon-parts.svg (the mark as ten separate shapes, generated with the other brand files;
   config/_default/module.yaml mounts it). It is inline so that it follows the colour of the page (currentColor, set in _landing.scss) in
   both appearances and so that a stylesheet can play the rollout on its parts (assets/brand/README.md, "Motion"). It is decoration: the
@@ -17,6 +19,15 @@ SPDX-License-Identifier: Apache-2.0
   (fingerprinted, no inline code, nothing from another origin).
 */ -}}
 {{ $hero := hugo.Data.landing.hero -}}
+{{ $release := hugo.Data.release -}}
+{{ $final := $release.final | default "" -}}
+{{ $candidate := $release.candidate | default "" -}}
+{{ if and (ne $final "") (ne $candidate "") }}{{ errorf "landing: data/release.yaml sets final and candidate; only one of them may be set" }}{{ end -}}
+{{ if and (ne $final "") (not (findRE `^v[0-9]+\.[0-9]+\.[0-9]+$` $final)) }}{{ errorf "landing: data/release.yaml: final %q is not a tag vX.Y.Z" $final }}{{ end -}}
+{{ if and (ne $candidate "") (not (findRE `^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$` $candidate)) }}{{ errorf "landing: data/release.yaml: candidate %q is not a tag vX.Y.Z-rc.N" $candidate }}{{ end -}}
+{{ $tag := cond (ne $final "") $final $candidate -}}
+{{ $note := "No release has been published yet" -}}
+{{ if ne $final "" }}{{ $note = printf "Latest release %s" $final }}{{ else if ne $candidate "" }}{{ $note = printf "Release candidate %s (pre-release)" $candidate }}{{ end -}}
 {{ $markFile := resources.Get "brand/myriarch-icon-parts.svg" -}}
 {{ if not $markFile }}{{ errorf "landing: assets/brand/myriarch-icon-parts.svg is not mounted (config/_default/module.yaml)" }}{{ end -}}
 {{ $mark := $markFile.Content -}}
@@ -32,7 +43,7 @@ SPDX-License-Identifier: Apache-2.0
     <div class="landing-hero__copy">
       <p class="landing-chip">
         <span class="landing-chip__level">{{ $hero.status }}</span>
-        <span class="landing-chip__note">{{ $hero.status_note }}</span>
+        <span class="landing-chip__note">{{ if ne $tag "" }}<a href="{{ site.Params.repo.url }}/releases/tag/{{ $tag }}" rel="noopener">{{ $note }}</a>{{ else }}{{ $note }}{{ end }}</span>
       </p>
       <h1 id="landing-hero-title" class="landing-hero__title">{{ $hero.title }}</h1>
       <p class="landing-hero__subline">{{ $hero.subline }}</p>

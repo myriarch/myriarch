@@ -55,6 +55,12 @@ quickstart:
   title: y
 """
 
+RELEASE = '''# comment
+final: ""
+candidate: ""
+'''
+
+
 def circle(cx, cy, r, ccw=False):
     """A full circle as two arcs, in the form of the brand files."""
     sweep = 0 if ccw else 1
@@ -79,6 +85,7 @@ BUTTON = '<button type="button" class="landing-hero__motion" aria-label="Pause l
 
 GOOD_PAGE = """<!doctype html><html><head><title>t</title><link rel="stylesheet" href="/css/site.css"></head><body class="td-home">
 <h1>Title</h1>
+<p class="landing-chip"><span class="landing-chip__level">Alpha</span><span class="landing-chip__note">No release has been published yet</span></p>
 @MARK@
 <section id="features"></section>
 <section id="architecture"><svg role="img" aria-labelledby="arch-title arch-desc" viewBox="0 0 1 1"><title id="arch-title">a</title></svg></section>
@@ -101,11 +108,13 @@ class LandingTest(unittest.TestCase):
         self.public = os.path.join(self.tmp, "public")
         self.shots = os.path.join(self.tmp, "shots")
         self.data = os.path.join(self.tmp, "landing.yaml")
+        self.release = os.path.join(self.tmp, "release.yaml")
         os.makedirs(os.path.join(self.public, "images"))
         os.makedirs(self.shots)
         for name in ("a.webp", "a_640.webp"):
             self.write(os.path.join(self.public, "images", name), b"x")
         self.write(self.data, DATA.encode())
+        self.write(self.release, RELEASE.encode())
         self.icon = os.path.join(self.tmp, "myriarch-icon.svg")
         self.write(self.icon, ICON_SVG.encode())
         os.makedirs(os.path.join(self.public, "css"))
@@ -125,7 +134,7 @@ class LandingTest(unittest.TestCase):
     def run_check(self, *extra):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = self.mod.main([self.public, "--screenshots", self.shots, "--data", self.data, "--icon", self.icon] + list(extra))
+            rc = self.mod.main([self.public, "--screenshots", self.shots, "--data", self.data, "--release", self.release, "--icon", self.icon] + list(extra))
         return rc, out.getvalue(), err.getvalue()
 
     def test_clean_page_passes(self):
@@ -345,6 +354,59 @@ class LandingTest(unittest.TestCase):
     def test_real_data_file_lists_four_screenshots(self):
         names = self.mod.screenshot_names(self.mod.LANDING_DATA)
         self.assertEqual(names, ["dashboard", "agents", "fleet-version", "rollout"])
+
+
+    def release_file(self, text):
+        self.write(self.release, text.encode())
+
+    def chip_page(self, note, link=False):
+        inner = '<a href="https://example.test/r">%s</a>' % note if link else note
+        return GOOD_PAGE.replace("No release has been published yet", inner)
+
+    def test_chip_for_a_candidate(self):
+        self.release_file('final: ""\ncandidate: "v0.1.0-rc.1"  # comment\n')
+        self.page(self.chip_page("Release candidate v0.1.0-rc.1 (pre-release)", link=True))
+        rc, out, _ = self.run_check()
+        self.assertEqual(rc, 0, out)
+
+    def test_chip_for_a_final_release(self):
+        self.release_file("final: v0.1.0\ncandidate: ''\n")
+        self.page(self.chip_page("Latest release v0.1.0", link=True))
+        rc, out, _ = self.run_check()
+        self.assertEqual(rc, 0, out)
+
+    def test_stale_chip_is_reported(self):
+        self.release_file('final: ""\ncandidate: "v0.1.0-rc.1"\n')
+        rc, out, _ = self.run_check()
+        self.assertEqual(rc, 1)
+        self.assertIn("the status chip says 'No release has been published yet', website/data/release.yaml says 'Release candidate v0.1.0-rc.1 (pre-release)'", out)
+
+    def test_missing_chip_is_reported(self):
+        self.page(GOOD_PAGE.replace("landing-chip__note", "other"))
+        rc, out, _ = self.run_check()
+        self.assertEqual(rc, 1)
+        self.assertIn("exactly one status chip note (landing-chip__note), found 0", out)
+
+    def test_release_data_with_both_tags(self):
+        self.release_file('final: "v0.1.0"\ncandidate: "v0.2.0-rc.1"\n')
+        rc, out, _ = self.run_check()
+        self.assertEqual(rc, 1)
+        self.assertIn("final and candidate are both set", out)
+
+    def test_release_data_with_bad_tags(self):
+        self.release_file('final: "0.1.0"\ncandidate: "v0.1.0"\n')
+        rc, out, _ = self.run_check()
+        self.assertEqual(rc, 1)
+        self.assertIn("final '0.1.0' is not a tag of the form vX.Y.Z", out)
+        self.assertIn("candidate 'v0.1.0' is not a tag of the form vX.Y.Z-rc.N", out)
+
+    def test_release_data_with_missing_and_unknown_keys(self):
+        self.release_file('final: ""\nlatest: "v1.0.0"\nnot yaml\n')
+        rc, out, _ = self.run_check()
+        self.assertEqual(rc, 1)
+        self.assertIn("the key candidate is missing", out)
+        self.assertIn("unknown key latest", out)
+        self.assertIn("release.yaml:3: expected", out)
 
 
 if __name__ == "__main__":
