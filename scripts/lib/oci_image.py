@@ -310,10 +310,16 @@ def archive_checksum(dist, archive_name):
     return found[0]
 
 
+def is_local_junk(name):
+    """Names that editors and file managers leave behind: not part of a release (the same names the build from source skips)."""
+    return name in (".DS_Store", "Thumbs.db") or name.startswith("._") or name.endswith("~") or name.endswith(".swp")
+
+
 def read_archive(data, label, wanted, tree=None):
     """The regular files of the archive root named in wanted (name -> bytes); anything else in the archive is ignored.
     tree: a directory of the archive (e.g. "examples/sim") whose files are returned as well, as {path relative to tree: bytes}.
-    Below the tree only regular files and directories are accepted, and no path may leave it. The tree must not be empty.
+    Below the tree only regular files and directories are accepted, no path may leave it, no file may be the parent of another
+    one and files that editors and file managers leave behind (.DS_Store, ._*, *~, *.swp) are refused. The tree must not be empty.
     data holds the bytes of the archive: the bytes that were checked against checksums.txt are the bytes that are read."""
     found = {}
     files = {}
@@ -337,6 +343,8 @@ def read_archive(data, label, wanted, tree=None):
                     continue
                 if not member.isreg():
                     raise CheckError("%s: %s is not a regular file" % (label, name))
+                if any(is_local_junk(part) for part in parts):
+                    raise CheckError("%s: %s is a file of a local work tree (a release is built from a fresh checkout)" % (label, name))
                 if rel in files:
                     raise CheckError("%s: %s occurs twice" % (label, name))
                 files[rel] = tf.extractfile(member).read()
@@ -355,6 +363,11 @@ def read_archive(data, label, wanted, tree=None):
         return found
     if not files:
         raise CheckError("%s holds no files below %s" % (label, tree))
+    for rel in files:
+        parts = rel.split("/")
+        for i in range(1, len(parts)):
+            if "/".join(parts[:i]) in files:
+                raise CheckError("%s: %s/%s is below %s/%s, which is a file" % (label, tree, rel, tree, "/".join(parts[:i])))
     return found, files
 
 

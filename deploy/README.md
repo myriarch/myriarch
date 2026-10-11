@@ -218,6 +218,12 @@ in deployments.
     The default command starts the server; start the other programs with another entrypoint, for example
     `docker run --entrypoint /usr/local/bin/myriarch-sim IMAGE run --profile /opt/myriarch/examples/sim/small.yaml` or
     `docker run --entrypoint /usr/local/bin/myrctl IMAGE validate /opt/myriarch/examples/quickstart`.
+    The working directory is `/`, which is not writable for the user 65532, and the release `myriarchd` has no embedded
+    PostgreSQL (no `devpg` tag). `myriarchd dev` with this image therefore needs the paths and the database spelled out:
+    `dev --gitops-dir /opt/myriarch/examples/quickstart --data-dir /var/lib/myriarchd --dsn <PostgreSQL DSN>` (the defaults
+    `examples/quickstart` and `.dev` are relative to `/`), plus `--allow-nonlocal` and a `--listen` address that the container
+    port can reach, with a volume at the data directory. The image built from source (`dev` variant) has the embedded
+    PostgreSQL and the working directory `/opt/myriarch`.
   * **Updater image.** `/usr/local/bin/myriarch-updater` (entrypoint, no default command). It has no data directory: the
     updater image is the source of the binary for the collector image (`UPDATER_SOURCE=image`) and the state directory of
     container mode (`stateDir`, `installDir`) is on the volume of the image that runs the updater
@@ -247,7 +253,8 @@ in deployments.
 * **Origin of the example files.** The example repositories are not read from the work tree: `examples/quickstart` is part of
   the `myriarchd` archive and `examples/sim` of the `myriarch-sim` archive (`release/goreleaser.yaml`), so `checksums.txt`, and
   with it the signature of the release, covers every file of the image, and the image can be rebuilt from `dist/` alone. The
-  builder reads only regular files below those two directories and refuses links and paths that leave them.
+  builder reads only regular files below those two directories and refuses links, paths that leave them, a file that is the parent
+  of another file and leftovers of a local work tree (`.DS_Store`, `._*`, `*~`, `*.swp`): a release is built from a fresh checkout.
 * **Verification.** The signatures and attestations of the images and how to verify them come with the release workflow.
 
 ## License files
@@ -268,7 +275,8 @@ with every artifact that is built here, except the mirror image (see below):
   `docker/myriarch-sim.Dockerfile` and the collector image (`k8s/collector/Dockerfile`,
   `scripts/build-collector-image-crane.sh`). `scripts/build-image-crane.sh layout` and
   `scripts/build-collector-image-crane.sh layout` print the paths of the data and license files of the layer without building
-  anything (a test checks them: `ci/tests/image-crane-test.sh`).
+  anything, and `scripts/build-image-crane.sh layout-dirs` prints its directories with mode and owner (a test checks them:
+  `ci/tests/image-crane-test.sh`).
   The mirror image (`scripts/build-mirror-image-crane.sh`) is the exception: it holds busybox and the OpenTelemetry release
   files, not the project's binaries, and no `LICENSE` or `THIRD_PARTY_NOTICES`. Its label names the two licenses of its
   content (`Apache-2.0 AND GPL-2.0-only`); whoever pushes it takes on the obligations of busybox (corresponding source of the

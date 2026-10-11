@@ -18,6 +18,8 @@
 #   IMAGE_VARIANT=release scripts/build-image-crane.sh layout
 #                                             print the paths of the data and license files of the variant; needs no
 #                                             IMAGE_REPO, no network and no repository state, and builds nothing
+#   IMAGE_VARIANT=release scripts/build-image-crane.sh layout-dirs
+#                                             print the directories of the variant with mode and owner ("<path> <mode> <uid>:<gid>")
 #   IMAGE_SOURCE=dist IMAGE_KIND=server scripts/build-image-crane.sh
 #   IMAGE_SOURCE=dist IMAGE_KIND=updater scripts/build-image-crane.sh
 #                                             the release images (see below): from the linux archives of a goreleaser
@@ -364,15 +366,16 @@ build_binaries() {
 # ---- layer --------------------------------------------------------------------------------------------------------
 # Deterministic tar written by Python (no GNU/BSD tar differences): sorted entries, uid/gid 0, fixed mtime, fixed modes.
 # One entry table serves both modes of the program below: "build" packs the layer (and checks the binaries), "list" prints the
-# archive paths of all files of the layer except the binaries (no ELF check, nothing is built; used by `layout`).
-# Arguments: build <root> <variant> <layer.tar> <epoch> <bindir> <elf machine> <platform> | list <root> <variant>
+# archive paths of all files of the layer except the binaries and "dirs" prints its directories as "<path> <mode> <uid>:<gid>"
+# (no ELF check, nothing is built; used by `layout` and `layout-dirs`).
+# Arguments: build <root> <variant> <layer.tar> <epoch> <bindir> <elf machine> <platform> | list|dirs <root> <variant>
 layer_py() {
   cat <<'PY'
 import io, os, sys, tarfile
 
 mode, root, variant = sys.argv[1], sys.argv[2], sys.argv[3]
-if mode not in ("build", "list") or variant not in ("dev", "release"):
-    raise SystemExit("usage: build|list <root> dev|release ...")
+if mode not in ("build", "list", "dirs") or variant not in ("dev", "release"):
+    raise SystemExit("usage: build|list|dirs <root> dev|release ...")
 
 # archive path -> (kind, payload, mode, owner); kind "dir" (no payload), "file" (payload = source path), "data" (payload = bytes);
 # owner is the uid and gid (0 or the user of the image)
@@ -469,6 +472,11 @@ if mode == "list":
         if entries[arc][0] != "dir":
             print(arc)
     sys.exit(0)
+if mode == "dirs":
+    for arc in sorted(entries):
+        if entries[arc][0] == "dir":
+            print("%s %o %d:%d" % (arc, entries[arc][2], entries[arc][3], entries[arc][3]))
+    sys.exit(0)
 
 with tarfile.open(out, "w", format=tarfile.PAX_FORMAT) as tar:
     for arc in sorted(entries):
@@ -509,6 +517,15 @@ cmd_layout() {
   image_variant_check
   have python3 || die "python3 not found"
   layer_py | python3 - list "${ROOT}" "${IMAGE_VARIANT}" || die "cannot list the layout of the ${IMAGE_VARIANT} variant"
+}
+
+# `layout-dirs`: the directories of the layer as "<path> <mode in octal> <uid>:<gid>", sorted. The owners and modes the image
+# is tested for (the data directory of the server belongs to the user of the image) come from the same table the layer is
+# written from.
+cmd_layout_dirs() {
+  image_variant_check
+  have python3 || die "python3 not found"
+  layer_py | python3 - dirs "${ROOT}" "${IMAGE_VARIANT}" || die "cannot list the directories of the ${IMAGE_VARIANT} variant"
 }
 
 # ---- labels -------------------------------------------------------------------------------------------------------
@@ -863,7 +880,8 @@ case "${1:-build}" in
       *) die "invalid IMAGE_SOURCE '${IMAGE_SOURCE}' (build or dist)" ;;
     esac ;;
   layout) cmd_layout ;;
+  layout-dirs) cmd_layout_dirs ;;
   login) shift; cmd_login "$@" ;;
   -h|--help|help) sed -n '2,/^set -euo pipefail$/p' "${BASH_SOURCE[0]}" | sed -e '/^set -euo/d' -e 's/^# \{0,1\}//' ;;
-  *) die "unknown command '$1' (build | layout | login <user> | help)" ;;
+  *) die "unknown command '$1' (build | layout | layout-dirs | login <user> | help)" ;;
 esac

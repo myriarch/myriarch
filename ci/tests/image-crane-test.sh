@@ -245,6 +245,17 @@ if printf '%s\n' "${REL_LAYOUT}" | grep -qi 'fixtures'; then fail "layout (relea
 if [ "${DEV_LAYOUT}" = "${EXPLICIT_DEV_LAYOUT}" ]; then ok "the default variant is dev"; else fail "the default variant differs from IMAGE_VARIANT=dev"; fi
 if printf '%s\n' "${DEV_LAYOUT}" | LC_ALL=C sort -c 2>/dev/null; then ok "layout is sorted"; else fail "layout is not sorted"; fi
 if printf '%s\n' "${DEV_LAYOUT}" "${REL_LAYOUT}" | grep -q '^/\|^usr/local/bin/'; then fail "layout lists absolute paths or binaries"; else ok "layout lists no absolute paths and no binaries"; fi
+# `layout-dirs` prints the directories with mode and owner: the data directory belongs to the user of the image
+t_layout_dirs() { env -u IMAGE_REPO -u IMAGE_VARIANT IMAGE_VARIANT="$1" bash "${IMG}" layout-dirs; }
+for variant in dev release; do
+  DIRS="$(t_layout_dirs "${variant}" 2>&1)"
+  for want in "var/lib/myriarchd 750 65532:65532" "tmp 1777 0:0" "usr/share/licenses/myriarch 755 0:0" "opt/myriarch/examples/quickstart 755 0:0"; do
+    if printf '%s\n' "${DIRS}" | grep -qx -- "${want}"; then ok "layout-dirs (${variant}) contains '${want}'"; else fail "layout-dirs (${variant}) lacks '${want}': ${DIRS}"; fi
+  done
+  if printf '%s\n' "${DIRS}" | grep -q '^var/lib/myriarchd '; then
+    [ "$(printf '%s\n' "${DIRS}" | grep -c '^var/lib/myriarchd ')" = 1 ] && ok "layout-dirs (${variant}) lists the data directory once" || fail "layout-dirs (${variant}) lists the data directory more than once"
+  fi
+done
 t_layout_badvariant() { env -u IMAGE_REPO IMAGE_VARIANT=bogus bash "${IMG}" layout; }
 expect_fail "layout rejects an invalid IMAGE_VARIANT" "invalid IMAGE_VARIANT 'bogus'" t_layout_badvariant
 t_build_badvariant() { IMAGE_VARIANT=Release IMAGE_REPO=registry.example.com/x/y bash "${IMG}"; }
@@ -429,6 +440,8 @@ for name, amd64, arm64 in specs:
                 ti.linkname = "/etc/passwd"
                 ti.mtime = 1700000000
                 tar.addfile(ti)
+            for extra in o.get("file", []):
+                add(tree + "/" + extra, b"extra\n", 0o644)
             if "dotdot" in o:
                 add(tree + "/../escape.txt", b"outside\n", 0o644)
         sums.append("%s  %s\n" % (hashlib.sha256(open(os.path.join(dist, archive), "rb").read()).hexdigest(), archive))
@@ -760,6 +773,12 @@ PY
   mkdist "${W}/dist-dotdot" myriarchd "${BIN}/amd64/myriarchd" "${BIN}/arm64/myriarchd" "${RV}" myriarch-sim.dotdot=1
   t_dotdot() { run_dist server "${W}/dist-dotdot" "${W}/outf"; }
   expect_fail "a path that leaves the example tree is refused" "is not a clean path below examples/sim" t_dotdot
+  mkdist "${W}/dist-junk" myriarchd "${BIN}/amd64/myriarchd" "${BIN}/arm64/myriarchd" "${RV}" file=fleets/.DS_Store
+  t_junk() { run_dist server "${W}/dist-junk" "${W}/outf"; }
+  expect_fail "a file of a local work tree in the example tree is refused" "examples/quickstart/fleets/.DS_Store is a file of a local work tree" t_junk
+  mkdist "${W}/dist-fileparent" myriarchd "${BIN}/amd64/myriarchd" "${BIN}/arm64/myriarchd" "${RV}" file=extra file=extra/inner.yaml
+  t_fileparent() { run_dist server "${W}/dist-fileparent" "${W}/outf"; }
+  expect_fail "a file that is the parent of another file is refused" "examples/quickstart/extra/inner.yaml is below examples/quickstart/extra, which is a file" t_fileparent
   # the updater image does not need the archives of the server image
   t_updater_only() { run_dist updater "${W}/dist-ok-updater" "${W}/out9" IMAGE_SBOM=0; }
   if [ ! -e "${W}/dist-ok-updater/myrctl_${RV}_linux_amd64.tar.gz" ] && OUT="$(t_updater_only 2>&1)"; then ok "the updater image needs the archive of the updater only"; else fail "updater image from a dist without the server archives: ${OUT:-}"; fi
