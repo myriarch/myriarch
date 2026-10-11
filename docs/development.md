@@ -192,7 +192,8 @@ ships:
   verified against the `SYFT_SHA256_*` and `ZIZMOR_SHA256_*` values in `ci/versions.env`. Both publish binaries for macOS and for
   Linux, for arm64 and amd64 (zizmor only with glibc, `unknown-linux-gnu`; there is no musl build). syft is not built from source:
   only the upstream release binaries carry their version, which syft records in every SBOM it makes (a `go build` reports
-  "[not provided]"), and a Go module for it would bring its whole dependency graph into the repository. No gate runs zizmor yet.
+  "[not provided]"), and a Go module for it would bring its whole dependency graph into the repository. The `workflows` gate runs zizmor
+  ([Security rules of the workflows](#security-rules-of-the-workflows)).
   The SBOM jobs run syft with `SYFT_CHECK_FOR_APP_UPDATE=false`, so that it does not look for a newer release.
 - `osslsigncode` (signs and verifies the Authenticode signatures of the Windows release files) is built from the source archive of
   the pinned tag, verified against `OSSLSIGNCODE_SOURCE_SHA256` in `ci/versions.env` (`ci/install-tools.sh osslsigncode`). It is a C
@@ -237,7 +238,7 @@ make docs-check                                   # when you touched documentati
 | `build` | `make build` |
 | `examples` | `make validate-examples` (`myrctl validate --strict` on `examples/quickstart`, `gitops-template/config` and `hack/kind/gitops`) |
 | `shellcheck` | `ci/lint-shell.sh` over all shell scripts we ship or run |
-| `workflows` | `ci/lint-workflows.sh`: `actionlint` over `.github/workflows` and the policy check `ci/check-workflows.py` (pinned actions, read-only token, forbidden triggers, secrets only for listed deployment jobs, a timeout per job, parity with the gates, the shape of the Scorecard and release workflows; see [Continuous integration](#continuous-integration)) |
+| `workflows` | `ci/lint-workflows.sh`: `actionlint` over `.github/workflows`, `zizmor` over the workflows, the local action and `.github/dependabot.yml` (offline; `ZIZMOR_ONLINE=1` with `GH_TOKEN` adds the audits that ask the GitHub API, which the CI job does), and the policy check `ci/check-workflows.py` (pinned actions, read-only token, forbidden triggers, secrets only for listed deployment jobs, a timeout per job, parity with the gates, the shape of the Scorecard and release workflows; see [Continuous integration](#continuous-integration)) |
 | `helm` | `ci/lint-helm.sh` and `ci/helm-conform.sh` (renders the chart with the example values and validates it against the schemas of Kubernetes 1.30.0, the chart floor, and 1.34.12) |
 | `language` | the language guard for English (see below) |
 | `docs` | `make docs-check`: generated CLI reference up to date, links, front matter |
@@ -401,6 +402,27 @@ both, so a rule does not depend on how a file is named:
   patterns and arrays that mention `go` or `make` are fine; a program started through a variable, a script or an interpreter
   that is not a shell is out of reach, so the scripts that privileged jobs call are tested with a `PATH` without `go`, `node`
   and `pnpm`.
+- **zizmor audits the workflows.** `ci/lint-workflows.sh` runs the pinned `zizmor` (`ci/install-tools.sh zizmor`) between
+  `actionlint` and the policy check: template injection, dangerous triggers, excessive permissions, persisted credentials,
+  cache poisoning, unpinned and impostor actions, secrets outside environments, unsafe writes to `GITHUB_ENV` and
+  `GITHUB_PATH`, and the cooldown of Dependabot updates. It uses the regular persona; the pedantic one asks for a concurrency
+  group in every workflow, which the fixed shape of `scorecard.yml` (rule R12) does not have. The gate runs offline, so it needs
+  no network and no token. The `workflows` job of `ci.yml` sets `ZIZMOR_ONLINE=1` and passes the read-only token of the run
+  as `GH_TOKEN`, which switches on the audits that ask the GitHub API about the pinned actions. To run them locally, export a
+  `GH_TOKEN` and `ZIZMOR_ONLINE=1`. A finding fails the gate. Fix the workflow; if the finding is a false positive, ignore it
+  as narrowly as possible, with the reason next to the ignore: a trailing comment `# zizmor: ignore[<audit>]` on the line the
+  finding names (it must be the line of the `run:` key for a script) or an entry under `rules.<audit>.ignore` in `zizmor.yml`
+  (audit and file, a line number where the finding is about one place). No audit is switched off. The environment variables
+  `ZIZMOR_CONFIG` and `ZIZMOR_OFFLINE` are ignored by the script. `ci/tests/lint-workflows-test.sh` checks with the real
+  zizmor that a finding fails the gate and that an ignore covers only its audit and file.
+- **CodeQL scans the code** (`.github/workflows/codeql.yml`, results in the code scanning alerts of the repository). One matrix
+  job `analyze` per language: `go` with a manual build (`go build ./...` and `go build -tags devpg ./...`, so that the code
+  behind the build tag is analysed), `javascript-typescript` (the web UI and the website scripts) and `actions` (the workflows
+  and the local action), with the `security-extended` queries. It runs on pushes to `main`, on pull requests from branches of this
+  repository (a fork or Dependabot gets a read-only token that cannot upload results) and weekly. The job's one write scope,
+  `security-events`, is listed in `ci/workflow-permissions.txt`. Default setup of code scanning must stay off in the repository
+  settings, because this workflow replaces it. `init`, `analyze` and the `upload-sarif` step of `scorecard.yml` use the same pin
+  of `github/codeql-action` (rule R2). A new language or build tag goes into the matrix and into the build step.
 - **A read-only token**: `permissions: contents: read` at the top of every workflow. A job-level write scope needs a line in
   `ci/workflow-permissions.txt` (`<workflow file> <job> <scope>`) and a review of the job.
 - **No `pull_request_target` and no `workflow_run`**, `persist-credentials: false` on every checkout, a timeout on
@@ -454,7 +476,8 @@ step in `.github/actions/setup/action.yml`. Move it to the next LTS line only af
 ## Dependency updates
 
 Dependabot (`.github/dependabot.yml`) proposes version updates every Monday, as one grouped pull request per directory, and
-security updates as soon as an advisory has a fix. The pull requests go through the same checks as any other change, and several
+security updates as soon as an advisory has a fix. Every entry has a cooldown of 7 days (zizmor, audit `dependabot-cooldown`): a version
+is proposed no earlier than a week after its release; security updates ignore the cooldown. The pull requests go through the same checks as any other change, and several
 of them need a follow-up commit on the same branch:
 
 | Ecosystem and directory | Group | What else the update has to change |
