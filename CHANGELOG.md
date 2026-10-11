@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
-First public release. The sections below describe what the project ships; the history before publication is in the Git log.
+First public release (v0.1.0, published first as release candidates). The sections below describe what the project ships; the history before publication is in the Git log.
 
 ### Added
 

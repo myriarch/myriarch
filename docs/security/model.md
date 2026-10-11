@@ -443,8 +443,9 @@ guidance after each item names what to do.
     see: Go files for operating systems other than Linux, Windows and macOS, build tags other than `embedui` and `devpg`, and
     the compiled web UI are not covered, and the shell scripts, the Helm chart and the PowerShell installers are no CodeQL
     language (ShellCheck, the chart gate, the installer tests and review cover them). That the extractor follows the `GOOS` of
-    the traced build is assumed, not proven: the first run of the workflow must confirm, in its logs or on the tool status page
-    of code scanning, that the `*_windows.go` files (`internal/updater/service_windows.go`, `internal/artifact/open_windows.go`,
+    the traced build is assumed, not proven: nobody has recorded that the extractor saw the files below. Check it in the logs or
+    on the tool status page of code scanning, and again after every change of the build steps of the workflow, that the
+    `*_windows.go` files (`internal/updater/service_windows.go`, `internal/artifact/open_windows.go`,
     `internal/deps/deps_windows.go`) and `internal/devpg/lock_other.go` were extracted; if they were not, the Windows build
     needs a job of its own.
   - *OpenSSF Scorecard* (`scorecard.yml`, ADR-0033) scores repository practices (token permissions, pinned dependencies, branch
