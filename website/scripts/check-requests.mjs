@@ -10,11 +10,12 @@
 //   node website/scripts/check-requests.mjs [--base http://127.0.0.1:1313] [--pages website/scripts/request-pages.txt] [--page /path ...]
 //
 // It also checks the motion of the mark on the landing page (checkMotion, light and dark): the rollout plays on the ten parts of the mark,
-// every part ends on an identity transform (the unchanged mark), the mark is held, the dots retract and a second cycle starts; the pause
-// button (an accessible button) stops the motion and shows the static mark, play resumes at the retraction of a cycle without a jump and
-// the ring does not grow again, and the loop stands still while the hero is out of view or the document is hidden; with
-// prefers-reduced-motion: reduce nothing animates and there is no button; without JavaScript the rollout plays once. The check takes about
-// a minute.
+// every part ends on an identity transform (the unchanged mark), the mark is held, the dots retract and a second cycle starts; the mark is
+// its own pause control (no visible button): a click, or Enter or Space on the focused mark, stops the motion and shows the static mark,
+// the next one resumes at the retraction of a cycle without a jump and the ring does not grow again, aria-pressed follows, the focus ring
+// shows for keyboard focus and not after a mouse click, and the loop stands still while the hero is out of view or the document is hidden;
+// with prefers-reduced-motion: reduce nothing animates and the mark has no role and is not focusable; without JavaScript the rollout plays
+// once and the mark is a plain image. The check takes about a minute and a half.
 //
 // Serve the production build first (make website-preview, port 1313). Every page is loaded in the light and in the dark appearance.
 // Chrome: the environment variable CHROME, else Google Chrome on macOS, else google-chrome or chromium (see cdp.mjs). Node.js 22 or newer.
@@ -162,27 +163,33 @@ const LOOP_STATE = `(() => {
   return JSON.stringify({ running: true, iteration: timing.currentIteration, progress: timing.progress, pos: timing.progress === null ? null : timing.progress * Number(timing.duration), ms: Number(animation.currentTime), iterations: timing.iterations });
 })()`;
 
-/** The pause button: what a keyboard user and a screen reader get. */
-const BUTTON_STATE = `(() => {
-  const button = document.querySelector('.landing-hero__motion');
-  if (!button) return JSON.stringify({ found: false });
-  const box = button.getBoundingClientRect();
-  const style = getComputedStyle(button);
+/** The mark as a control: what a keyboard user, a pointer user and a screen reader get. */
+const CONTROL_STATE = `(() => {
+  const mark = document.querySelector('svg.landing-hero__mark');
+  if (!mark) return JSON.stringify({ found: false });
+  const box = mark.getBoundingClientRect();
+  const style = getComputedStyle(mark);
   const root = getComputedStyle(document.documentElement);
   return JSON.stringify({
     found: true,
-    tag: button.tagName,
-    type: button.getAttribute('type'),
-    disabled: button.disabled,
-    hiddenAttribute: button.hidden,
-    display: style.display,
+    visibleButton: document.querySelector('.landing-hero__motion, .landing-hero__art button') !== null,
+    role: mark.getAttribute('role'),
+    tabindexAttribute: mark.getAttribute('tabindex'),
+    tabIndex: mark.tabIndex,
+    label: mark.getAttribute('aria-label'),
+    pressed: mark.getAttribute('aria-pressed'),
+    ariaHidden: mark.getAttribute('aria-hidden'),
+    cursor: style.cursor,
+    x: box.x,
+    y: box.y,
     width: box.width,
     height: box.height,
-    tabIndex: button.tabIndex,
-    label: button.getAttribute('aria-label'),
-    pressed: button.getAttribute('aria-pressed'),
-    color: style.color,
-    borderColor: style.borderTopColor,
+    focused: document.activeElement === mark,
+    focusVisible: mark.matches(':focus-visible'),
+    outlineStyle: style.outlineStyle,
+    outlineWidth: parseFloat(style.outlineWidth),
+    outlineColor: style.outlineColor,
+    scrollY: window.scrollY,
     from: root.getPropertyValue('--landing-hero-from').trim(),
     to: root.getPropertyValue('--landing-hero-to').trim(),
   });
@@ -224,37 +231,81 @@ export function contrast(a, b) {
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
-/** The pause button as an accessible control: a real button, reachable, labelled, at least 24x24 px, readable in this appearance. */
-async function checkButton(page, label, findings) {
-  const b = await json(page, BUTTON_STATE);
-  if (!b.found) {
-    findings.push(`${label}: the pause button (.landing-hero__motion) is not on the page`);
+/** A click of the mouse in the middle of the mark (real input events, so that :focus-visible behaves as for a visitor). */
+async function clickMark(page) {
+  const c = await json(page, CONTROL_STATE);
+  const x = c.x + c.width / 2;
+  const y = c.y + c.height / 2;
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+  await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+  await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+}
+
+const KEYS = {
+  Tab: { key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
+  Enter: { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
+  Space: { key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " " },
+};
+
+/** A key press with real input events: keyDown (with its text) and keyUp. */
+async function pressKey(page, name, { shift = false } = {}) {
+  const k = KEYS[name];
+  const modifiers = shift ? 8 : 0;
+  await page.send("Input.dispatchKeyEvent", { type: k.text ? "keyDown" : "rawKeyDown", modifiers, ...k });
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", modifiers, key: k.key, code: k.code, windowsVirtualKeyCode: k.windowsVirtualKeyCode });
+}
+
+/** Moves the focus to the mark with the Tab key from the top of the page; true when the mark has the focus. */
+async function tabToMark(page) {
+  await page.evaluate("(() => { if (document.activeElement) document.activeElement.blur(); window.scrollTo({ top: 0, behavior: 'instant' }); })()");
+  for (let i = 0; i < 60; i++) {
+    await pressKey(page, "Tab");
+    if ((await json(page, CONTROL_STATE)).focused) return true;
+  }
+  return false;
+}
+
+/** The mark of a page that can animate: a control with a role, a name and a state, no visible button, a pointer, a big target. */
+async function checkControl(page, label, findings, { pressed = "false" } = {}) {
+  const c = await json(page, CONTROL_STATE);
+  if (!c.found) {
+    findings.push(`${label}: the mark (svg.landing-hero__mark) is not on the page`);
     return;
   }
-  if (b.tag !== "BUTTON" || b.type !== "button") findings.push(`${label}: the pause control is not a <button type="button">`);
-  if (b.disabled || b.hiddenAttribute || b.display === "none") findings.push(`${label}: the pause button is not shown (hidden=${b.hiddenAttribute}, display=${b.display})`);
-  if (b.tabIndex < 0) findings.push(`${label}: the pause button is not reachable with the keyboard (tabIndex ${b.tabIndex})`);
-  if (b.width < 24 || b.height < 24) findings.push(`${label}: the pause button is ${b.width}x${b.height} px, expected at least 24x24`);
-  if (!b.label || !/pause/i.test(b.label)) findings.push(`${label}: the pause button has no aria-label that names the action (${JSON.stringify(b.label)})`);
-  if (b.pressed !== "false") findings.push(`${label}: aria-pressed of the pause button is ${JSON.stringify(b.pressed)} while the mark plays, expected "false"`);
-  for (const [what, color] of [["glyph", b.color], ["border", b.borderColor]]) {
-    for (const bg of [b.from, b.to]) {
-      const ratio = contrast(color, bg);
-      if (ratio === null) findings.push(`${label}: cannot compute the contrast of the pause button (${color} on ${bg})`);
-      else if (ratio < 4.5) findings.push(`${label}: the ${what} of the pause button has a contrast of ${ratio.toFixed(2)}:1 on ${bg}, expected 4.5:1`);
-    }
+  if (c.visibleButton) findings.push(`${label}: the page shows a pause button; the mark itself is the control`);
+  if (c.role !== "button") findings.push(`${label}: the mark has the role ${JSON.stringify(c.role)}, expected "button"`);
+  if (c.tabIndex !== 0 || c.tabindexAttribute !== "0") findings.push(`${label}: the mark is not reachable with the keyboard (tabindex ${JSON.stringify(c.tabindexAttribute)})`);
+  if (c.ariaHidden !== null) findings.push(`${label}: the mark is a control but has aria-hidden=${JSON.stringify(c.ariaHidden)}`);
+  if (!c.label || !/pause/i.test(c.label)) findings.push(`${label}: the mark has no aria-label that names the action (${JSON.stringify(c.label)})`);
+  if (c.pressed !== pressed) findings.push(`${label}: aria-pressed of the mark is ${JSON.stringify(c.pressed)}, expected ${JSON.stringify(pressed)}`);
+  if (c.cursor !== "pointer") findings.push(`${label}: the cursor over the mark is ${JSON.stringify(c.cursor)}, expected "pointer"`);
+  if (c.width < 24 || c.height < 24) findings.push(`${label}: the target of the mark is ${c.width}x${c.height} px, expected at least 24x24`);
+}
+
+/** The focus ring of the keyboard focus: shown, 2 px or more, and a contrast of 3:1 on the hero (WCAG 1.4.11). */
+function checkFocusRing(c, label, findings) {
+  if (!c.focused) {
+    findings.push(`${label}: the mark does not take the keyboard focus`);
+    return;
   }
-  // focus ring, as a keyboard user gets it
-  const focus = await page.evaluate(`(() => {
-    const button = document.querySelector('.landing-hero__motion');
-    button.focus();
-    const style = getComputedStyle(button);
-    return JSON.stringify({ active: document.activeElement === button, visible: button.matches(':focus-visible'), outlineStyle: style.outlineStyle, outlineWidth: parseFloat(style.outlineWidth) });
-  })()`);
-  const f = JSON.parse(focus);
-  if (!f.active) findings.push(`${label}: the pause button cannot take the keyboard focus`);
-  else if (!f.visible || f.outlineStyle === "none" || f.outlineWidth < 2) findings.push(`${label}: the pause button shows no focus ring (${JSON.stringify(f)})`);
-  await page.evaluate("document.querySelector('.landing-hero__motion').blur()");
+  if (!c.focusVisible || c.outlineStyle === "none" || c.outlineWidth < 2) findings.push(`${label}: the mark shows no focus ring for the keyboard (${JSON.stringify({ visible: c.focusVisible, style: c.outlineStyle, width: c.outlineWidth })})`);
+  for (const bg of [c.from, c.to]) {
+    const ratio = contrast(c.outlineColor, bg);
+    if (ratio === null) findings.push(`${label}: cannot compute the contrast of the focus ring (${c.outlineColor} on ${bg})`);
+    else if (ratio < 3) findings.push(`${label}: the focus ring has a contrast of ${ratio.toFixed(2)}:1 on ${bg}, expected 3:1`);
+  }
+}
+
+/** The mark of a page that cannot animate (reduced motion, no JavaScript): a plain image, no role, not focusable, nothing to pause. */
+async function checkPlainImage(page, label, findings, state = null) {
+  const c = state ?? (await json(page, CONTROL_STATE));
+  if (!c.found) return;
+  if (c.visibleButton) findings.push(`${label}: the page shows a pause button although nothing can be paused`);
+  if (c.role !== null) findings.push(`${label}: the mark has the role ${JSON.stringify(c.role)}, expected none (nothing to pause)`);
+  if (c.tabindexAttribute !== null || c.tabIndex >= 0) findings.push(`${label}: the mark is focusable (tabindex ${JSON.stringify(c.tabindexAttribute)}, tabIndex ${c.tabIndex}), expected not`);
+  if (c.pressed !== null) findings.push(`${label}: the mark has aria-pressed=${JSON.stringify(c.pressed)}, expected none`);
+  if (c.ariaHidden !== "true") findings.push(`${label}: the mark is not hidden from assistive technology (aria-hidden ${JSON.stringify(c.ariaHidden)})`);
+  if (c.cursor === "pointer") findings.push(`${label}: the cursor over the mark is a pointer although nothing can be paused`);
 }
 
 /** True once the mark is static: no animation runs on it and every part is on its identity transform. */
@@ -282,7 +333,7 @@ async function expectPlaying(page, label, what, findings) {
   if (movedDots(state) === 0) findings.push(`${label}: no dot is moving ${what}, the mark looks like the static one`);
 }
 
-/** Full motion in one appearance: the loop, the pause button, the observers. About 20 s. */
+/** Full motion in one appearance: the loop, the click on the mark, the observers. About 25 s. */
 async function checkLoop(browser, base, scheme, findings) {
   const label = `/ (motion, full motion, ${scheme})`;
   const page = await browser.newPage();
@@ -298,7 +349,7 @@ async function checkLoop(browser, base, scheme, findings) {
   }
   if (first.parts !== 10) findings.push(`${label}: the mark has ${first.parts} parts, expected 10`);
   if (first.animations !== 10) findings.push(`${label}: ${first.animations} animations run on the mark, expected 10 (the ring and nine dots)`);
-  await checkButton(page, label, findings);
+  await checkControl(page, label, findings);
 
   // The first cycle: the rollout ends on identity transforms and the unchanged mark is held (6 to 8.5 s), then the dots retract (the
   // transforms move again), and a second cycle starts. The ring stays where it is for the whole time.
@@ -343,19 +394,22 @@ async function checkLoop(browser, base, scheme, findings) {
   else if (!secondCycleMoved) findings.push(`${label}: the second cycle does not move the dots`);
   if (ringMoved > 0) findings.push(`${label}: the ring left its identity transform ${ringMoved} times after it had grown (it must stay in place)`);
 
-  // The pause button stops the motion and shows the static mark; play resumes at the retraction of a cycle (no jump).
-  await page.evaluate("document.querySelector('.landing-hero__motion').click()");
+  // A click on the mark stops the motion and shows the static mark; the next click resumes at the retraction of a cycle (no jump). A
+  // mouse click gives the mark the focus but no focus ring (:focus-visible).
+  await clickMark(page);
   await sleep(250);
-  await expectStatic(page, label, "after the pause button was pressed", findings);
-  const pausedButton = await json(page, BUTTON_STATE);
-  if (pausedButton.pressed !== "true") findings.push(`${label}: aria-pressed is ${JSON.stringify(pausedButton.pressed)} after pause, expected "true"`);
+  await expectStatic(page, label, "after the mark was clicked", findings);
+  const paused = await json(page, CONTROL_STATE);
+  if (paused.pressed !== "true") findings.push(`${label}: aria-pressed is ${JSON.stringify(paused.pressed)} after the click, expected "true"`);
+  if (!paused.focused) findings.push(`${label}: the mark does not take the focus when it is clicked`);
+  if (paused.focusVisible || paused.outlineStyle !== "none") findings.push(`${label}: the mark shows a focus ring after a mouse click (${JSON.stringify({ visible: paused.focusVisible, style: paused.outlineStyle })})`);
   await sleep(1500);
   await expectStatic(page, label, "while paused", findings);
-  await page.evaluate("document.querySelector('.landing-hero__motion').click()");
+  await clickMark(page);
   await sleep(150);
-  await expectPlaying(page, label, "after play was pressed", findings);
-  const playing = await json(page, BUTTON_STATE);
-  if (playing.pressed !== "false") findings.push(`${label}: aria-pressed is ${JSON.stringify(playing.pressed)} after play, expected "false"`);
+  await expectPlaying(page, label, "after the second click", findings);
+  const playing = await json(page, CONTROL_STATE);
+  if (playing.pressed !== "false") findings.push(`${label}: aria-pressed is ${JSON.stringify(playing.pressed)} after the second click, expected "false"`);
 
   // Out of view: no motion; back in view: resumed at the retraction.
   await page.evaluate("window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })");
@@ -374,15 +428,69 @@ async function checkLoop(browser, base, scheme, findings) {
   await expectPlaying(page, label, "when the document is visible again", findings);
 
   // A paused mark stays paused when the hero leaves the view and comes back.
-  await page.evaluate("document.querySelector('.landing-hero__motion').click()");
+  await clickMark(page);
   await page.evaluate("window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })");
   await sleep(400);
   await page.evaluate("window.scrollTo({ top: 0, behavior: 'instant' })");
   await sleep(400);
   await expectStatic(page, label, "when the hero came back after the visitor had paused it", findings);
+
+  // Reduced motion switched on while the page is open: the mark stops being a control and stays still; switched off again, the control
+  // is back with the choice of the visitor (paused).
+  await page.setReducedMotion(true);
+  await sleep(300);
+  await expectStatic(page, label, "when reduced motion was switched on", findings);
+  await checkPlainImage(page, `${label}, reduced motion switched on`, findings);
+  await page.setReducedMotion(false);
+  await sleep(300);
+  await checkControl(page, `${label}, reduced motion switched off (still paused)`, findings, { pressed: "true" });
+  await expectStatic(page, label, "after reduced motion was switched off while paused", findings);
 }
 
-/** With prefers-reduced-motion: reduce nothing animates and there is no pause button. */
+/**
+ * The keyboard: Tab reaches the mark, the focus ring shows (contrast 3:1), Enter and Space (on keyup, like a native button, without
+ * scrolling the page) pause and resume it, and aria-pressed follows.
+ */
+async function checkKeyboard(browser, base, scheme, findings) {
+  const label = `/ (motion, keyboard, ${scheme})`;
+  const page = await browser.newPage();
+  await page.setViewport(1280, 900);
+  await page.setColorScheme(scheme);
+  await page.setReducedMotion(false);
+  await page.goto(base + "/");
+  await page.waitForIdle();
+  await sleep(300);
+  if (!(await tabToMark(page))) {
+    findings.push(`${label}: the Tab key does not reach the mark`);
+    return;
+  }
+  checkFocusRing(await json(page, CONTROL_STATE), label, findings);
+  for (const key of ["Enter", "Space"]) {
+    await pressKey(page, key);
+    await sleep(250);
+    await expectStatic(page, label, `after ${key} on the focused mark`, findings);
+    const paused = await json(page, CONTROL_STATE);
+    if (paused.pressed !== "true") findings.push(`${label}: aria-pressed is ${JSON.stringify(paused.pressed)} after ${key}, expected "true"`);
+    if (paused.scrollY !== 0) findings.push(`${label}: the page scrolled by ${paused.scrollY} px on ${key}`);
+    checkFocusRing(paused, `${label} (paused)`, findings);
+    await pressKey(page, key);
+    await sleep(150);
+    await expectPlaying(page, label, `after ${key} on the focused mark again`, findings);
+    const playing = await json(page, CONTROL_STATE);
+    if (playing.pressed !== "false") findings.push(`${label}: aria-pressed is ${JSON.stringify(playing.pressed)} after ${key} again, expected "false"`);
+  }
+  // Space acts on keyup, like a native button: the key down alone changes nothing.
+  await page.send("Input.dispatchKeyEvent", { type: "keyDown", ...KEYS.Space });
+  await sleep(150);
+  const down = await json(page, CONTROL_STATE);
+  if (down.pressed !== "false") findings.push(`${label}: Space toggled the mark on key down (aria-pressed ${JSON.stringify(down.pressed)}), expected on key up`);
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: KEYS.Space.key, code: KEYS.Space.code, windowsVirtualKeyCode: KEYS.Space.windowsVirtualKeyCode });
+  await sleep(150);
+  const up = await json(page, CONTROL_STATE);
+  if (up.pressed !== "true") findings.push(`${label}: Space did not toggle the mark on key up (aria-pressed ${JSON.stringify(up.pressed)})`);
+}
+
+/** With prefers-reduced-motion: reduce nothing animates, and the mark is a plain image: no role, not focusable, no pause button. */
 async function checkReducedMotion(browser, base, scheme, findings) {
   const label = `/ (motion, reduced motion, ${scheme})`;
   const page = await browser.newPage();
@@ -398,13 +506,16 @@ async function checkReducedMotion(browser, base, scheme, findings) {
   }
   if (first.parts !== 10) findings.push(`${label}: the mark has ${first.parts} parts, expected 10`);
   await expectStatic(page, label, "with reduced motion", findings);
-  const button = await json(page, BUTTON_STATE);
-  if (button.found && button.display !== "none") findings.push(`${label}: the pause button is shown with reduced motion (display ${button.display})`);
-  await sleep(1500);
+  await checkPlainImage(page, label, findings);
+  await clickMark(page);
+  await sleep(300);
+  await checkPlainImage(page, `${label}, after a click`, findings);
+  await expectStatic(page, label, "with reduced motion after a click", findings);
+  await sleep(1200);
   await expectStatic(page, label, "with reduced motion after 1.5 s", findings);
 }
 
-/** Without JavaScript the page shows the rollout once and then the unchanged mark, and no button. */
+/** Without JavaScript the page shows the rollout once and then the unchanged mark, a plain image. */
 async function checkWithoutScript(browser, base, findings) {
   const label = "/ (motion, no JavaScript)";
   const page = await browser.newPage();
@@ -429,21 +540,22 @@ async function checkWithoutScript(browser, base, findings) {
   await sleep(2600);
   const last = JSON.parse((await page.send("Runtime.evaluate", { expression: MARK_STATE, returnByValue: true })).result.value);
   if (moved(last) > 0) findings.push(`${label}: ${moved(last)} parts of the mark do not end on an identity transform`);
-  const button = await page.send("Runtime.evaluate", { expression: BUTTON_STATE, returnByValue: true });
-  const b = JSON.parse(button.result.value);
-  if (b.found && b.display !== "none") findings.push(`${label}: the pause button is shown although nothing can pause the animation (it plays once)`);
+  const control = await page.send("Runtime.evaluate", { expression: CONTROL_STATE, returnByValue: true });
+  await checkPlainImage(page, label, findings, JSON.parse(control.result.value));
 }
 
 /**
  * The mark of the landing page. Full motion (both appearances): the rollout runs on the ring and the nine dots (ten animations), the
- * first cycle ends on identity transforms (the unchanged mark) and holds it, the dots retract, a second cycle starts; the pause button
- * (a real button of at least 24x24 px with a label, a state, a focus ring and readable contrast) stops the motion and shows the static
- * mark, play resumes at the retraction of a cycle; the loop does not run while the hero is out of view or the document is hidden. With
- * prefers-reduced-motion: reduce no animation runs and there is no button. Without JavaScript the rollout plays once.
+ * first cycle ends on identity transforms (the unchanged mark) and holds it, the dots retract, a second cycle starts; the mark is its own
+ * pause control (role, name, state, a pointer, a big target): a click, or Enter or Space on the focused mark, stops the motion and shows
+ * the static mark, the next one resumes at the retraction of a cycle; the focus ring shows for the keyboard and not after a mouse click;
+ * the loop does not run while the hero is out of view or the document is hidden. With prefers-reduced-motion: reduce no animation runs
+ * and the mark is a plain image (no role, not focusable). Without JavaScript the rollout plays once and the mark is a plain image.
  */
 async function checkMotion(browser, base, findings) {
   for (const scheme of ["light", "dark"]) {
     await checkLoop(browser, base, scheme, findings);
+    await checkKeyboard(browser, base, scheme, findings);
     await checkReducedMotion(browser, base, scheme, findings);
   }
   await checkWithoutScript(browser, base, findings);
