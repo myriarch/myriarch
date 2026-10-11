@@ -169,7 +169,7 @@ func TestComposeFile(t *testing.T) {
 
 func TestDockerfiles(t *testing.T) {
 	myriarchd := string(readDeploy(t, "docker/myriarchd.Dockerfile"))
-	for _, want := range []string{"node:20", "pnpm", "-tags embedui", "gcr.io/distroless/static:nonroot", "internal/webui/dist", "/myriarchd"} {
+	for _, want := range []string{"node:24", "pnpm", "-tags embedui", "gcr.io/distroless/static:nonroot", "internal/webui/dist", "/myriarchd"} {
 		assert.Contains(t, myriarchd, want)
 	}
 	sim := string(readDeploy(t, "docker/myriarch-sim.Dockerfile"))

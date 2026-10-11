@@ -28,7 +28,7 @@
 # Publishing is not configured here: the release page and keyless signing come with the GitHub release workflow
 # (ADR-0023). `release:` below is disabled until then.
 #
-# Prerequisites: Go, Node 20 + pnpm (UI build, only if internal/webui/dist is missing), cosign v3 (signing is mandatory
+# Prerequisites: Go, Node.js (.node-version) + pnpm (UI build, only if internal/webui/dist is missing), cosign v3 (signing is mandatory
 # for releases; --skip=sign is meant for snapshots only) and, for the Windows binaries, osslsigncode + an Authenticode
 # certificate (deploy/release/authenticode.sh aborts release builds without a certificate).
 # Signing keys: deploy/release/README.md.

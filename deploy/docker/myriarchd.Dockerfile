@@ -2,7 +2,7 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# myriarchd - multi-stage build: web UI (Node 20 + pnpm) -> Go binary with embedded UI -> distroless.
+# myriarchd - multi-stage build: web UI (Node 24 + pnpm) -> Go binary with embedded UI -> distroless.
 #
 # The build context is the repository root:
 #   docker build -f deploy/docker/myriarchd.Dockerfile \
@@ -17,7 +17,8 @@
 # a named volume there.
 
 # ---- 1. Web UI -> internal/webui/dist -------------------------------------------------
-FROM node:20-bookworm-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS web
+# The Node.js major is the one of .node-version (ci/check.sh verifies it); Node 24 still bundles corepack, which provides pnpm.
+FROM node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS web
 ENV CI=true
 RUN corepack enable
 WORKDIR /src/web

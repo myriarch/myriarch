@@ -38,7 +38,7 @@ the registry container and the work directory), `make kind-probe`.
 ## Prerequisites
 
 * Docker Desktop (or another Docker engine) with at least 6 GiB of memory and 4 CPUs for the VM (`up.sh` warns below that).
-* The tools the repository already needs: Go, Node 20 with pnpm (the web UI is built into the server image), `python3`,
+* The tools the repository already needs: Go, Node.js (`.node-version`) with pnpm (the web UI is built into the server image), `python3`,
   `openssl`, `ssh-keygen`, `curl`, `jq`, `git`, `make`. kind, kubectl, helm, crane and yq are pinned in `ci/versions.env` and
   built or downloaded into `.cache/bin` by `ci/install-tools.sh` (kubectl is a download verified by SHA-256).
 * Network access to Docker Hub, `ghcr.io`, GitHub (releases and the Sigstore TUF root), the Go proxy, the Alpine package

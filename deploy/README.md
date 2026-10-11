@@ -14,7 +14,7 @@ Operations artifacts. All supervisor configurations use exactly the keys of opam
 | [`k8s/collector/`](k8s/collector) | Image (supervisor + otelcol-contrib + myriarch-updater), gateway StatefulSet, node DaemonSet, ConfigMaps; container mode of the myriarch-updater |
 | [`updater/container/`](updater/container) | `updater.yaml` for container mode (`myriarch-updater container`) |
 | [`compose/`](compose) | docker-compose: PostgreSQL 17 + myriarchd (+ optional myriarch-sim) for development |
-| [`docker/`](docker) | `myriarchd.Dockerfile` (Node 20 + pnpm -> Go `-tags embedui` -> distroless) and `myriarch-sim.Dockerfile`, for local builds. The published images are not built from Dockerfiles (see "Published images") |
+| [`docker/`](docker) | `myriarchd.Dockerfile` (Node 24 + pnpm -> Go `-tags embedui` -> distroless) and `myriarch-sim.Dockerfile`, for local builds. The published images are not built from Dockerfiles (see "Published images") |
 | [`release/`](release) | `goreleaser.yaml`: release matrix of all binaries (key-based signatures until the keyless GitHub release workflow), `authenticode.sh`, `README.md` (generating/rotating the signing key, signature format contract) |
 
 CI scripts and local gates: [`../ci`](../ci) (`make check-local`); enterprise mirror tools: [`../contrib/enterprise-mirror`](../contrib/enterprise-mirror).
