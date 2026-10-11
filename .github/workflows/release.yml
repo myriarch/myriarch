@@ -1,0 +1,1283 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# The release workflow (ADR-0035): it runs for a pushed tag v* and nothing else. It builds the release files and the container
+# images, signs checksums.txt and the images keyless with the OIDC token of this workflow, attests the build provenance, creates
+# a draft release, verifies everything before the release exists for the public, and publishes it only after a second approval.
+# Smoke tests of the published release run at the end of the same workflow.
+#
+# Rules that this file keeps (ci/check-workflows.py rule R13 and ci/tests/release-workflow-test.sh enforce them):
+#   - The signing identity is frozen from v0.1.0 on: https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/v*
+#     is what every installed verifier checks (ADR-0029, ADR-0035). Never rename this file, never move signing into a reusable
+#     workflow or another workflow, never add another trigger.
+#   - Build code (go, node, pnpm, goreleaser, make) runs only in jobs with contents: read. The jobs with write scopes, id-token,
+#     attestations: write or an environment call only the scripts below ci/release, cosign, crane, gh and actions/attest.
+#   - Two tool sets: cosign, crane and gh (signing-tools, built first on a runner of its own) are the only tools that jobs with a
+#     write scope, id-token, attestations or an environment execute; goreleaser, syft, yq, go-winres and osslsigncode (build-tools)
+#     reach only jobs with contents: read. Every consumer runs ci/release/tools.sh check after the unpack.
+#   - Jobs exchange files only as artifacts of this run: one tar file each, uploaded without compression, downloaded by artifact
+#     ID with the digest check of the artifact service, and unpacked after the SHA-256 that the producing job reported (see
+#     ci/release/artifact.sh). Artifacts live one day.
+#   - Values reach the scripts through env: of the step, never through a ${{ }} expression inside run: text. Nothing writes to
+#     GITHUB_ENV or GITHUB_PATH; tools are reached through TOOLS_BIN.
+#   - Exactly two jobs use the environment release (approval 1: sign-windows, before anything is signed or pushed; approval 2:
+#     finalize, after the draft and every verification). A gate is passed once per run, and the job draft (contents: write) runs
+#     before gate 2: only finalize is stopped by it. v0.1.0 reads no secret.
+#   - The registry credentials live in $HOME/.docker/config.json (written by ci/release/registry-login.sh): actions/attest reads
+#     only that file. DOCKER_CONFIG is never set.
+#   - Pushes, signatures and attestations for one image digest run as strictly sequential steps of the job push-images.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read # the default of every job; jobs below state their own scopes
+
+# A second run for the same ref waits: it never cancels a release that is running.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GOTOOLCHAIN: local
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+  GH_NO_UPDATE_NOTIFIER: '1'
+  GH_PROMPT_DISABLED: '1'
+  SYFT_CHECK_FOR_APP_UPDATE: 'false'
+
+jobs:
+  # The tag guard and the release outputs. A fork that pushes a v* tag skips the whole run (every other job needs this one).
+  # Only this job reads github.ref_name and github.sha; the others take the validated outputs.
+  guard:
+    name: guard
+    if: github.repository == 'myriarch/myriarch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+      checks: read # the tag guard reads the check run ci-ok of the tagged commit
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      base-version: ${{ steps.meta.outputs.base-version }}
+      commit: ${{ steps.meta.outputs.commit }}
+      kind: ${{ steps.meta.outputs.kind }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      latest: ${{ steps.meta.outputs.latest }}
+      image-tags: ${{ steps.meta.outputs.image-tags }}
+      notes-start-tag: ${{ steps.meta.outputs.notes-start-tag }}
+      windows-signing: ${{ steps.meta.outputs.windows-signing }}
+      windows-unsigned-final-tag: ${{ steps.meta.outputs.windows-unsigned-final-tag }}
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Run the tag guard
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ci/release/guard.sh
+      - name: Compute the release outputs
+        id: meta
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: ci/release/meta.sh >> "${GITHUB_OUTPUT}"
+
+  # Builds the tools that the jobs with id-token, attestations, packages or contents write execute (cosign, crane, gh) on a runner of
+  # their own, before anything else is installed or run there: no apt package, no C compiler, no other tool. The tar file carries
+  # VERSIONS and SHA256SUMS; the job summary records both. See ci/release/tools.sh and docs/security/model.md.
+  signing-tools:
+    name: signing-tools
+    needs: [guard]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build the signing tools
+        env:
+          TOOLS_NO_CACHE: '1'
+        run: ci/release/tools.sh build --set signing --out "${RUNNER_TEMP}/tools"
+      - name: Pack signing-tools
+        id: pack
+        run: ci/release/artifact.sh pack --dir "${RUNNER_TEMP}/tools" --out "${RUNNER_TEMP}/out/signing-tools.tar" >> "${GITHUB_OUTPUT}"
+      - name: Upload signing-tools
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/out/signing-tools.tar
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: false
+
+  # Builds goreleaser, syft, yq, go-winres and osslsigncode (which needs apt packages and a C compiler). Only jobs with
+  # contents: read execute them.
+  build-tools:
+    name: build-tools
+    needs: [guard]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build the build tools
+        env:
+          TOOLS_NO_CACHE: '1'
+        run: ci/release/tools.sh build --set build --out "${RUNNER_TEMP}/tools"
+      - name: Pack build-tools
+        id: pack
+        run: ci/release/artifact.sh pack --dir "${RUNNER_TEMP}/tools" --out "${RUNNER_TEMP}/out/build-tools.tar" >> "${GITHUB_OUTPUT}"
+      - name: Upload build-tools
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/out/build-tools.tar
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: false
+
+  # The only job with Node.js: it builds the web UI and runs the release license and dependency gates.
+  ui:
+    name: ui
+    needs: [guard]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      # The version comes from .node-version: Node 24, which still bundles corepack (Node 25 and later do not).
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Enable pnpm through corepack
+        run: |
+          corepack enable
+          cd web
+          want="$(python3 -I -c 'import json; print(json.load(open("package.json"))["packageManager"].split("@", 1)[1].split("+", 1)[0])')"
+          have="$(pnpm --version)"
+          echo "pnpm ${have}"
+          [ "${have}" = "${want}" ] || { echo "::error::pnpm ${have} is active, but web/package.json pins ${want}"; exit 1; }
+      - name: Install go-licenses
+        env:
+          TOOLS_NO_CACHE: '1'
+        run: ci/install-tools.sh go-licenses
+      - name: Build the web UI
+        run: make web-build
+      - name: Run the release license and dependency gates
+        run: ci/check-release-deps.sh && ci/check-release-licenses.sh && scripts/gen-third-party-notices.sh --check
+      - name: Pack webui-dist
+        id: pack
+        run: ci/release/artifact.sh pack --dir "${GITHUB_WORKSPACE}/internal/webui" --only dist --out "${RUNNER_TEMP}/out/webui-dist.tar" >> "${GITHUB_OUTPUT}"
+      - name: Upload webui-dist
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/out/webui-dist.tar
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: false
+
+  # Builds the Windows targets unsigned (stage collect of deploy/release/windows-signed.sh) for the signing slot.
+  build-windows:
+    name: build-windows
+    needs: [guard, build-tools]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      # goreleaser needs the tag and the history.
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Download build-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/build-tools
+          digest-mismatch: error
+      - name: Unpack build-tools
+        env:
+          TAR_SHA256: ${{ needs.build-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/build-tools/build-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set build --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      - name: Build the Windows targets (stage collect)
+        env:
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          MYRIARCH_WINDOWS_STAGE: collect
+          MYRIARCH_WINDOWS_UNSIGNED_DIR: ${{ runner.temp }}/windows-unsigned
+          GORELEASER_CURRENT_TAG: ${{ needs.guard.outputs.tag }}
+        run: |
+          "${TOOLS_BIN}/goreleaser" build --clean --id myriarch-updater --id myrctl -f deploy/release/goreleaser.yaml
+          deploy/release/windows-signed.sh seal
+      - name: Pack windows-unsigned
+        id: pack
+        run: ci/release/artifact.sh pack --dir "${RUNNER_TEMP}/windows-unsigned" --out "${RUNNER_TEMP}/out/windows-unsigned.tar" >> "${GITHUB_OUTPUT}"
+      - name: Upload windows-unsigned
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/out/windows-unsigned.tar
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: false
+
+  # Approval 1 and the slot of the Authenticode provider (ADR-0034). With WINDOWS_SIGNING=off (v0.1.0) the hook copies the
+  # files and writes signer.json; no secret and no extra scope. A provider pull request adds its scope or secret line here
+  # and in ci/workflow-permissions.txt or ci/workflow-secrets.txt; the job, its environment and its place stay.
+  sign-windows:
+    name: sign-windows
+    needs: [guard, build-windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+          sparse-checkout-cone-mode: false
+      - name: Download windows-unsigned
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build-windows.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/windows-unsigned
+          digest-mismatch: error
+      - name: Unpack windows-unsigned
+        env:
+          TAR_SHA256: ${{ needs.build-windows.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/windows-unsigned/windows-unsigned.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/windows-unsigned"
+      - name: Run the signing hook
+        env:
+          WINDOWS_SIGNING: ${{ needs.guard.outputs.windows-signing }}
+        run: ci/release/windows-sign-hook.sh --in "${RUNNER_TEMP}/windows-unsigned" --out "${RUNNER_TEMP}/windows-signed"
+      - name: Pack windows-signed
+        id: pack
+        run: ci/release/artifact.sh pack --dir "${RUNNER_TEMP}/windows-signed" --out "${RUNNER_TEMP}/out/windows-signed.tar" >> "${GITHUB_OUTPUT}"
+      - name: Upload windows-signed
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/out/windows-signed.tar
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: false
+
+  # Builds and packages all targets, accepts the signed Windows set (stage apply) and stages the release assets.
+  package:
+    name: package
+    needs: [guard, build-tools, ui, build-windows, sign-windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Download build-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/build-tools
+          digest-mismatch: error
+      - name: Unpack build-tools
+        env:
+          TAR_SHA256: ${{ needs.build-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/build-tools/build-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set build --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      - name: Download webui-dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.ui.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/webui-dist
+          digest-mismatch: error
+      - name: Unpack webui-dist
+        env:
+          TAR_SHA256: ${{ needs.ui.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/webui-dist/webui-dist.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/webui"
+      # internal/webui/dist is git-ignored and absent in a fresh checkout; artifact.sh never unpacks into the work tree.
+      - name: Place the web UI
+        run: mv "${RUNNER_TEMP}/webui/dist" internal/webui/dist
+      - name: Download windows-unsigned
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build-windows.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/windows-unsigned
+          digest-mismatch: error
+      - name: Unpack windows-unsigned
+        env:
+          TAR_SHA256: ${{ needs.build-windows.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/windows-unsigned/windows-unsigned.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/windows-unsigned"
+      - name: Download windows-signed
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.sign-windows.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/windows-signed
+          digest-mismatch: error
+      - name: Unpack windows-signed
+        env:
+          TAR_SHA256: ${{ needs.sign-windows.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/windows-signed/windows-signed.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/windows-signed"
+      # No token: with --skip=publish goreleaser needs none.
+      - name: Build, package and check (stage apply)
+        env:
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          MYRIARCH_WINDOWS_STAGE: apply
+          MYRIARCH_WINDOWS_UNSIGNED_DIR: ${{ runner.temp }}/windows-unsigned
+          MYRIARCH_WINDOWS_SIGNED_DIR: ${{ runner.temp }}/windows-signed
+          MYRIARCH_WINDOWS_SIGNING: ${{ needs.guard.outputs.windows-signing }}
+          GORELEASER_CURRENT_TAG: ${{ needs.guard.outputs.tag }}
+        run: |
+          "${TOOLS_BIN}/goreleaser" release --clean --skip=publish -f deploy/release/goreleaser.yaml
+          deploy/release/windows-signed.sh check-dist
+      - name: Stage the release assets
+        env:
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+        run: ci/release/stage-assets.sh --dist dist --root . --version "${RELEASE_VERSION}" --out "${RUNNER_TEMP}/release"
+      - name: Pack release-assets
+        id: pack
+        run: ci/release/artifact.sh pack --dir "${RUNNER_TEMP}/release" --out "${RUNNER_TEMP}/out/release-assets.tar" >> "${GITHUB_OUTPUT}"
+      - name: Upload release-assets
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/out/release-assets.tar
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: false
+
+  # Builds the OCI layouts of both images from the released archives (no registry, no daemon).
+  images:
+    name: images
+    needs: [guard, build-tools, signing-tools, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+      server-index: ${{ steps.build.outputs.server-index }}
+      server-amd64: ${{ steps.build.outputs.server-amd64 }}
+      server-arm64: ${{ steps.build.outputs.server-arm64 }}
+      updater-index: ${{ steps.build.outputs.updater-index }}
+      updater-amd64: ${{ steps.build.outputs.updater-amd64 }}
+      updater-arm64: ${{ steps.build.outputs.updater-arm64 }}
+    steps:
+      # The tree must be clean for scripts/build-image-crane.sh.
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Download build-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/build-tools
+          digest-mismatch: error
+      - name: Unpack build-tools
+        env:
+          TAR_SHA256: ${{ needs.build-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/build-tools/build-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set build --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/signing-tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/signing-tools" --platform linux-amd64
+      - name: Download release-assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.package.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/release-assets
+          digest-mismatch: error
+      - name: Unpack release-assets
+        env:
+          TAR_SHA256: ${{ needs.package.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-assets/release-assets.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/release"
+      - name: Build the image layouts
+        id: build
+        env:
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          CRANE: ${{ runner.temp }}/signing-tools/linux-amd64/crane
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+        run: ci/release/images.sh --release "${RUNNER_TEMP}/release" --version "${RELEASE_VERSION}" --out "${RUNNER_TEMP}/oci" >> "${GITHUB_OUTPUT}"
+      - name: Pack oci-layouts
+        id: pack
+        run: ci/release/artifact.sh pack --dir "${RUNNER_TEMP}/oci" --out "${RUNNER_TEMP}/out/oci-layouts.tar" >> "${GITHUB_OUTPUT}"
+      - name: Upload oci-layouts
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/out/oci-layouts.tar
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: false
+
+  # Signs checksums.txt keyless and attests the build provenance of its 39 files. No contents, packages or release access.
+  sign-blobs:
+    name: sign-blobs
+    needs: [guard, signing-tools, package, sign-windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+      id-token: write # mint the OIDC token of release.yml at the tag for keyless signing (the frozen identity of ADR-0035)
+      attestations: write # store the attestations in GitHub's attestation API
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+          sparse-checkout-cone-mode: false
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      - name: Download release-assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.package.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/release-assets
+          digest-mismatch: error
+      - name: Unpack release-assets
+        env:
+          TAR_SHA256: ${{ needs.package.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-assets/release-assets.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/release"
+      - name: Sign checksums.txt (keyless)
+        env:
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
+        run: ci/release/sign-checksums.sh sign --assets "${RUNNER_TEMP}/release/assets" --out "${RUNNER_TEMP}/signatures" --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}"
+      - name: Attest the build provenance of the release files
+        id: provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: ${{ runner.temp }}/release/assets/checksums.txt
+      - name: Name the provenance asset
+        env:
+          BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+        run: ci/release/sign-checksums.sh provenance --bundle "${BUNDLE}" --assets "${RUNNER_TEMP}/release/assets" --out "${RUNNER_TEMP}/signatures" --version "${RELEASE_VERSION}"
+      - name: Pack signatures
+        id: pack
+        run: ci/release/artifact.sh pack --dir "${RUNNER_TEMP}/signatures" --out "${RUNNER_TEMP}/out/signatures.tar" >> "${GITHUB_OUTPUT}"
+      - name: Upload signatures
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/out/signatures.tar
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: false
+
+  # Pushes both images by digest (no release tags), signs them and attaches the provenance and SBOM attestations.
+  # Strictly sequential: push, cosign sign, then the attest steps, server first, then updater. No matrix, no second job
+  # writes to ghcr.io before finalize. No contents or release access.
+  push-images:
+    name: push-images
+    needs: [guard, signing-tools, images, sign-windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+      id-token: write # mint the OIDC token of release.yml at the tag for keyless signing (the frozen identity of ADR-0035)
+      attestations: write # store the attestations in GitHub's attestation API
+      packages: write # write the packages of this repository in ghcr.io
+    steps:
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+            ci/image-labels.env
+            scripts/lib
+          sparse-checkout-cone-mode: false
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      - name: Download oci-layouts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.images.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/oci-layouts
+          digest-mismatch: error
+      - name: Unpack oci-layouts
+        env:
+          TAR_SHA256: ${{ needs.images.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/oci-layouts/oci-layouts.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/oci"
+      # Default HOME, no DOCKER_CONFIG: actions/attest reads only $HOME/.docker/config.json.
+      - name: Log in to ghcr.io
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+        run: ci/release/registry-login.sh login
+      - name: Push the server image by digest
+        env:
+          CRANE: ${{ runner.temp }}/tools/linux-amd64/crane
+          IMAGE_DIGEST: ${{ needs.images.outputs.server-index }}
+        run: ci/release/push-images.sh "${RUNNER_TEMP}/oci/server" "ghcr.io/myriarch/myriarch@${IMAGE_DIGEST}"
+      - name: Sign the server image
+        env:
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          IMAGE_INDEX: ${{ needs.images.outputs.server-index }}
+          IMAGE_AMD64: ${{ needs.images.outputs.server-amd64 }}
+          IMAGE_ARM64: ${{ needs.images.outputs.server-arm64 }}
+          RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
+        run: |
+          ci/release/sign-image.sh --repository ghcr.io/myriarch/myriarch --index "${IMAGE_INDEX}" \
+            --platform "${IMAGE_AMD64}" --platform "${IMAGE_ARM64}" --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}"
+      - name: Attest the provenance of the server image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/myriarch/myriarch
+          subject-digest: ${{ needs.images.outputs.server-index }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: Attest the SBOM of the server image (linux/amd64)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/myriarch/myriarch
+          subject-digest: ${{ needs.images.outputs.server-amd64 }}
+          sbom-path: ${{ runner.temp }}/oci/server.sbom/linux_amd64.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: Attest the SBOM of the server image (linux/arm64)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/myriarch/myriarch
+          subject-digest: ${{ needs.images.outputs.server-arm64 }}
+          sbom-path: ${{ runner.temp }}/oci/server.sbom/linux_arm64.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: Push the updater image by digest
+        env:
+          CRANE: ${{ runner.temp }}/tools/linux-amd64/crane
+          IMAGE_DIGEST: ${{ needs.images.outputs.updater-index }}
+        run: ci/release/push-images.sh "${RUNNER_TEMP}/oci/updater" "ghcr.io/myriarch/myriarch-updater@${IMAGE_DIGEST}"
+      - name: Sign the updater image
+        env:
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          IMAGE_INDEX: ${{ needs.images.outputs.updater-index }}
+          IMAGE_AMD64: ${{ needs.images.outputs.updater-amd64 }}
+          IMAGE_ARM64: ${{ needs.images.outputs.updater-arm64 }}
+          RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
+        run: |
+          ci/release/sign-image.sh --repository ghcr.io/myriarch/myriarch-updater --index "${IMAGE_INDEX}" \
+            --platform "${IMAGE_AMD64}" --platform "${IMAGE_ARM64}" --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}"
+      - name: Attest the provenance of the updater image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/myriarch/myriarch-updater
+          subject-digest: ${{ needs.images.outputs.updater-index }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: Attest the SBOM of the updater image (linux/amd64)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/myriarch/myriarch-updater
+          subject-digest: ${{ needs.images.outputs.updater-amd64 }}
+          sbom-path: ${{ runner.temp }}/oci/updater.sbom/linux_amd64.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: Attest the SBOM of the updater image (linux/arm64)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/myriarch/myriarch-updater
+          subject-digest: ${{ needs.images.outputs.updater-arm64 }}
+          sbom-path: ${{ runner.temp }}/oci/updater.sbom/linux_arm64.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: Log out of ghcr.io
+        run: ci/release/registry-login.sh logout
+
+  # Creates the draft release with the 42 files and the rendered notes. A draft is invisible to the public and stays
+  # editable until finalize publishes it.
+  draft:
+    name: draft
+    needs: [guard, signing-tools, package, images, sign-windows, sign-blobs, push-images]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write # create the draft release; no narrower scope exists, and this job runs before approval 2 (docs/security/model.md)
+    outputs:
+      release-id: ${{ steps.draft.outputs.release-id }}
+    steps:
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+            CHANGELOG.md
+          sparse-checkout-cone-mode: false
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      - name: Download release-assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.package.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/release-assets
+          digest-mismatch: error
+      - name: Unpack release-assets
+        env:
+          TAR_SHA256: ${{ needs.package.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-assets/release-assets.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/release"
+      - name: Download signatures
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.sign-blobs.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signatures
+          digest-mismatch: error
+      - name: Unpack signatures
+        env:
+          TAR_SHA256: ${{ needs.sign-blobs.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signatures/signatures.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/signatures"
+      - name: Download windows-signed (for signer.json)
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.sign-windows.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/windows-signed
+          digest-mismatch: error
+      - name: Unpack windows-signed
+        env:
+          TAR_SHA256: ${{ needs.sign-windows.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/windows-signed/windows-signed.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/windows-signed"
+      - name: Render the release notes
+        env:
+          RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
+          WINDOWS_SIGNING: ${{ needs.guard.outputs.windows-signing }}
+          WINDOWS_UNSIGNED_FINAL_TAG: ${{ needs.guard.outputs.windows-unsigned-final-tag }}
+          IMAGE_TAGS: ${{ needs.guard.outputs.image-tags }}
+          SERVER_INDEX_DIGEST: ${{ needs.images.outputs.server-index }}
+          UPDATER_INDEX_DIGEST: ${{ needs.images.outputs.updater-index }}
+        run: |
+          ci/release/notes.sh --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}" \
+            --signer "${RUNNER_TEMP}/windows-signed/signer.json" --out "${RUNNER_TEMP}/notes.md"
+      - name: Create the draft release
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
+          RELEASE_PRERELEASE: ${{ needs.guard.outputs.prerelease }}
+          NOTES_START_TAG: ${{ needs.guard.outputs.notes-start-tag }}
+        run: |
+          ci/release/draft.sh --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}" --notes "${RUNNER_TEMP}/notes.md" \
+            --assets "${RUNNER_TEMP}/release/assets" --signatures "${RUNNER_TEMP}/signatures" >> "${GITHUB_OUTPUT}"
+
+  # Verifies the files, the signatures, the provenance and both images against the tag, the commit and the frozen identity.
+  # Read scopes only. Its summary is what the reviewer of approval 2 reads.
+  verify:
+    name: verify
+    needs: [guard, signing-tools, package, images, sign-blobs, push-images]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+      packages: read # read the (still private) packages of this repository in ghcr.io
+      attestations: read # read the attestations to verify them
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+            ci/image-labels.env
+          sparse-checkout-cone-mode: false
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      - name: Download release-assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.package.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/release-assets
+          digest-mismatch: error
+      - name: Unpack release-assets
+        env:
+          TAR_SHA256: ${{ needs.package.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-assets/release-assets.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/release"
+      - name: Download signatures
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.sign-blobs.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signatures
+          digest-mismatch: error
+      - name: Unpack signatures
+        env:
+          TAR_SHA256: ${{ needs.sign-blobs.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signatures/signatures.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/signatures"
+      # The packages are still private before the maintainer switches them to public.
+      - name: Log in to ghcr.io (read)
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+        run: ci/release/registry-login.sh login
+      - name: Verify the release before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
+          SERVER_INDEX_DIGEST: ${{ needs.images.outputs.server-index }}
+          SERVER_AMD64_DIGEST: ${{ needs.images.outputs.server-amd64 }}
+          SERVER_ARM64_DIGEST: ${{ needs.images.outputs.server-arm64 }}
+          UPDATER_INDEX_DIGEST: ${{ needs.images.outputs.updater-index }}
+          UPDATER_AMD64_DIGEST: ${{ needs.images.outputs.updater-amd64 }}
+          UPDATER_ARM64_DIGEST: ${{ needs.images.outputs.updater-arm64 }}
+        run: ci/release/verify.sh --assets "${RUNNER_TEMP}/release/assets" --signatures "${RUNNER_TEMP}/signatures" --out "${RUNNER_TEMP}/verified"
+      - name: Log out of ghcr.io
+        run: ci/release/registry-login.sh logout
+      - name: Pack verified
+        id: pack
+        run: ci/release/artifact.sh pack --dir "${RUNNER_TEMP}/verified" --out "${RUNNER_TEMP}/out/verified.tar" >> "${GITHUB_OUTPUT}"
+      - name: Upload verified
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/out/verified.tar
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: false
+
+  # Runs both images on amd64 and arm64 by digest before publication.
+  verify-images:
+    name: verify-images (${{ matrix.os }})
+    needs: [guard, signing-tools, images, push-images]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            tools: linux-amd64
+            arch: amd64
+          - os: ubuntu-24.04-arm
+            tools: linux-arm64
+            arch: arm64
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+      packages: read # read the (still private) packages of this repository in ghcr.io
+    steps:
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+          sparse-checkout-cone-mode: false
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+          TOOLS_PLATFORM: ${{ matrix.tools }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform "${TOOLS_PLATFORM}"
+      - name: Log in to ghcr.io (read)
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+          TOOLS_BIN: ${{ runner.temp }}/tools/${{ matrix.tools }}
+        run: ci/release/registry-login.sh login
+      - name: Run both images
+        env:
+          TOOLS_BIN: ${{ runner.temp }}/tools/${{ matrix.tools }}
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+          SERVER_INDEX_DIGEST: ${{ needs.images.outputs.server-index }}
+          UPDATER_INDEX_DIGEST: ${{ needs.images.outputs.updater-index }}
+        run: |
+          ci/release/smoke.sh image-run --image "ghcr.io/myriarch/myriarch@${SERVER_INDEX_DIGEST}" --kind server --version "${RELEASE_VERSION}"
+          ci/release/smoke.sh image-run --image "ghcr.io/myriarch/myriarch-updater@${UPDATER_INDEX_DIGEST}" --kind updater --version "${RELEASE_VERSION}"
+      - name: Log out of ghcr.io
+        env:
+          TOOLS_BIN: ${{ runner.temp }}/tools/${{ matrix.tools }}
+        run: ci/release/registry-login.sh logout
+
+  # Checks the Windows files (version resources, Authenticode state, installer scripts) before publication.
+  verify-windows:
+    name: verify-windows
+    needs: [guard, package, sign-windows]
+    runs-on: windows-2025
+    timeout-minutes: 20
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+    steps:
+      # GitHub's Windows images set core.autocrlf=true: without this step the checkout turns ci/release/*.sh into CRLF files that Git Bash cannot run.
+      - name: Keep the line endings of the repository (Windows)
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+          sparse-checkout-cone-mode: false
+      - name: Download release-assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.package.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/release-assets
+          digest-mismatch: error
+      - name: Unpack release-assets
+        env:
+          TAR_SHA256: ${{ needs.package.outputs.sha256 }}
+        run: |
+          root="$(cygpath -u "${RUNNER_TEMP}")"
+          ci/release/artifact.sh unpack --file "${root}/in/release-assets/release-assets.tar" --sha256 "${TAR_SHA256}" --into "${root}/release"
+      - name: Download windows-signed
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.sign-windows.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/windows-signed
+          digest-mismatch: error
+      - name: Unpack windows-signed
+        env:
+          TAR_SHA256: ${{ needs.sign-windows.outputs.sha256 }}
+        run: |
+          root="$(cygpath -u "${RUNNER_TEMP}")"
+          ci/release/artifact.sh unpack --file "${root}/in/windows-signed/windows-signed.tar" --sha256 "${TAR_SHA256}" --into "${root}/windows-signed"
+      - name: Check the Windows files
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          ./ci/release/smoke-windows.ps1 -Mode Assets -AssetsDir "$env:RUNNER_TEMP\release\assets" -Version $env:RELEASE_VERSION `
+            -Signer "$env:RUNNER_TEMP\windows-signed\signer.json"
+
+  # Approval 2. Checks that the draft still holds exactly the verified files, proves anonymous read access of the images,
+  # sets the image tags and publishes the release, which becomes immutable. Nothing here builds or runs project code.
+  finalize:
+    name: finalize
+    needs: [guard, signing-tools, images, push-images, draft, verify, verify-images, verify-windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write # read the draft release and publish it (the Releases API accepts no narrower scope)
+      packages: write # write the packages of this repository in ghcr.io
+      attestations: read # read the attestations to verify them
+    outputs:
+      release-url: ${{ steps.publish.outputs.release-url }}
+    steps:
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+            ci/image-labels.env
+            scripts/lib
+          sparse-checkout-cone-mode: false
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      - name: Download verified
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.verify.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/verified
+          digest-mismatch: error
+      - name: Unpack verified
+        env:
+          TAR_SHA256: ${{ needs.verify.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/verified/verified.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/verified"
+      # packages: write is needed for crane tag.
+      - name: Log in to ghcr.io
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+        run: ci/release/registry-login.sh login
+      - name: Check, tag and publish
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
+          RELEASE_ID: ${{ needs.draft.outputs.release-id }}
+          RELEASE_PRERELEASE: ${{ needs.guard.outputs.prerelease }}
+          RELEASE_LATEST: ${{ needs.guard.outputs.latest }}
+          IMAGE_TAGS: ${{ needs.guard.outputs.image-tags }}
+          SERVER_INDEX_DIGEST: ${{ needs.images.outputs.server-index }}
+          UPDATER_INDEX_DIGEST: ${{ needs.images.outputs.updater-index }}
+        run: ci/release/finalize.sh --tag "${RELEASE_TAG}" --release-id "${RELEASE_ID}" --verified "${RUNNER_TEMP}/verified" >> "${GITHUB_OUTPUT}"
+      - name: Log out of ghcr.io
+        run: ci/release/registry-login.sh logout
+
+  # ---- Smoke tests of the published release (ADR-0035): anonymous downloads and registry reads, read scopes only ----
+
+  # Downloads the published files, checks the signatures, the provenance and GitHub's release attestation, and reads both
+  # images anonymously.
+  smoke-assets:
+    name: smoke-assets
+    needs: [guard, signing-tools, images, finalize]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+      attestations: read # read the attestations to verify them
+    steps:
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+          sparse-checkout-cone-mode: false
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      # gh refuses to run without a token; every registry read is anonymous, so there is no registry login.
+      - name: Smoke test the published assets and images
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
+          IMAGE_TAGS: ${{ needs.guard.outputs.image-tags }}
+          SERVER_INDEX_DIGEST: ${{ needs.images.outputs.server-index }}
+          SERVER_AMD64_DIGEST: ${{ needs.images.outputs.server-amd64 }}
+          SERVER_ARM64_DIGEST: ${{ needs.images.outputs.server-arm64 }}
+          UPDATER_INDEX_DIGEST: ${{ needs.images.outputs.updater-index }}
+          UPDATER_AMD64_DIGEST: ${{ needs.images.outputs.updater-amd64 }}
+          UPDATER_ARM64_DIGEST: ${{ needs.images.outputs.updater-arm64 }}
+        run: ci/release/smoke.sh assets --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}"
+
+  # Installs the published updater with the installer of the downloaded archive (keyless verification, staging root) and
+  # runs both images by tag, on amd64 and arm64.
+  smoke-linux:
+    name: smoke-linux (${{ matrix.os }})
+    needs: [guard, signing-tools, images, finalize]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            tools: linux-amd64
+            arch: amd64
+          - os: ubuntu-24.04-arm
+            tools: linux-arm64
+            arch: arm64
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+    steps:
+      # The installer under test is the one inside the downloaded and verified release archive, not the one of the checkout.
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+          sparse-checkout-cone-mode: false
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+          TOOLS_PLATFORM: ${{ matrix.tools }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform "${TOOLS_PLATFORM}"
+      - name: Smoke test the Linux installation
+        env:
+          TOOLS_BIN: ${{ runner.temp }}/tools/${{ matrix.tools }}
+          RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
+          ARCH: ${{ matrix.arch }}
+          SERVER_INDEX_DIGEST: ${{ needs.images.outputs.server-index }}
+          UPDATER_INDEX_DIGEST: ${{ needs.images.outputs.updater-index }}
+        run: ci/release/smoke.sh linux --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}" --arch "${ARCH}"
+
+  # Installs the published Windows updater in staging mode with the documented verification.
+  smoke-windows:
+    name: smoke-windows
+    needs: [guard, signing-tools, finalize]
+    runs-on: windows-2025
+    timeout-minutes: 30
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+    steps:
+      # GitHub's Windows images set core.autocrlf=true: without this step the checkout turns ci/release/*.sh into CRLF files that Git Bash cannot run.
+      - name: Keep the line endings of the repository (Windows)
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+          sparse-checkout-cone-mode: false
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          root="$(cygpath -u "${RUNNER_TEMP}")"
+          ci/release/artifact.sh unpack --file "${root}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${root}/tools"
+          ci/release/tools.sh check --set signing --dir "${root}/tools" --platform windows-amd64
+      - name: Smoke test the Windows installation
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+          WINDOWS_SIGNING: ${{ needs.guard.outputs.windows-signing }}
+        run: |
+          ./ci/release/smoke-windows.ps1 -Mode Install -Tag $env:RELEASE_TAG -Commit $env:RELEASE_COMMIT -Version $env:RELEASE_VERSION `
+            -Cosign "$env:RUNNER_TEMP\tools\windows-amd64\cosign.exe" -WindowsSigning $env:WINDOWS_SIGNING
+
+  # Installs the chart from the tag on a kind cluster with the published server image.
+  smoke-kind:
+    name: smoke-kind
+    needs: [guard, images, finalize]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+    steps:
+      # The chart comes from the tag; hack/kind holds the cluster configuration and the pinned node and PostgreSQL images.
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      # Test harness tools of an unprivileged job after the publication: they never touch release content.
+      - name: Install kind, kubectl and helm
+        env:
+          TOOLS_NO_CACHE: '1'
+        run: ci/install-tools.sh kind kubectl helm
+      - name: Smoke test the chart on kind
+        env:
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+          SERVER_INDEX_DIGEST: ${{ needs.images.outputs.server-index }}
+          SERVER_AMD64_DIGEST: ${{ needs.images.outputs.server-amd64 }}
+        run: ci/release/smoke.sh kind --version "${RELEASE_VERSION}" --server-index "${SERVER_INDEX_DIGEST}" --server-amd64 "${SERVER_AMD64_DIGEST}"

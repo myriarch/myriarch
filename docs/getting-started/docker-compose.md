@@ -54,8 +54,9 @@ pinned by digest (`ghcr.io/myriarch/myriarch@sha256:...`) or copied to your own 
 QUICKSTART_IMAGE=ghcr.io/myriarch/myriarch@sha256:<digest> docker compose -f quickstart.yaml up -d
 ```
 
-[Verify releases](../security/verify-releases.md) explains how to check the files of a release. Verifying the container
-images will be documented together with the release workflow.
+[Verify releases](../security/verify-releases.md) explains how to check the files of a release, and
+[how to verify the container images](../security/verify-releases.md#verify-the-container-images) (signature, provenance, SBOM
+and the digest to pin) before you start them.
 
 The log of `myriarchd` shows the `DEV MODE` warning and `http server listening` once the database is ready. Open
 <http://localhost:8080> and sign in as `admin` with the password `admin`. After a short ramp-up the agents of the fleets

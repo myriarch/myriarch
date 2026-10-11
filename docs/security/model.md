@@ -379,9 +379,10 @@ guidance after each item names what to do.
 
 - **No signing key in the release build.** goreleaser signs nothing, `ci/build-release.sh` has only the snapshot mode, and the
   hook for a PFX file is removed. Releases are signed keyless by the release workflow
-  ([ADR-0023](../adr/0023-keyless-release-signing.md)), which is not in the repository yet. The installers authenticate the
-  updater through that keyless bundle only (see Supply chain of the installers above). The key-based toolkit for organizations
-  that mirror releases is in `contrib/enterprise-mirror/`.
+  (`.github/workflows/release.yml`, [ADR-0023](../adr/0023-keyless-release-signing.md),
+  [ADR-0035](../adr/0035-release-workflow-with-keyless-signing-and-verification-before-publication.md)). The installers
+  authenticate the updater through that keyless bundle only (see Supply chain of the installers above). The toolkit for
+  organizations that mirror releases, keyless and unchanged or re-signed with their own key, is in `contrib/enterprise-mirror/`.
 - **Acceptance check of signed Windows files.** A signing provider is not trusted with the content of a release. Stage apply of
   the release build (`deploy/release/README.md`) requires that the rebuilt file equals the unsigned build, extracts the signature
   from the provider's file and attaches it to the job's own build, and verifies the result against the committed chain: subject,
@@ -464,7 +465,7 @@ guidance after each item names what to do.
     gate (`--strict-collection`) instead of being skipped with a warning. It reads the files of the repository, so it does not
     see settings of the organization or the repository (allowed actions, environments, rulesets), secrets, or what a pinned
     action does at run time.
-- **Rules for the release workflow (R13) exist before the workflow.** `ci/check-workflows.py` already requires of
+- **Rules for the release workflow (R13).** `ci/check-workflows.py` requires of
   `.github/workflows/release.yml`: a trigger for pushed `v*` tags only, no caches and no local actions, the literal environment
   `release`, a `guard` job that every other job needs, no Node.js, Go, pnpm, npm, goreleaser, make or similar build tool
   (the list is in the docstring of the check) in a job with a write scope, `id-token`, `attestations` or an environment, and
@@ -474,13 +475,74 @@ guidance after each item names what to do.
   standard input (here-document, `| sh`, `bash -s`) or a `shell:` other than `bash` or `sh`. The check reads the text of the
   workflow; it does not see a program that a privileged job starts through a variable, a script, an interpreter that is not
   a shell or a wrapper that it does not know.
-- **Release pipeline controls are pending.** Protected release environments, signing jobs without caches, SBOM and
-  provenance attestations and a verification step before publishing belong to the release workflow, which does not
-  exist yet. The release-time dependency, license and notices gates, building the web UI from the tagged checkout and running
-  without a tool cache moved from `ci/build-release.sh` to that workflow; until it exists they rest on `ci-ok` on the tagged
-  commit, which the release tag guard requires. The list is in [`deploy/release/README.md`](../../deploy/release/README.md).
-  No release has been published.
-- **Release tag guard.** `ci/release/guard.sh` is meant to run before any other step of a release. It refuses a tag that is
+- **Release workflow controls.** `.github/workflows/release.yml`
+  ([ADR-0035](../adr/0035-release-workflow-with-keyless-signing-and-verification-before-publication.md)) builds, signs,
+  verifies and publishes a release. Controls, in the order of the run:
+  - *Trigger and guard.* The workflow runs only for a pushed tag `v*` (no `workflow_dispatch`, no pull request) and, in a fork,
+    not at all. The job `guard` runs the release tag guard and `ci/release/meta.sh`, which refuses a run whose
+    `GITHUB_WORKFLOW_REF` is not exactly `myriarch/myriarch/.github/workflows/release.yml@refs/tags/<tag>`, so a renamed
+    workflow file or a call through a reusable workflow fails before anything is signed (the frozen identity).
+  - *Job isolation (R13).* Build code runs only in jobs with `contents: read`; privileged jobs run reviewed scripts, cosign,
+    crane, gh and `actions/attest` and take only artifacts of the same run, downloaded by ID and checked against the digest of
+    the artifact service and the SHA-256 that the producing job reported. The tools are built from `ci/tools` in the run (no
+    cache) and travel as two artifacts: the signing set (cosign, crane, gh) is built first, in a job of its own where nothing
+    else is installed or run, and is the only set that jobs with a write scope, `id-token`, `attestations` or an environment
+    execute; the build set (goreleaser, syft, yq, go-winres, osslsigncode) reaches only jobs with `contents: read`. Every consumer
+    runs `ci/release/tools.sh check` after the unpack, and VERSIONS and SHA256SUMS of both sets are in the job summaries.
+    Artifacts are kept one day.
+  - *Two approvals.* Exactly two jobs use the environment `release` (no administrator bypass, tags `v*` only): `sign-windows`,
+    before anything is signed or pushed, and `finalize`, after the draft release exists and every verification passed. A gate is
+    passed once per run, not once per attempt: "Re-run failed jobs" re-runs only the failed jobs and their dependents, so
+    `sign-blobs`, `push-images` and `draft` run again without a new approval of gate 1 (whether `finalize` asks again after an
+    approved attempt is observed on the first candidate). Gate 2 is a technical boundary for `finalize` only: the job `draft`
+    holds `contents: write` without the environment and runs before it, with the signing tool set and the reviewed scripts as its
+    whole trust base.
+  - *Keyless signing and provenance.* `checksums.txt` is signed with a cosign bundle (it covers the 39 other files), and the
+    build provenance of those files is attested with `actions/attest`. Both images are pushed by digest only (`push-images.sh`
+    refuses any other reference, so the images have no release tag before verification), signed with `cosign sign --recursive`
+    and given provenance and SBOM attestations, strictly one after the other. No long-lived signing key or registry secret
+    exists; the registry token is `GITHUB_TOKEN`.
+  - *Verification before publication.* The jobs `verify`, `verify-images` and `verify-windows` check the files and the images from
+    which the draft was created (the artifacts of the run and the pushed digests, not the draft itself) with the commands that
+    users run (exact identity with repository, ref, commit and trigger, the pattern of ADR-0029, the pattern bound to the
+    version, provenance with `--deny-self-hosted-runners`, image index, configuration, signatures and attestations, absence of a
+    `latest` tag, a run of both images on amd64 and arm64, version resources and Authenticode state of the Windows files). The
+    contents of the draft are bound to that result only by `finalize`; the reviewer of gate 2 checks the count of 42 assets.
+  - *Finalize.* After the second approval `finalize` checks that the draft still holds exactly the verified files by comparing
+    GitHub's SHA-256 digest of every asset with the verified manifest, that the release is a draft of this tag by
+    `github-actions[bot]`, that `refs/tags/<tag>` still resolves to the tagged commit (`tag_moved`; `draft.sh` also sets the commit
+    as the target of the release) and that both packages are readable without credentials; it refuses to move an immutable image
+    tag; it sets the image tags, reads the draft by ID again and repeats the checks of the draft (author, title, pre-release flag,
+    the only release of the tag), the asset checks and the tag check directly before it publishes; a tag that no longer exists is
+    reported as `tag_moved`. After publication it reads the release once more, repeats the identity and uniqueness checks and
+    compares its assets with the verified manifest again
+    (`release_assets_changed` says that the release is immutable and wrong), and it requires that the release is immutable and
+    that GitHub's release attestation verifies.
+  - *Smoke tests.* After publication, jobs of the same workflow with read scopes only download and verify the release
+    anonymously, install it on amd64 and arm64, stage the Windows installer, run both images and install the Helm chart of the tag
+    on kind.
+
+  The release-time dependency, license and notices gates run in the job `ui`. Residual risks: one account can tag and approve
+  both gates until a second reviewer exists (the second organization owner is for emergencies, ADR-0029); deleting the
+  `sha256-<hex>` tags or package versions of a released digest breaks the verification of that image; the job token cannot read
+  the setting for immutable releases, so a disabled setting is detected only after the release is published
+  (`release_not_immutable`, the release stays mutable); artifacts live for one day; the release depends on the availability of
+  GitHub, ghcr.io and the Sigstore public-good instance. The first push of a new package makes it private, and an organization
+  owner makes it public by hand (irreversible) before the second approval; `finalize` refuses to continue while it is private.
+  Further residual risks of the release workflow: (1) a replacement of an asset in the short window between the last read of the
+  draft and the PATCH is found only afterwards, when the release is immutable; (2) every run, also a failed or abandoned one,
+  creates valid credentials for the identity at the tag before verification and gate 2 (Rekor-logged cosign bundles of
+  `checksums.txt`, image signatures and attestations in the `sha256-<hex>` tags, build provenance in GitHub's attestation API)
+  and deleting a draft revokes none of them, so a check with the exact or version-bound identity does not prove that a file was
+  released, only `gh release verify-asset` does (membership in the published, immutable release); (3) write access to Actions
+  allows re-running the privileged jobs of a run that passed gate 1; (4) a KMS route for Windows signing that needs `id-token`
+  makes `sign-windows` a holder of the release identity (ADR-0035, point 7); (5) the resume path of `finalize` cannot tell a
+  release published by hand between two attempts from its own; (6) the signing tool set is built from the pinned modules in the
+  run, so the dependency trees of cosign, crane and gh (and of `actions/attest` and the other GitHub-owned actions) are part of
+  the trust base of the privileged jobs, no longer the trees of the build tools.
+  The list of the release build is in [`deploy/release/README.md`](../../deploy/release/README.md), the maintainer's runbook is
+  [Releasing](../releasing.md), the user's commands are [Verify releases](verify-releases.md).
+- **Release tag guard.** `ci/release/guard.sh` runs as the first job (`guard`) of `release.yml`. It refuses a tag that is
   not `vX.Y.Z` or `vX.Y.Z-rc.N`, a lightweight tag, a tag that points at another commit than the run's, a commit that is
   not on `origin/main`, a `VERSION` or a copy of it that differs from the tag, a final tag without a dated `CHANGELOG.md`
   heading, an rc tag without entries in "Unreleased", and a commit without a successful `ci-ok` check run of GitHub

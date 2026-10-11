@@ -6,7 +6,7 @@
 #   <workflow file> <job id> <scope>
 #
 # for example `deploy.yml publish pages`. Each line needs a review of the job: which scope, why, and either that the job
-# does not run code of a pull request or why the scope is harmless there.
+# does not run code of a pull request or why the scope is harmless there. An entry is added only together with that review.
 
 # CodeQL (.github/workflows/codeql.yml). The job `analyze` uploads the SARIF results of the analysis to code scanning, which needs
 # security-events: write; contents is read-only. The job analyses the code of every pull request to main. The token of a pull
@@ -25,3 +25,31 @@ codeql.yml analyze security-events
 # The job has no write access to contents, packages or releases.
 scorecard.yml analysis security-events
 scorecard.yml analysis id-token
+
+# Release workflow (ADR-0035; .github/workflows/release.yml, shape fixed by rule R13). It runs only for a pushed v* tag, never
+# for a pull request, and holds no secret in v0.1.0. Every job below needs the job sign-windows (approval 1, the environment
+# release) in its chain of needs and takes only artifacts of the same run, downloaded by ID and checked against the SHA-256 that
+# the producing job reported; build code (go, node, pnpm, goreleaser, make) runs only in jobs with contents: read, and these
+# jobs execute only the signing tool set (cosign, crane, gh), which is built on a runner of its own. A gate is passed once per
+# run, not once per attempt: "Re-run failed jobs" runs a failed job below again without asking for approval 1 again.
+#
+# sign-blobs signs checksums.txt keyless (cosign sign-blob) and attests the build provenance of its 39 subjects (actions/attest):
+# id-token: write mints the OIDC token of release.yml at the tag (the signing identity of ADR-0029), attestations: write stores
+# the attestation. No contents, packages or release access.
+release.yml sign-blobs id-token
+release.yml sign-blobs attestations
+# push-images pushes both images by digest only (no release tags), signs them (cosign sign --recursive) and attaches the
+# provenance and SBOM attestations in ghcr.io, strictly in sequence. packages: write is limited by GitHub to the packages of
+# this repository; id-token and attestations as above. No contents or release access.
+release.yml push-images id-token
+release.yml push-images attestations
+release.yml push-images packages
+# draft creates the draft release of the tag with the verified-to-be file set; contents: write is the only scope that the
+# Releases API accepts for that. A draft is invisible to the public and stays editable until finalize. The job runs before
+# approval 2 and has no environment: approval 2 stops finalize only, so draft runs nothing but the signing tool set and
+# ci/release scripts (docs/security/model.md).
+release.yml draft contents
+# finalize runs after approval 2 (environment release): it checks that the draft still holds exactly the verified files
+# (GitHub's asset digests), sets the image tags with crane and publishes the release, which becomes immutable.
+release.yml finalize contents
+release.yml finalize packages

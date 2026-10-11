@@ -10,6 +10,8 @@
 #   3. goreleaser snapshot in stage apply: every rebuilt .exe has to equal the unsigned build, the signatures are attached to the
 #      rebuilt files and verified (chain, subject, RFC 3161 timestamp), check dist/
 #   4. verify the Windows files in dist/ again, and compare both dist directories (the builds are reproducible)
+#   5. stage the release files of dist/ the way the release workflow does (ci/release/stage-assets.sh), which checks the asset list of
+#      deploy/release/assets.json against the real goreleaser output
 #
 # The test CA lives in a temporary directory outside the repository and is deleted on exit; its key never goes anywhere else. The
 # staging areas are below .cache/release-rehearsal (git-ignored), the first pass is kept in .cache/release-rehearsal/pass1.
@@ -65,4 +67,7 @@ done
 files+=(".cache/release/windows/archive/windows/scripts/install-windows.ps1" ".cache/release/windows/archive/windows/windows/Set-ServiceEnvironment.ps1")
 python3 -I ci/release/authenticode.py verify --trust "${K}/ca/trust" "${files[@]}" > /dev/null
 python3 -I ci/release/dist-check.py compare --first "${R}/pass1" --second dist
-log "release rehearsal passed: $(wc -l < dist/checksums.txt | tr -d ' ') checksums, signed Windows files verified, builds reproducible"
+section_start stage "stage the release assets and check them against deploy/release/assets.json"
+snapshot_version="$(python3 -I -c 'import json; print(json.load(open("dist/metadata.json", encoding="utf-8"))["version"])')"
+ci/release/stage-assets.sh --dist dist --root . --version "${snapshot_version}" --out "${R}/staged"
+log "release rehearsal passed: $(wc -l < dist/checksums.txt | tr -d ' ') checksums, signed Windows files verified, builds reproducible, assets staged"

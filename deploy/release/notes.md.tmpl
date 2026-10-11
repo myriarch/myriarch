@@ -1,0 +1,89 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Template of the GitHub release notes (ci/release/notes.sh renders it in the draft job of the release workflow, ADR-0035).
+# The leading "#" lines (this header) are dropped. Conditional blocks are lines "<!-- if NAME -->" and "<!-- end NAME -->" on their
+# own; the names are rc, final, unsigned, unsigned-exception and signed; blocks do not nest. Placeholders are {{NAME}} with
+# NAME from this list (an unknown one fails the rendering):
+#   TAG VERSION BASE_VERSION COMMIT REPOSITORY IDENTITY IDENTITY_REGEXP IDENTITY_BOUND_REGEXP OIDC_ISSUER SIGNER_WORKFLOW
+#   SERVER_IMAGE UPDATER_IMAGE SERVER_DIGEST UPDATER_DIGEST IMAGE_TAGS PROVENANCE_ASSET UPDATER_ASSET_LINUX_AMD64
+#   CHANGELOG_SECTION CHANGELOG_URL WINDOWS_SIGNER_SUBJECT WINDOWS_SIGNER_PROVIDER (the last two only inside "signed")
+# GitHub appends its generated list of merged pull requests after the text of this template.
+
+<!-- if rc -->
+**Release candidate.** `{{TAG}}` is a pre-release for testing `{{BASE_VERSION}}`. It is published as a GitHub pre-release and is never marked as the latest release. Report problems in the issue tracker; fixes go into the next release candidate.
+<!-- end rc -->
+
+<!-- if unsigned -->
+**Windows files are not Authenticode-signed.** `myriarch-updater.exe`, `myrctl.exe`, `install-windows.ps1` and `Set-ServiceEnvironment.ps1` of this release carry no Authenticode signature, so Windows cannot tell you who built them. Verify them with cosign before you run them (below), and allow them by hash under App Control ([ADR-0034](https://github.com/{{REPOSITORY}}/blob/{{TAG}}/docs/adr/0034-authenticode-signing-of-windows-release-artifacts.md)).
+<!-- end unsigned -->
+
+<!-- if unsigned-exception -->
+This final release ships unsigned Windows files under the reviewed exception for exactly `{{TAG}}` (`deploy/release/windows-signing.env`).
+<!-- end unsigned-exception -->
+
+<!-- if signed -->
+Windows files are Authenticode-signed by `{{WINDOWS_SIGNER_SUBJECT}}` ({{WINDOWS_SIGNER_PROVIDER}}) with an RFC 3161 timestamp.
+<!-- end signed -->
+
+Myriarch `{{VERSION}}`, built from commit `{{COMMIT}}` by `release.yml` of `{{REPOSITORY}}`.
+
+## Support levels
+
+<!-- if final -->
+Myriarch is alpha software: interfaces and configuration may change between minor versions.
+
+<!-- end final -->
+| Area | Level | Notes |
+|---|---|---|
+| Linux hosts (systemd) | beta | Installer and updater from the release files. |
+| Container mode | beta | Needs a collector image that you build yourself until the collector chart of v0.2.0 ([container mode](https://github.com/{{REPOSITORY}}/blob/{{TAG}}/docs/design/container-mode.md)). |
+| Windows hosts | experimental | |
+| Helm chart | experimental | Installed from the tag (there is no OCI chart before v0.2.0). |
+
+## Known limitations
+
+- PostgreSQL is required: release builds have no embedded database ([development guide](https://github.com/{{REPOSITORY}}/blob/{{TAG}}/docs/development.md#release-builds-omit-devpg)).
+- Rate limits and sign-in backoff are kept per replica ([security model](https://github.com/{{REPOSITORY}}/blob/{{TAG}}/docs/security/model.md#known-limitations)).
+- Under App Control script enforcement the unsigned Windows installer runs in Constrained Language Mode and fails: allow it by hash ([security model](https://github.com/{{REPOSITORY}}/blob/{{TAG}}/docs/security/model.md#known-limitations)).
+- macOS binaries are not signed or notarized: download them with curl, or remove the quarantine attribute with `xattr -d com.apple.quarantine <file>` ([verify releases](https://github.com/{{REPOSITORY}}/blob/{{TAG}}/docs/security/verify-releases.md)).
+- The images have no `latest` tag during v0.x. ghcr.io lists tags named `sha256-<hex>` that hold the signatures and attestations: do not delete them.
+
+## Container images
+
+| Image | Tags | Digest |
+|---|---|---|
+| `{{SERVER_IMAGE}}` | {{IMAGE_TAGS}} | `{{SERVER_DIGEST}}` |
+| `{{UPDATER_IMAGE}}` | {{IMAGE_TAGS}} | `{{UPDATER_DIGEST}}` |
+
+Pin the digest, for example `helm install myriarch ./deploy/helm/myriarch --set image.digest={{SERVER_DIGEST}}` from a checkout of `{{TAG}}`.
+
+## Verify this release
+
+Every release file is listed in `checksums.txt`, which is signed keyless by `release.yml` at `{{TAG}}`. The guide [Verify releases](https://github.com/{{REPOSITORY}}/blob/{{TAG}}/docs/security/verify-releases.md) explains each step.
+
+```bash
+gh release download {{TAG}} --repo {{REPOSITORY}} --pattern 'checksums.txt*' --pattern '{{UPDATER_ASSET_LINUX_AMD64}}'
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-identity '{{IDENTITY}}' \
+  --certificate-oidc-issuer {{OIDC_ISSUER}} checksums.txt
+sha256sum --check --ignore-missing checksums.txt
+gh attestation verify {{UPDATER_ASSET_LINUX_AMD64}} --repo {{REPOSITORY}} --signer-workflow {{SIGNER_WORKFLOW}} --source-ref refs/tags/{{TAG}}
+gh release verify {{TAG}} --repo {{REPOSITORY}}
+gh release verify-asset {{TAG}} checksums.txt --repo {{REPOSITORY}}
+cosign verify {{SERVER_IMAGE}}@{{SERVER_DIGEST}} \
+  --certificate-identity '{{IDENTITY}}' --certificate-oidc-issuer {{OIDC_ISSUER}}
+cosign verify {{UPDATER_IMAGE}}@{{UPDATER_DIGEST}} \
+  --certificate-identity '{{IDENTITY}}' --certificate-oidc-issuer {{OIDC_ISSUER}}
+gh attestation verify oci://{{SERVER_IMAGE}}@{{SERVER_DIGEST}} --repo {{REPOSITORY}} --bundle-from-oci --signer-workflow {{SIGNER_WORKFLOW}} --source-ref refs/tags/{{TAG}}
+```
+
+Use gh 2.102.0 or newer: older versions treat `--signer-workflow ...@refs/tags/<tag>` as a prefix, and `--source-ref` is the exact check in every version. `gh release verify`, `gh release verify-asset` and the online `gh attestation verify` need a login (`gh auth login` or `GH_TOKEN`). `cosign verify` of an image also accepts the attestations of the same identity; the JSON entry of the type `https://sigstore.dev/cosign/sign/v1` is the cosign signature. `gh release verify-asset` (membership of a file in this immutable release) is the proof that a file was released.
+
+The build provenance is also the release file `{{PROVENANCE_ASSET}}` (`gh attestation verify <file> --bundle {{PROVENANCE_ASSET}} --repo {{REPOSITORY}}` needs no call to the attestation API; offline it needs a trusted root that gh cached within the last day, or `--custom-trusted-root`, see the section "Offline and behind a proxy" of the guide). The installers check `checksums.txt` against the version-bound pattern `{{IDENTITY_BOUND_REGEXP}}`; the pattern for any release is `{{IDENTITY_REGEXP}}`.
+
+## Changes
+
+{{CHANGELOG_SECTION}}
+
+The list of merged pull requests below is generated by GitHub.

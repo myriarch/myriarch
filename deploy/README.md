@@ -159,7 +159,7 @@ make release-snapshot                          # goreleaser snapshot of the matr
 make release-rehearsal                         # the path of a release in a snapshot, with a signing pass by a throwaway test CA (nothing is published)
 ```
 
-Releases are built and signed keyless by the release workflow (ADR-0023). This tree has no key-based release path: goreleaser
+Releases are built and signed keyless by the release workflow (ADR-0023, ADR-0035). This tree has no key-based release path: goreleaser
 signs nothing, and `ci/build-release.sh` only builds snapshots. The build, the SBOMs and the Windows signing hook are described
 in [`release/README.md`](release/README.md).
 
@@ -253,7 +253,14 @@ in deployments.
   with it the signature of the release, covers every file of the image, and the image can be rebuilt from `dist/` alone. The
   builder reads only regular files below those two directories and refuses links, paths that leave them, a file that is the parent
   of another file and leftovers of a local work tree (`.DS_Store`, `._*`, `*~`, `*.swp`): a release is built from a fresh checkout.
-* **Verification.** The signatures and attestations of the images and how to verify them come with the release workflow.
+* **Signatures and attestations.** The job `push-images` of the release workflow signs both images with `cosign sign --recursive`
+  and attaches a provenance attestation (index) and an SPDX SBOM attestation (each platform image) in ghcr.io, strictly one
+  after the other. The job `verify` then checks them, the image configuration and the absence of a `latest` tag, and
+  `finalize` sets the version tags only after that ([ADR-0035](../docs/adr/0035-release-workflow-with-keyless-signing-and-verification-before-publication.md)).
+  ghcr.io has no referrers API, so the signatures and attestations are kept in tags named `sha256-<hex>` (about three per
+  image); do not delete them. The first push creates both packages as private; an organization owner makes them public before
+  the second approval ([`docs/releasing.md`](../docs/releasing.md)). How to verify an image is in
+  [Verify releases](../docs/security/verify-releases.md#verify-the-container-images).
 
 ## License files
 
@@ -336,4 +343,7 @@ build of the matrix, mirror upload and signing scripts against throw-away server
 covered by automated tests: Docker image builds from the Dockerfiles, service creation/registry/ACLs on Windows, systemd integration on a real host, applying the
 manifests to a cluster. The release images are covered up to the registry: the build from release archives (contract, determinism,
 SBOMs) and the push by digest run against a registry on `127.0.0.1` in `ci/tests/image-crane-test.sh`; whether ghcr.io accepts
-a tag-less push by digest and rejects a wrong digest is checked with the first release candidate.
+a tag-less push by digest and rejects a wrong digest is checked with the first release candidate: the job `push-images` fails
+when it does not, and the job `verify` then checks the pushed images. The scripts of the release workflow are covered by
+`ci/tests/release-scripts-test.sh`, `ci/tests/release-smoke-test.sh` and `ci/tests/release-workflow-test.sh`; the smoke jobs
+after publication test the release as a user installs it.
