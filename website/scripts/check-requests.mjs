@@ -11,9 +11,10 @@
 //
 // It also checks the motion of the mark on the landing page (checkMotion, light and dark): the rollout plays on the ten parts of the mark,
 // every part ends on an identity transform (the unchanged mark), the mark is held, the dots retract and a second cycle starts; the pause
-// button (an accessible button) stops the motion and shows the static mark, play starts a clean cycle, and the loop stands still while the
-// hero is out of view or the document is hidden; with prefers-reduced-motion: reduce nothing animates and there is no button; without
-// JavaScript the rollout plays once. The check takes about a minute.
+// button (an accessible button) stops the motion and shows the static mark, play resumes at the retraction of a cycle without a jump and
+// the ring does not grow again, and the loop stands still while the hero is out of view or the document is hidden; with
+// prefers-reduced-motion: reduce nothing animates and there is no button; without JavaScript the rollout plays once. The check takes about
+// a minute.
 //
 // Serve the production build first (make website-preview, port 1313). Every page is loaded in the light and in the dark appearance.
 // Chrome: the environment variable CHROME, else Google Chrome on macOS, else google-chrome or chromium (see cdp.mjs). Node.js 22 or newer.
@@ -143,17 +144,22 @@ const MARK_STATE = `(() => {
     parts: parts.length,
     animations: mark.getAnimations({ subtree: true }).length,
     transforms: parts.map((p) => getComputedStyle(p).transform),
+    dots: [...mark.querySelectorAll('.dot')].map((p) => getComputedStyle(p).transform),
     ring: getComputedStyle(mark.querySelector('.ring')).transform,
+    ringAnimations: mark.querySelector('.ring').getAnimations().length,
   });
 })()`;
 
-/** The clock of the loop: the animation of the last dot of the mark (iteration, progress within the cycle, time in ms). */
+/**
+ * The clock of the loop: the animation of the last dot of the mark. pos is the position within the cycle in ms (progress of the effect times
+ * the duration); it includes the negative animation delay, which currentTime (ms) does not, so it tells where in the 10 s cycle the mark is.
+ */
 const LOOP_STATE = `(() => {
   const dot = document.querySelector('svg.landing-hero__mark .r3.c3');
   const animation = dot && dot.getAnimations()[0];
   if (!animation) return JSON.stringify({ running: false });
   const timing = animation.effect.getComputedTiming();
-  return JSON.stringify({ running: true, iteration: timing.currentIteration, progress: timing.progress, ms: Number(animation.currentTime), iterations: timing.iterations });
+  return JSON.stringify({ running: true, iteration: timing.currentIteration, progress: timing.progress, pos: timing.progress === null ? null : timing.progress * Number(timing.duration), ms: Number(animation.currentTime), iterations: timing.iterations });
 })()`;
 
 /** The pause button: what a keyboard user and a screen reader get. */
@@ -186,6 +192,11 @@ const IDENTITY = new Set(["none", "matrix(1, 0, 0, 1, 0, 0)"]);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const json = async (page, expression) => JSON.parse(await page.evaluate(expression));
 const moved = (state) => state.transforms.filter((t) => !IDENTITY.has(t)).length;
+const movedDots = (state) => state.dots.filter((t) => !IDENTITY.has(t)).length;
+
+/** Where a resumed loop starts: at the retraction that ends a cycle (9.4 s of 10 s, see $myr-retract-at in _landing.scss). */
+const RESUME_FROM = 9350;
+const CYCLE = 10000;
 
 /** Relative luminance of an sRGB color given as "#rgb", "#rrggbb" or "rgb(r, g, b)"; null when the text is none of these. */
 function luminance(text) {
@@ -253,14 +264,22 @@ async function expectStatic(page, label, what, findings) {
   if (moved(state) > 0) findings.push(`${label}: ${moved(state)} parts of the mark are not on an identity transform ${what}`);
 }
 
-/** The mark plays: the dots (and, before the first stop, the ring) animate, and the loop is at the start of a cycle. */
+/**
+ * The mark plays again after a stop: the nine dots animate and the ring does not (it grew once, on load), and the loop is in the
+ * retraction that ends a cycle (position 9.35 s to 10 s, the dots shrink from the full mark, so nothing jumps), not in the hold and not
+ * at scale 0 of a cycle start. A mark that resumed in the hold would look like a static one, so at least one dot is off its identity
+ * transform.
+ */
 async function expectPlaying(page, label, what, findings) {
   const state = await json(page, MARK_STATE);
   const loop = await json(page, LOOP_STATE);
-  if (state.animations < 9) findings.push(`${label}: ${state.animations} animations run on the mark ${what}, expected at least 9 (the nine dots)`);
-  else if (!loop.running || loop.iteration !== 0 || loop.ms > 1500) {
-    findings.push(`${label}: the mark does not start from the beginning of a cycle ${what} (${JSON.stringify(loop)})`);
+  if (state.animations !== 9) findings.push(`${label}: ${state.animations} animations run on the mark ${what}, expected 9 (the nine dots)`);
+  if (state.ringAnimations !== 0) findings.push(`${label}: the ring has ${state.ringAnimations} running animations ${what}, expected none (it grows once)`);
+  if (!IDENTITY.has(state.ring)) findings.push(`${label}: the ring is not on its identity transform ${what} (${state.ring})`);
+  if (!loop.running || loop.iteration !== 0 || loop.pos === null || loop.pos < RESUME_FROM || loop.pos >= CYCLE) {
+    findings.push(`${label}: the mark does not resume at the retraction of a cycle ${what} (${JSON.stringify(loop)})`);
   }
+  if (movedDots(state) === 0) findings.push(`${label}: no dot is moving ${what}, the mark looks like the static one`);
 }
 
 /** Full motion in one appearance: the loop, the pause button, the observers. About 20 s. */
@@ -299,17 +318,17 @@ async function checkLoop(browser, base, scheme, findings) {
     }
     if (loop.iteration === 0) {
       const identity = moved(state) === 0;
-      if (identity && loop.ms > 2000 && holdStart === null) holdStart = loop.ms;
-      if (!identity && holdStart !== null && holdEnd === null) holdEnd = loop.ms;
+      if (identity && loop.pos > 2000 && holdStart === null) holdStart = loop.pos;
+      if (!identity && holdStart !== null && holdEnd === null) holdEnd = loop.pos;
       if (!identity && loop.progress >= 0.94) sawRetract = true;
-      if (holdStart === null && loop.ms > 2800) {
-        findings.push(`${label}: the first rollout is not finished after ${Math.round(loop.ms)} ms (${moved(state)} parts still move)`);
-        holdStart = loop.ms;
+      if (holdStart === null && loop.pos > 2800) {
+        findings.push(`${label}: the first rollout is not finished after ${Math.round(loop.pos)} ms (${moved(state)} parts still move)`);
+        holdStart = loop.pos;
       }
     } else if (loop.iteration === 1) {
       secondCycle = true;
       if (moved(state) > 0) secondCycleMoved = true;
-      if (loop.ms > 1500) break;
+      if (loop.pos > 1500) break;
     }
     if (!IDENTITY.has(state.ring)) ringMoved++;
     await sleep(100);
@@ -324,7 +343,7 @@ async function checkLoop(browser, base, scheme, findings) {
   else if (!secondCycleMoved) findings.push(`${label}: the second cycle does not move the dots`);
   if (ringMoved > 0) findings.push(`${label}: the ring left its identity transform ${ringMoved} times after it had grown (it must stay in place)`);
 
-  // The pause button stops the motion and shows the static mark; play starts a clean cycle.
+  // The pause button stops the motion and shows the static mark; play resumes at the retraction of a cycle (no jump).
   await page.evaluate("document.querySelector('.landing-hero__motion').click()");
   await sleep(250);
   await expectStatic(page, label, "after the pause button was pressed", findings);
@@ -338,7 +357,7 @@ async function checkLoop(browser, base, scheme, findings) {
   const playing = await json(page, BUTTON_STATE);
   if (playing.pressed !== "false") findings.push(`${label}: aria-pressed is ${JSON.stringify(playing.pressed)} after play, expected "false"`);
 
-  // Out of view: no motion; back in view: a clean cycle start.
+  // Out of view: no motion; back in view: resumed at the retraction.
   await page.evaluate("window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })");
   await sleep(600);
   await expectStatic(page, label, "while the hero is out of view", findings);
@@ -346,7 +365,7 @@ async function checkLoop(browser, base, scheme, findings) {
   await sleep(400);
   await expectPlaying(page, label, "when the hero is back in view", findings);
 
-  // A hidden document: no motion; visible again: a clean cycle start.
+  // A hidden document: no motion; visible again: resumed at the retraction.
   await page.evaluate("(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); })()");
   await sleep(200);
   await expectStatic(page, label, "while the document is hidden", findings);
@@ -419,7 +438,7 @@ async function checkWithoutScript(browser, base, findings) {
  * The mark of the landing page. Full motion (both appearances): the rollout runs on the ring and the nine dots (ten animations), the
  * first cycle ends on identity transforms (the unchanged mark) and holds it, the dots retract, a second cycle starts; the pause button
  * (a real button of at least 24x24 px with a label, a state, a focus ring and readable contrast) stops the motion and shows the static
- * mark, play starts a clean cycle; the loop does not run while the hero is out of view or the document is hidden. With
+ * mark, play resumes at the retraction of a cycle; the loop does not run while the hero is out of view or the document is hidden. With
  * prefers-reduced-motion: reduce no animation runs and there is no button. Without JavaScript the rollout plays once.
  */
 async function checkMotion(browser, base, findings) {

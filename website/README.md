@@ -39,8 +39,8 @@ data/repo_pages.yaml        repository files that adapters render (the root file
 data/third_party.yaml       the notices of /legal/third-party/
 layouts/                    render hooks (_markup), partials (repo/*, csp.html), shortcodes, overrides of Docsy files, 404.html, robots.txt
 assets/scss/                brand tokens (_variables_project.scss) and project styles
-static/                     site.webmanifest
 assets/js/                  landing-mark.js: the loop of the mark on the landing page and its pause button (the site's own script; the rest comes with the theme)
+static/                     site.webmanifest
 scripts/                    the checks (check-*.py), their tests (test_checks.py, testdata/), the browser checks (*.mjs), the preview server (preview-server.py)
 overrides.txt               SHA-256 of the upstream file behind every override of a Docsy file
 lychee.toml, .markdownlint-cli2.jsonc   configuration of the link check and of markdownlint
@@ -206,7 +206,13 @@ A new check is a file `scripts/check-<name>.py` that takes the built site as its
 
 - `node website/scripts/check-requests.mjs` (needs `make website-preview` running, Node.js 22 and Chrome; the pages are in
   `scripts/request-pages.txt`) loads every page in light and dark and fails on a request to another origin, a CSP violation or a
-  console error, a search that finds nothing for an operation or a heading, a diagram that does not render, an API page without its tables, and the mark on the landing page (about a minute, in light and dark): its rollout must play and end on identity transforms, the unchanged mark must be held for 6 to 8.5 s, the dots must retract and a second cycle must start; the pause button (a real button of at least 24x24 px with a label, `aria-pressed`, a focus ring and a contrast of 4.5:1) must stop the motion and show the static mark, and play must start a clean cycle; nothing may run while the hero is out of view or the document is hidden; with reduced motion nothing may animate and there must be no button; without JavaScript the rollout must play once.
+  console error, a search that finds nothing for an operation or a heading, a diagram that does not render, an API page without its
+  tables, and the mark on the landing page (about a minute, in light and dark): its rollout must play and end on identity transforms,
+  the unchanged mark must be held for 6 to 8.5 s, the dots must retract and a second cycle must start; the pause button (a real button
+  of at least 24x24 px with a label, `aria-pressed`, a focus ring and a contrast of 4.5:1) must stop the motion and show the static
+  mark, and play must resume at the retraction that ends a cycle (the dots shrink from the full mark, the ring does not grow again);
+  nothing may run while the hero is out of view or the document is hidden; with reduced motion nothing may animate and there must be no
+  button; without JavaScript the rollout must play once.
 - `python3 -I website/scripts/lighthouse-scores.py --min 90 <report.json>` evaluates Lighthouse reports (see the development guide). The
   preview server (`scripts/preview-server.py`) compresses text files like a host does, so its scores match what visitors get.
 

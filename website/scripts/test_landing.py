@@ -272,16 +272,19 @@ class LandingTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("exactly one button with the class landing-hero__motion (pause), found 0", out)
 
-    def test_pause_button_that_is_not_a_button_with_a_name_and_a_state(self):
-        bad = '<div class="landing-hero__motion" aria-label="Logo"></div>'
-        self.page(GOOD_PAGE.replace(BUTTON, "<button class=\"landing-hero__motion\" aria-label=\"Logo\"></button>"))
+    def test_pause_button_that_is_not_a_typed_button_with_a_name_and_a_state(self):
+        not_a_typed_button = '<button class="landing-hero__motion" aria-label="Logo"></button>'
+        self.page(GOOD_PAGE.replace(BUTTON, not_a_typed_button))
         rc, out, _ = self.run_check()
         self.assertEqual(rc, 1)
         self.assertIn('must be a <button type="button">', out)
         self.assertIn("names the action (pause)", out)
         self.assertIn('aria-pressed="false"', out)
         self.assertIn("attribute hidden", out)
-        self.page(GOOD_PAGE.replace(BUTTON, bad))
+
+    def test_pause_control_that_is_not_a_button(self):
+        not_a_button = '<div class="landing-hero__motion" aria-label="Logo"></div>'
+        self.page(GOOD_PAGE.replace(BUTTON, not_a_button))
         rc, out, _ = self.run_check()
         self.assertEqual(rc, 1)
         self.assertIn("found 0", out)
