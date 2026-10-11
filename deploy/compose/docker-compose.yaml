@@ -39,9 +39,7 @@ services:
       - dev
       - --dsn=postgres://myriarch:myriarch-dev-password@postgres:5432/myriarch?sslmode=disable
       - --gitops-dir=/gitops
-      # the image runs as a non-root user (65532) and has no /var/lib/myriarchd, so a named volume there would be owned by
-      # root and not writable; /tmp is writable. All state lives in the database (the artifact cache is rebuilt on demand)
-      - --data-dir=/tmp/myriarchd
+      - --data-dir=/var/lib/myriarchd
       - --listen=:8080
       # inside the container myriarchd listens on all interfaces and talks to the Postgres container: dev mode
       # requires an explicit confirmation for that (the ports below are bound to 127.0.0.1 only)
@@ -58,8 +56,8 @@ services:
       - myriarchd-data:/var/lib/myriarchd
     ports:
       # local only: dev mode has fixed logins (admin/admin) and OpAMP without an enrollment token
-      # (/metrics is served on the same port)
       - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9090:9090"
 
   myriarch-sim:
     profiles: ["sim"]
@@ -83,3 +81,4 @@ services:
 
 volumes:
   pgdata:
+  myriarchd-data:
