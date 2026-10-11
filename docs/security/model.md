@@ -490,7 +490,10 @@ guidance after each item names what to do.
     else is installed or run, and is the only set that jobs with a write scope, `id-token`, `attestations` or an environment
     execute; the build set (goreleaser, syft, yq, go-winres, osslsigncode) reaches only jobs with `contents: read`. Every consumer
     runs `ci/release/tools.sh check` after the unpack, and VERSIONS and SHA256SUMS of both sets are in the job summaries.
-    Artifacts are kept one day.
+    Artifacts are kept one day. The release scripts and the goreleaser commands take the pinned tools only from `TOOLS_BIN`, the
+    directory of the unpacked set, never from `PATH` (the workflow never writes `GITHUB_PATH`): `deploy/release/goreleaser.yaml`
+    passes `TOOLS_BIN` to its `sboms` commands, `go-winres` is accepted only from `TOOLS_BIN` and only with the stamp of its pin,
+    and `ci/tests/release-workflow-test.sh` and `ci/tests/release-scripts-test.sh` enforce this.
   - *Two approvals.* Exactly two jobs use the environment `release` (no administrator bypass, tags `v*` only): `sign-windows`,
     before anything is signed or pushed, and `finalize`, after the draft release exists and every verification passed. A gate is
     passed once per run, not once per attempt: "Re-run failed jobs" re-runs only the failed jobs and their dependents, so

@@ -22,8 +22,8 @@
 #        drafts of github-actions[bot] (left by an earlier attempt) -> deleted by id (gh api -X DELETE), each logged
 #   3. gh release create TAG --repo <repository> --draft --verify-tag --target SHA --title TAG --notes-file FILE --generate-notes
 #        [--notes-start-tag NOTES_START_TAG] [--prerelease] <the 42 files sorted by name>      [create_failed]
-#      NOTES_START_TAG is only used when that tag has a published (not draft) release: guard.sh names the highest tag below the
-#      current one, which has no release when an earlier attempt failed before publication (a tag is never reused). Without a
+#      NOTES_START_TAG is only used when that tag has a published (not draft) release: meta.sh (the guard job output notes-start-tag) names the
+#      highest tag below the current one, which has no release when an earlier attempt failed before publication (a tag is never reused). Without a
 #      published release the option is left out and the log says so, and GitHub picks the start of the generated change list itself.
 #      --prerelease exactly when RELEASE_PRERELEASE=true; never --latest. The notes of FILE come first, then GitHub's generated list.
 #   4. reads the list again: exactly one draft of the tag by github-actions[bot] [draft_ambiguous] [draft_missing], with exactly the

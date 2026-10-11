@@ -66,7 +66,9 @@ goreleaser starts an `sboms` command with a reduced environment: from its own en
 therefore hands `TOOLS_BIN` to both `sboms` entries (`env: ["TOOLS_BIN={{ .Env.TOOLS_BIN }}"]`), and `sbom.sh` finds syft and yq
 only in `${TOOLS_BIN}`: it stops with `[tools_bin_missing]` when the variable is not set and does not use `PATH` or the default
 directory. The release workflow keeps the pinned tools out of `PATH` on purpose (it never writes `GITHUB_PATH`), so this is the only way
-they reach the script. A new `sboms` entry that calls a pinned tool needs the same `env` line; `ci/tests/release-workflow-test.sh`
+they reach the script. A direct `goreleaser release -f deploy/release/goreleaser.yaml` without `TOOLS_BIN` in the environment stops while goreleaser renders the
+template, with `map has no entry for key "TOOLS_BIN"`; that is intended (it fails closed), `ci/build-release.sh` and
+`ci/release/rehearsal.sh` set the variable. A new `sboms` entry that calls a pinned tool needs the same `env` line; `ci/tests/release-workflow-test.sh`
 checks it, together with the `TOOLS_BIN` of every workflow step that uses a pinned tool, and `ci/tests/release-scripts-test.sh` scans the
 release scripts for a pinned tool called by its bare name or looked up with `have` or `need_cmd`; both tests use one tokenizer
 (`ci/tests/bare-tools.py`), which also sees a call behind a variable assignment, `exec`, `env`, `command`, `time`, `nohup`, `xargs`,

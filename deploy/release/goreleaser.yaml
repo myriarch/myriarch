@@ -34,6 +34,9 @@
 #
 # Prerequisites: Go, the built web UI (internal/webui/dist, make web-build), goreleaser, syft, go-winres and yq from
 # ci/install-tools.sh, python3, and osslsigncode (ci/install-tools.sh osslsigncode) for stage apply with signed files.
+# TOOLS_BIN (absolute path of the directory with the pinned tools) must be set: ci/build-release.sh and ci/release/rehearsal.sh set it,
+# the release workflow sets it in the step env, and the sboms entries below pass it on to their commands (goreleaser starts them with
+# a reduced environment). Without it goreleaser stops at template time with `map has no entry for key "TOOLS_BIN"`.
 version: 2
 project_name: myriarch
 
