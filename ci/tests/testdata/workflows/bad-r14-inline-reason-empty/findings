@@ -1,0 +1,1 @@
+.github/workflows/ci.yml:20: R14: an inline zizmor ignore needs its reason, at least one word, in a comment line directly above or behind the bracket

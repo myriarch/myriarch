@@ -1,0 +1,5 @@
+rules:
+  # why the finding does not apply
+  self-repository: {ignore: [ci.yml, e2e.yml]}
+  # another reason
+  concurrency-limits: {ignore: [scorecard.yml:3]}

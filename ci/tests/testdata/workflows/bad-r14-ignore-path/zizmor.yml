@@ -1,0 +1,5 @@
+rules:
+  # why
+  self-repository:
+    ignore:
+      - .github/workflows/ci.yml

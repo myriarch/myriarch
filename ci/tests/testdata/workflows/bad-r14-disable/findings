@@ -1,0 +1,1 @@
+zizmor.yml:4: R14: audit template-injection: only `ignore:` is allowed, not 'disable' (no audit is switched off or weakened)

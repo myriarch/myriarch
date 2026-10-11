@@ -86,12 +86,16 @@ Rules
       `false`, at job and at step level (a failed guard, approval or verification counts as passed). R12 and R13 read the
       YAML with a small reader for block style (anchors, aliases, tags, multi-line flow collections and multi-line
       scalars are findings of their own).
-  R14 zizmor stays strict (ADR-0032). zizmor.yml in the repository root holds ignore entries and nothing else: the only
-      top-level key is `rules`, each audit under it has only the key `ignore` (so no `disable`, no `config` and no other
-      key) with a list of workflow or action files, optionally with `:line` or `:line:column`, no wildcards, and a comment
-      line directly above the audit that gives the reason. An inline ignore in a file below .github needs the rule names
-      in brackets (`# zizmor: ignore[github-env]`, never a bare `# zizmor: ignore`) and a reason: a comment line directly
-      above it, or text behind the closing bracket. The rule reads the configuration with the reader of R12 and R13.
+  R14 zizmor stays strict (docs/development.md, "Security rules of the workflows", and docs/security/model.md, "Static
+      analysis in CI"). zizmor.yml in the repository root holds ignore entries and nothing else: the only top-level key is
+      `rules`, written as a block with one audit per line (never `rules: {...}`); each audit under it has only the key
+      `ignore` (so no `disable`, no `config` and no other key) with a list of workflow files, optionally with `:line` or
+      `:line:column`. zizmor compares an entry with the base name of the file, so an entry is `ci.yml` without a directory
+      and without a wildcard, and `action.yml` is refused (it would match every local action; ignore a finding in a local
+      action with an inline comment). A comment line directly above the audit gives the reason, with at least one word. An
+      inline ignore in a file below .github needs the rule names in brackets (`# zizmor: ignore[github-env]`, never a bare
+      `# zizmor: ignore`) and a reason of at least one word: a comment line directly above it, or text behind the closing
+      bracket. The rule reads the configuration with the reader of R12 and R13.
       The files that zizmor reads (zizmor.yml, the workflows, the local actions and .github/dependabot.yml or .yaml) must
       read the same for this check and for a YAML parser: a file that is not UTF-8 is a finding, and so is a file with
       U+0085, U+2028 or U+2029 (line breaks for a parser, zizmor's reader of zizmor.yml included, but not for this check,
@@ -146,7 +150,9 @@ ACTION_FILE = re.compile(r"^action\.ya?ml$", re.I)  # the metadata file of a loc
 ALLOW_JOB = re.compile(r"^[A-Za-z0-9_-]+$")
 ALLOW_SECRET = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ZIZMOR_AUDIT = re.compile(r"^[a-z][a-z0-9-]*$")
-ZIZMOR_IGNORE_PATH = re.compile(r"^[A-Za-z0-9._/-]+\.ya?ml(?::[0-9]+(?::[0-9]+)?)?$")
+# an entry of `ignore:` in zizmor.yml: zizmor compares it with the base name of the file, so a directory never matches
+ZIZMOR_IGNORE_PATH = re.compile(r"^[A-Za-z0-9._-]+\.ya?ml(?::[0-9]+(?::[0-9]+)?)?$")
+ZIZMOR_IGNORE_ACTION = re.compile(r"^action\.ya?ml(?::|$)", re.I)  # the base name of every local action
 ZIZMOR_COMMENT = re.compile(r"#\s*zizmor\s*:\s*ignore", re.I)
 ZIZMOR_COMMENT_OK = re.compile(r"#\s*zizmor\s*:\s*ignore\[\s*[a-z][a-z0-9-]*(?:\s*,\s*[a-z][a-z0-9-]*)*\s*\](.*)$", re.I)
 # R14: characters with which a YAML parser reads a file differently from this check, which splits it into lines at LF and CR only.
@@ -166,6 +172,17 @@ def indent_of(line):
 def is_blank_or_comment(line):
     s = line.strip()
     return s == "" or s.startswith("#")
+
+
+def has_word(text):
+    """True when the text has a letter or a digit: a reason that is only punctuation says nothing."""
+    return re.search(r"[^\W_]", text) is not None
+
+
+def is_reason_comment(line):
+    """True for a line that holds nothing but a comment with at least one word."""
+    s = line.strip()
+    return s.startswith("#") and has_word(s[1:])
 
 
 def expressions(text):
@@ -1358,7 +1375,8 @@ class Checker:
 
     # ---- R14: zizmor stays strict ---------------------------------------------------------------------------
     def rule_zizmor_comments(self, path, lines):
-        """An inline `# zizmor: ignore[...]` names its rules and says why: a comment line right above or text behind the bracket."""
+        """An inline `# zizmor: ignore[...]` names its rules and says why: a comment line right above or text behind the bracket,
+        with at least one word."""
         for i, line in enumerate(lines):
             m = ZIZMOR_COMMENT.search(line)
             if not m:
@@ -1366,11 +1384,11 @@ class Checker:
             ok = ZIZMOR_COMMENT_OK.search(line)
             if not ok:
                 self.add(path, i + 1, "R14", "an inline zizmor ignore must name its rules: `# zizmor: ignore[<audit>]`, not a bare ignore")
-            elif not (ok.group(1).strip() or (i > 0 and lines[i - 1].strip().startswith("#"))):
-                self.add(path, i + 1, "R14", "an inline zizmor ignore needs its reason in a comment line directly above or behind the bracket")
+            elif not (has_word(ok.group(1)) or (i > 0 and is_reason_comment(lines[i - 1]))):
+                self.add(path, i + 1, "R14", "an inline zizmor ignore needs its reason, at least one word, in a comment line directly above or behind the bracket")
 
     def rule_zizmor_config(self):
-        """zizmor.yml in the repository root: `rules: {<audit>: {ignore: [<file>[:line[:column]]]}}` and nothing else."""
+        """zizmor.yml in the repository root: `rules: {<audit>: {ignore: [<workflow file>[:line[:column]]]}}` and nothing else."""
         path = os.path.join(self.root, "zizmor.yml")
         if not os.path.isfile(path):
             return
@@ -1396,12 +1414,15 @@ class Checker:
         if rules is None:
             self.add(path, rules_node.line, "R14", "rules: must be a mapping of audits")
             return
+        if any(node.line <= rules_node.line for node in rules.values()):
+            # in a flow mapping (`rules: {a: {...}, b: {...}}`) every audit has the line of rules:, and one comment would pass for all
+            self.add(path, rules_node.line, "R14", "rules: must be a block, one audit per line, each under a comment line of its own that gives the reason")
         for audit, node in rules.items():
             if not ZIZMOR_AUDIT.match(audit):
                 self.add(path, node.line, "R14", "'%s' is not the name of an audit" % audit)
             body = as_map(node)
             if body is None:
-                self.add(path, node.line, "R14", "audit %s: only `ignore:` with a list of files is allowed" % audit)
+                self.add(path, node.line, "R14", "audit %s: only `ignore:` with a list of workflow files is allowed" % audit)
                 continue
             for key, sub in body.items():
                 if key != "ignore":
@@ -1411,14 +1432,16 @@ class Checker:
                 continue
             items = as_list(entries)
             if items is None:
-                self.add(path, entries.line, "R14", "audit %s: ignore: must be a list of files" % audit)
+                self.add(path, entries.line, "R14", "audit %s: ignore: must be a list of workflow files" % audit)
                 continue
             for item in items:
                 text = as_text(item)
                 if text is None or not ZIZMOR_IGNORE_PATH.match(text):
-                    self.add(path, item.line, "R14", "audit %s: an ignore entry is a workflow or action file, optionally with :line or :line:column (no wildcards)" % audit)
-            if node.line < 2 or not lines[node.line - 2].strip().startswith("#"):
-                self.add(path, node.line, "R14", "audit %s: a comment line directly above the audit must give the reason for its ignores" % audit)
+                    self.add(path, item.line, "R14", "audit %s: an ignore entry is the base name of a workflow file, optionally with :line or :line:column (zizmor compares the name only: no directory, no wildcard)" % audit)
+                elif ZIZMOR_IGNORE_ACTION.match(text):
+                    self.add(path, item.line, "R14", "audit %s: the entry %s would silence the audit in every local action, because zizmor compares the file name only: ignore a finding in a local action with a comment in the file" % (audit, text))
+            if node.line > rules_node.line and not is_reason_comment(lines[node.line - 2]):
+                self.add(path, node.line, "R14", "audit %s: a comment line directly above the audit must give the reason for its ignores (at least one word)" % audit)
 
     def rule_secret_entries(self):
         """Stale entries of ci/workflow-secrets.txt: the workflow file, the job or the use of the secret is gone."""

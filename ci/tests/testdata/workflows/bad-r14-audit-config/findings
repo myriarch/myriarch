@@ -1,0 +1,1 @@
+zizmor.yml:4: R14: audit excessive-permissions: only `ignore:` is allowed, not 'config' (no audit is switched off or weakened)

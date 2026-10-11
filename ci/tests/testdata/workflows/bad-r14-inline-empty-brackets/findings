@@ -1,0 +1,1 @@
+.github/workflows/ci.yml:20: R14: an inline zizmor ignore must name its rules: `# zizmor: ignore[<audit>]`, not a bare ignore

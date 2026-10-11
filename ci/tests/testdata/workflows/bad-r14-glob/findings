@@ -1,0 +1,1 @@
+zizmor.yml:5: R14: audit template-injection: an ignore entry is the base name of a workflow file, optionally with :line or :line:column (zizmor compares the name only: no directory, no wildcard)

@@ -7,7 +7,7 @@ rules:
     ignore:
       - ci.yml
       - e2e.yml:12
-      - .github/actions/setup/action.yml:7:3
+      - e2e.yml:14:3
   # more than one line of reason
   # second line
   concurrency-limits:

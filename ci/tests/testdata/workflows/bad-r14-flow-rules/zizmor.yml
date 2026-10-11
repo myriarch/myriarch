@@ -1,0 +1,2 @@
+# one comment for all audits
+rules: {self-repository: {ignore: [ci.yml]}, concurrency-limits: {ignore: [scorecard.yml]}}

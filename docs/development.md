@@ -415,9 +415,12 @@ both, so a rule does not depend on how a file is named:
   workflow; if the finding is a false positive, ignore it as narrowly as possible, with the reason next to the ignore: a trailing
   comment `# zizmor: ignore[<audit>]` on the line the finding names (it must be the line of the `run:` key for a script), with a
   comment line above it or text behind the bracket that gives the reason, or an entry under `rules.<audit>.ignore` in
-  `zizmor.yml` (audit and file, a line number where the finding is about one place) under a comment that gives the reason.
+  `zizmor.yml` (audit and workflow file, a line number where the finding is about one place) under a comment that gives the
+  reason. An entry is the base name of the file (`ci.yml`), because zizmor compares nothing else: a directory never matches,
+  and `action.yml` would match every local action, so a finding in a local action is ignored with a comment in the file.
   Rule R14 of the policy check enforces this: `zizmor.yml` has nothing but ignore entries (no `disable`, no `config`, no other
-  key, no wildcard), and a bare `# zizmor: ignore` fails. R14 also makes sure that the policy check and zizmor read the same
+  key, no wildcard, no directory), written as a block with one audit per line, each under a comment line whose reason has at
+  least one word; an inline ignore needs a reason with a word as well, and a bare `# zizmor: ignore` fails. R14 also makes sure that the policy check and zizmor read the same
   lines: a file that zizmor reads (`zizmor.yml`, the workflows, the local action, `.github/dependabot.yml`) fails when it is not
   UTF-8 or holds U+0085, U+2028 or U+2029 (a YAML parser takes them for line breaks, the check splits at LF and CR), another
   control character than TAB, or a byte order mark. The environment variables `ZIZMOR_CONFIG`, `ZIZMOR_OFFLINE` and

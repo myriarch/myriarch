@@ -1,0 +1,1 @@
+zizmor.yml:5: R14: audit github-env: the entry action.yml would silence the audit in every local action, because zizmor compares the file name only: ignore a finding in a local action with a comment in the file

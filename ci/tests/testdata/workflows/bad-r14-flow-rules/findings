@@ -1,0 +1,1 @@
+zizmor.yml:2: R14: rules: must be a block, one audit per line, each under a comment line of its own that gives the reason
