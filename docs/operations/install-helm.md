@@ -39,11 +39,16 @@ The images `ghcr.io/myriarch/myriarch` (the server) and `ghcr.io/myriarch/myriar
 `X.Y.Z` and `X.Y` (`X.Y.Z-rc.N` for release candidates). There is no tag `latest`. **They exist from the first release
 on.** Pin the image by digest in production (`image.digest`, see below).
 
-Before the first release, or to run an unreleased commit, build the release variant of the image and push it to your own
-registry. The script needs no container runtime, but it needs the build toolchain of the repository (Go, Node.js and pnpm,
-see [Local development](../getting-started/local-dev.md#prerequisites); the script builds the web UI when it is missing)
-and `python3`. It builds the binaries, packs them into a `FROM scratch` image and pushes it with `crane`; the work tree
-must be clean (`ALLOW_DIRTY=1` overrides this for experiments):
+### Build the image yourself
+
+The published release images are the supported way to install: they are built from the release archives that the release
+workflow signs, and they are an index for `linux/amd64` and `linux/arm64`. Build an image yourself only to run an unreleased
+commit, or when your cluster cannot pull from `ghcr.io` and you do not mirror the release image. The script needs no
+container runtime, but it needs the build toolchain of the repository (Go, Node.js and pnpm, see
+[Local development](../getting-started/local-dev.md#prerequisites); the script builds the web UI when it is missing) and
+`python3`. It compiles the binaries from your work tree, packs them into a `FROM scratch` image and pushes it to your own
+registry with `crane`; the work tree must be clean (`ALLOW_DIRTY=1` overrides this for experiments). The script never pushes
+to `ghcr.io/myriarch/*`, which belongs to the release workflow.
 
 ```bash
 make tools TOOLS=crane                                         # installs crane into .cache/bin
@@ -53,13 +58,27 @@ sed -n 's/^IMAGE_DIGEST=//p' image.out
 ```
 
 The last command prints the `sha256:...` digest of the pushed image. Use it in the installation with
-`--set image.repository=registry.example.com/myriarch/myriarch --set image.digest=sha256:...`. The image is built for
-`linux/amd64`; `IMAGE_PLATFORM=linux/arm64` builds an arm64 image with a tag that ends in `-arm64`. The release variant has
-no embedded PostgreSQL and no test fixtures; `IMAGE_VARIANT=release scripts/build-image-crane.sh layout` lists its files.
-`scripts/build-image-crane.sh` documents all variables. Output line names and platform handling can change with the
-multi-architecture image work before the first release; read the output of the script and its header rather than relying
-on this page. The image declares the user 1001, while the chart runs the pod as user 65532 (`podSecurityContext.runAsUser`);
-this works because the image writes nothing outside of `/tmp` and all its files are world-readable.
+`--set image.repository=registry.example.com/myriarch/myriarch --set image.digest=sha256:...`. Use
+`IMAGE_VARIANT=release`: the default variant `dev` is for `myriarchd dev` and holds the embedded PostgreSQL and test
+fixtures, and a production installation does not need them. The image is built for one platform, `linux/amd64`;
+`IMAGE_PLATFORM=linux/arm64` builds an arm64 image with a tag that ends in `-arm64`. There is no multi-platform index.
+
+The image has the same layout as the release image, except that it is built from your work tree:
+
+- **User:** `65532:65532`, the user the chart runs the pod as (`podSecurityContext.runAsUser`). The image has no shell and
+  no package database.
+- **Programs:** `/usr/local/bin/myriarchd` is the entry point, with the default arguments `serve --config
+  /etc/myriarchd/myriarchd.yaml`; `/usr/local/bin/myrctl` and `/usr/local/bin/myriarch-sim` are next to it.
+- **Data:** the example repositories below `/opt/myriarch/examples` and the licenses below `/usr/share/licenses/myriarch`,
+  all world-readable.
+- **Data directory:** the empty directory `/var/lib/myriarchd` (mode `0750`, owned by `65532:65532`). The chart mounts its
+  data volume there (an `emptyDir` or a PVC, `persistence.enabled`) and puts the GitOps clone and the artifact cache below
+  it; the volume is group-writable for the pod through `fsGroup: 65532`.
+- **Scratch space:** an empty `/tmp`. The chart mounts an `emptyDir` there and keeps the root file system read-only.
+
+`IMAGE_VARIANT=release scripts/build-image-crane.sh layout` lists the files of the image without building anything.
+`scripts/build-image-crane.sh` documents all variables and its output; read the header of the script in your checkout
+rather than relying on this page for details of options.
 
 ## Install with the minimal values
 
