@@ -56,6 +56,10 @@ MAX_FILE = 256 * 1024 * 1024
 TIMEOUT = 120
 SIG_BEGIN = b"# SIG # Begin signature block"
 SIG_END = b"# SIG # End signature block"
+# osslsigncode (script.c) picks the script parser by the file extension, ignoring case. The hash-comment scripts carry the block that
+# check_script_block checks; the other script formats use other comment syntax and are refused.
+HASH_SCRIPT_EXT = (".ps1", ".psd1", ".psm1")
+OTHER_SCRIPT_EXT = (".ps1xml", ".psc1", ".cdxml", ".mof", ".js")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -204,9 +208,14 @@ def load_trust(directory):
 def verify(tool, path, trust):
     """Verifies one file against the trust anchors. osslsigncode exits 0 for a missing or invalid timestamp as long as the signing
     certificate is currently valid, so the output is parsed rule by rule."""
+    name = os.path.basename(str(path))
+    ext = os.path.splitext(name)[1].lower()
+    if ext in HASH_SCRIPT_EXT:
+        check_script_block(name, Path(path).read_bytes())
+    elif ext in OTHER_SCRIPT_EXT:
+        fail("script_unsupported", "%s: osslsigncode treats '%s' as a script with another comment syntax; only %s are supported" % (name, ext, ", ".join(HASH_SCRIPT_EXT)))
     rc, out = tool.run(["verify", "-CAfile", trust["ca"], "-TSA-CAfile", trust["tsa_ca"], "-in", str(path)])
     lines = [ln.strip() for ln in out.splitlines()]
-    name = os.path.basename(str(path))
     if rc != 0:
         fail("signature_invalid", "%s: osslsigncode verify exited with status %d:\n%s" % (name, rc, "\n".join(lines[-20:])))
     if sum(1 for ln in lines if ln.startswith("Signature Index:")) != 1 or "Number of verified signatures: 1" not in lines:
@@ -378,17 +387,43 @@ def cmd_accept_exe(a):
     print("accepted %s (%s)" % (name, label), file=sys.stderr)
 
 
-def split_signed_script(name, path, data):
-    """Returns the text before the signature block of a signed script, with the one line ending that precedes the block removed."""
+# One line of the block without its line ending: padding ("=") is only valid at the end of the base64 stream, i.e. on the last line.
+SIG_LINE = re.compile(rb"# [A-Za-z0-9+/]+")
+SIG_LAST_LINE = re.compile(rb"# [A-Za-z0-9+/]+={0,2}")
+
+
+def check_script_block(name, data):
+    """Checks the signature block of a signed script strictly and returns the offset of its begin marker. The check runs before
+    osslsigncode sees the file, because the OpenSSL base64 decoder in the tool is lenient in a way that differs between OpenSSL builds
+    (stray whitespace or other bytes are skipped by some and refused by others), so that the same file would be accepted on one host and
+    refused on another. Signers (Set-AuthenticodeSignature, signtool, SignPath) write the block as the begin marker, lines of "# "
+    followed by base64 characters (the padding "=", up to two, only at the end of the last line), and the end marker, each line ended by LF
+    or CRLF (exactly one CR before the LF). Anything else is [signature_malformed]."""
     if data.count(SIG_BEGIN) != 1:
         fail("script_changed", "%s: the signed file must hold the '# SIG # Begin signature block' marker exactly once" % name)
     i = data.index(SIG_BEGIN)
+    if i != 0 and data[i - 1:i] != b"\n":
+        fail("script_changed", "%s: the '# SIG # Begin signature block' marker must start a line" % name)
     block = data[i:]
     if block.count(SIG_END) != 1 or not (block.endswith(SIG_END) or block.endswith(SIG_END + b"\r\n") or block.endswith(SIG_END + b"\n")):
         fail("script_changed", "%s: the signature block must end with '# SIG # End signature block' at the end of the file" % name)
-    for line in block.replace(b"\r\n", b"\n").split(b"\n"):
-        if line and not line.startswith(b"# "):
-            fail("script_changed", "%s: text inside the signature block that is not a comment line" % name)
+    lines = block.split(b"\n")
+    if lines[-1] == b"":
+        lines.pop()
+    lines = [ln[:-1] if ln.endswith(b"\r") else ln for ln in lines]
+    if lines[0] != SIG_BEGIN or lines[-1] != SIG_END or len(lines) < 3:
+        fail("signature_malformed", "%s: the signature block needs the begin marker on a line of its own, base64 lines and the end marker" % name)
+    body = lines[1:-1]
+    for n, ln in enumerate(body, start=2):
+        if not (SIG_LAST_LINE if n == len(body) + 1 else SIG_LINE).fullmatch(ln):
+            fail("signature_malformed", "%s: line %d of the signature block is not '# ' followed by base64 characters only (no space, tab, "
+                 "empty line, second CR or other byte, not even at the end of a line; '=' only at the end of the last line)" % (name, n))
+    return i
+
+
+def split_signed_script(name, path, data):
+    """Returns the text before the signature block of a signed script, with the one line ending that precedes the block removed."""
+    i = check_script_block(name, data)
     prefix = data[:i]
     if prefix.endswith(b"\r\n"):
         return prefix[:-2]

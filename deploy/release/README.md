@@ -148,7 +148,17 @@ the only code that runs osslsigncode):
    is parsed. The verified file replaces the rebuilt one.
 
 The scripts take the same path. In addition, the text before `# SIG # Begin signature block` must equal the repository file
-(`[script_changed]`). The accepted files are staged in `.cache/release/windows/archive/windows/`, from where the Windows archives pick
+(`[script_changed]`). The signature block of a provider's script has a defined format that is checked before osslsigncode reads the
+file (on `accept-scripts` and on `verify`): the begin marker on a line of its own, then one or more lines that consist of `# ` followed
+by base64 characters only (`A-Z a-z 0-9 + /`; the padding `=`, up to two, only at the end of the last line), then the end marker at
+the end of the file, every line ended by LF or CRLF (exactly one CR before the LF). Any other byte, such as a space or tab at the end of
+a line, a second CR, an empty line, padding in the middle of the stream, or text after a marker, is refused with `[signature_malformed]`,
+and the provider's bytes are never normalized. A block with LF line endings is accepted: the signature is extracted from it and attached
+to the repository file. The check applies to `.ps1`, `.psd1` and `.psm1` files, by the extension in any case (osslsigncode chooses its
+script parser the same way); `authenticode.py verify` refuses the script formats with another comment syntax (`.ps1xml`, `.psc1`,
+`.cdxml`, `.mof`, `.js`) with `[script_unsupported]`. This is what Set-AuthenticodeSignature, signtool and SignPath
+write; the check exists because the base64 decoder inside osslsigncode is lenient in a way that depends on the OpenSSL build, so the
+same file would otherwise be accepted on one host and refused on another. The accepted files are staged in `.cache/release/windows/archive/windows/`, from where the Windows archives pick
 them up; the tracked scripts are never modified. `windows-signed.sh check-dist` then verifies that `dist/` holds exactly the accepted
 files (also in the zip archives and in `checksums.txt`), that the Windows scripts are in the Windows updater archives only, that the
 binaries carry the version resources, and that every archive, bare binary, SBOM, `LICENSE` and `THIRD_PARTY_NOTICES` is listed in

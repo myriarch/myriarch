@@ -190,18 +190,31 @@ import hashlib, json, os, sys
 # tamper.py rewrite DIR UNSIGNED_DIR PROVIDER SIGNED SUBJECT: SHA256SUMS and signer.json that match the files in DIR
 # tamper.py flip FILE: changes one byte in the middle
 # tamper.py checksum FILE: flips one byte of the PE CheckSum field (e_lfanew + 24 + 64), which the signature does not cover
-# tamper.py sigspace FILE: appends a space to the first base64 line of a script's signature block, which the decoder ignores
+# tamper.py sigblock FILE MODE: damages the first base64 line of the signature block of a script (space, tab: appended; junk: a
+# non-base64 character in the middle; blank: an empty line inserted before it; pad: a line "# AA==" with padding inserted in the middle
+# of the stream; crcr: a second CR before the line ending). "tamper.py sigblock FILE lf" is not damage: it converts the block (the begin
+# marker to the end of the file) to LF line endings.
 def sha(p): return hashlib.sha256(open(p, "rb").read()).hexdigest()
 cmd = sys.argv[1]
 if cmd == "flip":
   b = bytearray(open(sys.argv[2], "rb").read()); b[len(b) // 2] ^= 1; open(sys.argv[2], "wb").write(bytes(b))
 elif cmd == "checksum":
   b = bytearray(open(sys.argv[2], "rb").read()); off = int.from_bytes(b[0x3c:0x40], "little") + 24 + 64; b[off] ^= 0x5a; open(sys.argv[2], "wb").write(bytes(b))
-elif cmd == "sigspace":
-  ls = open(sys.argv[2], "rb").read().split(b"\n"); i = next(n for n, l in enumerate(ls) if l.startswith(b"# SIG # Begin signature block"))
-  assert ls[i + 1].startswith(b"# "), ls[i + 1][:20]
-  ls[i + 1] = ls[i + 1][:-1] + b" \r" if ls[i + 1].endswith(b"\r") else ls[i + 1] + b" "
-  open(sys.argv[2], "wb").write(b"\n".join(ls))
+elif cmd == "sigblock":
+  raw = open(sys.argv[2], "rb").read(); mode = sys.argv[3]
+  i = raw.index(b"# SIG # Begin signature block"); head, block = raw[:i], raw[i:]
+  eol = b"\r\n" if b"\r\n" in block else b"\n"
+  ls = block.split(eol)
+  assert ls[1].startswith(b"# "), ls[1][:20]
+  if mode == "space": ls[1] = ls[1] + b" "
+  elif mode == "tab": ls[1] = ls[1] + b"\t"
+  elif mode == "junk": ls[1] = ls[1][:10] + b"!" + ls[1][11:]
+  elif mode == "blank": ls.insert(1, b"")
+  elif mode == "pad": ls.insert(2, b"# AA==")
+  elif mode == "crcr": ls[1] = ls[1] + b"\r"
+  elif mode == "lf": ls = [l[:-1] if l.endswith(b"\r") else l for l in ls]; eol = b"\n"
+  else: raise SystemExit("unknown mode " + mode)
+  open(sys.argv[2], "wb").write(head + eol.join(ls))
 elif cmd == "rewrite":
   d, u, provider, signed, subject = sys.argv[2:7]
   signed = signed == "true"
@@ -449,16 +462,44 @@ if needs_ossl 14; then
   rm -rf "${TEST_TMP}/s-foreign"; cp -R "${SG_TEST}" "${TEST_TMP}/s-foreign"
   sign_as "${T}/foreign" "${S}/deploy/scripts/install-windows.ps1" "${TEST_TMP}/s-foreign/install-windows.ps1" 1 sha256 && TAMPER rewrite "${TEST_TMP}/s-foreign" "${U}" test true "CN=Myriarch Test Signer,O=Myriarch Test"
   expect_fail "scripts: signed by a foreign CA" "\\[signature_invalid\\]" accs "${TEST_TMP}/s-foreign" "${T}/ca/trust"
-  rm -rf "${TEST_TMP}/s-space"; cp -R "${SG_TEST}" "${TEST_TMP}/s-space"; TAMPER sigspace "${TEST_TMP}/s-space/install-windows.ps1"
-  TAMPER rewrite "${TEST_TMP}/s-space" "${U}" test true "CN=Myriarch Test Signer,O=Myriarch Test"
-  expect_ok "scripts: the provider file with whitespace in its signature block still verifies" env TOOLS_BIN="${TB}" python3 -I "${AUTHPY}" verify --root "${S}" \
-    --trust "${T}/ca/trust" "${TEST_TMP}/s-space/install-windows.ps1"
-  expect_ok "scripts: ... and is accepted" accs "${TEST_TMP}/s-space" "${T}/ca/trust"
-  reattach "${TEST_TMP}/s-space/install-windows.ps1" "${S}/deploy/scripts/install-windows.ps1" "${TEST_TMP}/space-want.ps1" || fail "the signature could not be re-attached"
-  [ "$(sha256_of "${ST}/archive/windows/scripts/install-windows.ps1")" = "$(sha256_of "${TEST_TMP}/space-want.ps1")" ] \
+  # The signature block has a defined format (ci/release/authenticode.py check_script_block): "# " and base64 characters per line, CRLF or
+  # LF. Every damage is refused before osslsigncode sees the file, so that the OpenSSL base64 decoder of the build host cannot change the
+  # outcome. The block osslsigncode writes (CRLF) is the case "correct test signatures are accepted" above. The LF variant is accepted
+  # end to end below (accept-scripts extracts the signature and attaches it to the repository file, which does not depend on the line
+  # endings of the block); only a direct "verify" of the provider's LF file fails, because osslsigncode takes the line ending of the
+  # signed text from the begin marker line, which makes the digest differ. That path is not part of the release flow.
+  expect_ok "scripts: the block format accepts CRLF and LF lines, with the end marker at the end of the file or followed by a line ending" \
+    python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import authenticode as a
+b = b"# SIG # Begin signature block\n# MIIabc+/0\n# AAAA==\n# SIG # End signature block"
+for t in (b, b + b"\n", b.replace(b"\n", b"\r\n") + b"\r\n"):
+    assert a.check_script_block("x.ps1", b"text\n" + t) == 5' "$(dirname "${AUTHPY}")"
+  rm -rf "${TEST_TMP}/s-lf"; cp -R "${SG_TEST}" "${TEST_TMP}/s-lf"; TAMPER sigblock "${TEST_TMP}/s-lf/install-windows.ps1" lf
+  TAMPER rewrite "${TEST_TMP}/s-lf" "${U}" test true "CN=Myriarch Test Signer,O=Myriarch Test"
+  grep -q "$(printf '\r')" <(sed -n '/# SIG # Begin signature block/,$p' "${TEST_TMP}/s-lf/install-windows.ps1") && fail "the LF block still holds a CR" || ok "scripts: the provider file with an LF signature block is prepared"
+  expect_ok "scripts: a provider file with an LF signature block is accepted" accs "${TEST_TMP}/s-lf" "${T}/ca/trust"
+  reattach "${TEST_TMP}/s-lf/install-windows.ps1" "${S}/deploy/scripts/install-windows.ps1" "${TEST_TMP}/lf-want.ps1" || fail "the signature could not be re-attached"
+  [ "$(sha256_of "${ST}/archive/windows/scripts/install-windows.ps1")" = "$(sha256_of "${TEST_TMP}/lf-want.ps1")" ] \
     && ok "... the staged script is the signature attached to the repository file" || fail "the staged script is not the re-attach output"
-  [ "$(sha256_of "${ST}/archive/windows/scripts/install-windows.ps1")" != "$(sha256_of "${TEST_TMP}/s-space/install-windows.ps1")" ] \
+  [ "$(sha256_of "${ST}/archive/windows/scripts/install-windows.ps1")" != "$(sha256_of "${TEST_TMP}/s-lf/install-windows.ps1")" ] \
     && ok "... and not the provider's file" || fail "the provider's script was staged"
+  for dmg in space tab junk blank pad crcr; do
+    rm -rf "${TEST_TMP}/s-${dmg}"; cp -R "${SG_TEST}" "${TEST_TMP}/s-${dmg}"; TAMPER sigblock "${TEST_TMP}/s-${dmg}/install-windows.ps1" "${dmg}"
+    TAMPER rewrite "${TEST_TMP}/s-${dmg}" "${U}" test true "CN=Myriarch Test Signer,O=Myriarch Test"
+    expect_fail "scripts: ${dmg} damage in the signature block is refused on verify" "\\[signature_malformed\\] install-windows.ps1" \
+      env TOOLS_BIN="${TB}" python3 -I "${AUTHPY}" verify --root "${S}" --trust "${T}/ca/trust" "${TEST_TMP}/s-${dmg}/install-windows.ps1"
+    expect_fail "scripts: ... and on accept (${dmg})" "\\[signature_malformed\\] install-windows.ps1" accs "${TEST_TMP}/s-${dmg}" "${T}/ca/trust"
+  done
+  # verify picks the format check by the extension, ignoring case, like osslsigncode does; formats with another comment syntax are refused
+  for ext in PS1 psm1 psd1; do
+    cp "${TEST_TMP}/s-space/install-windows.ps1" "${TEST_TMP}/x.${ext}"
+    expect_fail "scripts: verify checks the block of a .${ext} file" "\\[signature_malformed\\] x.${ext}" \
+      env TOOLS_BIN="${TB}" python3 -I "${AUTHPY}" verify --root "${S}" --trust "${T}/ca/trust" "${TEST_TMP}/x.${ext}"
+  done
+  for ext in ps1xml js mof; do
+    cp "${S}/deploy/scripts/install-windows.ps1" "${TEST_TMP}/x.${ext}"
+    expect_fail "scripts: verify refuses a .${ext} file" "\\[script_unsupported\\] x.${ext}" \
+      env TOOLS_BIN="${TB}" python3 -I "${AUTHPY}" verify --root "${S}" --trust "${T}/ca/trust" "${TEST_TMP}/x.${ext}"
+  done
   expect_fail "scripts: a release build without the configured mode" "\\[mode_missing\\]" accs "${SG_OFF}" "${AUTHDIR}" --release
   expect_fail "scripts: the configured mode is kms, the hook returned unsigned files" "\\[provider_mismatch\\]" accs "${SG_OFF}" "${AUTHDIR}" --release --expect-provider kms
   expect_ok "scripts: an unsigned set is accepted without trust anchors" accs "${SG_OFF}" "${S}/deploy/release/authenticode"
