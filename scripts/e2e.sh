@@ -16,6 +16,11 @@
 #   E2E_KEEP=1                     leave myriarchd/sim running at the end (clean up with scripts/e2e.sh --stop)
 #   NO_BUILD=1                     use the existing bin/ binaries
 #
+# A load run (more than 100 collectors) raises maxConcurrent of the gateway rollout policy from 1 to 10 in its working copy of
+# the test data: serially, one rollout of the 125 gateways takes about 13 minutes (a health wait of about 6 s per gateway) and
+# exceeds E2E_STEP_TIMEOUT, and 10 equals the batchSize of the webhook executor, so the load run also sends batched webhook
+# calls, which the serial smoke run never does.
+#
 # The run is self-contained: own ports (18080/18081, PostgreSQL 54339), own work dir .e2e/, a local release
 # mirror (no network access needed), a mock receiver for webhook/AWX/notifications. Every step prints
 # PASS/FAIL with the evidence; the exit code is 0 only if no step failed. Everything started is stopped again.
@@ -103,18 +108,31 @@ rollouts_summary() {
   a "/rollouts?${1:+kind=$1&}limit=200" | jq -c '[.items[]? | {k:.kind,f:.fleetName,s:.status,ok:.counts.succeeded,fl:.counts.failed,t:.counts.total}]'
 }
 
+# show_open_rollouts -> logs one "attention" line per unfinished rollout of any kind: status, reason, the counts per target
+# status and the targets that are not done, each with status, last error, attempts and last update (UTC, "now" is given for
+# comparison). A rollout that is only slow still moves (pending targets are started, the updatedAt of the targets in progress
+# is recent); a stuck one keeps the same targets in the same state with an old updatedAt or a last error.
+show_open_rollouts() {
+  local rid now
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  for rid in $(a '/rollouts?active=true&limit=100' | jq -r '.items[]?|.id'); do
+    log "attention (now $now): $(a "/rollouts/$rid" | jq -c '{f:.fleetName,k:.kind,s:.status,r:.statusReason,c:.counts}') open targets: $(a "/rollouts/$rid/targets?limit=200" | jq -c '[.items[]|select(.status!="succeeded" and .status!="skipped")|{h:.hostname,s:.status,e:.lastError,at:.attempts,u:.updatedAt}]')"
+  done
+}
+
 # wait_rollouts KIND TIMEOUT -> approves waves; returns 0 when no rollout of the kind is active; 1 on timeout;
-# 2 if a rollout is paused/failed (needs attention)
+# 2 if a rollout is paused/failed (needs attention). Both failures log the open rollouts (show_open_rollouts) first.
 wait_rollouts() {
   local kind=$1 end=$((SECONDS + $2)) act bad
   while [ $SECONDS -lt $end ]; do
     approve_waiting >/dev/null
     act=$(a "/rollouts?kind=$kind&active=true&limit=200")
     bad=$(echo "$act" | jq -r '[.items[]? | select(.status=="paused" or .status=="failed" or .status=="rolling_back")] | length')
-    [ "${bad:-0}" -gt 0 ] && return 2
+    if [ "${bad:-0}" -gt 0 ]; then show_open_rollouts; return 2; fi
     [ "$(echo "$act" | jq -r '.items | length')" = "0" ] && return 0
     sleep 3
   done
+  show_open_rollouts
   return 1
 }
 
@@ -212,6 +230,17 @@ for b in myriarchd myriarch-sim myrctl; do [ -x "bin/$b" ] || { fail "binary bin
 section "1. myriarchd (dev mode, embedded PostgreSQL, test data repo)"
 rm -rf "$E2E_DIR/data" "$E2E_DIR/b" "$E2E_DIR/a2" "$E2E_DIR/fixtures" "$E2E_DIR/sim-state"
 python3 scripts/e2e/prepare_repo.py internal/testdata/gitops "$GITOPS" "$PORT_MOCK" || { fail "prepare repo" "script failed"; exit 1; }
+# Load run: one gateway at a time would exceed STEP_TIMEOUT (see the header). Only the working copy changes, never
+# internal/testdata; the smoke run, with few gateways, keeps maxConcurrent 1 and the serial path.
+if [ "$AGENTS" -gt 100 ]; then
+  GATEWAY_POLICY="$GITOPS/policies/gateway.yaml"
+  sed -i.bak 's/^  maxConcurrent: 1$/  maxConcurrent: 10/' "$GATEWAY_POLICY" && rm -f "$GATEWAY_POLICY.bak"
+  if [ "$(grep -c '^  maxConcurrent: 10$' "$GATEWAY_POLICY")" = 1 ]; then
+    pass "load run: gateway policy maxConcurrent 10 (batchSize of the webhook executor)" "$GATEWAY_POLICY"
+  else
+    fail "load run: gateway policy maxConcurrent 10" "the edit of $GATEWAY_POLICY did not apply (expected one line '  maxConcurrent: 1')"; exit 1
+  fi
+fi
 cp -R internal/release/testdata/fixtures "$E2E_DIR/fixtures"
 printf "%s" "$E2E_SECRET" > "$E2E_DIR/notify.secret"
 # generated credentials for the declarative configuration (mode 0600, never printed)
@@ -586,12 +615,6 @@ if [ "${E2E_HA:-1}" = 1 ]; then
   wait_until 60 '[ "$(sim_b_applied)" -gt "$APPLIED_BEFORE" ]' || log "no agent of replica-b applied the new config within 60s"
   wait_rollouts config "$STEP_TIMEOUT"; rc=$?
   APPLIED_AFTER=$(sim_b_applied)
-  if [ $rc != 0 ]; then
-    # rc=1 (timeout) and rc=2 (paused/failed): show every unfinished rollout and the targets that are not done
-    for rid in $(a '/rollouts?active=true&limit=100' | jq -r '.items[]?|.id'); do
-      log "attention: $(a "/rollouts/$rid" | jq -c '{f:.fleetName,k:.kind,s:.status,r:.statusReason}') open targets: $(a "/rollouts/$rid/targets?limit=200" | jq -c '[.items[]|select(.status!="succeeded" and .status!="skipped")|{h:.hostname,s:.status,e:.lastError,at:.attempts,u:.updatedAt}]')"
-    done
-  fi
   if [ $rc = 0 ] && [ "$APPLIED_AFTER" -gt "$APPLIED_BEFORE" ]; then pass "config change reaches agents on BOTH replicas" "replica-b agents applied $APPLIED_BEFORE -> $APPLIED_AFTER; $(rollouts_summary config | jq -c 'map(select(.s=="completed"))|length') rollouts completed"; else fail "config change reaches agents on both replicas" "rc=$rc applied $APPLIED_BEFORE -> $APPLIED_AFTER $(rollouts_summary config)"; fi
   TOTAL_BEFORE=$(a /stats/overview | jq -r .agents.total)
   PID_A=$(grep '^myriarchd-a ' "$PIDS_FILE" | awk '{print $2}')
