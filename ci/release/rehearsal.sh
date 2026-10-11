@@ -26,6 +26,12 @@ cd "${ROOT}"
 "${CI_DIR}/install-tools.sh" goreleaser syft go-winres yq osslsigncode
 [ -f internal/webui/dist/index.html ] || die "internal/webui/dist/index.html is missing: build the web UI first (make web-build)"
 K="$(mktemp -d "${TMPDIR:-/tmp}/myriarch-rehearsal.XXXXXX")"
+# the trap comes right after the directory exists: a failure of isolate_tools (a tool missing from the set) must not leave it behind
+cleanup() {
+  rm -rf "${K}"
+  deploy/release/windows-signed.sh clean
+}
+trap cleanup EXIT
 # The pinned tools are reached the way the release workflow reaches them: through TOOLS_BIN, a directory that is on no PATH (the
 # former directory .cache/bin leaves PATH). goreleaser gives its sboms commands only a reduced environment, and a script that looks
 # for a pinned tool anywhere else fails here, as it does in the release.
@@ -35,11 +41,6 @@ cfg=deploy/release/goreleaser.yaml
 R=".cache/release-rehearsal"
 rm -rf "${R}"
 mkdir -p "${R}"
-cleanup() {
-  rm -rf "${K}"
-  deploy/release/windows-signed.sh clean
-}
-trap cleanup EXIT
 unset MYRIARCH_WINDOWS_STAGE MYRIARCH_WINDOWS_UNSIGNED_DIR MYRIARCH_WINDOWS_SIGNED_DIR MYRIARCH_AUTHENTICODE_DIR MYRIARCH_WINDOWS_SIGNING WINDOWS_SIGNING WINDOWS_SIGNING_TEST_DIR
 
 section_start collect "pass 1: snapshot in stage collect"
