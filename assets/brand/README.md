@@ -170,8 +170,8 @@ Rules for every animation of the mark:
   transparency, no distortion) hold in every frame, not only in the last.
 - The ring never rotates and always points up.
 - Always end on the unchanged mark: every part at scale 1, in the colour of the static mark.
-- Play the rollout once, or loop it only as described under [Looping](#looping). Do not replay it on hover or focus; the mark is
-  decoration and not a control.
+- Play the rollout once, or loop it only as described under [Looping](#looping). Do not replay it on hover or focus. The mark is
+  decoration, except where it is the pause control of a loop (see [Looping](#looping)).
 - Respect `prefers-reduced-motion`: the static mark is the base style, and the animation is added only inside
   `@media (prefers-reduced-motion: no-preference)`. With reduced motion, in print and where CSS animations are unsupported the unchanged
   mark shows.
@@ -187,14 +187,17 @@ The landing page keeps the mark alive by repeating the rollout. A loop is allowe
   full size), then the nine dots retract to scale 0 in the last 0.6 s (`ease-in-out`, all together), so that the next rollout starts from
   the state in which the first one started and nothing jumps. The ring grows once, on load, and stays in place afterwards. A cycle
   never ends on a half-grown mark: the unchanged mark is what the visitor sees for most of the time.
-- **A way to pause it** (WCAG 2.2.2, Pause, Stop, Hide: motion that starts by itself and lasts longer than 5 s). The landing page has a
-  small pause button next to the mark. While paused the unchanged mark shows. With `prefers-reduced-motion: reduce` nothing animates and
-  the button is not shown.
+- **A way to pause it** (WCAG 2.2.2, Pause, Stop, Hide: motion that starts by itself and lasts longer than 5 s). The mark itself is the
+  control, with no visible button: a click or tap on the mark pauses the loop and shows the unchanged mark, and another click resumes
+  it. The script makes the mark a control only when it can animate (`role="button"`, `tabindex="0"`, the name "Pause logo animation",
+  `aria-pressed` for the paused state, Enter and Space toggle it like a native button, a pointer cursor, and a focus ring for keyboard
+  focus only, in the accent colour of the appearance). With `prefers-reduced-motion: reduce` nothing animates and the mark is a plain
+  image: no role, not focusable.
 - **Only while visible.** The loop stops (unchanged mark, no running animation) when the hero is out of view or the document is hidden,
   and starts again at the retraction that ends a cycle (the dots shrink from the full mark and the rollout follows at once, so nothing
   jumps). Nothing runs on a timer: the browser runs the animation, and a stopped mark has none.
-- **Without JavaScript** the rollout plays once and the page keeps the unchanged mark (and shows no button, since nothing needs to be
-  paused).
+- **Without JavaScript** the rollout plays once and the page keeps the unchanged mark (a plain image: no role, not focusable, since
+  nothing needs to be paused).
 
 The stylesheet holds the timeline (`website/assets/scss/_landing.scss`; the loop has one keyframes rule per dot because the stagger of
 the columns has to repeat in every cycle) and `website/assets/js/landing-mark.js` decides when it runs.

@@ -75,11 +75,11 @@ def mark_svg(extra="", ring_d=RING_D, dots=DOTS, svg_attrs=' aria-hidden="true" 
     return '<svg width="114" height="104" class="landing-hero__mark"%s viewBox="0 0 114 104">%s%s</svg>' % (svg_attrs, extra, paths)
 
 
-BUTTON = '<button type="button" class="landing-hero__motion" aria-label="Pause logo animation" aria-pressed="false" hidden></button>'
+BUTTON = '<button type="button" class="landing-hero__motion" aria-label="Pause logo animation" aria-pressed="false" hidden></button>'  # the removed one
 
 GOOD_PAGE = """<!doctype html><html><head><title>t</title><link rel="stylesheet" href="/css/site.css"></head><body class="td-home">
 <h1>Title</h1>
-@MARK@@BUTTON@
+@MARK@
 <section id="features"></section>
 <section id="architecture"><svg role="img" aria-labelledby="arch-title arch-desc" viewBox="0 0 1 1"><title id="arch-title">a</title></svg></section>
 <section id="screenshots">
@@ -89,7 +89,7 @@ GOOD_PAGE = """<!doctype html><html><head><title>t</title><link rel="stylesheet"
 <section id="community"></section>
 <script src="/js/landing-mark.min.0123.js" integrity="sha256-x" defer></script>
 </body></html>
-""".replace("@MARK@", mark_svg()).replace("@BUTTON@", BUTTON)
+""".replace("@MARK@", mark_svg())
 
 
 class LandingTest(unittest.TestCase):
@@ -266,28 +266,30 @@ class LandingTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("the circles of the mark are not those of myriarch-icon.svg", out)
 
-    def test_page_without_the_pause_button(self):
-        self.page(GOOD_PAGE.replace(BUTTON, ""))
+    def test_page_with_the_removed_pause_button(self):
+        self.page(GOOD_PAGE.replace("</h1>", "</h1>" + BUTTON, 1))
         rc, out, _ = self.run_check()
         self.assertEqual(rc, 1)
-        self.assertIn("exactly one button with the class landing-hero__motion (pause), found 0", out)
+        self.assertIn("still has a visible pause control (<button> with the class landing-hero__motion)", out)
 
-    def test_pause_button_that_is_not_a_typed_button_with_a_name_and_a_state(self):
-        not_a_typed_button = '<button class="landing-hero__motion" aria-label="Logo"></button>'
-        self.page(GOOD_PAGE.replace(BUTTON, not_a_typed_button))
+    def test_page_with_any_other_pause_control(self):
+        self.page(GOOD_PAGE.replace("</h1>", '</h1><div class="landing-hero__motion"></div>', 1))
         rc, out, _ = self.run_check()
         self.assertEqual(rc, 1)
-        self.assertIn('must be a <button type="button">', out)
-        self.assertIn("names the action (pause)", out)
-        self.assertIn('aria-pressed="false"', out)
-        self.assertIn("attribute hidden", out)
+        self.assertIn("still has a visible pause control (<div> with the class landing-hero__motion)", out)
 
-    def test_pause_control_that_is_not_a_button(self):
-        not_a_button = '<div class="landing-hero__motion" aria-label="Logo"></div>'
-        self.page(GOOD_PAGE.replace(BUTTON, not_a_button))
-        rc, out, _ = self.run_check()
-        self.assertEqual(rc, 1)
-        self.assertIn("found 0", out)
+    def test_mark_that_is_a_control_in_the_markup(self):
+        cases = (
+            (' role="button"', "no title, aria-label or role"),
+            (' tabindex="0"', "no tabindex or aria-pressed"),
+            (' aria-pressed="false"', "no tabindex or aria-pressed"),
+        )
+        for attrs, message in cases:
+            with self.subTest(attrs=attrs):
+                self.page_with_mark(mark_svg(svg_attrs=' aria-hidden="true" focusable="false"' + attrs))
+                rc, out, _ = self.run_check()
+                self.assertEqual(rc, 1)
+                self.assertIn(message, out)
 
     def test_page_without_the_script_of_the_mark(self):
         self.page(GOOD_PAGE.replace("/js/landing-mark.min.0123.js", "/js/other.js"))

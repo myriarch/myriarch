@@ -1113,9 +1113,11 @@ The REST API reference is made of static pages without scripts of their own; the
 why it is a separate page. `check-requests.mjs` checks that a tag page renders its tables and that the site search finds the operations (`approveRolloutWave`)
 and permissions (`rollouts:operate`) of the contract, and the motion of the mark on the landing page (about a minute, in light and
 dark): the rollout plays and ends on identity transforms, the unchanged mark is held and a second cycle starts after the dots
-retract, the pause button stops the motion and shows the static mark, play resumes at the retraction that ends a cycle (the dots
-shrink from the full mark and the ring does not grow again), nothing runs while the hero is out of view or the document is hidden,
-with reduced motion nothing animates and there is no button, and without JavaScript the rollout plays once.
+retract, a click on the mark (or Enter or Space on the focused mark) pauses the loop and shows the static mark, the next one resumes at the
+retraction that ends a cycle (the dots shrink from the full mark and the ring does not grow again), `aria-pressed` follows, the focus
+ring shows for keyboard focus and not after a mouse click, nothing runs while the hero is out of view or the document is hidden, with
+reduced motion nothing animates and the mark has no role and is not focusable, and without JavaScript the rollout plays once and the
+mark is a plain image.
 
 ### Privacy rules
 

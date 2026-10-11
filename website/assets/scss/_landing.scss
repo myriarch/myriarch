@@ -258,7 +258,6 @@ $landing-blush: #fbf6f9;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    gap: 0.75rem;
     width: 15rem;
   }
 }
@@ -275,43 +274,23 @@ $landing-blush: #fbf6f9;
   }
 }
 
-// The pause button (WCAG 2.2.2: motion that starts by itself and lasts longer than 5 s needs a way to pause it). The script
-// (assets/js/landing-mark.js) shows it; without JavaScript it stays hidden, because the animation then plays once and stops by itself.
-// It is a 2 rem target (24 CSS px at least) and uses the muted text colour (Mauve on Blush 7.97, #cbd5e1 on Night 12.0) for the glyph and
-// the border; the focus ring is the one of the links. aria-pressed is true while the animation is paused, and the icon follows it.
-.landing-hero__motion {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  font-size: 0.75rem;
-  line-height: 1;
-  color: var(--landing-muted);
-  background: transparent;
-  border: 1px solid var(--landing-muted);
-  border-radius: 50%;
+// The mark is its own pause control (WCAG 2.2.2: motion that starts by itself and lasts longer than 5 s needs a way to pause it). The script
+// (assets/js/landing-mark.js) gives it role="button" only while it can animate, so the selector below matches nothing without the script
+// and with reduced motion, where the mark stays a plain image. There is no visible button; the pointer shows that the mark can be clicked,
+// and the keyboard focus ring is the one of the links and buttons of the page (Tyrian on Blush 5.2:1, Orchid on Night 7.2:1, above the
+// 3:1 of non-text contrast). :focus-visible keeps the ring away from a mouse click or a tap. aria-pressed is true while the loop is paused.
+.landing-hero__mark[role='button'] {
   cursor: pointer;
+  border-radius: 0.5rem;
+  -webkit-tap-highlight-color: transparent;
 
-  &[hidden] {
-    display: none;
-  }
-
-  &:hover {
-    color: var(--landing-accent);
-    border-color: var(--landing-accent);
+  &:focus:not(:focus-visible) {
+    outline: none;
   }
 
   &:focus-visible {
     outline: 3px solid var(--landing-accent);
-    outline-offset: 3px;
-  }
-
-  &[aria-pressed='true'] .landing-hero__motion-pause,
-  &[aria-pressed='false'] .landing-hero__motion-play {
-    display: none;
+    outline-offset: 6px;
   }
 }
 
@@ -520,13 +499,6 @@ $landing-blush: #fbf6f9;
     .dot {
       animation: none;
     }
-  }
-}
-
-// With reduced motion nothing animates, so there is nothing to pause.
-@media (prefers-reduced-motion: reduce) {
-  .landing-hero__motion {
-    display: none;
   }
 }
 
