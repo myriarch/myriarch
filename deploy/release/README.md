@@ -2,8 +2,11 @@
 
 `goreleaser.yaml` in this directory describes the release build of all four programs for every platform. It holds **no signing
 key** and has no `signs:` block: releases are signed keyless by the release workflow
-([ADR-0023](../../docs/adr/0023-keyless-release-signing.md)), and the Windows files get an Authenticode signature through the hook
-described below ([ADR-0034](../../docs/adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Nothing in this directory publishes anything.
+([ADR-0023](../../docs/adr/0023-keyless-release-signing.md), [ADR-0035](../../docs/adr/0035-release-workflow-with-keyless-signing-and-verification-before-publication.md)),
+and the Windows files get an Authenticode signature through the hook described below
+([ADR-0034](../../docs/adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Nothing in this directory publishes anything.
+How a maintainer releases is in [`docs/releasing.md`](../../docs/releasing.md); how users verify a release is in
+[`docs/security/verify-releases.md`](../../docs/security/verify-releases.md).
 
 ## Commands
 
@@ -19,14 +22,27 @@ built only by the release workflow; `ci/build-release.sh release` does not exist
 
 ## Assets
 
-* Archives: `myriarchd_<version>_<os>_<arch>.tar.gz`, `myriarch-updater_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows),
-  `myrctl_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows) and `myriarch-sim_<version>_<os>_<arch>.tar.gz`: 16 archives.
-* The bare updater binaries `myriarch-updater_<version>_<os>_<arch>[.exe]` (the target of `--updater-url` / `-UpdaterUrl`).
-* One SBOM per archive, `<archive>.sbom.json`, and `myriarch-webui_<version>.sbom.json` for the web UI (SPDX 2.3 JSON).
-* `checksums.txt` lists all of them and also `LICENSE` and `THIRD_PARTY_NOTICES`: 39 entries for a release (16 archives, 4 bare
-  binaries, 16 archive SBOMs, the web UI SBOM and the two license files). goreleaser does not copy the two license files into
-  `dist/`; the release workflow uploads them from the repository root.
+`assets.json` in this directory is the complete list of the files of a release, with `{version}` for the version without `v`. A
+release has **42 assets**: the 40 files that the build produces and two signature files that the release workflow adds.
+`ci/release/stage-assets.sh` and `ci/release/verify-dist.sh` read the list, so a file that is missing or unexpected fails the
+build, the verification and the publication.
+
+| Kind | Files | Count |
+|---|---|---|
+| archive | `myriarchd_<version>_<os>_<arch>.tar.gz`, `myriarch-updater_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows), `myrctl_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows) and `myriarch-sim_<version>_<os>_<arch>.tar.gz` | 16 |
+| binary | the bare updater binaries `myriarch-updater_<version>_<os>_<arch>[.exe]` (the target of `--updater-url` / `-UpdaterUrl`) | 4 |
+| sbom | one SBOM per archive, `<archive>.sbom.json`, and `myriarch-webui_<version>.sbom.json` for the web UI (SPDX 2.3 JSON) | 17 |
+| license | `LICENSE` and `THIRD_PARTY_NOTICES` | 2 |
+| checksums | `checksums.txt` | 1 |
+| signature | `checksums.txt.sigstore.json`, the keyless cosign bundle over `checksums.txt` | 1 |
+| provenance | `myriarch_<version>_provenance.intoto.jsonl`, the GitHub build provenance of the 39 files | 1 |
+
+* The first five kinds (40 files) are the stage `unsigned` of `verify-dist.sh`; with the last two it is the stage `final`.
+* `checksums.txt` lists exactly 39 entries: the archives, the bare binaries, the SBOMs and the two license files. It does not
+  list itself, its bundle or the provenance file. goreleaser does not copy the two license files into `dist/`;
+  `stage-assets.sh` copies them from the repository root.
 * The Windows scripts (`install-windows.ps1`, `Set-ServiceEnvironment.ps1`) are in the Windows updater archives only.
+* The release workflow publishes a draft with all 42 files and no other.
 
 ## Reproducibility
 
@@ -180,25 +196,61 @@ changed, a provider file that differs only in a region that no signature covers 
 block; the staged file is still the job's own build with the signature attached), a nested second signature, a mode that differs from
 `signer.json`, and the staging rules.
 
-## What the release workflow has to do
+## How the release workflow uses this build
 
-The release workflow (not part of this directory) connects to the build through these points:
+`.github/workflows/release.yml` ([ADR-0035](../../docs/adr/0035-release-workflow-with-keyless-signing-and-verification-before-publication.md))
+connects to the build through these points. The jobs hand directories to each other as tar files that are checked by artifact ID
+and SHA-256 (`ci/release/artifact.sh`).
 
-* **Mode binding.** The sign job exports `WINDOWS_SIGNING` for the hook, and the packaging job exports `MYRIARCH_WINDOWS_SIGNING` for
-  stage `apply`, both parsed (as data, not as shell) from `deploy/release/windows-signing.env`. Without the second variable a release
-  build fails, and `signer.json` has to name the configured provider.
+| Job | Step of the build |
+|---|---|
+| `ui` | `make web-build`, then the release gates (below). The release build never runs Node.js. |
+| `build-windows` | `goreleaser build --clean --id myriarch-updater --id myrctl` with `MYRIARCH_WINDOWS_STAGE=collect`, then `windows-signed.sh seal`. |
+| `sign-windows` | `ci/release/windows-sign-hook.sh` with `WINDOWS_SIGNING` from `windows-signing.env` (job with the first approval). |
+| `package` | `goreleaser release --clean --skip=publish` with `MYRIARCH_WINDOWS_STAGE=apply` and `MYRIARCH_WINDOWS_SIGNING`, then `windows-signed.sh check-dist`, then `ci/release/stage-assets.sh`, which copies the 40 files under their upload names and ends with `ci/release/verify-dist.sh --stage unsigned`. |
+| `sign-blobs`, `draft`, `verify` | `checksums.txt.sigstore.json` and the provenance file are added to the 40 files; `verify-dist.sh --stage final` checks all 42. |
+
+Points that the build and the workflow depend on:
+
+* **Mode binding.** The workflow parses `windows-signing.env` as data (in the job `guard`, `ci/release/meta.sh`), passes the mode
+  to the sign job as `WINDOWS_SIGNING` and to the packaging job as `MYRIARCH_WINDOWS_SIGNING`. Without the second variable a
+  release build fails, and `signer.json` has to name the configured provider.
 * **Release gates.** `ci/build-release.sh` and goreleaser do not run `ci/check-release-deps.sh`, `ci/check-release-licenses.sh` or
-  `scripts/gen-third-party-notices.sh --check`. The release workflow has to run them (the `ui` and `tools` jobs) before it packages. They
+  `scripts/gen-third-party-notices.sh --check`. The job `ui` of the release workflow runs them before anything is packaged. They
   also run on every commit in the gates `go` and `licenses` of `ci-ok`, which the release guard requires on the tagged commit.
 * **No UI in the `before:` hook.** The check for `internal/webui/dist/index.html` is a pre-build hook of `myriarchd` only. The `before:`
   hook runs `windows-signed.sh prepare`, because the job that builds the Windows files (stage `collect`) builds without the web UI.
 * **Direct goreleaser calls** leave the generated `rsrc_windows_*.syso` files in place; see the section on version resources.
+* **The rehearsal covers the staging.** `make release-rehearsal` runs `ci/release/stage-assets.sh` after the second pass, so every
+  pull request checks `assets.json` against the real goreleaser output.
+
+## Release notes template
+
+`notes.md.tmpl` is the template of the release notes. `ci/release/notes.sh` renders it in the job `draft` with the tag, the
+commit, the image digests, the Windows signing state (`signer.json`) and the section of `CHANGELOG.md`: "Unreleased" for a
+release candidate, `## [X.Y.Z] - YYYY-MM-DD` for a final release.
+
+* The leading `#` lines (license header and a comment) are dropped. Blocks `<!-- if NAME -->` ... `<!-- end NAME -->` with the names
+  `rc`, `final`, `unsigned`, `unsigned-exception` and `signed` show text only when they apply; they do not nest and every block
+  must be closed.
+* Placeholders have the form `{{NAME}}`; an unknown placeholder or a leftover `{{` fails the rendering. The complete set:
+  `TAG`, `VERSION`, `BASE_VERSION`, `COMMIT`, `REPOSITORY`, `IDENTITY` (the exact certificate identity of the tag),
+  `IDENTITY_REGEXP` (the pattern of ADR-0029), `IDENTITY_BOUND_REGEXP` (the pattern bound to the version, as the installers use it),
+  `OIDC_ISSUER`, `SIGNER_WORKFLOW`, `SERVER_IMAGE`, `UPDATER_IMAGE`, `SERVER_DIGEST`, `UPDATER_DIGEST`, `IMAGE_TAGS`,
+  `PROVENANCE_ASSET`, `UPDATER_ASSET_LINUX_AMD64`, `CHANGELOG_SECTION`, `CHANGELOG_URL`, and, inside `signed` only,
+  `WINDOWS_SIGNER_SUBJECT` and `WINDOWS_SIGNER_PROVIDER`.
+* The notes carry the banners (release candidate; Windows files unsigned, with the sentence about the reviewed exception for a
+  final tag), the support levels, the known limitations, the image table, the commands of
+  [Verify releases](../../docs/security/verify-releases.md) with the exact tag, identity and digests, and the changelog section.
+  GitHub appends the generated list of merged pull requests.
+* The rendered text must be at most 100,000 characters and must not contain `SPDX-License-Identifier`.
 
 ## Authenticode (Windows)
 
 Authenticode is the signature that Windows evaluates (App Control for Business and AppLocker publisher rules, Smart App
 Control, the execution policy for PowerShell scripts). It adds to the Sigstore signature of a release and never replaces it;
-with the keyless release workflow ([ADR-0023](../../docs/adr/0023-keyless-release-signing.md)), installers and the updater trust its Sigstore identity. The decision is
+with the keyless release workflow ([ADR-0023](../../docs/adr/0023-keyless-release-signing.md), [ADR-0035](../../docs/adr/0035-release-workflow-with-keyless-signing-and-verification-before-publication.md)),
+installers and the updater trust its Sigstore identity. The decision is
 [ADR-0034](../../docs/adr/0034-authenticode-signing-of-windows-release-artifacts.md).
 
 **Target design.**
@@ -207,7 +259,7 @@ with the keyless release workflow ([ADR-0023](../../docs/adr/0023-keyless-releas
   with SHA-256 and an RFC 3161 timestamp, and a Windows version resource (product name, file and product version) on both
   executables.
 * The signer is the SignPath Foundation (free for open source). The release workflow submits the unsigned files with a short
-  `curl` client from one job of the `release` environment; SignPath fetches them from the run and a person approves every
+  `curl` client from the job `sign-windows`, which uses the `release` environment; SignPath fetches them from the run and a person approves every
   release there. The only secret is a SignPath API token that can only submit requests. If SignPath declines or does not decide
   within four weeks, the fallback is an individual-validation certificate with its key in a Google Cloud KMS HSM, used through
   GitHub OIDC and `jsign` (no secret); the maintainer decides before anything is bought, within a budget of US$700 for the

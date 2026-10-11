@@ -498,6 +498,42 @@ checks through the tag.
 Moving `.node-version` to a Node.js release without corepack (Node.js 25 and later) needs a pinned `npm install -g corepack@<version>`
 step in `.github/actions/setup/action.yml`. Move it to the next LTS line only after its first LTS release.
 
+### Release workflow
+
+`.github/workflows/release.yml` is the workflow that builds, signs, verifies and publishes a release when a tag `v*` is pushed
+([ADR-0035](adr/0035-release-workflow-with-keyless-signing-and-verification-before-publication.md); the maintainer's runbook is
+[Releasing](releasing.md)). It is not part of `ci-ok` and cannot be started by hand, so you test it in pieces:
+
+```bash
+bash ci/tests/run-all.sh static             # includes the three release tests below
+bash ci/tests/release-scripts-test.sh       # the scripts of ci/release with stubs for cosign, gh and crane; the real cosign checks a fixture
+bash ci/tests/release-smoke-test.sh         # the smoke tests (ci/release/smoke.sh) against test doubles
+bash ci/tests/release-workflow-test.sh      # the shape of release.yml: jobs, needs, permissions, environments, artifacts
+make release-rehearsal                      # the path of a release in a snapshot, including the staging of the 40 files
+```
+
+The real-cosign cases of `release-scripts-test.sh` need the pinned cosign (`make tools TOOLS=cosign`); they are skipped locally
+without it and required when `CI=true`. The workflow itself is checked by the `workflows` gate (actionlint, `ci/check-workflows.py`,
+zizmor), which must be clean from the first commit of any change.
+
+Rules for a change to the release workflow:
+
+- **Never rename `release.yml` and never move signing into a reusable workflow.** The file name is part of the signing identity
+  that every installer, `myriarch-updater` and the documented commands check (ADR-0035, point 10, and ADR-0029). `ci/release/identity.env`
+  holds the values, and a test pins them to the installers, `internal/brand` and the ADR. `ci/release/meta.sh` refuses a run
+  whose `GITHUB_WORKFLOW_REF` is not this file at the tag.
+- **A new job decides its place under R13 first.** If it builds or runs code of the repository (Go, Node.js, pnpm, goreleaser,
+  make), it has `contents: read` and no environment, and it sits before the privileged jobs. If it needs a write scope,
+  `id-token`, `attestations` or the environment, it calls only scripts of `ci/release/`, cosign, crane, gh or `actions/attest`,
+  takes artifacts by ID and digest, and needs `guard` and the approval job transitively. Add the table row of
+  `ci/tests/release-workflow-test.sh` in the same change, and the line of `ci/workflow-permissions.txt` with its reason for
+  every write scope.
+- **No `${{ }}` in `run:` text.** Values reach scripts through `env:` of the step, from `needs.guard.outputs.*` or other jobs'
+  outputs. `github.token` appears only in the step-level `env:` of the steps that need it.
+- **Scripts first.** Logic goes into a tested script of `ci/release/` with stable error codes (`[code]` in the message) and
+  tools only from `TOOLS_BIN`, not into `run:` text.
+- **Pins** of actions follow [Update an action pin](#update-an-action-pin); the release workflow uses the same SHAs as the others.
+
 ## Dependency updates
 
 Dependabot (`.github/dependabot.yml`) proposes version updates every Monday, as one grouped pull request per directory, and

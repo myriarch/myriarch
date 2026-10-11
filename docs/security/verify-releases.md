@@ -1,7 +1,7 @@
 ---
 title: "Verify releases"
 weight: 20
-description: "Check the files of a myriarch release before you run them: checksums.txt, its keyless Sigstore bundle, the exact signing identity and the hashes of the files."
+description: "Check a myriarch release before you run it: checksums.txt and its keyless Sigstore bundle, the build provenance, the immutable release, the container images and the macOS binaries."
 ---
 
 Every release of myriarch is built and signed by one GitHub Actions workflow, `release.yml` of the repository
@@ -10,18 +10,21 @@ Every release of myriarch is built and signed by one GitHub Actions workflow, `r
 long-lived signing key to steal or to distribute. A signature is bound to a short-lived certificate that Sigstore issued to
 that workflow run, and the certificate names the workflow and the tag.
 
-This page is part 1 of the verification guide and covers the **files of a release**. Verifying the container images and the
-build provenance follows with the release workflow.
+This guide has two parts. Part 1 covers the **files of a release** and how the installers check them. Part 2 covers the
+**build provenance**, the **immutable release**, the **container images** and the **macOS binaries**. Every command below uses
+the identity of the workflow at the tag of the version you verify. The release notes of every release show the same commands
+with the tag, the commit and the image digests filled in.
 
 ## What is signed
 
-A release contains the archives and the bare `myriarch-updater` binaries, the SBOMs of the archives and of the web UI, `LICENSE`, `THIRD_PARTY_NOTICES` and two
-files that carry the trust:
+A release contains the archives and the bare `myriarch-updater` binaries, the SBOMs of the archives and of the web UI, `LICENSE`,
+`THIRD_PARTY_NOTICES` and three files that carry the trust:
 
 | File | Content |
 |---|---|
-| `checksums.txt` | the SHA-256 of every other file of the release, one line `<hex>  <file name>` per file |
+| `checksums.txt` | the SHA-256 of the 39 other files of the release (archives, bare binaries, SBOMs and the two license files), one line `<hex>  <file name>` per file |
 | `checksums.txt.sigstore.json` | the Sigstore bundle: the signature over `checksums.txt`, the certificate and the transparency log proof |
+| `myriarch_<version>_provenance.intoto.jsonl` | the GitHub build provenance (SLSA) of the same 39 files, as a Sigstore bundle (part 2) |
 
 You verify **one signed file** and then check every other file against it. The identity of a release is exactly this
 certificate identity (the Subject Alternative Name of the certificate), with this issuer:
@@ -131,4 +134,135 @@ You do not need to run these steps for a host that you install with the scripts:
 ## Mirrors
 
 A mirror must carry `checksums.txt` and `checksums.txt.sigstore.json` unchanged. A modified `checksums.txt` fails the check,
-whatever the mirror signed it with. See the [enterprise mirror toolkit](../../contrib/enterprise-mirror/README.md).
+whatever the mirror signed it with. The [enterprise mirror toolkit](../../contrib/enterprise-mirror/README.md) verifies a
+release keyless (`verify-release.sh --keyless`) and copies it unchanged (`publish-mirror.sh --keyless`).
+
+## Part 2: provenance, immutability, images and macOS
+
+Part 2 needs [gh](https://cli.github.com/) (the release workflow itself uses gh 2.102.0), cosign 3.0.4 or newer and, for the
+images, [crane](https://github.com/google/go-containerregistry/blob/main/cmd/crane/README.md) or Docker. Set the version and the
+tag once:
+
+```bash
+VERSION=0.1.0                   # the release you verify, without the "v"
+TAG="v${VERSION}"
+```
+
+## Verify the build provenance
+
+Each of the 39 files that `checksums.txt` lists has a build provenance attestation: a statement, signed by the same workflow
+identity, that GitHub Actions built this exact file from this repository, this commit and this tag. The online check asks
+GitHub's attestation API, and needs a login of gh (`gh auth login`, or `GH_TOKEN`):
+
+```bash
+gh release download "${TAG}" --repo myriarch/myriarch --pattern 'checksums.txt*' --pattern "myriarch-updater_${VERSION}_linux_amd64"
+gh attestation verify "myriarch-updater_${VERSION}_linux_amd64" --repo myriarch/myriarch \
+  --signer-workflow "myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG}" \
+  --source-ref "refs/tags/${TAG}" --deny-self-hosted-runners
+```
+
+`--signer-workflow` with `@refs/tags/${TAG}` pins the workflow **and** the tag. `--source-ref` pins the tag the build ran for,
+and `--deny-self-hosted-runners` refuses a build that did not run on a GitHub-hosted runner. To pin the commit as well, add
+`--source-digest <commit>` (the commit of the tag, shown in the release notes).
+
+The provenance is also a release asset, `myriarch_<version>_provenance.intoto.jsonl`. With `--bundle` the check needs no login
+and no call to the attestation API (it still needs the Sigstore trusted root, which gh caches; see
+[Offline and behind a proxy](#offline-and-behind-a-proxy)):
+
+```bash
+gh release download "${TAG}" --repo myriarch/myriarch --pattern "myriarch_${VERSION}_provenance.intoto.jsonl"
+gh attestation verify "myriarch-updater_${VERSION}_linux_amd64" --repo myriarch/myriarch \
+  --bundle "myriarch_${VERSION}_provenance.intoto.jsonl" \
+  --signer-workflow "myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG}" \
+  --source-ref "refs/tags/${TAG}" --deny-self-hosted-runners
+```
+
+The signature of `checksums.txt` and the provenance are two independent proofs of the same identity. Run both for a release you
+depend on.
+
+## Check that a release is immutable
+
+Myriarch publishes releases as **immutable releases**: once a release is published, GitHub locks its assets and its tag: the assets cannot be
+changed, added or removed, and the tag cannot be moved. GitHub signs a release attestation when it publishes. Ask for it:
+
+```bash
+gh release verify "${TAG}" --repo myriarch/myriarch
+gh release verify-asset "${TAG}" checksums.txt --repo myriarch/myriarch
+```
+
+`gh release verify` checks that the release of the tag is immutable and that its attestation is valid. `gh release verify-asset`
+checks that a file you downloaded is an asset of that release, so a swapped file fails. If the first command reports that the
+release is not immutable, do not rely on the contents of the assets; report it in the issue tracker.
+
+## Verify the container images
+
+The images are `ghcr.io/myriarch/myriarch` (the server, with `myrctl` and `myriarch-sim`) and
+`ghcr.io/myriarch/myriarch-updater`. They are signed by the same workflow identity as the files and carry a provenance
+attestation (on the image index) and an SPDX SBOM attestation (on each platform image). A tag is only a name: **verify and pin
+the digest**.
+
+1. Resolve the tag of the version to its digest, or take the digest from the release notes:
+
+   ```bash
+   crane digest "ghcr.io/myriarch/myriarch:${VERSION}"
+   docker buildx imagetools inspect "ghcr.io/myriarch/myriarch:${VERSION}"      # the line "Digest:" is the same value
+   ```
+
+2. Verify the signature by digest with the complete identity of the version:
+
+   ```bash
+   DIGEST=sha256:...           # the digest from step 1 or from the release notes
+   cosign verify "ghcr.io/myriarch/myriarch@${DIGEST}" \
+     --certificate-identity "https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG}" \
+     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+   ```
+
+   Repeat it for `ghcr.io/myriarch/myriarch-updater` with its own digest.
+
+3. Verify the build provenance of the image index. The attestations are stored in the registry, next to the image:
+
+   ```bash
+   gh attestation verify "oci://ghcr.io/myriarch/myriarch@${DIGEST}" --repo myriarch/myriarch --bundle-from-oci \
+     --signer-workflow "myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG}"
+   ```
+
+4. Verify the SBOM. It is attached to each platform image, so use the digest of the platform image (the manifest of the index
+   lists them):
+
+   ```bash
+   crane manifest "ghcr.io/myriarch/myriarch@${DIGEST}" | jq -r '.manifests[] | "\(.platform.os)/\(.platform.architecture) \(.digest)"'
+   gh attestation verify "oci://ghcr.io/myriarch/myriarch@sha256:<platform digest>" --repo myriarch/myriarch --bundle-from-oci \
+     --predicate-type https://spdx.dev/Document/v2.3 \
+     --signer-workflow "myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG}"
+   ```
+
+   `gh` needs a login here (`GH_TOKEN`), but it reads the attestations from the registry, anonymously.
+
+**What the `sha256-<hex>` tags are.** The package view of ghcr.io shows tags named `sha256-` followed by 64 hex digits, about
+three for each image. ghcr.io has no API for attached artifacts, so cosign and the attestation step keep the signatures and
+attestations in these tags. They are part of the release: do not delete them, and do not delete untagged versions of a released
+image, or the checks above fail. There is no `latest` tag while the major version is 0; the version tags are `X.Y.Z`, `X.Y`
+(the newest patch release of that minor version) and `X.Y.Z-rc.N` for release candidates.
+
+**Pin the digest in your deployment.** With the Helm chart from the tag, set the digest of the server image (the digest wins
+over the tag):
+
+```bash
+helm install myriarch ./deploy/helm/myriarch --set image.digest="${DIGEST}"     # from a checkout of the tag
+```
+
+For Compose, use `QUICKSTART_IMAGE=ghcr.io/myriarch/myriarch@${DIGEST}` (see the
+[Docker Compose quickstart](../getting-started/docker-compose.md)).
+
+## macOS
+
+The macOS binaries (`myriarchd`, `myrctl` and `myriarch-sim` for Apple silicon, `myrctl` also for Intel) are **not signed with
+an Apple Developer ID and not notarized**. macOS Gatekeeper blocks an unsigned binary that carries the quarantine attribute, which
+browsers set on downloads. Verify the file first (cosign and `shasum -a 256 --check --ignore-missing checksums.txt`, above), then
+use one of these ways:
+
+- download the archive with `curl` or `gh release download`, which do not set the quarantine attribute; or
+- remove the attribute from a file you verified: `xattr -d com.apple.quarantine <file>` (for an archive, extract it first and run
+  the command on the extracted binary).
+
+Do not turn Gatekeeper off for the system. Whoever needs signed and notarized macOS binaries can build from source.
