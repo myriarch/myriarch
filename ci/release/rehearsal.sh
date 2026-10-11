@@ -24,14 +24,17 @@ load_versions
 cd "${ROOT}"
 
 "${CI_DIR}/install-tools.sh" goreleaser syft go-winres yq osslsigncode
-export PATH="${TOOLS_BIN}:${PATH}"
 [ -f internal/webui/dist/index.html ] || die "internal/webui/dist/index.html is missing: build the web UI first (make web-build)"
+K="$(mktemp -d "${TMPDIR:-/tmp}/myriarch-rehearsal.XXXXXX")"
+# The pinned tools are reached the way the release workflow reaches them: through TOOLS_BIN, a directory that is on no PATH (the
+# former directory .cache/bin leaves PATH). goreleaser gives its sboms commands only a reduced environment, and a script that looks
+# for a pinned tool anywhere else fails here, as it does in the release.
+isolate_tools "${K}/tools" goreleaser syft go-winres yq osslsigncode
 
 cfg=deploy/release/goreleaser.yaml
 R=".cache/release-rehearsal"
 rm -rf "${R}"
 mkdir -p "${R}"
-K="$(mktemp -d "${TMPDIR:-/tmp}/myriarch-rehearsal.XXXXXX")"
 cleanup() {
   rm -rf "${K}"
   deploy/release/windows-signed.sh clean
@@ -41,7 +44,7 @@ unset MYRIARCH_WINDOWS_STAGE MYRIARCH_WINDOWS_UNSIGNED_DIR MYRIARCH_WINDOWS_SIGN
 
 section_start collect "pass 1: snapshot in stage collect"
 MYRIARCH_WINDOWS_STAGE=collect MYRIARCH_WINDOWS_UNSIGNED_DIR="${R}/windows-unsigned" \
-  goreleaser release --snapshot --clean --skip=publish -f "${cfg}"
+  "${TOOLS_BIN}/goreleaser" release --snapshot --clean --skip=publish -f "${cfg}"
 MYRIARCH_WINDOWS_STAGE=collect MYRIARCH_WINDOWS_UNSIGNED_DIR="${R}/windows-unsigned" deploy/release/windows-signed.sh seal
 MYRIARCH_WINDOWS_STAGE=collect deploy/release/windows-signed.sh check-dist
 mv dist "${R}/pass1"
@@ -52,7 +55,7 @@ WINDOWS_SIGNING=test WINDOWS_SIGNING_TEST_DIR="${K}/ca" ci/release/windows-sign-
 
 section_start apply "pass 2: snapshot in stage apply"
 MYRIARCH_WINDOWS_STAGE=apply MYRIARCH_WINDOWS_UNSIGNED_DIR="${R}/windows-unsigned" MYRIARCH_WINDOWS_SIGNED_DIR="${R}/windows-signed" MYRIARCH_WINDOWS_SIGNING=test \
-  MYRIARCH_AUTHENTICODE_DIR="${K}/ca/trust" goreleaser release --snapshot --clean --skip=publish -f "${cfg}"
+  MYRIARCH_AUTHENTICODE_DIR="${K}/ca/trust" "${TOOLS_BIN}/goreleaser" release --snapshot --clean --skip=publish -f "${cfg}"
 MYRIARCH_WINDOWS_STAGE=apply deploy/release/windows-signed.sh check-dist
 
 section_start verify "verify the signed files and compare the two builds"

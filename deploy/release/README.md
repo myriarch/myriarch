@@ -195,6 +195,11 @@ binaries carry the version resources, and that every archive, bare binary, SBOM,
 
 ### Rehearsal
 
+The rehearsal reaches the pinned tools the way the release workflow does: `ci/release/rehearsal.sh` (and `ci/build-release.sh`, `make
+release-snapshot`) link goreleaser, syft, go-winres, yq and osslsigncode into a temporary directory, make it `TOOLS_BIN` and take `.cache/bin`
+off `PATH` (`isolate_tools` in `ci/lib.sh`). A script, or a goreleaser `sboms` entry, that looks for a tool on `PATH` or in the default
+directory therefore fails in the rehearsal, which the CI job `build` runs, and not only in the release.
+
 `make release-rehearsal` runs the path above in a snapshot. The signing pass uses a throwaway CA that `ci/release/authenticode-test-ca.sh`
 creates in a temporary directory outside the repository (RSA 3072, valid for seven days, no network access) and deletes on exit; the key
 is never published and never trusted anywhere else. The timestamp comes from the built-in RFC 3161 time stamping authority of

@@ -64,12 +64,20 @@ cat > "${S}/bin/goreleaser" <<'STUB'
 echo "goreleaser: argv=$*" >> "${RECORD}"
 echo "goreleaser: stage=${MYRIARCH_WINDOWS_STAGE:-unset}" >> "${RECORD}"
 echo "goreleaser: cosign=${COSIGN_KEY:-unset} pfx=${AUTHENTICODE_PFX:-unset}" >> "${RECORD}"
+echo "goreleaser: tools_bin=${TOOLS_BIN:-unset}" >> "${RECORD}"
+case ":${PATH}:" in *":${ORIGINAL_TOOLS_BIN}:"*) echo "goreleaser: path=holds-tools" >> "${RECORD}" ;; *) echo "goreleaser: path=clean" >> "${RECORD}" ;; esac
+[ -x "${TOOLS_BIN}/syft" ] && [ -x "${TOOLS_BIN}/yq" ] && [ -x "${TOOLS_BIN}/go-winres" ] && [ -f "$(ls "${TOOLS_BIN}"/.stamp-syft-* | head -n 1)" ] \
+  && echo "goreleaser: linked=yes" >> "${RECORD}"
 mkdir -p dist
 STUB
-chmod 0755 "${S}"/ci/*.sh "${S}"/bin/goreleaser
+printf '#!/usr/bin/env bash\nexit 0\n' > "${S}/bin/tool-stub"
+for t in syft yq go-winres; do cp "${S}/bin/tool-stub" "${S}/bin/${t}"; done
+rm "${S}/bin/tool-stub"
+: > "${S}/bin/.stamp-syft-1.2.3"
+chmod 0755 "${S}"/ci/*.sh "${S}"/bin/goreleaser "${S}"/bin/syft "${S}"/bin/yq "${S}"/bin/go-winres
 git init -q -b main "${S}" && git -C "${S}" add -A && git -C "${S}" commit -q -m release
 RECORD="${TEST_TMP}/record.txt"; : > "${RECORD}"
-build() { ( cd "${S}" && env RECORD="${RECORD}" TOOLS_BIN="${S}/bin" "$@" bash ci/build-release.sh "${BUILD_MODE-}" ); }
+build() { ( cd "${S}" && env RECORD="${RECORD}" TOOLS_BIN="${S}/bin" ORIGINAL_TOOLS_BIN="${S}/bin" TMPDIR="${TEST_TMP}" PATH="${S}/bin:${PATH}" "$@" bash ci/build-release.sh "${BUILD_MODE-}" ); }
 BUILD_MODE=release;  expect_fail "release mode was removed"           "release was removed" build
 BUILD_MODE=;         expect_fail "no argument prints the usage"       "usage" build
 BUILD_MODE=snapshot; expect_fail "snapshot without the built UI"      "make web-build" build
@@ -80,6 +88,12 @@ grep -q '^tools=goreleaser syft go-winres yq$' "${RECORD}" && ok "snapshot insta
 grep -q '^goreleaser: argv=release --snapshot --clean --skip=publish -f deploy/release/goreleaser.yaml$' "${RECORD}" && ok "goreleaser runs a snapshot without a sign skip" || fail "unexpected goreleaser arguments: $(grep argv "${RECORD}")"
 grep -q 'skip=.*sign' "${RECORD}" && fail "the arguments mention signing"
 grep -q '^goreleaser: stage=off$' "${RECORD}" && ok "the Windows stage is off" || fail "the Windows stage is not off: $(grep stage "${RECORD}")"
+# the pinned tools reach goreleaser through a TOOLS_BIN of their own, not through PATH (the way the release workflow runs it)
+grep -q "^goreleaser: tools_bin=" "${RECORD}" && ! grep -q "^goreleaser: tools_bin=${S}/bin\$" "${RECORD}" \
+  && ok "goreleaser gets a TOOLS_BIN of its own (symlinks to the pinned tools)" || fail "unexpected TOOLS_BIN: $(grep tools_bin "${RECORD}")"
+grep -q '^goreleaser: path=clean$' "${RECORD}" && ok "the directory of the tools is not on PATH" || fail "PATH still holds the directory of the tools"
+grep -q '^goreleaser: linked=yes$' "${RECORD}" && ok "syft, yq, go-winres and the stamps are linked into it" || fail "the tools are not linked into the new TOOLS_BIN"
+[ -z "$(ls -d "${TEST_TMP}"/myriarch-snapshot.* 2>/dev/null)" ] && ok "the directory of the links is removed on exit" || fail "the directory of the links is left behind"
 # the removed key path: signing variables in the environment change nothing
 : > "${RECORD}"
 BUILD_MODE=snapshot; expect_ok "snapshot with signing variables in the environment" build COSIGN_KEY=key COSIGN_PASSWORD=pw AUTHENTICODE_PFX=pfx AUTHENTICODE_PFX_PASSWORD_FILE=pw
