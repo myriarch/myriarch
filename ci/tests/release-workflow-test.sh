@@ -41,6 +41,9 @@ workflow, policy, goreleaser = sys.argv[1], sys.argv[2], sys.argv[3]
 spec = importlib.util.spec_from_file_location("check_workflows", policy)
 cw = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cw)
+bt_spec = importlib.util.spec_from_file_location("bare_tools", os.path.join(os.path.dirname(policy), "tests", "bare-tools.py"))
+bt = importlib.util.module_from_spec(bt_spec)
+bt_spec.loader.exec_module(bt)
 
 problems = []
 checks = 0
@@ -416,10 +419,9 @@ for jid, steps in steps_of.items():
             check(m is not None and m.group(1) in un, "job %s, step '%s': CRANE must point into a tool set that the job unpacks (found '%s')" % (jid, name, tx(env.get("CRANE"))))
             if m and m.group(1) in un:
                 check("crane" in TOOLSET.get((un[m.group(1)][0], m.group(2)), set()), "job %s, step '%s': CRANE points into a set without crane" % (jid, name))
-        # no pinned tool by its bare name at the start of a command
-        for line in run.split("\n"):
-            for m in re.finditer(r"(?:^|[;&|(]\s*|\$\(\s*)(%s)(?=\s|$)" % "|".join(re.escape(t) for t in PINNED_NAMES), line.strip()):
-                check(False, "job %s, step '%s': the pinned tool %s is called by its bare name (use \"${TOOLS_BIN}/%s\")" % (jid, name, m.group(1), m.group(1)))
+        # no pinned tool by its bare name in command position (the tokenizer is shared with release-scripts-test.sh)
+        for lineno, tool in bt.scan_text(run, PINNED_NAMES):
+            check(False, "job %s, step '%s': the pinned tool %s is called by its bare name (use \"${TOOLS_BIN}/%s\")" % (jid, name, tool, tool))
 
 # smoke-kind is the one exception: the install step and the smoke step both use the default directory .cache/bin
 sk = steps_of.get("smoke-kind", [])
@@ -737,6 +739,18 @@ expect_fail "a pinned tool called by its bare name is refused" "the pinned tool 
 '
 expect_fail "a pinned tool after a pipe by its bare name is refused" "the pinned tool gh is called by its bare name" \
   mutated 'run: ci/release/meta.sh >> "${GITHUB_OUTPUT}"' 'run: ci/release/meta.sh | gh version'
+expect_fail "a pinned tool after a variable assignment is refused" "the pinned tool cosign is called by its bare name" \
+  mutated 'run: ci/release/registry-login.sh logout
+' 'run: X=1 cosign version
+'
+expect_fail "a pinned tool in an if condition is refused" "the pinned tool cosign is called by its bare name" \
+  mutated 'run: ci/release/registry-login.sh logout
+' 'run: if cosign version; then :; fi
+'
+expect_fail "a pinned tool after exec is refused" "the pinned tool gh is called by its bare name" \
+  mutated 'run: ci/release/registry-login.sh logout
+' 'run: exec gh version
+'
 expect_fail "smoke-kind with its own TOOLS_BIN is refused" "smoke-kind: no step sets TOOLS_BIN" \
   mutated $'      - name: Smoke test the chart on kind\n        env:\n' $'      - name: Smoke test the chart on kind\n        env:\n          TOOLS_BIN: ${{ runner.temp }}/tools\n'
 expect_fail "a renamed workflow file is refused" 'must be named release.yml' \

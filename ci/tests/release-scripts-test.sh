@@ -1551,46 +1551,11 @@ expect_fail "images.sh: a non-empty output" "out_not_empty" run_priv "${IR}/ci/r
 # script that the workflow or deploy/release/goreleaser.yaml runs may call a pinned tool by its bare name or look it up with have,
 # need_cmd or command -v: the tools are ${TOOLS_BIN}/<name> (the first release candidate failed because sbom.sh looked for syft on PATH).
 # Quoted text, comments and case labels are not code; command substitutions inside double quotes are.
-cat > "${TEST_TMP}/bare-tools.py" <<'PY'
-import re
-import sys
-
-NAMES = "syft yq goreleaser go-winres osslsigncode cosign crane gh kind kubectl helm".split()
-ALT = "|".join(re.escape(n) for n in NAMES)
-CMD = re.compile(r"(?:^|[;&|(`]\s*|\$\(\s*|\b(?:then|do|else|if|while|until|!)\s+)(%s)(?=\s|$)(?!\s*(?:==|!=|in\b))" % ALT)
-HELPER = re.compile(r"\b(?:have|need_cmd|command\s+-v|which|type\s+-P)\s+(?:-\w+\s+)*(%s)\b" % ALT)
-
-
-def code_of(line):
-    """The line without quoted text, except the command substitutions inside double quotes."""
-    line = re.sub(r"'[^']*'", "''", line)
-    subs = []
-    line = re.sub(r'"((?:[^"\\]|\\.)*)"', lambda m: (subs.extend(re.findall(r"\$\(([^()]*)\)", m.group(1))) or '""'), line)
-    return line + " ; " + " ; ".join(subs) if subs else line
-
-
-bad = 0
-for path in sys.argv[1:]:
-    in_here = None
-    for no, raw in enumerate(open(path, encoding="utf-8"), 1):
-        text = raw.strip()
-        if in_here is not None:
-            if text == in_here:
-                in_here = None
-            continue
-        m = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", text)
-        if text.startswith("#"):
-            continue
-        code = code_of(text)
-        for found in list(CMD.finditer(code)) + list(HELPER.finditer(code)):
-            print("%s:%d: the pinned tool %s is called by its bare name" % (path, no, found.group(1)))
-            bad += 1
-        if m:
-            in_here = m.group(1)
-sys.exit(1 if bad else 0)
-PY
+# One tokenizer (ci/tests/bare-tools.py) serves this scan and the run-text check of ci/tests/release-workflow-test.sh. It knows the
+# command positions (line start, after ; && || | ( $( ` {, then, do, else, if, while, until), NAME=value words and the prefixes exec,
+# env, command, time, nohup, xargs and sudo in front of a command.
 SCAN_FILES=("${ROOT}"/ci/release/*.sh "${ROOT}"/deploy/release/*.sh "${ROOT}/scripts/build-image-crane.sh")
-scan_bare() { python3 -I "${TEST_TMP}/bare-tools.py" "$@"; }
+scan_bare() { python3 -I "${ROOT}/ci/tests/bare-tools.py" "$@"; }
 expect_ok "no release script calls a pinned tool by its bare name (${#SCAN_FILES[@]} scripts)" scan_bare "${SCAN_FILES[@]}"
 mkdir -p "${TEST_TMP}/scan"
 printf '%s\n' '#!/usr/bin/env bash' 'have syft || exit 1' > "${TEST_TMP}/scan/have.sh"
@@ -1598,6 +1563,12 @@ printf '%s\n' '#!/usr/bin/env bash' 'x=1; yq -o=json . f.yaml' > "${TEST_TMP}/sc
 printf '%s\n' '#!/usr/bin/env bash' 'got="$(syft version | head -n 1)"' > "${TEST_TMP}/scan/subst.sh"
 printf '%s\n' '#!/usr/bin/env bash' 'need_cmd go-winres git' > "${TEST_TMP}/scan/need.sh"
 printf '%s\n' '#!/usr/bin/env bash' 'if cosign version; then :; fi' > "${TEST_TMP}/scan/if.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'X=1 syft version' > "${TEST_TMP}/scan/assign.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'exec gh version' > "${TEST_TMP}/scan/exec.sh"
+printf '%s\n' '#!/usr/bin/env bash' '{ kubectl get pods; }' > "${TEST_TMP}/scan/group.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'env A=b yq .' > "${TEST_TMP}/scan/env.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'xargs -n1 helm lint' 'sudo -E crane ls x' 'time command cosign version' 'nohup kind create cluster' > "${TEST_TMP}/scan/prefix.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'MYRIARCH_X=1 \' '  goreleaser release' > "${TEST_TMP}/scan/cont.sh"
 printf '%s\n' '#!/usr/bin/env bash' '"${TOOLS_BIN}/syft" version' 'die "syft not found (ci/install-tools.sh syft)"' '# syft is a comment' "printf 'gh is text\\n'" 'case "$1" in gh) : ;; esac' \
   'cat <<EOF' 'cosign is in a here document' 'EOF' > "${TEST_TMP}/scan/clean.sh"
 expect_fail "the scan finds a have lookup" "have.sh:2: the pinned tool syft" scan_bare "${TEST_TMP}/scan/have.sh"
@@ -1605,6 +1576,15 @@ expect_fail "the scan finds a command after a semicolon" "cmd.sh:2: the pinned t
 expect_fail "the scan finds a command substitution inside double quotes" "subst.sh:2: the pinned tool syft" scan_bare "${TEST_TMP}/scan/subst.sh"
 expect_fail "the scan finds a need_cmd lookup" "need.sh:2: the pinned tool go-winres" scan_bare "${TEST_TMP}/scan/need.sh"
 expect_fail "the scan finds a command after if" "if.sh:2: the pinned tool cosign" scan_bare "${TEST_TMP}/scan/if.sh"
+expect_fail "the scan finds a command after a variable assignment" "assign.sh:2: the pinned tool syft" scan_bare "${TEST_TMP}/scan/assign.sh"
+expect_fail "the scan finds a command after exec" "exec.sh:2: the pinned tool gh" scan_bare "${TEST_TMP}/scan/exec.sh"
+expect_fail "the scan finds a command in a group" "group.sh:2: the pinned tool kubectl" scan_bare "${TEST_TMP}/scan/group.sh"
+expect_fail "the scan finds a command after env and its assignment" "env.sh:2: the pinned tool yq" scan_bare "${TEST_TMP}/scan/env.sh"
+expect_fail "the scan finds a command after xargs with an option" "prefix.sh:2: the pinned tool helm" scan_bare "${TEST_TMP}/scan/prefix.sh"
+expect_fail "the scan finds a command after sudo with an option" "prefix.sh:3: the pinned tool crane" scan_bare "${TEST_TMP}/scan/prefix.sh"
+expect_fail "the scan finds a command after time and command" "prefix.sh:4: the pinned tool cosign" scan_bare "${TEST_TMP}/scan/prefix.sh"
+expect_fail "the scan finds a command after nohup" "prefix.sh:5: the pinned tool kind" scan_bare "${TEST_TMP}/scan/prefix.sh"
+expect_fail "the scan finds a command behind a continued line" "cont.sh:2: the pinned tool goreleaser" scan_bare "${TEST_TMP}/scan/cont.sh"
 expect_ok "the scan accepts TOOLS_BIN paths, comments, quoted text, case labels and here documents" scan_bare "${TEST_TMP}/scan/clean.sh"
 
 finish_tests "release-scripts-test"
