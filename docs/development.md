@@ -410,13 +410,17 @@ both, so a rule does not depend on how a file is named:
   needs a concurrency group; `scorecard.yml` cannot have one, because its shape is fixed (rule R12), and is ignored for that audit
   in `zizmor.yml`. The gate runs offline, so it needs no network and no token. The `workflows` job of `ci.yml` sets
   `ZIZMOR_ONLINE=1` and passes the read-only token of the run as `GH_TOKEN`, which switches on the audits that ask the GitHub API
-  about the pinned actions. To run them locally, export a `GH_TOKEN` and `ZIZMOR_ONLINE=1`. A finding fails the gate. Fix the
+  about the pinned actions. To run them locally, export a `GH_TOKEN` and `ZIZMOR_ONLINE=1`. A finding fails the gate, and so
+  does a file that zizmor cannot parse (`--strict-collection`; by default zizmor skips such a file with a warning). Fix the
   workflow; if the finding is a false positive, ignore it as narrowly as possible, with the reason next to the ignore: a trailing
   comment `# zizmor: ignore[<audit>]` on the line the finding names (it must be the line of the `run:` key for a script), with a
   comment line above it or text behind the bracket that gives the reason, or an entry under `rules.<audit>.ignore` in
   `zizmor.yml` (audit and file, a line number where the finding is about one place) under a comment that gives the reason.
   Rule R14 of the policy check enforces this: `zizmor.yml` has nothing but ignore entries (no `disable`, no `config`, no other
-  key, no wildcard), and a bare `# zizmor: ignore` fails. The environment variables `ZIZMOR_CONFIG`, `ZIZMOR_OFFLINE` and
+  key, no wildcard), and a bare `# zizmor: ignore` fails. R14 also makes sure that the policy check and zizmor read the same
+  lines: a file that zizmor reads (`zizmor.yml`, the workflows, the local action, `.github/dependabot.yml`) fails when it is not
+  UTF-8 or holds U+0085, U+2028 or U+2029 (a YAML parser takes them for line breaks, the check splits at LF and CR), another
+  control character than TAB, or a byte order mark. The environment variables `ZIZMOR_CONFIG`, `ZIZMOR_OFFLINE` and
   `ZIZMOR_NO_ONLINE_AUDITS` are ignored by the script. `ci/tests/lint-workflows-test.sh` checks with the real zizmor that a
   finding fails the gate and that an ignore covers only its audit and file.
 - **CodeQL scans the code** (`.github/workflows/codeql.yml`, results in the code scanning alerts of the repository). One matrix

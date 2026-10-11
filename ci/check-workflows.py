@@ -92,6 +92,11 @@ Rules
       line directly above the audit that gives the reason. An inline ignore in a file below .github needs the rule names
       in brackets (`# zizmor: ignore[github-env]`, never a bare `# zizmor: ignore`) and a reason: a comment line directly
       above it, or text behind the closing bracket. The rule reads the configuration with the reader of R12 and R13.
+      The files that zizmor reads (zizmor.yml, the workflows, the local actions and .github/dependabot.yml or .yaml) must
+      read the same for this check and for a YAML parser: a file that is not UTF-8 is a finding, and so is a file with
+      U+0085, U+2028 or U+2029 (line breaks for a parser, zizmor's reader of zizmor.yml included, but not for this check,
+      which splits at LF and CR), a control character other than TAB, LF and CR, DEL, a C1 control character or a byte order
+      mark. The rules R1 to R14 read lines, so every one of them depends on this.
 
 --remote (needs network, for updating pins): `git ls-remote` for every pinned action and a comparison of the SHA with
 the tag that the comment names.
@@ -144,6 +149,12 @@ ZIZMOR_AUDIT = re.compile(r"^[a-z][a-z0-9-]*$")
 ZIZMOR_IGNORE_PATH = re.compile(r"^[A-Za-z0-9._/-]+\.ya?ml(?::[0-9]+(?::[0-9]+)?)?$")
 ZIZMOR_COMMENT = re.compile(r"#\s*zizmor\s*:\s*ignore", re.I)
 ZIZMOR_COMMENT_OK = re.compile(r"#\s*zizmor\s*:\s*ignore\[\s*[a-z][a-z0-9-]*(?:\s*,\s*[a-z][a-z0-9-]*)*\s*\](.*)$", re.I)
+# R14: characters with which a YAML parser reads a file differently from this check, which splits it into lines at LF and CR only.
+# NEL (U+0085), LS (U+2028) and PS (U+2029) are line breaks for the parser (zizmor's reader of zizmor.yml is one), so the two
+# disagree about what a comment is. A parser also rejects or skips control characters (C0 but TAB, LF and CR; DEL; C1) and a byte
+# order mark. Each of them is a finding, because every rule of this check reads lines.
+UNREADABLE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u2028\u2029\ufeff]")
+LINE_BREAK_CHARACTERS = {"\x85": "NEXT LINE", "\u2028": "LINE SEPARATOR", "\u2029": "PARAGRAPH SEPARATOR"}
 TRIGGER_KEY = re.compile(r"^\s*(pull_request_target|workflow_run)\s*:")
 TRIGGER_INLINE = re.compile(r"^on\s*:.*\b(pull_request_target|workflow_run)\b")
 
@@ -944,6 +955,7 @@ class Checker:
         self.secret_entries = self.read_secret_allowlist()  # (workflow file, job, NAME) -> line in ci/workflow-secrets.txt
         self.secret_uses = set()  # (workflow file, job, NAME) of every `KEY: ${{ secrets.NAME }}` in an env: of a job or a step
         self.job_ids = {}  # workflow file -> ids of its jobs
+        self.unreadable = set()  # workflow files that are not UTF-8: the other rules cannot read them (R14 reports the file)
 
     def add(self, path, lineno, rule, msg):
         rel = os.path.relpath(path, self.root)
@@ -986,10 +998,38 @@ class Checker:
                     entries[tuple(parts)] = no
         return entries
 
+    def read_lines(self, path):
+        """The lines of a file that zizmor reads as well (a workflow, a local action, zizmor.yml, the Dependabot configuration),
+        or None for a file that is not UTF-8. LF, CR and CRLF end a line. A character with which a YAML parser reads the file
+        differently (UNREADABLE) is an R14 finding, one per character, at its first line; the lines are returned all the same."""
+        with open(path, "rb") as f:
+            data = f.read()
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as e:
+            line = len(re.findall(rb"\r\n|\r|\n", data[:e.start])) + 1
+            self.add(path, line, "R14", "the file is not valid UTF-8 (%s at byte %d)" % (e.reason, e.start))
+            return None
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        reported = set()
+        for m in UNREADABLE.finditer(text):
+            char = m.group(0)
+            if char in reported:
+                continue
+            reported.add(char)
+            name = LINE_BREAK_CHARACTERS.get(char, "BYTE ORDER MARK" if char == "\ufeff" else "control character")
+            how = "read as a line break by" if char in LINE_BREAK_CHARACTERS else "rejected or skipped by"
+            self.add(path, text.count("\n", 0, m.start()) + 1, "R14",
+                     "the file contains U+%04X (%s), which is %s YAML parsers such as zizmor's, but not by this check: remove it" % (ord(char), name, how))
+        return text.split("\n")
+
     # ---- per file -------------------------------------------------------------------------------------------
     def check_file(self, path, is_workflow):
-        with open(path, encoding="utf-8") as f:
-            lines = f.read().split("\n")
+        lines = self.read_lines(path)
+        if lines is None:
+            if is_workflow:
+                self.unreadable.add(os.path.basename(path))
+            return
         self.rule_uses(path, lines, is_workflow)
         self.rule_triggers(path, lines)
         self.rule_checkout(path, lines)
@@ -1334,8 +1374,9 @@ class Checker:
         path = os.path.join(self.root, "zizmor.yml")
         if not os.path.isfile(path):
             return
-        with open(path, encoding="utf-8") as f:
-            lines = f.read().split("\n")
+        lines = self.read_lines(path)
+        if lines is None:
+            return
         root, errors = MiniYaml(lines).parse()
         if errors:
             no, problem = min(errors)
@@ -1382,6 +1423,8 @@ class Checker:
     def rule_secret_entries(self):
         """Stale entries of ci/workflow-secrets.txt: the workflow file, the job or the use of the secret is gone."""
         for (wf, job, name), no in sorted(self.secret_entries.items(), key=lambda item: item[1]):
+            if wf in self.unreadable:
+                continue
             if wf not in self.job_ids:
                 msg = "stale entry: the workflow file .github/workflows/%s does not exist" % wf
             elif job not in self.job_ids[wf]:
@@ -1736,8 +1779,9 @@ class Checker:
 
     # ---- repository level -------------------------------------------------------------------------------------
     def rule_parity(self, ci_path):
-        with open(ci_path, encoding="utf-8") as f:
-            lines = f.read().split("\n")
+        lines = self.read_lines(ci_path)
+        if lines is None:
+            return
         used = set()
         calls_e2e = False
         for line in lines:
@@ -1827,8 +1871,9 @@ def main(argv):
     for name in ("dependabot.yml", "dependabot.yaml"):
         dep = os.path.join(root, ".github", name)
         if os.path.isfile(dep):
-            with open(dep, encoding="utf-8") as f:
-                c.rule_zizmor_comments(dep, f.read().split("\n"))
+            dep_lines = c.read_lines(dep)
+            if dep_lines is not None:
+                c.rule_zizmor_comments(dep, dep_lines)
     for rel, line, rule, msg in sorted(set(c.findings)):
         print("%s:%d: %s: %s" % (rel, line, rule, msg))
     status = 1 if c.findings else 0

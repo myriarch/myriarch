@@ -16,7 +16,8 @@
 # zizmor runs with the pedantic persona (it also asks for a reason next to a permission and for a concurrency group; the one
 # workflow that cannot have one, scorecard.yml, whose shape rule R12 fixes, is ignored in zizmor.yml) and the configuration
 # zizmor.yml in the repository root, which lists every ignored finding with its reason; rule R14 of the policy check allows
-# nothing but ignore entries there. It runs offline: the audits that need the GitHub API (impostor commits, known vulnerable
+# nothing but ignore entries there. An input that zizmor cannot parse fails the gate (--strict-collection); by default zizmor
+# skips it with a warning. It runs offline: the audits that need the GitHub API (impostor commits, known vulnerable
 # actions, ref confusion, stale action references) are skipped, so the gate needs no network and no token. ZIZMOR_ONLINE=1
 # switches them on; the token comes from GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN (the workflows job of ci.yml sets GH_TOKEN).
 set -euo pipefail
@@ -49,7 +50,8 @@ while IFS= read -r f; do inputs+=("${f}"); done < <(find .github/actions -type f
 for f in .github/dependabot.yml .github/dependabot.yaml; do
   if [ -f "${f}" ]; then inputs+=("${f}"); fi
 done
-zizmor_args=(--no-progress --persona pedantic --config zizmor.yml --cache-dir "${ROOT}/.cache/zizmor")
+# --strict-collection: without it zizmor skips an input that it cannot parse with a warning, and the gate would pass over the file.
+zizmor_args=(--no-progress --strict-collection --persona pedantic --config zizmor.yml --cache-dir "${ROOT}/.cache/zizmor")
 if [ "${ZIZMOR_ONLINE:-}" = 1 ]; then
   [ -n "${GH_TOKEN:-${GITHUB_TOKEN:-${ZIZMOR_GITHUB_TOKEN:-}}}" ] || die "ZIZMOR_ONLINE=1 needs GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN"
   mode="online"

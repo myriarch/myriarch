@@ -447,7 +447,11 @@ guidance after each item names what to do.
     actions and unsafe writes to the environment files. It runs offline in the local gate and with the read-only token of the run
     in CI for the audits that ask the GitHub API. It runs with the pedantic persona. Every ignored finding is listed in `zizmor.yml` or marked on its
     line, with the reason; no audit is disabled or configured, and rule R14 of `ci/check-workflows.py` rejects a `zizmor.yml` with
-    anything but ignore entries and an inline ignore without rule names or reason. It reads the files of the repository, so it does not see settings of the organization or the
+    anything but ignore entries and an inline ignore without rule names or reason. Rule R14 also rejects a file that zizmor reads
+    and that holds a character on which the policy check and a YAML parser disagree (U+0085, U+2028 and U+2029 are line breaks for
+    the parser, not for the check, which splits at LF and CR; control characters and a byte order mark; a file that is not UTF-8),
+    so both read the same lines. A file that zizmor cannot parse fails the gate (`--strict-collection`) instead of being skipped
+    with a warning. It reads the files of the repository, so it does not see settings of the organization or the
     repository (allowed actions, environments, rulesets), secrets, or what a pinned action does at run time.
 - **Rules for the release workflow (R13) exist before the workflow.** `ci/check-workflows.py` already requires of
   `.github/workflows/release.yml`: a trigger for pushed `v*` tags only, no caches and no local actions, the literal environment

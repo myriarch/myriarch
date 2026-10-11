@@ -121,6 +121,19 @@ runs:
 YAML
 expect_fail "a finding in a local action fails" 'github-env' lint "${t}"
 
+# an input that zizmor cannot parse fails the gate; without --strict-collection zizmor skips it with a warning
+t="$(newtree broken-action)"
+mkdir -p "${t}/.github/actions/tool"
+printf 'name: tool\nruns: [\n' > "${t}/.github/actions/tool/action.yml"
+expect_fail "an action that zizmor cannot parse fails the gate" 'failed to load .*action\.yml' lint "${t}"
+t="$(newtree control-character)"
+mkdir -p "${t}/.github/actions/tool"
+printf 'name: tool\ndescription: a tool\nruns:\n  using: composite\n  steps:\n    - shell: bash\n      run: echo ok\n# a note\001\n' > "${t}/.github/actions/tool/action.yml"
+expect_fail "an action with a control character fails the gate" 'control characters are not allowed' lint "${t}"
+OUT="$(lint "${t}" 2>&1)"
+if ! printf '%s\n' "${OUT}" | grep -q 'policy check'; then ok "the gate stops at zizmor, which would otherwise skip that action"; else fail "zizmor skipped the action and the gate went on"; fi
+expect_fail "the policy check on its own reports that control character" 'R14: the file contains U\+0001' python3 -I "${t}/ci/check-workflows.py" --root "${t}"
+
 t="$(newtree dependabot)"
 cat > "${t}/.github/dependabot.yml" <<'YAML'
 version: 2
