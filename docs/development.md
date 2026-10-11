@@ -1075,8 +1075,10 @@ sheet (about 0.4 MB) would cost about 30 points of the performance score. Stop t
 
 The REST API reference is made of static pages without scripts of their own; the data types page is long (about 150 types), which is
 why it is a separate page. `check-requests.mjs` checks that a tag page renders its tables and that the site search finds the operations
-(`approveRolloutWave`) and permissions (`rollouts:operate`) of the contract, and that the mark on the landing page plays its animation and
-ends on identity transforms (and does not animate with reduced motion).
+(`approveRolloutWave`) and permissions (`rollouts:operate`) of the contract, and the motion of the mark on the landing page (about a minute, in light and dark): the rollout plays and ends on identity
+transforms, the unchanged mark is held and a second cycle starts after the dots retract, the pause button stops the motion and shows the
+static mark, play starts a clean cycle, nothing runs while the hero is out of view or the document is hidden, with reduced motion
+nothing animates and there is no button, and without JavaScript the rollout plays once.
 
 ### Privacy rules
 

@@ -75,9 +75,11 @@ def mark_svg(extra="", ring_d=RING_D, dots=DOTS, svg_attrs=' aria-hidden="true" 
     return '<svg width="114" height="104" class="landing-hero__mark"%s viewBox="0 0 114 104">%s%s</svg>' % (svg_attrs, extra, paths)
 
 
+BUTTON = '<button type="button" class="landing-hero__motion" aria-label="Pause logo animation" aria-pressed="false" hidden></button>'
+
 GOOD_PAGE = """<!doctype html><html><head><title>t</title><link rel="stylesheet" href="/css/site.css"></head><body class="td-home">
 <h1>Title</h1>
-@MARK@
+@MARK@@BUTTON@
 <section id="features"></section>
 <section id="architecture"><svg role="img" aria-labelledby="arch-title arch-desc" viewBox="0 0 1 1"><title id="arch-title">a</title></svg></section>
 <section id="screenshots">
@@ -85,8 +87,9 @@ GOOD_PAGE = """<!doctype html><html><head><title>t</title><link rel="stylesheet"
 </section>
 <section id="quickstart"></section>
 <section id="community"></section>
+<script src="/js/landing-mark.min.0123.js" integrity="sha256-x" defer></script>
 </body></html>
-""".replace("@MARK@", mark_svg())
+""".replace("@MARK@", mark_svg()).replace("@BUTTON@", BUTTON)
 
 
 class LandingTest(unittest.TestCase):
@@ -262,6 +265,39 @@ class LandingTest(unittest.TestCase):
         rc, out, _ = self.run_check()
         self.assertEqual(rc, 1)
         self.assertIn("the circles of the mark are not those of myriarch-icon.svg", out)
+
+    def test_page_without_the_pause_button(self):
+        self.page(GOOD_PAGE.replace(BUTTON, ""))
+        rc, out, _ = self.run_check()
+        self.assertEqual(rc, 1)
+        self.assertIn("exactly one button with the class landing-hero__motion (pause), found 0", out)
+
+    def test_pause_button_that_is_not_a_button_with_a_name_and_a_state(self):
+        bad = '<div class="landing-hero__motion" aria-label="Logo"></div>'
+        self.page(GOOD_PAGE.replace(BUTTON, "<button class=\"landing-hero__motion\" aria-label=\"Logo\"></button>"))
+        rc, out, _ = self.run_check()
+        self.assertEqual(rc, 1)
+        self.assertIn('must be a <button type="button">', out)
+        self.assertIn("names the action (pause)", out)
+        self.assertIn('aria-pressed="false"', out)
+        self.assertIn("attribute hidden", out)
+        self.page(GOOD_PAGE.replace(BUTTON, bad))
+        rc, out, _ = self.run_check()
+        self.assertEqual(rc, 1)
+        self.assertIn("found 0", out)
+
+    def test_page_without_the_script_of_the_mark(self):
+        self.page(GOOD_PAGE.replace("/js/landing-mark.min.0123.js", "/js/other.js"))
+        rc, out, _ = self.run_check()
+        self.assertEqual(rc, 1)
+        self.assertIn("must load exactly one script landing-mark from the site", out)
+
+    def test_script_of_the_mark_from_another_host(self):
+        self.page(GOOD_PAGE.replace("/js/landing-mark.min.0123.js", "https://cdn.example.com/landing-mark.js"))
+        rc, out, _ = self.run_check()
+        self.assertEqual(rc, 1)
+        self.assertIn("must load exactly one script landing-mark from the site", out)
+        self.assertIn("loads https://cdn.example.com/landing-mark.js from another host", out)
 
     def test_mark_in_the_minified_form_of_hugo(self):
         # arc flags glued to the next number and numbers such as 5.5.0, as the HTML minifier writes them
