@@ -153,9 +153,12 @@ func randomString(n int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// safeRedirect returns p if it is a safe relative UI path, else "/".
+// safeRedirect returns p if it is a safe relative UI path, else "/". Browsers
+// read the rest of "//..." and "/\..." as a host name, so neither a slash nor a
+// backslash may follow the leading slash; backslashes and control characters
+// are refused anywhere in the path.
 func safeRedirect(p string) string {
-	if p == "" || p[0] != '/' || strings.HasPrefix(p, "//") || strings.ContainsAny(p, "\\") {
+	if p == "" || p[0] != '/' || strings.HasPrefix(p, "//") || strings.HasPrefix(p, "/\\") || strings.ContainsAny(p, "\\") {
 		return "/"
 	}
 	for _, r := range p {

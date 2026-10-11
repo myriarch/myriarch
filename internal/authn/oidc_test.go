@@ -359,6 +359,8 @@ func TestOIDCRedirectIsSanitized(t *testing.T) {
 		"//evil.example.com":        "/",
 		"https://evil.example.com/": "/",
 		"/\\evil.example.com":       "/",
+		"/agents\\evil.example.com": "/", // backslash later in the path
+		"/\t/evil.example.com":      "/", // control character right after the leading slash
 		"agents":                    "/",
 		"/ok\r\nSet-Cookie: a=b":    "/",
 		"javascript:alert(1)":       "/",
