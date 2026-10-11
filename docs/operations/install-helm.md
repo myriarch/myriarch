@@ -63,7 +63,9 @@ The last command prints the `sha256:...` digest of the pushed image. Use it in t
 fixtures, and a production installation does not need them. The image is built for one platform, `linux/amd64`;
 `IMAGE_PLATFORM=linux/arm64` builds an arm64 image with a tag that ends in `-arm64`. There is no multi-platform index.
 
-The image has the same layout as the release image, except that it is built from your work tree:
+The image has the same files, user and entry point as the release image, but it is built from your work tree. It differs
+in the metadata (its working directory is `/opt/myriarch`, the labels differ), it has one platform and it carries no
+SBOM:
 
 - **User:** `65532:65532`, the user the chart runs the pod as (`podSecurityContext.runAsUser`). The image has no shell and
   no package database.
