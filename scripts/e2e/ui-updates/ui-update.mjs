@@ -122,7 +122,7 @@ try {
     result.dialogText = (await dlg.innerText()).replace(/\s+/g, ' ').slice(0, 600);
     await shot('02-dialog');
     // pick the version in the list when it is not preselected
-    const opt = dlg.getByText(new RegExp(`^${VERSION.replace(/\./g, '\\.')}$`)).first();
+    const opt = dlg.getByText(VERSION, { exact: true }).first();
     if (await opt.count()) await opt.click().catch(() => {});
     const reason = dlg.locator('textarea').first();
     if (await reason.count()) await reason.fill(REASON);
