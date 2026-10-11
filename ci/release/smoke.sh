@@ -310,6 +310,26 @@ sys.exit(0 if ok else 1)
 ' "$1"
 }
 
+# moving_tag_is_newer REF VERSION: the image behind the moving tag X.Y has a version label above VERSION (the rule of finalize.sh)
+moving_tag_is_newer() { # ref version
+  local out
+  out="$(anon "${TOOLS_BIN}/crane" config "$1" 2>"${WORK}/crane-config-err.txt")" || return 1
+  printf '%s' "${out}" | python3 -I -c '
+import json, re, sys
+
+def key(v):
+    m = re.match(r"^(\d+)\.(\d+)\.(\d+)$", v or "")
+    return tuple(int(x) for x in m.groups()) if m else None
+
+try:
+    label = json.load(sys.stdin)["config"]["Labels"]["org.opencontainers.image.version"]
+except Exception:
+    sys.exit(1)
+a, b = key(label), key(sys.argv[1])
+sys.exit(0 if a is not None and b is not None and a > b else 1)
+' "$2"
+}
+
 # ---- assets ------------------------------------------------------------------------------------------------------------
 cmd_assets() {
   TAG="" COMMIT="${RELEASE_COMMIT:-}"
@@ -405,6 +425,11 @@ PY
       CHECK_OUT="${WORK}/crane-digest.txt" check image_tag_mismatch "crane digest ${repo}:${t} (without credentials)" \
         anon "${TOOLS_BIN}/crane" digest "${repo}:${t}"
       got="$(tr -d '[:space:]' < "${WORK}/crane-digest.txt")"
+      if [ "${got}" != "${digest}" ] && [[ "${t}" =~ ^[0-9]+\.[0-9]+$ ]] && moving_tag_is_newer "${repo}:${t}" "${version}"; then
+        # finalize.sh leaves the moving tag X.Y alone when it already points at a newer patch release (an older patch released later)
+        log "${repo}:${t} points at a newer release than ${version}, as finalize leaves it"
+        continue
+      fi
       [ "${got}" = "${digest}" ] || fail image_tag_mismatch "${repo}:${t} points at ${got}, the release built ${digest}"
     done <<< "${tags}"
     check signature_invalid "cosign verify ${repo}@${digest}" cosign_verify_image "${repo}@${digest}"

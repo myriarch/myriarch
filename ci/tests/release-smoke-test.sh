@@ -77,7 +77,7 @@ new_root() { # name: sets R and exports what the stubs read
   STUB_BOOTSTRAP_B64="$(printf '%s' "${BOOTSTRAP_VALUE}" | base64 | tr -d '\n')"
   export STUB_BOOTSTRAP_B64
   mkdir -p "${R}/ci/release" "${R}/deploy/release" "${R}/deploy/helm/myriarch" "${R}/hack/kind/manifests" "${R}/bin" "${R}/path" \
-    "${STUB_CALLS}" "${STUB_STATE}/crane-digest" "${STUB_SERVE}"
+    "${STUB_CALLS}" "${STUB_STATE}/crane-digest" "${STUB_STATE}/crane-config" "${STUB_SERVE}"
   cp "${ROOT}/ci/release/smoke.sh" "${R}/ci/release/smoke.sh"
   cp "${ROOT}/ci/lib.sh" "${R}/ci/lib.sh"
   cp "${VERSIONS}" "${R}/ci/versions.env"
@@ -143,6 +143,7 @@ exit 0'
   mkstub "${R}/bin/crane" crane 'case "$1" in
   version) echo "${STUB_CRANE_VERSION}" ;;
   digest) f="${STUB_STATE}/crane-digest/$(printf "%s" "$2" | tr "/:" "__")"; if [ -f "$f" ]; then cat "$f"; else echo "stub: no such image" >&2; exit 1; fi ;;
+  config) f="${STUB_STATE}/crane-config/$(printf "%s" "$2" | tr "/:" "__")"; if [ -f "$f" ]; then cat "$f"; else echo "stub: no such image" >&2; exit 1; fi ;;
 esac
 exit 0'
   mkstub "${R}/bin/gh" gh 'case "$1" in
@@ -295,6 +296,35 @@ printf '%s' "${SIDX}" > "${STUB_STATE}/crane-digest/ghcr.io_myriarch_myriarch_9.
 printf '%s' "${UIDX}" > "${STUB_STATE}/crane-digest/ghcr.io_myriarch_myriarch-updater_9.9.9-rc.1"
 expect_ok "assets: an rc tag expects the tag 9.9.9-rc.1 only" run_smoke assets --tag v9.9.9-rc.1 --commit "${COMMIT}"
 assert "assets: an rc resolves one tag per image" count_is crane '^digest ' 2
+
+# the contract with the scripts lane: smoke.sh against the real verify-blob.sh, identity.env and assets.json (only cosign is a stub)
+new_root assets-real-scripts
+cp "${ROOT}/ci/release/verify-blob.sh" "${ROOT}/ci/release/common.sh" "${ROOT}/ci/release/identity.env" "${R}/ci/release/"
+cp "${ROOT}/deploy/release/assets.json" "${R}/deploy/release/assets.json"
+fill_release
+printf '/tampered/\n' > "${STUB_STATE}/cosign.fail"
+expect_ok "assets with the real verify-blob.sh, identity.env and assets.json" run_smoke assets --tag "${TAG}" --commit "${COMMIT}"
+BUNDLE="[^ ]*/release/checksums\.txt\.sigstore\.json"
+assert "real verify-blob.sh: exact verification of checksums.txt (identity, issuer, repository, ref, sha, trigger)" call_like cosign "^verify-blob --bundle ${BUNDLE} --certificate-identity $(rx "${IDENTITY}") --certificate-oidc-issuer $(rx "${ISSUER}") --certificate-github-workflow-repository myriarch/myriarch --certificate-github-workflow-ref refs/tags/${TAG} --certificate-github-workflow-sha ${COMMIT} --certificate-github-workflow-trigger push [^ ]*/release/checksums\.txt\$"
+assert "real verify-blob.sh: the ADR-0029 pattern" call_like cosign "^verify-blob --bundle ${BUNDLE} --certificate-identity-regexp $(rx '^https://github\.com/myriarch/myriarch/\.github/workflows/release\.yml@refs/tags/v') --certificate-oidc-issuer $(rx "${ISSUER}") [^ ]*/release/checksums\.txt\$"
+assert "real verify-blob.sh: the negative control reaches cosign with a tampered copy" call_like cosign "^verify-blob .* [^ ]*/tampered/checksums\.txt\$"
+
+# the moving tag X.Y stays on a newer patch release (an older patch published later): finalize leaves it, so the smoke test accepts it
+new_root assets-moving-tag
+fill_release
+other_idx="sha256:$(printf '9%.0s' $(seq 64))"
+printf '%s' "${other_idx}" > "${STUB_STATE}/crane-digest/ghcr.io_myriarch_myriarch_9.9"
+printf '{"config":{"Labels":{"org.opencontainers.image.version":"9.9.10"}}}\n' > "${STUB_STATE}/crane-config/ghcr.io_myriarch_myriarch_9.9"
+expect_ok "assets: X.Y on a newer version is accepted" run_smoke assets --tag "${TAG}" --commit "${COMMIT}"
+printf '{"config":{"Labels":{"org.opencontainers.image.version":"9.9.8"}}}\n' > "${STUB_STATE}/crane-config/ghcr.io_myriarch_myriarch_9.9"
+expect_fail "assets: X.Y on an older version is a mismatch" '\[image_tag_mismatch\]' run_smoke assets --tag "${TAG}" --commit "${COMMIT}"
+printf '{"config":{"Labels":{"org.opencontainers.image.version":"9.9.9"}}}\n' > "${STUB_STATE}/crane-config/ghcr.io_myriarch_myriarch_9.9"
+expect_fail "assets: X.Y on another image of the same version is a mismatch" '\[image_tag_mismatch\]' run_smoke assets --tag "${TAG}" --commit "${COMMIT}"
+rm -f "${STUB_STATE}/crane-config/ghcr.io_myriarch_myriarch_9.9"
+expect_fail "assets: X.Y with an unreadable config is a mismatch" '\[image_tag_mismatch\]' run_smoke assets --tag "${TAG}" --commit "${COMMIT}"
+printf '{"config":{"Labels":{"org.opencontainers.image.version":"9.9.10"}}}\n' > "${STUB_STATE}/crane-config/ghcr.io_myriarch_myriarch_9.9.9"
+printf '%s' "${other_idx}" > "${STUB_STATE}/crane-digest/ghcr.io_myriarch_myriarch_9.9.9"
+expect_fail "assets: the immutable tag X.Y.Z is never excused" '\[image_tag_mismatch\]' run_smoke assets --tag "${TAG}" --commit "${COMMIT}"
 
 new_root assets-negative
 fill_release
