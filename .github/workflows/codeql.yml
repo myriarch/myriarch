@@ -3,13 +3,17 @@
 
 # CodeQL code scanning (ADR-0032; docs/security/model.md, "Static analysis in CI"). One matrix job per language:
 #
-#   go                      manual build: `go build ./...` and `go build -tags devpg ./...`, so that the code behind the build tag
-#                           devpg (the server with an embedded development PostgreSQL) is analysed too
-#   javascript-typescript   the web UI (web/) and the scripts of the website (website/); no build needed
+#   go                      manual build, traced by CodeQL: `go build ./...` for Linux, with the build tags `embedui` and `devpg` (the
+#                           server with the embedded web UI and with an embedded development PostgreSQL), and for Windows and macOS
+#                           (the Windows-only code of the updater, which runs as SYSTEM, and the non-unix variants of files)
+#   javascript-typescript   the web UI (web/) and the JavaScript scripts of the website (website/scripts); no build needed
+#   python                  the Python scripts (ci/, scripts/, website/scripts/, assets/brand/source); no build needed
 #   actions                 the workflows and local actions below .github
 #
 # Default setup of code scanning stays off in the repository settings, because this workflow replaces it. The results go to the
-# code scanning alerts of the repository (Security tab); nothing here blocks a merge, a ruleset may require them later.
+# code scanning alerts of the repository (Security tab); nothing here blocks a merge, a ruleset may require them later. Pull
+# requests from forks and from Dependabot are analysed too: GitHub always allows code scanning to upload the results of a
+# `pull_request` run, although the token of such a run is read-only otherwise.
 #
 # Policy (enforced by ci/check-workflows.py): only github/codeql-action from the pinned set, a SHA pin, a read-only token at the
 # top, no persisted checkout credentials, a timeout. The one write scope (security-events, to upload the results) is listed in
@@ -37,20 +41,11 @@ concurrency:
 jobs:
   analyze:
     name: analyze (${{ matrix.language }})
-    # A pull request from a fork or from Dependabot gets a read-only token that cannot upload results to code scanning, so the job
-    # would only fail there. The analysis of the merged code runs on the push to main.
-    if: >-
-      github.event_name != 'pull_request'
-      || (github.event.pull_request.head.repo.full_name == github.repository
-          && github.event.pull_request.user.login != 'dependabot[bot]')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
-      # upload the results to code scanning (reviewed in ci/workflow-permissions.txt)
-      security-events: write
-      # read the repository, and read the workflow runs of the repository to attach the analysis to them
-      contents: read
-      actions: read
+      security-events: write # upload the results to code scanning (reviewed in ci/workflow-permissions.txt)
+      contents: read # check out the repository (the repository is public, so no actions: read is needed)
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +53,8 @@ jobs:
           - language: go
             build-mode: manual
           - language: javascript-typescript
+            build-mode: none
+          - language: python
             build-mode: none
           - language: actions
             build-mode: none
@@ -82,15 +79,21 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           queries: security-extended
 
-      # Manual build: CodeQL traces both builds. The second one compiles the files behind the build tag devpg (the same two
-      # commands as the gate "go" of ci/check-local.sh).
+      # Manual build: CodeQL traces every `go build`. The tags devpg and embedui select files that the plain build leaves out
+      # (internal/webui/embed_on.go needs a built UI below internal/webui/dist, which is git-ignored: the placeholder page stands in,
+      # the Go code is the same). GOOS=windows and GOOS=darwin compile the files that exist only for those systems; the Windows
+      # files of the updater are security-relevant. The build commands follow the gate "go" of ci/check-local.sh.
       - name: Build the Go packages
         if: matrix.language == 'go'
         env:
           GOTOOLCHAIN: local
         run: |
           go build ./...
-          go build -tags devpg ./...
+          mkdir -p internal/webui/dist
+          cp internal/webui/placeholder/index.html internal/webui/dist/index.html
+          go build -tags embedui,devpg ./...
+          GOOS=windows GOARCH=amd64 go build ./...
+          GOOS=darwin GOARCH=arm64 go build ./...
 
       - name: Perform the CodeQL analysis
         uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
