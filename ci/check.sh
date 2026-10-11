@@ -6,11 +6,11 @@
 #  - scripts: executable (except the sourced contrib/enterprise-mirror/ca-env.sh), syntax ok (bash -n)
 #  - tool modules in ci/tools/<tool>: go.mod matches the version in ci/versions.env
 #  - image digests: golang/distroless identical across the Dockerfiles, every FROM and the compose postgres pinned by
-#    digest (the postgres service of ci.yml uses the same digest), MYRCTL_BASE_IMAGE matches myrctl.Dockerfile
+#    digest (the postgres service of ci.yml uses the same digest)
 #  - OTELCOL_* pins agree with each other and with deploy/k8s/collector/Dockerfile
 #  - reuse (ci/tools/reuse): requirements.in and requirements.txt pin the version of ci/versions.env, the build
 #    requirements pin poetry-core, and every pinned package carries hashes
-#  - .node-version holds one exact Node.js release of 22 or newer
+#  - .node-version holds one exact Node.js release of 22 or newer, and the web stage of myriarchd.Dockerfile uses its major
 #  - goreleaser.yaml references the signing script, which exists
 #  - one version source: VERSION and every copy of the product version agree (ci/check-versions.sh)
 #  - ci/ and contrib/enterprise-mirror/ script paths mentioned in the Makefile, goreleaser.yaml and the scripts exist
@@ -83,25 +83,25 @@ node_version="$(cat .node-version 2>/dev/null || true)"
 printf '%s' "${node_version}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || bad ".node-version must contain one exact version such as 24.21.0 (got '${node_version}')"
 [ "${node_version%%.*}" -ge 22 ] 2>/dev/null || bad ".node-version (${node_version}) is older than Node.js 22, the floor of web/ and website/"
 
+# the web UI stage of myriarchd.Dockerfile builds with the Node.js major of .node-version (the same toolchain as CI)
+node_from="$(grep -E '^FROM node:' deploy/docker/myriarchd.Dockerfile | head -n 1 || true)"
+case "${node_from}" in
+  "FROM node:${node_version%%.*}-"*) ;;
+  *) bad "deploy/docker/myriarchd.Dockerfile: the web stage must use a node:${node_version%%.*}- image, the Node.js major of .node-version (got '${node_from:-none}')" ;;
+esac
+
 # digest of the first line of <file> matching <pattern>
 digest_in() { grep -E "$2" "$1" | head -n 1 | sed -n 's/.*@\(sha256:[0-9a-f]\{64\}\).*/\1/p'; }
-
-# MYRCTL_BASE_IMAGE == base of myrctl.Dockerfile
-want="$(printf '%s' "${MYRCTL_BASE_IMAGE}" | sed -n 's/.*@\(sha256:[0-9a-f]\{64\}\).*/\1/p')"
-got="$(digest_in deploy/docker/myrctl.Dockerfile '^FROM curlimages/curl:')"
-[ -n "${want}" ] || bad "no digest in ci/versions.env (MYRCTL_BASE_IMAGE)"
-[ "${want}" = "${got}" ] || bad "myrctl base: ci/versions.env (MYRCTL_BASE_IMAGE=${want}) and deploy/docker/myrctl.Dockerfile (${got:-no digest}) differ"
 
 # golang: myriarchd.Dockerfile and myriarch-sim.Dockerfile use the same digest
 g1="$(digest_in deploy/docker/myriarchd.Dockerfile '^FROM golang:')"
 g2="$(digest_in deploy/docker/myriarch-sim.Dockerfile '^FROM golang:')"
 { [ -n "${g1}" ] && [ "${g1}" = "${g2}" ]; } || bad "golang digest differs between myriarchd.Dockerfile (${g1:-none}) and myriarch-sim.Dockerfile (${g2:-none})"
 
-# distroless: all three Dockerfiles use the same digest
+# distroless: both Dockerfiles use the same digest (the published images are FROM scratch and built by scripts/build-image-crane.sh)
 d1="$(digest_in deploy/docker/myriarchd.Dockerfile '^FROM gcr.io/distroless/static')"
-d2="$(digest_in deploy/docker/myriarchd-release.Dockerfile '^FROM gcr.io/distroless/static')"
-d3="$(digest_in deploy/docker/myriarch-sim.Dockerfile '^FROM gcr.io/distroless/static')"
-{ [ -n "${d1}" ] && [ "${d1}" = "${d2}" ] && [ "${d1}" = "${d3}" ]; } || bad "distroless digest differs between myriarchd/myriarchd-release/myriarch-sim.Dockerfile"
+d2="$(digest_in deploy/docker/myriarch-sim.Dockerfile '^FROM gcr.io/distroless/static')"
+{ [ -n "${d1}" ] && [ "${d1}" = "${d2}" ]; } || bad "distroless digest differs between myriarchd.Dockerfile (${d1:-none}) and myriarch-sim.Dockerfile (${d2:-none})"
 
 # every FROM line of the Dockerfiles and the postgres image of the compose file are pinned by digest
 for f in deploy/docker/*.Dockerfile; do
@@ -131,7 +131,9 @@ grep -Fxq "ARG COLLECTOR_IMAGE=${OTELCOL_CONTRIB_IMAGE}" deploy/k8s/collector/Do
 grep -Fxq "ARG SUPERVISOR_IMAGE=${OTELCOL_SUPERVISOR_IMAGE}" deploy/k8s/collector/Dockerfile || bad "deploy/k8s/collector/Dockerfile: ARG SUPERVISOR_IMAGE is not OTELCOL_SUPERVISOR_IMAGE of ci/versions.env"
 g3="$(digest_in deploy/k8s/collector/Dockerfile '^ARG GO_IMAGE=golang:')"
 { [ -n "${g3}" ] && [ "${g3}" = "${g1}" ]; } || bad "deploy/k8s/collector/Dockerfile: ARG GO_IMAGE (${g3:-no digest}) is not the golang digest of the other Dockerfiles (${g1:-none})"
-grep -E '^ARG [A-Z_]*IMAGE=' deploy/k8s/collector/Dockerfile | grep -Evq '@sha256:[0-9a-f]{64}$' && bad "deploy/k8s/collector/Dockerfile: an ARG ...IMAGE default without digest"
+# UPDATER_IMAGE is the one exception: its default is the empty placeholder "scratch" (a release passes the published updater image by digest)
+grep -Fxq 'ARG UPDATER_IMAGE=scratch' deploy/k8s/collector/Dockerfile || bad "deploy/k8s/collector/Dockerfile: ARG UPDATER_IMAGE must default to the placeholder scratch, not to a tag"
+grep -E '^ARG [A-Z_]*IMAGE=' deploy/k8s/collector/Dockerfile | grep -Fvx 'ARG UPDATER_IMAGE=scratch' | grep -Evq '@sha256:[0-9a-f]{64}$' && bad "deploy/k8s/collector/Dockerfile: an ARG ...IMAGE default without digest"
 for v in SHELLCHECK_SHA256_DARWIN_ARM64 SHELLCHECK_SHA256_DARWIN_AMD64 SHELLCHECK_SHA256_LINUX_ARM64 SHELLCHECK_SHA256_LINUX_AMD64 \
          KUBECTL_SHA256_DARWIN_ARM64 KUBECTL_SHA256_DARWIN_AMD64 KUBECTL_SHA256_LINUX_ARM64 KUBECTL_SHA256_LINUX_AMD64 \
          HUGO_SHA256_DARWIN_UNIVERSAL HUGO_SHA256_LINUX_ARM64 HUGO_SHA256_LINUX_AMD64 \

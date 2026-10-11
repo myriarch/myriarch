@@ -15,6 +15,26 @@ image reference through the deployment repository, because swapping a binary mak
 declared image (see [ADR-0026](../adr/0026-collector-version-updates-on-kubernetes.md)). Container mode is meant for
 environments where that is not possible, such as air-gapped or edge clusters.
 
+## Images and support level
+
+Container mode is **beta** in v0.1.0 ([ADR-0021](../adr/0021-publication-gates-and-v0-1-0-scope.md)). The project publishes no
+collector image ([ADR-0024](../adr/0024-container-registry-and-image-set.md)), so container mode needs a collector image that
+you build yourself until the collector chart of v0.2.0: `deploy/k8s/collector/Dockerfile` or
+`scripts/build-collector-image-crane.sh` put the supervisor, `otelcol-contrib` and `myriarch-updater` into one image that keeps
+the entry point of the supervisor image (user 10001, the user of the upstream supervisor image, and group 0 for the volume).
+
+The updater in that image can be the released one. `ghcr.io/myriarch/myriarch-updater` is the published updater image (`FROM
+scratch`, user and group 65532, `/usr/local/bin/myriarch-updater`, built from the binary of the signed release archive). It is
+a source of the binary and not an image that runs container mode: it holds no supervisor and no collector, and it has no state
+directory of its own. The directories of container mode (`collector.installDir`, `stateDir`) are on the volume of the image that
+runs the updater, which is the collector image (`/var/lib/myriarch`, writable for its user 10001 and group 0, see
+`deploy/k8s/collector/Dockerfile`). The server image `ghcr.io/myriarch/myriarch` is a different case: it has the data directory
+`/var/lib/myriarchd` for the non-root user 65532, because the server writes the GitOps clone and the artifact cache there.
+
+Build the collector image with `--build-arg UPDATER_SOURCE=image --build-arg
+UPDATER_IMAGE=ghcr.io/myriarch/myriarch-updater@sha256:<digest>` to copy that binary instead of compiling the updater from your
+checkout; without the build arguments the Dockerfile compiles it. The digest is named in the release notes.
+
 ## Invocation
 
 `myriarch-updater container --config <file>`. The command runs on Linux and on macOS (useful for local end-to-end tests). On

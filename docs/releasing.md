@@ -28,7 +28,7 @@ Every other place that states the product version is a copy of `VERSION`:
 | `api/openapi.yaml`, `info.version` | Contract version of the REST API. It equals the release version. |
 | `web/package.json`, `version` | Version of the web UI package. |
 | `deploy/examples/production/myriarch-values.yaml`, `image.tag` | Image tag in the production example. |
-| `gitops-template/.gitlab-ci.yml`, `MYRCTL_IMAGE` | Tag of the `myrctl` image in the GitOps template. |
+| `gitops-template/.gitlab-ci.yml`, `MYRCTL_IMAGE` | Tag of the placeholder `myrctl` image in the GitOps template (the project publishes no `myrctl` image; you build it from the `myrctl` release archive). |
 
 The list lives in `ci/version-copies.py`. The binaries do not have a copy: they receive the version from the tag at build time.
 

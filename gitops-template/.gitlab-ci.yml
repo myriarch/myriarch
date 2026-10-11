@@ -7,8 +7,10 @@
 #   notify-myriarchd only on the default branch: triggers the sync in myriarchd through the webhook
 #
 # CI/CD variables (project: Settings -> CI/CD -> Variables)
-#   MYRCTL_IMAGE                  Image with myrctl (released with the code project; it must contain sh and curl).
-#                                   Default below; override with a project variable (project variables take precedence)
+#   MYRCTL_IMAGE                  Image with myrctl, sh and curl. The project publishes no myrctl image: build one in your
+#                                   registry from the myrctl_<version>_linux_<arch>.tar.gz release archive (any small base that
+#                                   has sh and curl). The default below is a placeholder; override it with a project variable
+#                                   (project variables take precedence)
 #   MYRIARCH_URL                      https://fleet.example.com (only for notify-myriarchd; deliberately WITHOUT a default)
 #   MYRIARCH_GITOPS_WEBHOOK_SECRET    Webhook secret = content of gitops-webhook-secret in the myriarchd Secret.
 #                                   Masked + protected (only available on protected branches -> protect main!)
@@ -35,7 +37,7 @@ variables:
 default:
   image:
     name: ${MYRCTL_IMAGE}
-    entrypoint: [""]          # the myrctl image has no mandatory entrypoint; GitLab starts its scripts with it
+    entrypoint: [""]          # the image has no mandatory entrypoint; GitLab starts its scripts with it
   interruptible: true
 
 validate:

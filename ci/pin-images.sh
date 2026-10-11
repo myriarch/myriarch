@@ -9,7 +9,6 @@
 #
 # Needs crane (ci/install-tools.sh crane) and access to the registries (HTTPS_PROXY if needed). A new digest does NOT
 # mean the image was reviewed: review the change (upstream release notes) before committing.
-# The digest of MYRCTL_BASE_IMAGE is also pinned in deploy/docker/myrctl.Dockerfile; ci/check.sh compares them.
 set -euo pipefail
 # shellcheck source=ci/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"

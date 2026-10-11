@@ -169,7 +169,7 @@ func TestComposeFile(t *testing.T) {
 
 func TestDockerfiles(t *testing.T) {
 	myriarchd := string(readDeploy(t, "docker/myriarchd.Dockerfile"))
-	for _, want := range []string{"node:20", "pnpm", "-tags embedui", "gcr.io/distroless/static:nonroot", "internal/webui/dist", "/myriarchd"} {
+	for _, want := range []string{"node:24", "pnpm", "-tags embedui", "gcr.io/distroless/static:nonroot", "internal/webui/dist", "/myriarchd"} {
 		assert.Contains(t, myriarchd, want)
 	}
 	sim := string(readDeploy(t, "docker/myriarch-sim.Dockerfile"))
@@ -220,12 +220,12 @@ func TestDockerfiles(t *testing.T) {
 
 // dockerCopy is one COPY instruction of a Dockerfile.
 type dockerCopy struct {
-	from, chmod string
-	srcs        []string
-	dst         string
+	from, chmod, chown string
+	srcs               []string
+	dst                string
 }
 
-// dockerCopies parses the COPY instructions (line continuations joined, comments skipped, flags --from and --chmod kept).
+// dockerCopies parses the COPY instructions (line continuations joined, comments skipped, flags --from, --chmod and --chown kept).
 func dockerCopies(dockerfile string) []dockerCopy {
 	var out []dockerCopy
 	for _, line := range strings.Split(strings.ReplaceAll(dockerfile, "\\\n", " "), "\n") {
@@ -241,6 +241,8 @@ func dockerCopies(dockerfile string) []dockerCopy {
 				c.from = v
 			case "--chmod":
 				c.chmod = v
+			case "--chown":
+				c.chown = v
 			}
 			args = args[1:]
 		}
@@ -262,25 +264,10 @@ func copyTo(copies []dockerCopy, dst string) (dockerCopy, bool) {
 	return dockerCopy{}, false
 }
 
-// The Dockerfiles of the images that are built from release artifacts take a build context that consists of exactly the
-// files they copy (documented in their header comments and in deploy/README.md), and no image carries the release
-// fixtures (test data of `myriarchd dev --releases-fixtures`, present only in the dev variant of the crane image).
-func TestReleaseDockerfilesBuildContext(t *testing.T) {
-	for rel, want := range map[string][]string{
-		"docker/myriarchd-release.Dockerfile": {"LICENSE", "THIRD_PARTY_NOTICES", "myriarchd"},
-		"docker/myrctl.Dockerfile":            {"LICENSE", "THIRD_PARTY_NOTICES", "myrctl"},
-	} {
-		df := string(readDeploy(t, rel))
-		var got []string
-		for _, c := range dockerCopies(df) {
-			assert.Emptyf(t, c.from, "%s has a single stage: COPY --from is not expected", rel)
-			got = append(got, c.srcs...)
-		}
-		sort.Strings(got)
-		assert.Equalf(t, want, got, "%s: the COPY sources are exactly the build context", rel)
-		assert.Contains(t, df, "THIRD_PARTY_NOTICES", "%s documents the build context", rel)
-	}
-
+// No image carries the release fixtures (test data of `myriarchd dev --releases-fixtures`, present only in the dev variant
+// of the crane image). The published images are not built from Dockerfiles but by scripts/build-image-crane.sh from the
+// release archives (deploy_image_contract_test.go), so deploy/docker holds only the local build Dockerfiles.
+func TestNoImageCarriesReleaseFixtures(t *testing.T) {
 	var all []string
 	files, err := filepath.Glob(filepath.Join(deployDir, "docker", "*.Dockerfile"))
 	require.NoError(t, err)

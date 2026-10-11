@@ -162,11 +162,13 @@ func TestFallbackRootsHelper(t *testing.T) {
 }
 
 // TestBinariesEmbedFallbackRoots keeps the import in the main packages of the
-// three binaries that are in the image. Without it the image (no CA bundle)
-// could not verify any public TLS certificate.
+// binaries that are in the images (the server image holds myriarchd, the updater
+// image myriarch-updater; the simulator and the CLI are built into the dev image
+// and the release archives). Without it an image (no CA bundle) could not verify
+// any public TLS certificate.
 func TestBinariesEmbedFallbackRoots(t *testing.T) {
 	const pkg = "golang.org/x/crypto/x509roots/fallback"
-	for _, bin := range []string{"myriarchd", "myriarch-sim", "myrctl"} {
+	for _, bin := range []string{"myriarchd", "myriarch-updater", "myriarch-sim", "myrctl"} {
 		file := filepath.Join("..", "..", "cmd", bin, "main.go")
 		f, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.ImportsOnly)
 		if err != nil {

@@ -62,12 +62,12 @@ config/                        <- gitops.path of the myriarchd configuration
 
    | Variable | Value | Options |
    |---|---|---|
-   | `MYRCTL_IMAGE` | `registry.example.com/myriarch/myrctl:<version>` | - (default in `.gitlab-ci.yml`) |
+   | `MYRCTL_IMAGE` | `registry.example.com/myriarch/myrctl:<version>`: an image of your own with `myrctl`, `sh` and `curl`, built from the `myrctl` release archive (the project publishes no `myrctl` image) | - (placeholder default in `.gitlab-ci.yml`) |
    | `MYRIARCH_URL` | `https://fleet.example.com` | - |
    | `MYRIARCH_GITOPS_WEBHOOK_SECRET` | content of `gitops-webhook-secret` in the myriarchd Secret (`openssl rand -hex 32`) | **masked**, **protected** |
    | `MYRIARCH_CA_FILE` | PEM of your CA | type **File**, only needed if the runner/image does not trust the CA |
 
-   The runner must be able to reach your registry and pull the `myrctl` image.
+   The runner must be able to reach your registry and pull the `myrctl` image you built.
 5. **Read-only token for myriarchd**: create a deploy token with the scope **`read_repository`** only. User name and
    token belong into the myriarchd configuration (`gitops.auth.username` and the Secret key `git-token`, see
    `deploy/examples/production`). Never write the token into this repository.

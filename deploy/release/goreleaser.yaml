@@ -3,7 +3,8 @@
 # Release matrix of myriarch (authoritative for releases; "make release" builds all binaries for all five platforms as
 # a check):
 #
-#   myriarchd        linux amd64/arm64, darwin arm64            (with the embedded web UI, -tags embedui)
+#   myriarchd        linux amd64/arm64, darwin arm64            (with the embedded web UI, -tags embedui; the archive also holds
+#                                                               examples/quickstart for the server image)
 #   myriarch-updater linux amd64/arm64, windows amd64/arm64
 #   myrctl      linux, darwin, windows x amd64/arm64
 #   myriarch-sim     linux amd64/arm64, darwin arm64
@@ -27,7 +28,7 @@
 # Publishing is not configured here: the release page and keyless signing come with the GitHub release workflow
 # (ADR-0023). `release:` below is disabled until then.
 #
-# Prerequisites: Go, Node 20 + pnpm (UI build, only if internal/webui/dist is missing), cosign v3 (signing is mandatory
+# Prerequisites: Go, Node.js (.node-version) + pnpm (UI build, only if internal/webui/dist is missing), cosign v3 (signing is mandatory
 # for releases; --skip=sign is meant for snapshots only) and, for the Windows binaries, osslsigncode + an Authenticode
 # certificate (deploy/release/authenticode.sh aborts release builds without a certificate).
 # Signing keys: deploy/release/README.md.
@@ -119,6 +120,11 @@ archives:
         info:
           mtime: "{{ .CommitDate }}"
       - src: deploy/docker/*
+        info:
+          mtime: "{{ .CommitDate }}"
+      # the example GitOps repository: the published server image (scripts/build-image-crane.sh, IMAGE_SOURCE=dist) takes it
+      # from this archive, so everything in the image is covered by checksums.txt
+      - src: examples/quickstart
         info:
           mtime: "{{ .CommitDate }}"
 
