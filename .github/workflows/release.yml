@@ -739,10 +739,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
           RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
           RELEASE_PRERELEASE: ${{ needs.guard.outputs.prerelease }}
           NOTES_START_TAG: ${{ needs.guard.outputs.notes-start-tag }}
         run: |
-          ci/release/draft.sh --tag "${RELEASE_TAG}" --notes "${RUNNER_TEMP}/notes.md" \
+          ci/release/draft.sh --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}" --notes "${RUNNER_TEMP}/notes.md" \
             --assets "${RUNNER_TEMP}/release/assets" --signatures "${RUNNER_TEMP}/signatures" >> "${GITHUB_OUTPUT}"
 
   # Verifies the files, the signatures, the provenance and both images against the tag, the commit and the frozen identity.
@@ -959,7 +960,7 @@ jobs:
     timeout-minutes: 20
     environment: release
     permissions:
-      contents: write # create the draft release and publish it (the Releases API accepts no narrower scope)
+      contents: write # read the draft release and publish it (the Releases API accepts no narrower scope)
       packages: write # write the packages of this repository in ghcr.io
       attestations: read # read the attestations to verify them
     outputs:
@@ -1009,6 +1010,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
           RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
           RELEASE_ID: ${{ needs.draft.outputs.release-id }}
           RELEASE_PRERELEASE: ${{ needs.guard.outputs.prerelease }}
           RELEASE_LATEST: ${{ needs.guard.outputs.latest }}
@@ -1114,10 +1116,11 @@ jobs:
           TOOLS_BIN: ${{ runner.temp }}/tools/${{ matrix.tools }}
           RELEASE_TAG: ${{ needs.guard.outputs.tag }}
           RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
           ARCH: ${{ matrix.arch }}
           SERVER_INDEX_DIGEST: ${{ needs.images.outputs.server-index }}
           UPDATER_INDEX_DIGEST: ${{ needs.images.outputs.updater-index }}
-        run: ci/release/smoke.sh linux --tag "${RELEASE_TAG}" --arch "${ARCH}"
+        run: ci/release/smoke.sh linux --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}" --arch "${ARCH}"
 
   # Installs the published Windows updater in staging mode with the documented verification.
   smoke-windows:
@@ -1159,10 +1162,11 @@ jobs:
         shell: pwsh
         env:
           RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
           RELEASE_VERSION: ${{ needs.guard.outputs.version }}
           WINDOWS_SIGNING: ${{ needs.guard.outputs.windows-signing }}
         run: |
-          ./ci/release/smoke-windows.ps1 -Mode Install -Tag $env:RELEASE_TAG -Version $env:RELEASE_VERSION `
+          ./ci/release/smoke-windows.ps1 -Mode Install -Tag $env:RELEASE_TAG -Commit $env:RELEASE_COMMIT -Version $env:RELEASE_VERSION `
             -Cosign "$env:RUNNER_TEMP\tools\windows-amd64\cosign.exe" -WindowsSigning $env:WINDOWS_SIGNING
 
   # Installs the chart from the tag on a kind cluster with the published server image.

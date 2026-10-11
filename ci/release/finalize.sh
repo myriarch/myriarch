@@ -6,13 +6,13 @@
 # approval of the environment `release`, ADR-0035). Privileged (contents: write, packages: write): it is called with a PATH that has no
 # go, node, pnpm, make or goreleaser.
 #
-#   GH_TOKEN=... TOOLS_BIN=... RELEASE_PRERELEASE=... RELEASE_LATEST=... IMAGE_TAGS=... SERVER_INDEX_DIGEST=... \
+#   GH_TOKEN=... TOOLS_BIN=... RELEASE_COMMIT=... RELEASE_PRERELEASE=... RELEASE_LATEST=... IMAGE_TAGS=... SERVER_INDEX_DIGEST=... \
 #   UPDATER_INDEX_DIGEST=... GITHUB_RUN_ATTEMPT=... ci/release/finalize.sh --tag TAG --release-id ID --verified DIR
 #
 #   --verified DIR  the artifact of the verify job: verified-manifest.txt, verified-images.txt, checksums.txt
 #
 # Order (nothing is tagged or published before the checks 1 to 4 and the planning of 5 passed)
-#   1. inputs       ID is a number; verified-manifest.txt has the 42 names of assets.json with well-formed lines; verified-images.txt has
+#   1. inputs       ID is a number; RELEASE_COMMIT is the commit of the tag; verified-manifest.txt has the 42 names of assets.json with well-formed lines; verified-images.txt has
 #                   six lines whose index digests equal the two environment digests [verified_mismatch]; IMAGE_TAGS are the tags of TAG
 #                   (X.Y.Z-rc.N, or X.Y.Z and X.Y) and none is latest [image_tag_latest]; RELEASE_PRERELEASE and RELEASE_LATEST fit TAG
 #   2. visibility   all six digests are read WITHOUT credentials (a fresh empty DOCKER_CONFIG for that one crane call): ghcr.io makes a
@@ -21,16 +21,21 @@
 #                   [draft_foreign]; it is the only release of the tag [draft_ambiguous]; it is a draft, or - only in a re-run
 #                   (GITHUB_RUN_ATTEMPT > 1) after it was published by this job - published with the same assets [release_not_draft]
 #   4. assets       the names equal the manifest; each asset is uploaded [asset_state] by github-actions[bot] [asset_foreign], has the
-#                   size [asset_size_mismatch] and the SHA-256 digest of the manifest [asset_digest_missing] [asset_digest_mismatch]
+#                   size [asset_size_mismatch] and the SHA-256 digest of the manifest [asset_digest_missing] [asset_digest_mismatch];
+#                   refs/tags/TAG resolves (an annotated tag is dereferenced) to RELEASE_COMMIT [tag_moved]
 #   5. image tags   per repository from `crane ls`: an immutable tag (X.Y.Z-rc.N, X.Y.Z) is set when absent, kept when it already
 #                   points at the index, and a conflict otherwise [image_tag_conflict]; the moving tag X.Y (final tags only) is set when
 #                   absent, re-set when its image has a lower version, left alone (and logged) when its version is higher, and a
 #                   conflict when unreadable; a repository with a tag latest is refused. After tagging, `crane digest` of every tag
 #                   that was set or kept equals the index [image_tag_mismatch]
-#   6. publish      gh api -X PATCH repos/<repository>/releases/ID -F draft=false -f make_latest=<RELEASE_LATEST> [publish_failed]
+#   6. publish      directly before: the release is read by ID again and checks 3 and 4 are repeated (the draft may have changed while
+#                   the image tags were set), and the tag is resolved again [tag_moved]. Then
+#                   gh api -X PATCH repos/<repository>/releases/ID -F draft=false -f make_latest=<RELEASE_LATEST> [publish_failed]
 #   7. post checks  (each retried up to 10 times, RELEASE_RETRY_DELAY seconds apart, default 15: the release attestation appears shortly
 #                   after publication) gh release view: not a draft, the same ID, the prerelease flag, immutable [release_not_immutable];
-#                   gh release verify [release_attestation]; gh release verify-asset on checksums.txt [release_asset_attestation]
+#                   the release is read by ID once more and check 4 is repeated on the published, now immutable release
+#                   [release_assets_changed: the run must say that the release is immutable and wrong]; gh release verify
+#                   [release_attestation]; gh release verify-asset on checksums.txt [release_asset_attestation]
 #   8. stdout       release-url=https://github.com/<repository>/releases/tag/TAG
 #
 # Exit status: 0 published and checked, 1 refused or failed, 2 usage error.
@@ -60,6 +65,8 @@ need_tool crane
 repo="${RELEASE_REPOSITORY}"
 version="${tag#v}"
 base="${version%%-*}"
+commit="${RELEASE_COMMIT:-}"
+check_match commit_invalid "RELEASE_COMMIT" "${commit}" "${COMMIT_RE}"
 attempt="${GITHUB_RUN_ATTEMPT:-1}"
 check_match run_attempt_invalid "GITHUB_RUN_ATTEMPT" "${attempt}" '^[1-9][0-9]*$'
 delay="${RELEASE_RETRY_DELAY:-15}"
@@ -138,9 +145,15 @@ EOT
 info "all six image digests are readable without credentials"
 
 # --- 3. the release ----------------------------------------------------------------------------------------------------------
-rel="$(gh_json "read release ${rid}" api "repos/${repo}/releases/${rid}")"
-trap 'rm -rf "${anon}" "${work}"; rm -f "${rel}"' EXIT
-draft="$(python3 -I - "${rel}" "${tag}" "${prerelease}" "${BOT}" <<'PY'
+rel=""
+trap 'rm -rf "${anon}" "${work}"; [ -z "${rel}" ] || rm -f "${rel}"' EXIT
+read_release() { # what: reads the release by ID into the file ${rel}
+  [ -z "${rel}" ] || rm -f "${rel}"
+  rel="$(gh_json "$1" api "repos/${repo}/releases/${rid}")"
+}
+# release_draft_flag: the release in ${rel} is the release that the workflow created for TAG; prints true (draft) or false (published)
+release_draft_flag() {
+  python3 -I - "${rel}" "${tag}" "${prerelease}" "${BOT}" <<'PY' || exit 1
 import json, sys
 
 path, tag, prerelease, bot = sys.argv[1:5]
@@ -157,7 +170,9 @@ if not ok:
     sys.exit(1)
 print(str(r["draft"]).lower())
 PY
-)" || exit 1
+}
+read_release "read release ${rid}"
+draft="$(release_draft_flag)" || exit 1
 rows="$(release_rows "${tag}")"
 n=0
 while IFS='|' read -r id _ _ _ _; do
@@ -177,15 +192,22 @@ if [ "${draft}" = false ]; then
   info "release ${rid} is already published (re-run ${attempt}); continuing with the tags and the checks"
 fi
 
-# --- 4. the assets -----------------------------------------------------------------------------------------------------------
-python3 -I - "${rel}" "${manifest}" "${BOT}" <<'PY' || exit 1
+# --- 4. the assets and the tag -----------------------------------------------------------------------------------------------
+# check_assets [code]: the assets of the release in ${rel} are exactly the verified files. With a code, every refusal carries that code
+# (used after the publication, when the release is immutable and a difference cannot be undone).
+check_assets() {
+  python3 -I - "${rel}" "${manifest}" "${BOT}" "${1:-}" <<'PY' || exit 1
 import json, re, sys
 
-path, manifest_path, bot = sys.argv[1:4]
+path, manifest_path, bot, override = sys.argv[1:5]
 
 
 def fail(code, msg):
-    print("[finalize] ERROR [%s] %s" % (code, msg), file=sys.stderr)
+    if override:
+        print("[finalize] ERROR [%s] the release is published and immutable, but its files differ from the verified files (%s: %s). "
+              "Do not use this release; publish a new tag." % (override, code, msg), file=sys.stderr)
+    else:
+        print("[finalize] ERROR [%s] %s" % (code, msg), file=sys.stderr)
     sys.exit(1)
 
 
@@ -217,7 +239,43 @@ for a in assets:
     if d != "sha256:" + want[n][0]:
         fail("asset_digest_mismatch", "%s differs from the verified file" % n)
 PY
+}
+# check_tag: refs/tags/TAG is a tag of RELEASE_COMMIT (an annotated tag is dereferenced, at most three levels). GitHub creates a missing
+# tag of a published draft at its target, so a tag that was moved or re-created would otherwise publish another commit than the one that
+# was signed and verified.
+tag_object() { # file: "<type> <sha>" of the object of a ref or an annotated tag
+  python3 -I -c '
+import json, re, sys
+
+try:
+    o = json.load(open(sys.argv[1], encoding="utf-8"))["object"]
+    assert o["type"] in ("commit", "tag") and re.match(r"^[0-9a-f]{40}$", o["sha"])
+except (OSError, ValueError, KeyError, TypeError, AssertionError):
+    sys.exit(1)
+print(o["type"], o["sha"])
+' "$1"
+}
+check_tag() {
+  local f line otype osha _
+  f="$(gh_json "resolve the tag ${tag}" api "repos/${repo}/git/ref/tags/${tag}")"
+  line="$(tag_object "${f}")" || { rm -f "${f}"; err tag_moved "the ref of the tag ${tag} is not a commit or a tag object"; }
+  rm -f "${f}"
+  for _ in 1 2 3; do
+    otype="${line%% *}"
+    osha="${line#* }"
+    [ "${otype}" = tag ] || break
+    f="$(gh_json "read the tag object ${osha}" api "repos/${repo}/git/tags/${osha}")"
+    line="$(tag_object "${f}")" || { rm -f "${f}"; err tag_moved "the tag object of ${tag} is not a commit or a tag object"; }
+    rm -f "${f}"
+  done
+  otype="${line%% *}"
+  osha="${line#* }"
+  [ "${otype}" = commit ] && [ "${osha}" = "${commit}" ] || err tag_moved "the tag ${tag} resolves to ${osha}, not to ${commit}, the commit that was signed and verified"
+}
+check_assets
 info "the ${m_count} assets of release ${rid} are the verified files"
+check_tag
+info "the tag ${tag} points at ${commit}"
 
 # --- 5. image tags: plan everything, then tag -------------------------------------------------------------------------------
 # lower|equal|higher|invalid: the version of the image behind the moving tag against this release
@@ -294,6 +352,11 @@ EOT
 
 # --- 6. publish --------------------------------------------------------------------------------------------------------------
 if [ "${published}" = 0 ]; then
+  # the draft is read again directly before the publication: the tags above took time, and the files of a draft stay editable
+  read_release "read release ${rid} again"
+  [ "$(release_draft_flag)" = true ] || err release_not_draft "release ${rid} of ${tag} was published while this job set the image tags"
+  check_assets
+  check_tag
   info "publishing release ${rid} of ${tag}"
   "${TOOLS_BIN}/gh" api -X PATCH "repos/${repo}/releases/${rid}" -F draft=false -f "make_latest=${latest}" > /dev/null || err publish_failed "publishing release ${rid} failed"
 fi
@@ -326,6 +389,11 @@ sys.exit(0 if json.load(sys.stdin).get("isImmutable") is True else 1)
 }
 retry release_state "release ${tag} is not published as release ${rid} with the expected pre-release flag" view_state_ok
 retry release_not_immutable "release ${tag} is published but NOT immutable: enable release immutability for the organization or repository before the next tag (it applies only to later releases); this release stays mutable" immutable_ok
+# the release is immutable now: its files are final. Compare them with the verified files once more.
+read_release "read the published release ${rid}"
+[ "$(release_draft_flag)" = false ] || err release_state "release ${rid} of ${tag} is not published"
+check_assets release_assets_changed
+info "the published, immutable release holds exactly the verified files"
 retry release_attestation "gh release verify ${tag} failed: the release attestation is missing or invalid" \
   "${TOOLS_BIN}/gh" release verify "${tag}" --repo "${repo}"
 retry release_asset_attestation "gh release verify-asset failed for checksums.txt of ${tag}" \

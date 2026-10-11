@@ -405,6 +405,22 @@ while i < len(lines):
     else:
         i += 1
 
+# ---- the commit reaches every step that binds the release to it (the exact identity, the tag-to-commit check, the release target) -----
+COMMIT_STEPS = {
+    ("draft", "Create the draft release"): '--commit "${RELEASE_COMMIT}"',
+    ("finalize", "Check, tag and publish"): "",
+    ("smoke-assets", "Smoke test the published assets and images"): '--commit "${RELEASE_COMMIT}"',
+    ("smoke-linux", "Smoke test the Linux installation"): '--commit "${RELEASE_COMMIT}"',
+    ("smoke-windows", "Smoke test the Windows installation"): "-Commit $env:RELEASE_COMMIT",
+}
+for (jid, step_name), needle in COMMIT_STEPS.items():
+    found = [s for s in steps_of.get(jid, []) if tx(s.get("name")) == step_name]
+    check(len(found) == 1, "job %s: the step '%s' is missing" % (jid, step_name))
+    for s in found:
+        check(tx(mp(s.get("env")).get("RELEASE_COMMIT")) == "${{ needs.guard.outputs.commit }}",
+              "job %s, step '%s': RELEASE_COMMIT must be needs.guard.outputs.commit" % (jid, step_name))
+        check(needle in (tx(s.get("run")) or ""), "job %s, step '%s': the script must be called with the commit (%s)" % (jid, step_name, needle))
+
 # ---- Windows jobs keep the LF line endings of the scripts (GitHub's Windows images set core.autocrlf=true) -------------------
 for jid, steps in steps_of.items():
     if not JOBS[jid][4].startswith("windows-"):
@@ -510,6 +526,12 @@ expect_fail "a secret is refused" 'reads no secret' \
   mutated $'      - name: Run the tag guard\n        env:\n' $'      - name: Run the tag guard\n        env:\n          X: ${{ secrets.X }}\n'
 expect_fail "a Windows job without the line-ending step is refused" 'job verify-windows: the first step must set core.autocrlf false' \
   mutated 'git config --global core.autocrlf false' 'git config --global core.autocrlf true'
+expect_fail "finalize without RELEASE_COMMIT is refused" "job finalize, step 'Check, tag and publish': RELEASE_COMMIT" \
+  mutated $'          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}\n          RELEASE_ID:' $'          RELEASE_ID:'
+expect_fail "a smoke test without the commit is refused" "job smoke-linux, step 'Smoke test the Linux installation': the script must be called with the commit" \
+  mutated 'smoke.sh linux --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}" --arch' 'smoke.sh linux --tag "${RELEASE_TAG}" --arch'
+expect_fail "a Windows smoke test without the commit is refused" "job smoke-windows, step 'Smoke test the Windows installation': the script must be called with the commit" \
+  mutated ' -Commit $env:RELEASE_COMMIT' ''
 expect_fail "a renamed workflow file is refused" 'must be named release.yml' \
   bash -c 'mkdir -p "$1/renamed" && cp "$2" "$1/renamed/publish.yml" && python3 -I "$3" "$1/renamed/publish.yml" "$4"' _ "${TEST_TMP}" "${WORKFLOW}" "${CHECKER}" "${CI_DIR}/check-workflows.py"
 

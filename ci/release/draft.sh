@@ -7,8 +7,10 @@
 # (contents: write): it is called with a PATH that has no go, node, pnpm, make or goreleaser.
 #
 #   GH_TOKEN=... TOOLS_BIN=... RELEASE_PRERELEASE=true|false NOTES_START_TAG=<tag or empty> \
-#     ci/release/draft.sh --tag TAG --notes FILE --assets DIR --signatures DIR
+#     ci/release/draft.sh --tag TAG --commit SHA --notes FILE --assets DIR --signatures DIR
 #
+#   --commit      the commit of the tag (guard output). It is the target of the release, so that GitHub would create a missing tag
+#                 of the published draft at this commit and nowhere else; finalize.sh checks the tag again before it publishes.
 #   --assets      the 40 files of stage `unsigned` (release-assets artifact); --signatures: checksums.txt.sigstore.json and the
 #                 provenance file. verify-dist.sh checks the union as stage `final` (42 files) first.
 #
@@ -18,24 +20,25 @@
 #        a published one      -> [release_exists]: a published tag is never released again, tag the next rc
 #        a draft whose author is not github-actions[bot] -> [draft_foreign]: delete or rename it by hand, then re-run
 #        drafts of github-actions[bot] (left by an earlier attempt) -> deleted by id (gh api -X DELETE), each logged
-#   3. gh release create TAG --repo <repository> --draft --verify-tag --title TAG --notes-file FILE --generate-notes
+#   3. gh release create TAG --repo <repository> --draft --verify-tag --target SHA --title TAG --notes-file FILE --generate-notes
 #        [--notes-start-tag NOTES_START_TAG] [--prerelease] <the 42 files sorted by name>      [create_failed]
 #      --prerelease exactly when RELEASE_PRERELEASE=true; never --latest. The notes of FILE come first, then GitHub's generated list.
 #   4. reads the list again: exactly one draft of the tag by github-actions[bot] [draft_ambiguous] [draft_missing], with exactly the
 #      42 names [asset_missing] [asset_unexpected] and the requested prerelease flag [prerelease_mismatch]
-# stdout: release-id=<REST id of the draft>.
+# stdout: release-id=<REST id of the draft> (a number [release_id_invalid]).
 #
 # Exit status: 0 ok, 1 refused or failed, 2 usage error.
 set -euo pipefail
 # shellcheck source=ci/release/common.sh
 . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-USAGE="draft.sh --tag TAG --notes FILE --assets DIR --signatures DIR"
+USAGE="draft.sh --tag TAG --commit SHA --notes FILE --assets DIR --signatures DIR"
 BOT="github-actions[bot]"
-tag="" notes="" assets="" signatures=""
+tag="" commit="" notes="" assets="" signatures=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --tag) need_value "$1" "$#"; tag="$2"; shift 2 ;;
+    --commit) need_value "$1" "$#"; commit="$2"; shift 2 ;;
     --notes) need_value "$1" "$#"; notes="$2"; shift 2 ;;
     --assets) need_value "$1" "$#"; assets="$2"; shift 2 ;;
     --signatures) need_value "$1" "$#"; signatures="$2"; shift 2 ;;
@@ -43,9 +46,10 @@ while [ "$#" -gt 0 ]; do
     *) usage_err "${USAGE}" ;;
   esac
 done
-[ -n "${tag}" ] && [ -n "${notes}" ] && [ -n "${assets}" ] && [ -n "${signatures}" ] || usage_err "${USAGE}"
+[ -n "${tag}" ] && [ -n "${commit}" ] && [ -n "${notes}" ] && [ -n "${assets}" ] && [ -n "${signatures}" ] || usage_err "${USAGE}"
 load_identity
 check_match tag_invalid "--tag" "${tag}" "${TAG_RE}"
+check_match commit_invalid "--commit" "${commit}" "${COMMIT_RE}"
 for v in "${notes}" "${assets}" "${signatures}"; do check_text file_missing "a path argument" "${v}"; done
 [ -f "${notes}" ] || err file_missing "the notes file ${notes} does not exist"
 [ -d "${assets}" ] && [ -d "${signatures}" ] || err file_missing "--assets and --signatures must be directories"
@@ -100,7 +104,7 @@ done
 # --- 3. create ---------------------------------------------------------------------------------------------------------------
 names=()
 while IFS= read -r name; do names+=("${real}/${name}"); done < <(asset_set "${version}" names)
-args=(release create "${tag}" --repo "${repo}" --draft --verify-tag --title "${tag}" --notes-file "${notes}" --generate-notes)
+args=(release create "${tag}" --repo "${repo}" --draft --verify-tag --target "${commit}" --title "${tag}" --notes-file "${notes}" --generate-notes)
 if [ -n "${start_tag}" ]; then args+=(--notes-start-tag "${start_tag}"); fi
 if [ "${prerelease}" = true ]; then args+=(--prerelease); fi
 args+=("${names[@]}")
@@ -119,6 +123,7 @@ ${rows}
 EOT
 [ "${count}" -le 1 ] || err draft_ambiguous "tag ${tag} has more than one release, or one that is not a draft of the release workflow"
 [ -n "${found_id}" ] || err draft_missing "the draft of ${tag} is not in the release list"
+check_match release_id_invalid "the id of the draft" "${found_id}" '^[1-9][0-9]*$'
 want=" $(asset_set "${version}" names | tr '\n' ' ')"
 for name in ${found_assets}; do
   case "${want}" in *" ${name} "*) ;; *) err asset_unexpected "the draft has the file ${name}, which is not part of the release" ;; esac

@@ -92,8 +92,16 @@ case "$1" in
     done
     case "${method}:${path}" in
       GET:repos/*/releases\?per_page=100) n="$(counter list.count)"; f="${d}/list.${n}.json"; [ -f "${f}" ] || f="${d}/list.json"; cat "${f}" ;;
-      GET:repos/*/releases/*) cat "${d}/release.${path##*/}.json" ;;
-      PATCH:*) [ ! -f "${d}/patch.rc" ] || exit "$(cat "${d}/patch.rc")" ;;
+      GET:repos/*/git/ref/tags/*) n="$(counter ref.count)"; f="${d}/ref.${n}.json"; [ -f "${f}" ] || f="${d}/ref.json"; cat "${f}" ;;
+      GET:repos/*/git/tags/*) cat "${d}/tagobj.${path##*/}.json" ;;
+      GET:repos/*/releases/*)
+        # the n-th read of a release is release.<id>.<n>.json when that file exists (a release that changes between two reads)
+        # after the PATCH the verified state is published (draft false); a numbered variant is returned as it is
+        n="$(counter "release.count.${path##*/}")"; f="${d}/release.${path##*/}.${n}.json"
+        if [ -f "${f}" ]; then cat "${f}"
+        elif [ -f "${d}/patched" ]; then sed 's/"draft": true/"draft": false/' "${d}/release.${path##*/}.json"
+        else cat "${d}/release.${path##*/}.json"; fi ;;
+      PATCH:*) [ ! -f "${d}/patch.rc" ] || exit "$(cat "${d}/patch.rc")"; : > "${d}/patched" ;;
     esac ;;
   release)
     case "${2:-}" in
@@ -136,6 +144,7 @@ case "$1" in
   tag)
     [ ! -f "${d}/crane.tag.rc" ] || exit "$(cat "${d}/crane.tag.rc")"
     repo="${2%@*}"; digest="${2#*@}"
+    [ ! -f "${d}/crane.tag.wrong" ] || digest="$(cat "${d}/crane.tag.wrong")"
     echo "${digest}" > "${d}/crane/digest.$(key "${repo}:$3")"
     echo "$3" >> "${d}/crane/ls.$(key "${repo}")" ;;
 esac
@@ -1010,7 +1019,7 @@ bot='github-actions[bot]'
 dr() { # tag assets-dir sig-dir [extra...] : with GH_TOKEN, RELEASE_PRERELEASE (from the tag) and NOTES_START_TAG
   local tag="$1" a="$2" sg="$3" pre=false; shift 3
   case "${tag}" in *-rc.*) pre=true ;; esac
-  GH_TOKEN=stub-token-not-secret RELEASE_PRERELEASE="${RP_PRE:-${pre}}" NOTES_START_TAG="${RP_START:-}" run_priv "${REL}/draft.sh" --tag "${tag}" --notes "${NOTES_FILE}" --assets "${a}" --signatures "${sg}" "$@"
+  GH_TOKEN=stub-token-not-secret RELEASE_PRERELEASE="${RP_PRE:-${pre}}" NOTES_START_TAG="${RP_START:-}" run_priv "${REL}/draft.sh" --tag "${tag}" --commit "${DR_COMMIT:-${C40}}" --notes "${NOTES_FILE}" --assets "${a}" --signatures "${sg}" "$@"
 }
 create_view() { # n: head options, file basenames of the n-th gh call
   python3 -I - "${S}/calls/gh.log" "$1" <<'PY'
@@ -1032,7 +1041,7 @@ gen list "${S}" list.2.json v9.9.9 "101,1,${bot},${ALLN}"
 expect_ok "draft: no releases yet" dr v9.9.9 "${FA}" "${SIGS}"
 contains "draft: stdout is release-id" "release-id=101" "${OUT}"
 eq "draft: the first call lists the releases" "api --paginate --slurp repos/myriarch/myriarch/releases?per_page=100" "$(call_line gh 1)"
-eq "draft: the create call (final, no notes-start-tag)" "release create v9.9.9 --repo myriarch/myriarch --draft --verify-tag --title v9.9.9 --notes-file NOTES --generate-notes |  | 42 files in 1 directory" "$(create_view 2 | head -n 1)"
+eq "draft: the create call (final, no notes-start-tag)" "release create v9.9.9 --repo myriarch/myriarch --draft --verify-tag --target ${C40} --title v9.9.9 --notes-file NOTES --generate-notes |  | 42 files in 1 directory" "$(create_view 2 | head -n 1)"
 eq "draft: the 42 files sorted by name" "$(gen names "${ver}" final)" "$(create_view 2 | tail -n +2)"
 no_call gh '(^| )--(prerelease|latest)( |$)' && ok "draft: neither --prerelease nor --latest for a final tag" || fail "draft: forbidden flag"
 no_call gh '(^| )(-X DELETE)' && ok "draft: nothing to delete" || fail "draft: unexpected DELETE"
@@ -1042,7 +1051,7 @@ gen list "${S}" list.1.json v9.9.9-rc.1 ""
 gen list "${S}" list.2.json v9.9.9-rc.1 "55,1,${bot},${ALLN_RC}"
 RP_START=v9.9.8-rc.1 expect_ok "draft: an rc with a start tag" dr v9.9.9-rc.1 "${TEST_TMP}/far" "${TEST_TMP}/sigsr"
 contains "draft rc: the draft id" "release-id=55" "${OUT}"
-eq "draft rc: --notes-start-tag then --prerelease" "release create v9.9.9-rc.1 --repo myriarch/myriarch --draft --verify-tag --title v9.9.9-rc.1 --notes-file NOTES --generate-notes | --notes-start-tag v9.9.8-rc.1 --prerelease | 42 files in 1 directory" "$(create_view 2 | head -n 1)"
+eq "draft rc: --notes-start-tag then --prerelease" "release create v9.9.9-rc.1 --repo myriarch/myriarch --draft --verify-tag --target ${C40} --title v9.9.9-rc.1 --notes-file NOTES --generate-notes | --notes-start-tag v9.9.8-rc.1 --prerelease | 42 files in 1 directory" "$(create_view 2 | head -n 1)"
 reset_stubs
 gen list "${S}" list.1.json v9.9.9-rc.1 "7,1,${bot},;8,1,${bot},old.txt"
 gen list "${S}" list.2.json v9.9.9-rc.1 "56,1,${bot},${ALLN_RC}"
@@ -1079,6 +1088,19 @@ gen list "${S}" list.2.json v9.9.9 "101,1,${bot},${ALLN}"; rm -f "${S}/list.coun
 expect_fail "draft: a failing gh release create" "create_failed" dr v9.9.9 "${FA}" "${SIGS}"
 rm -f "${S}/create.rc" "${S}/list.count"
 RP_PRE=true expect_fail "draft: a final tag with RELEASE_PRERELEASE=true" "prerelease_invalid" dr v9.9.9 "${FA}" "${SIGS}"
+reset_stubs
+DR_COMMIT=abc expect_fail "draft: a commit that is not 40 hex digits" "commit_invalid" dr v9.9.9 "${FA}" "${SIGS}"
+no_call gh '.' && ok "draft: no gh call for a malformed commit" || fail "draft: gh called for a malformed commit"
+reset_stubs
+gen list "${S}" list.1.json v9.9.9 ""
+python3 -I -c '
+import json, sys
+names = sys.argv[1].split("+")
+json.dump([[{"id": "12x", "tag_name": "v9.9.9", "name": "v9.9.9", "draft": True, "prerelease": False, "author": {"login": "github-actions[bot]"},
+             "assets": [{"name": n} for n in names]}]], open(sys.argv[2], "w"))
+' "${ALLN}" "${S}/list.2.json"
+expect_fail "draft: an id that is not a number never reaches GITHUB_OUTPUT" "release_id_invalid" dr v9.9.9 "${FA}" "${SIGS}"
+case "${OUT}" in *release-id=*) fail "draft: release-id was printed for a malformed id" ;; *) ok "draft: no release-id line for a malformed id" ;; esac
 mkdir -p "${TEST_TMP}/fa_short"; cp -R "${FA}/." "${TEST_TMP}/fa_short/"; rm "${TEST_TMP}/fa_short/LICENSE"
 expect_fail "draft: a missing file stops before any gh call" "asset_missing" dr v9.9.9 "${TEST_TMP}/fa_short" "${SIGS}"
 
@@ -1181,9 +1203,10 @@ fsetup() { # tag [image options...]
   gen verified "${FVER}" "${FA_}" "${FS_}" "${FV}" "${SERVER_INDEX_DIGEST}" "${SERVER_AMD64_DIGEST}" "${SERVER_ARM64_DIGEST}" "${UPDATER_INDEX_DIGEST}" "${UPDATER_AMD64_DIGEST}" "${UPDATER_ARM64_DIGEST}"
   gen release "${S}" 4711 "${FTAG}" "${FV}" "${FVER}/verified-manifest.txt"
   printf '{"tagName":"%s","isDraft":false,"isPrerelease":%s,"isImmutable":true,"databaseId":4711}\n' "${FTAG}" "${FPRE}" > "${S}/view.json"
+  printf '{"ref":"refs/tags/%s","object":{"type":"commit","sha":"%s"}}\n' "${FTAG}" "${C40}" > "${S}/ref.json"
 }
 fr() {
-  GH_TOKEN=stub-token-not-secret RELEASE_PRERELEASE="${FPRE}" RELEASE_LATEST="${FR_LATEST:-${FLATEST}}" IMAGE_TAGS="${FR_TAGS:-${FTAGS}}" \
+  GH_TOKEN=stub-token-not-secret RELEASE_COMMIT="${FR_COMMIT:-${C40}}" RELEASE_PRERELEASE="${FPRE}" RELEASE_LATEST="${FR_LATEST:-${FLATEST}}" IMAGE_TAGS="${FR_TAGS:-${FTAGS}}" \
     GITHUB_RUN_ATTEMPT="${FR_ATTEMPT:-1}" RELEASE_RETRY_DELAY=0 run_priv "${REL}/finalize.sh" --tag "${FTAG}" --release-id "${FR_ID:-4711}" --verified "${FVER}"
 }
 seq_line() { grep -n "$1" "${S}/calls/all.log" | head -n 1 | cut -d: -f1; }
@@ -1196,8 +1219,11 @@ eq "finalize rc: no other crane call uses an anonymous config" "0" "$(call_count
 eq "finalize rc: crane tag for both repositories" "2" "$(call_count crane '^tag ')"
 has_call crane "^tag ${REPO_S}@${SERVER_INDEX_DIGEST} 9.9.9-rc.1 " && has_call crane "^tag ${REPO_U}@${UPDATER_INDEX_DIGEST} 9.9.9-rc.1 " && ok "finalize rc: tag 9.9.9-rc.1 on the index digests" || fail "finalize rc: wrong crane tag calls"
 no_call crane '(^| )latest( |$)' && ok "finalize rc: no call with latest" || fail "finalize rc: a call with latest"
-eq "finalize rc: the publish call (draft=false, make_latest=false)" "api -X PATCH repos/myriarch/myriarch/releases/4711 -F draft=false -f make_latest=false" "$(call_line gh 3)"
-eq "finalize rc: gh calls: read, list, PATCH, view x2, verify, verify-asset" "7" "$(call_count gh '.')"
+eq "finalize rc: the publish call (draft=false, make_latest=false)" "api -X PATCH repos/myriarch/myriarch/releases/4711 -F draft=false -f make_latest=false" "$(call_line gh 6)"
+eq "finalize rc: gh calls: read, list, tag, read again, tag again, PATCH, view x2, read published, verify, verify-asset" "11" "$(call_count gh '.')"
+eq "finalize rc: the release is read three times (draft, directly before the PATCH, published)" "3" "$(call_count gh '^api repos/myriarch/myriarch/releases/4711$')"
+eq "finalize rc: the tag is resolved twice" "2" "$(call_count gh '^api repos/myriarch/myriarch/git/ref/tags/v9.9.9-rc.1$')"
+eq "finalize rc: the second read comes directly before the tag check and the PATCH" "api repos/myriarch/myriarch/releases/4711|api repos/myriarch/myriarch/git/ref/tags/v9.9.9-rc.1|api -X PATCH repos/myriarch/myriarch/releases/4711 -F draft=false -f make_latest=false" "$(call_line gh 4)|$(call_line gh 5)|$(call_line gh 6)"
 has_call gh '^release verify v9.9.9-rc.1 --repo myriarch/myriarch$' && has_call gh "^release verify-asset v9.9.9-rc.1 ${FVER}/checksums.txt --repo myriarch/myriarch\$" && ok "finalize rc: release verify and verify-asset" || fail "finalize rc: post checks missing"
 [ "$(seq_last 'crane manifest')" -lt "$(seq_line 'crane tag')" ] && [ "$(seq_last 'crane tag')" -lt "$(seq_line 'PATCH')" ] && ok "finalize rc: anonymous reads, then tags, then the publication" || fail "finalize rc: wrong order"
 fsetup v9.9.9
@@ -1206,7 +1232,7 @@ eq "finalize final: four crane tag calls" "4" "$(call_count crane '^tag ')"
 for r in "${REPO_S}@${SERVER_INDEX_DIGEST}" "${REPO_U}@${UPDATER_INDEX_DIGEST}"; do
   has_call crane "^tag ${r} 9.9.9 " && has_call crane "^tag ${r} 9.9 " && ok "finalize final: 9.9.9 and 9.9 on ${r:0:40}" || fail "finalize final: tags missing on ${r}"
 done
-contains "finalize final: make_latest=true" "make_latest=true" "$(call_line gh 3)"
+contains "finalize final: make_latest=true" "make_latest=true" "$(call_line gh 6)"
 # the moving tag X.Y
 other="sha256:$(printf 'e%.0s' $(seq 64))"
 mv_setup() { # label (empty for none) [digest]
@@ -1305,6 +1331,56 @@ fsetup v9.9.9-rc.1; echo 10 > "${S}/verify-asset.failures"
 expect_fail "finalize: gh release verify-asset failing" "release_asset_attestation" fr
 fsetup v9.9.9-rc.1; echo 1 > "${S}/patch.rc"
 expect_fail "finalize: a failing publication" "publish_failed" fr
+# the draft and the tag are checked again directly before the publication, and the published release once more
+alt_release() { # n options...: the n-th read of release 4711 returns the variant, the others the verified state
+  local n="$1"; shift
+  gen release "${S}" 4711 "${FTAG}" "${FV}" "${FVER}/verified-manifest.txt" "$@"
+  mv "${S}/release.4711.json" "${S}/release.4711.${n}.json"
+  gen release "${S}" 4711 "${FTAG}" "${FV}" "${FVER}/verified-manifest.txt"
+}
+fsetup v9.9.9-rc.1; alt_release 2 "extra=stray.bin"
+refuse_case "an asset replaced between the check and the publication" "asset_unexpected.*stray.bin"
+no_call gh '^release (view|verify)' && ok "finalize: nothing is checked after the refusal before the PATCH" || fail "finalize: post checks ran"
+fsetup v9.9.9-rc.1; alt_release 2 "digest_wrong=LICENSE"
+refuse_case "a changed digest between the check and the publication" "asset_digest_mismatch.*LICENSE"
+fsetup v9.9.9-rc.1; alt_release 2 draft=0
+refuse_case "the draft published by hand while the tags were set" "release_not_draft.*published while this job set the image tags"
+fsetup v9.9.9-rc.1; alt_release 3 "extra=stray.bin" draft=0
+expect_fail "finalize: an asset added after the publication" "release_assets_changed.*immutable.*asset_unexpected.*stray.bin.*publish a new tag" fr
+has_call gh '-X PATCH' && ok "finalize: the difference after the publication is found after the PATCH" || fail "finalize: no PATCH before the post read"
+no_call gh '^release verify ' && ok "finalize: no attestation check passes over a changed release" || fail "finalize: verified a changed release"
+fsetup v9.9.9-rc.1; alt_release 3 "digest_wrong=LICENSE" draft=0
+expect_fail "finalize: a changed digest after the publication" "release_assets_changed.*asset_digest_mismatch.*LICENSE" fr
+fsetup v9.9.9-rc.1; alt_release 3 draft=1
+expect_fail "finalize: a release that is a draft after the PATCH" "release_state" fr
+# the tag must still point at the commit that was signed and verified
+fsetup v9.9.9-rc.1; FR_COMMIT="$(printf 'f%.0s' $(seq 40))"
+refuse_case "a tag on another commit than RELEASE_COMMIT" "tag_moved.*resolves to ${C40}"
+no_call crane '^tag ' && ok "finalize: no image tag is set for a moved git tag" || fail "finalize: tagged although the git tag moved"
+unset FR_COMMIT
+fsetup v9.9.9-rc.1; printf '{"object":{"type":"commit","sha":"%s"}}\n' "$(printf 'f%.0s' $(seq 40))" > "${S}/ref.2.json"
+refuse_case "a tag that moved while the image tags were set" "tag_moved"
+has_call crane '^tag ' && ok "finalize: the second tag check comes after the image tags" || fail "finalize: no crane tag before the second tag check"
+fsetup v9.9.9-rc.1; T40="$(printf '7%.0s' $(seq 40))"
+printf '{"object":{"type":"tag","sha":"%s"}}\n' "${T40}" > "${S}/ref.json"
+printf '{"object":{"type":"commit","sha":"%s"}}\n' "${C40}" > "${S}/tagobj.${T40}.json"
+expect_ok "finalize: an annotated tag is dereferenced to the commit" fr
+has_call gh "^api repos/myriarch/myriarch/git/tags/${T40}\$" && ok "finalize: the tag object was read" || fail "finalize: no read of the tag object"
+fsetup v9.9.9-rc.1
+printf '{"object":{"type":"tag","sha":"%s"}}\n' "${T40}" > "${S}/ref.json"
+printf '{"object":{"type":"commit","sha":"%s"}}\n' "$(printf 'f%.0s' $(seq 40))" > "${S}/tagobj.${T40}.json"
+refuse_case "an annotated tag on another commit" "tag_moved"
+fsetup v9.9.9-rc.1
+printf '{"object":{"type":"tag","sha":"%s"}}\n' "${T40}" > "${S}/ref.json"
+printf '{"object":{"type":"tag","sha":"%s"}}\n' "${T40}" > "${S}/tagobj.${T40}.json"
+refuse_case "a chain of tag objects that never reaches a commit" "tag_moved"
+fsetup v9.9.9-rc.1; printf '{"object":{"type":"blob","sha":"%s"}}\n' "${C40}" > "${S}/ref.json"
+refuse_case "a tag that is not a commit or a tag object" "tag_moved"
+fsetup v9.9.9-rc.1; FR_COMMIT=abc
+refuse_case "RELEASE_COMMIT that is not a commit" "commit_invalid"
+unset FR_COMMIT
+fsetup v9.9.9-rc.1; echo "sha256:$(printf 'e%.0s' $(seq 64))" > "${S}/crane.tag.wrong"
+refuse_case "an image tag that does not point at the index after tagging" "image_tag_mismatch"
 
 # ==== 14. the rehearsal hook ======================================================================================================================
 section "14. rehearsal.sh stages the assets after pass 2"
