@@ -9,6 +9,6 @@ import "errors"
 
 func canDropPrivileges() bool { return false }
 
-func osExecutorAs(account string) (Executor, int, int, error) {
-	return nil, 0, 0, errors.New("running as another account is not supported on this platform")
+func osExecutorAs(account string) (Executor, error) {
+	return nil, errors.New("running as another account is not supported on this platform")
 }
