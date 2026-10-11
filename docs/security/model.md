@@ -424,14 +424,19 @@ guidance after each item names what to do.
   code-scanning alerts. That identity (`scorecard.yml` on `refs/heads/main`) is not the release identity and is never
   accepted where the release identity is required. The pin is changed only by a reviewed update.
 - **Static analysis in CI: CodeQL, Scorecard and zizmor.** Three controls look at the code and the pipeline, none replaces review:
-  - *CodeQL* (`.github/workflows/codeql.yml`) analyses the Go code (also the code behind the `devpg` build tag), the web UI and
-    website scripts, and the workflows with the `security-extended` queries, on pushes to `main`, on pull requests from branches
-    of this repository and weekly; results are code scanning alerts. The job holds `security-events: write` (listed in
-    `ci/workflow-permissions.txt`) and builds the Go code of a pull request from a branch of this repository; the scope lets it
-    write alerts only, no contents, packages or releases, and the job has no secrets. Alerts do not block a merge until a
-    ruleset requires them. It finds known classes of defects in code it can model; it does not find logic errors, design flaws,
-    problems in dependencies (`govulncheck` covers called vulnerabilities) or the configuration of the repository and the
-    organization.
+  - *CodeQL* (`.github/workflows/codeql.yml`) analyses the Go code (built for Linux with and without the `embedui` and `devpg`
+    build tags, and for Windows and macOS, so that the Windows-only code of the updater, which runs as SYSTEM, is included),
+    the web UI and the JavaScript scripts of the website, the Python scripts of the repository and the workflows, with the
+    `security-extended` queries, on pushes to `main`, on every pull request to `main` and weekly; results are code scanning
+    alerts. Pull requests from forks and from Dependabot are analysed too. The job holds `security-events: write` (listed in
+    `ci/workflow-permissions.txt`) and builds the code of the pull request; the scope lets it write alerts only, no contents,
+    packages or releases, GitHub makes the token of a fork pull request read-only, and the job has no secrets. Alerts do not
+    block a merge until a ruleset requires them. It finds known classes of defects in code it can model; it does not find logic
+    errors, design flaws, problems in dependencies (`govulncheck` covers called vulnerabilities) or the configuration of the
+    repository and the organization. It analyses what the build and the extractor see: Go files for operating systems other than
+    Linux, Windows and macOS, build tags other than `embedui` and `devpg`, and the compiled web UI are not covered, and the shell
+    scripts, the Helm chart and the PowerShell installers are no CodeQL language (ShellCheck, the chart gate, the installer
+    tests and review cover them).
   - *OpenSSF Scorecard* (`scorecard.yml`, ADR-0033) scores repository practices (token permissions, pinned dependencies, branch
     protection, review, signed releases, dependency update tooling, security policy) weekly and on pushes to `main` and publishes
     the result. It runs without `repo_token`, so checks that need administrative access (branch protection) are partly
@@ -440,8 +445,9 @@ guidance after each item names what to do.
   - *zizmor* (the `workflows` gate, `zizmor.yml`) audits the workflows, the local action and the Dependabot configuration for
     template injection, dangerous triggers, excessive permissions, persisted credentials, cache poisoning, unpinned or impostor
     actions and unsafe writes to the environment files. It runs offline in the local gate and with the read-only token of the run
-    in CI for the audits that ask the GitHub API. Every ignored finding is listed in `zizmor.yml` or marked on its line, with the
-    reason; no audit is disabled. It reads the files of the repository, so it does not see settings of the organization or the
+    in CI for the audits that ask the GitHub API. It runs with the pedantic persona. Every ignored finding is listed in `zizmor.yml` or marked on its
+    line, with the reason; no audit is disabled or configured, and rule R14 of `ci/check-workflows.py` rejects a `zizmor.yml` with
+    anything but ignore entries and an inline ignore without rule names or reason. It reads the files of the repository, so it does not see settings of the organization or the
     repository (allowed actions, environments, rulesets), secrets, or what a pinned action does at run time.
 - **Rules for the release workflow (R13) exist before the workflow.** `ci/check-workflows.py` already requires of
   `.github/workflows/release.yml`: a trigger for pushed `v*` tags only, no caches and no local actions, the literal environment

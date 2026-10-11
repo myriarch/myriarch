@@ -403,26 +403,34 @@ both, so a rule does not depend on how a file is named:
   that is not a shell is out of reach, so the scripts that privileged jobs call are tested with a `PATH` without `go`, `node`
   and `pnpm`.
 - **zizmor audits the workflows.** `ci/lint-workflows.sh` runs the pinned `zizmor` (`ci/install-tools.sh zizmor`) between
-  `actionlint` and the policy check: template injection, dangerous triggers, excessive permissions, persisted credentials,
-  cache poisoning, unpinned and impostor actions, secrets outside environments, unsafe writes to `GITHUB_ENV` and
-  `GITHUB_PATH`, and the cooldown of Dependabot updates. It uses the regular persona; the pedantic one asks for a concurrency
-  group in every workflow, which the fixed shape of `scorecard.yml` (rule R12) does not have. The gate runs offline, so it needs
-  no network and no token. The `workflows` job of `ci.yml` sets `ZIZMOR_ONLINE=1` and passes the read-only token of the run
-  as `GH_TOKEN`, which switches on the audits that ask the GitHub API about the pinned actions. To run them locally, export a
-  `GH_TOKEN` and `ZIZMOR_ONLINE=1`. A finding fails the gate. Fix the workflow; if the finding is a false positive, ignore it
-  as narrowly as possible, with the reason next to the ignore: a trailing comment `# zizmor: ignore[<audit>]` on the line the
-  finding names (it must be the line of the `run:` key for a script) or an entry under `rules.<audit>.ignore` in `zizmor.yml`
-  (audit and file, a line number where the finding is about one place). No audit is switched off. The environment variables
-  `ZIZMOR_CONFIG` and `ZIZMOR_OFFLINE` are ignored by the script. `ci/tests/lint-workflows-test.sh` checks with the real
-  zizmor that a finding fails the gate and that an ignore covers only its audit and file.
+  `actionlint` and the policy check: template injection, dangerous triggers, excessive permissions, undocumented permissions,
+  persisted credentials, cache poisoning, unpinned and impostor actions, secrets outside environments, unsafe writes to
+  `GITHUB_ENV` and `GITHUB_PATH`, missing concurrency limits and the cooldown of Dependabot updates. It uses the pedantic
+  persona. A permission needs a trailing comment on its own line (`security-events: write # upload the results`), and a workflow
+  needs a concurrency group; `scorecard.yml` cannot have one, because its shape is fixed (rule R12), and is ignored for that audit
+  in `zizmor.yml`. The gate runs offline, so it needs no network and no token. The `workflows` job of `ci.yml` sets
+  `ZIZMOR_ONLINE=1` and passes the read-only token of the run as `GH_TOKEN`, which switches on the audits that ask the GitHub API
+  about the pinned actions. To run them locally, export a `GH_TOKEN` and `ZIZMOR_ONLINE=1`. A finding fails the gate. Fix the
+  workflow; if the finding is a false positive, ignore it as narrowly as possible, with the reason next to the ignore: a trailing
+  comment `# zizmor: ignore[<audit>]` on the line the finding names (it must be the line of the `run:` key for a script), with a
+  comment line above it or text behind the bracket that gives the reason, or an entry under `rules.<audit>.ignore` in
+  `zizmor.yml` (audit and file, a line number where the finding is about one place) under a comment that gives the reason.
+  Rule R14 of the policy check enforces this: `zizmor.yml` has nothing but ignore entries (no `disable`, no `config`, no other
+  key, no wildcard), and a bare `# zizmor: ignore` fails. The environment variables `ZIZMOR_CONFIG`, `ZIZMOR_OFFLINE` and
+  `ZIZMOR_NO_ONLINE_AUDITS` are ignored by the script. `ci/tests/lint-workflows-test.sh` checks with the real zizmor that a
+  finding fails the gate and that an ignore covers only its audit and file.
 - **CodeQL scans the code** (`.github/workflows/codeql.yml`, results in the code scanning alerts of the repository). One matrix
-  job `analyze` per language: `go` with a manual build (`go build ./...` and `go build -tags devpg ./...`, so that the code
-  behind the build tag is analysed), `javascript-typescript` (the web UI and the website scripts) and `actions` (the workflows
-  and the local action), with the `security-extended` queries. It runs on pushes to `main`, on pull requests from branches of this
-  repository (a fork or Dependabot gets a read-only token that cannot upload results) and weekly. The job's one write scope,
-  `security-events`, is listed in `ci/workflow-permissions.txt`. Default setup of code scanning must stay off in the repository
-  settings, because this workflow replaces it. `init`, `analyze` and the `upload-sarif` step of `scorecard.yml` use the same pin
-  of `github/codeql-action` (rule R2). A new language or build tag goes into the matrix and into the build step.
+  job `analyze` per language, with the `security-extended` queries: `go` with a manual build that CodeQL traces (`go build ./...`,
+  then with the tags `embedui,devpg` and a placeholder page for the git-ignored `internal/webui/dist`, then for `GOOS=windows`
+  and `GOOS=darwin`, so that the code behind the build tags and the Windows-only code of the updater are analysed),
+  `javascript-typescript` (the web UI and the JavaScript scripts of the website), `python` (`ci/`, `scripts/`,
+  `website/scripts/`, `assets/brand/source`) and `actions` (the workflows and the local action). It runs on pushes to `main`, on
+  every pull request to `main` and weekly. Pull requests from forks and from Dependabot are analysed too, because GitHub always
+  lets code scanning upload the results of a `pull_request` run (default setup would skip forks; advanced setup does not). The
+  job's one write scope, `security-events`, is listed in `ci/workflow-permissions.txt`. Default setup of code scanning must stay
+  off in the repository settings, because this workflow replaces it. `init`, `analyze` and the `upload-sarif` step of
+  `scorecard.yml` use the same pin of `github/codeql-action` (rule R2). A new language, build tag or operating system goes into
+  the matrix and into the build step; a new build tag in `ci/check-local.sh` goes into the build step as well.
 - **A read-only token**: `permissions: contents: read` at the top of every workflow. A job-level write scope needs a line in
   `ci/workflow-permissions.txt` (`<workflow file> <job> <scope>`) and a review of the job.
 - **No `pull_request_target` and no `workflow_run`**, `persist-credentials: false` on every checkout, a timeout on
