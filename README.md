@@ -47,7 +47,8 @@ Myriarch closes that gap and keeps operators in control:
 
 Myriarch is **alpha**. **No release has been published yet**: the container images named below appear with the first
 release (v0.1.0). Interfaces, configuration and the GitOps format (`myriarch.dev/v1alpha1`) can
-still change.
+still change. Every release is signed keyless and carries build provenance; [verify it](docs/security/verify-releases.md)
+before you run it.
 
 | Component | Support level |
 |---|---|
