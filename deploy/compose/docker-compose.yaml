@@ -50,6 +50,9 @@ services:
       - ../../examples/quickstart:/gitops:ro
       # recorded releases/changelogs: release tracker without network access
       - ../../internal/release/testdata/fixtures:/fixtures:ro
+      # data directory (GitOps clone, artifact cache): a NAMED volume, so that it survives restarts and takes over the owner
+      # (65532:65532) and mode (0750) of /var/lib/myriarchd from the image (deploy/docker/myriarchd.Dockerfile); a bind mount
+      # keeps the owner of the host directory, which the non-root user of the image usually cannot write.
       - myriarchd-data:/var/lib/myriarchd
     ports:
       # local only: dev mode has fixed logins (admin/admin) and OpAMP without an enrollment token

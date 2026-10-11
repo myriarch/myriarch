@@ -41,7 +41,7 @@
 #   2. packs them into ONE deterministic layer tar (root:root, mtime = commit time, sorted): 0755 binaries in
 #      /usr/local/bin, 0644 data below /opt/myriarch (examples/quickstart, examples/sim and, in the dev variant only, release
 #      fixtures), the license files below /usr/share/licenses/myriarch, a minimal /etc/passwd and /etc/group (user and
-#      group 65532) and an empty /tmp (1777);
+#      group 65532), the empty data directory /var/lib/myriarchd (0750, owned by 65532:65532) and an empty /tmp (1777);
 #   3. assembles the image and pushes it in ONE step, so there is never a half-finished image under the final tag:
 #        BASE_IMAGE=scratch (default)  the layer is gzipped here and written together with the image config and the manifest
 #                                      as an OCI image layout (no build timestamps: the same commit gives the same image
@@ -103,6 +103,7 @@
 #   PATH=/usr/local/bin), WORKDIR /opt/myriarch, USER 65532 (numeric and non-root for runAsNonRoot; OpenShift replaces the
 #   UID by one of the project range, so nothing is written outside of volumes and all files are world readable),
 #   myriarch-sim: command /usr/local/bin/myriarch-sim, myrctl: /usr/local/bin/myrctl,
+#   data directory: /var/lib/myriarchd (0750, owned by 65532:65532, empty),
 #   data: /opt/myriarch/examples/quickstart, /opt/myriarch/examples/sim, and in the dev variant only
 #   /opt/myriarch/release-fixtures (inputs of `myriarchd dev --releases-fixtures`; the release variant does not carry them),
 #   licenses (both variants, 0644 root:root): /usr/share/licenses/myriarch/LICENSE (Apache-2.0) and
@@ -373,24 +374,25 @@ mode, root, variant = sys.argv[1], sys.argv[2], sys.argv[3]
 if mode not in ("build", "list") or variant not in ("dev", "release"):
     raise SystemExit("usage: build|list <root> dev|release ...")
 
-# archive path -> (kind, payload, mode); kind "dir" (no payload), "file" (payload = source path), "data" (payload = bytes)
+# archive path -> (kind, payload, mode, owner); kind "dir" (no payload), "file" (payload = source path), "data" (payload = bytes);
+# owner is the uid and gid (0 or the user of the image)
 entries = {}
 
-def add_dir(path, mode=0o755):
+def add_dir(path, mode=0o755, owner=0):
     parts = path.strip("/").split("/")
     for i in range(1, len(parts)):
-        entries.setdefault("/".join(parts[:i]), ("dir", None, 0o755))
+        entries.setdefault("/".join(parts[:i]), ("dir", None, 0o755, 0))
     leaf = "/".join(parts)
-    if leaf not in entries or mode != 0o755:
-        entries[leaf] = ("dir", None, mode)
+    if leaf not in entries or mode != 0o755 or owner != 0:
+        entries[leaf] = ("dir", None, mode, owner)
 
 def add_file(arc, src, mode):
     add_dir(os.path.dirname(arc))
-    entries[arc] = ("file", src, mode)
+    entries[arc] = ("file", src, mode, 0)
 
 def add_data(arc, data, mode=0o644):
     add_dir(os.path.dirname(arc))
-    entries[arc] = ("data", data, mode)
+    entries[arc] = ("data", data, mode, 0)
 
 def skip(name):
     return name in (".DS_Store", "Thumbs.db") or name.startswith("._") or name.endswith("~") or name.endswith(".swp")
@@ -458,6 +460,9 @@ add_data("etc/passwd", b"root:x:0:0:root:/root:/sbin/nologin\nmyriarch:x:65532:6
 add_data("etc/group", b"root:x:0:\nmyriarch:x:65532:\n")
 # empty, world writable with sticky bit (the manifests mount an emptyDir over it; plain `docker run` writes here)
 add_dir("tmp", 0o1777)
+# The data directory of myriarchd (GitOps clone, artifact cache; the Helm chart and the Compose files mount a volume here): empty and
+# owned by the user of the image, so that a named volume (which takes over the owner of the directory) or a PVC is writable.
+add_dir("var/lib/myriarchd", 0o750, 65532)
 
 if mode == "list":
     for arc in sorted(entries):
@@ -467,10 +472,10 @@ if mode == "list":
 
 with tarfile.open(out, "w", format=tarfile.PAX_FORMAT) as tar:
     for arc in sorted(entries):
-        kind, payload, fmode = entries[arc]
+        kind, payload, fmode, owner = entries[arc]
         ti = tarfile.TarInfo(arc)
-        ti.uid = ti.gid = 0
-        ti.uname = ti.gname = "root"
+        ti.uid = ti.gid = owner
+        ti.uname = ti.gname = "root" if owner == 0 else "myriarch"
         ti.mtime = epoch
         ti.mode = fmode
         if kind == "dir":
@@ -486,7 +491,7 @@ with tarfile.open(out, "w", format=tarfile.PAX_FORMAT) as tar:
             ti.size = len(payload)
             tar.addfile(ti, io.BytesIO(payload))
 
-files = sum(1 for k, _, _ in entries.values() if k != "dir")
+files = sum(1 for k, _, _, _ in entries.values() if k != "dir")
 print("layer: %d files, %d directories" % (files, len(entries) - files), file=sys.stderr)
 PY
 }

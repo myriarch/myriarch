@@ -230,7 +230,8 @@ OpenShift usually demand.
   backoff through other replicas. Exception for the upgrade to migration `00003`: replicas of an older version can no
   longer store OIDC users afterwards; for this upgrade set `replicaCount=1` and scale up again afterwards.
 * Security: non-root, `readOnlyRootFilesystem`, all capabilities dropped, seccomp `RuntimeDefault`; only
-  `/var/lib/myriarchd` (GitOps clone, artifact cache) and `/tmp` are writable. The chart always starts `myriarchd serve`;
+  `/var/lib/myriarchd` (GitOps clone, artifact cache) and `/tmp` are writable. The image creates `/var/lib/myriarchd`
+  (0750, owned by 65532:65532) and the chart mounts the data volume there with `fsGroup` 65532. The chart always starts `myriarchd serve`;
   the dev mode and the dev login are not available (setting `config.dev` or `config.auth.devLogin` fails the rendering).
 * `config.server.tls.terminatedUpstream` (default `true`) confirms to myriarchd that TLS ends at the ingress, Gateway or
   router (otherwise myriarchd does not start in production). `secretEnv` names must start with

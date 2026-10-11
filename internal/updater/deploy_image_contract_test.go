@@ -196,6 +196,67 @@ func TestServerImageContentComesFromTheReleaseArchives(t *testing.T) {
 	assert.Contains(t, crane, "an empty data directory /var/lib/myriarchd for the user 65532")
 }
 
+// The data directory of the server: the image makes it (empty, 0750, owned by the user of the image), and every way of running
+// the server mounts a volume exactly there and keeps its data below it.
+func TestServerDataDirectory(t *testing.T) {
+	const dir = "/var/lib/myriarchd"
+	// the build from source (kind probe, tests): same directory, same owner and mode
+	crane := readRepoFile(t, "scripts/build-image-crane.sh")
+	assert.Contains(t, crane, `add_dir("var/lib/myriarchd", 0o750, `+imageUID+`)`, "the image built from source")
+
+	// the local Dockerfile: made in the build stage (the distroless base has no shell), copied with its owner
+	df := string(readDeploy(t, "docker/myriarchd.Dockerfile"))
+	stages := dockerStages(df)
+	if st, ok := stages["build"]; assert.True(t, ok, "build stage") {
+		assert.Contains(t, st.body, "mkdir -p /out/data && chmod 0750 /out/data")
+	}
+	c, found := copyTo(dockerCopies(df), dir)
+	if assert.True(t, found, "myriarchd.Dockerfile creates "+dir) {
+		assert.Equal(t, "build", c.from)
+		assert.Equal(t, []string{"/out/data"}, c.srcs)
+		assert.Equal(t, imageUID+":"+imageUID, c.chown)
+	}
+
+	// Compose: a named volume at the data directory (it takes over owner and mode from the image), the server keeps its data there
+	var compose struct {
+		Services map[string]struct {
+			Command []string `yaml:"command"`
+			Volumes []string `yaml:"volumes"`
+		} `yaml:"services"`
+		Volumes map[string]any `yaml:"volumes"`
+	}
+	require.NoError(t, yaml.Unmarshal(readDeploy(t, "compose/docker-compose.yaml"), &compose))
+	srv := compose.Services["myriarchd"]
+	assert.Contains(t, srv.Command, "--data-dir="+dir)
+	var mounted bool
+	for _, v := range srv.Volumes {
+		if name, rest, ok := strings.Cut(v, ":"); ok && strings.HasPrefix(rest, dir) {
+			mounted = true
+			assert.Equal(t, dir, rest, "no mode suffix: the volume must be writable")
+			_, declared := compose.Volumes[name]
+			assert.Truef(t, declared, "%q is a named volume declared at the top level, not a path", name)
+			assert.NotContains(t, name, "/", "a named volume, not a bind mount")
+		}
+	}
+	assert.True(t, mounted, "compose: the server mounts a volume at "+dir)
+
+	// Helm: the data volume at the data directory, GitOps clone and artifact cache below it, the pod user is the image user
+	var values struct {
+		Config struct {
+			GitOps struct {
+				CloneDir string `yaml:"cloneDir"`
+			} `yaml:"gitops"`
+			Artifacts struct {
+				Dir string `yaml:"dir"`
+			} `yaml:"artifacts"`
+		} `yaml:"config"`
+	}
+	require.NoError(t, yaml.Unmarshal(readDeploy(t, "helm/myriarch/values.yaml"), &values))
+	assert.True(t, strings.HasPrefix(values.Config.GitOps.CloneDir, dir+"/"), values.Config.GitOps.CloneDir)
+	assert.True(t, strings.HasPrefix(values.Config.Artifacts.Dir, dir+"/"), values.Config.Artifacts.Dir)
+	assert.Regexp(t, `(?s)- name: data\s+mountPath: `+regexp.QuoteMeta(dir)+`\n`, string(readDeploy(t, "helm/myriarch/templates/deployment.yaml")))
+}
+
 func TestPublishedRepositoriesAndLabels(t *testing.T) {
 	crane := readRepoFile(t, "scripts/build-image-crane.sh")
 	assert.Contains(t, crane, `IMAGE_REPO_NAME="ghcr.io/myriarch/myriarch"`)

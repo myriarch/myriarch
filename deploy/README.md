@@ -292,6 +292,15 @@ Both variants hold the license files. The release fixtures are test data for `my
 not part of the release variant, of the Dockerfile images or of the collector image. An unknown value is rejected before
 anything is built.
 
+**Data directory of the local images.** The local images follow the data directory contract of the published server image (see
+"Published images"): the image built from source and `docker/myriarchd.Dockerfile` contain the empty directory
+`/var/lib/myriarchd` (0750, owned by `65532:65532`), so that a named volume mounted there is writable for the non-root user.
+`compose/docker-compose.yaml` mounts the named volume `myriarchd-data` there and starts `myriarchd dev --data-dir
+/var/lib/myriarchd`; a bind mount would keep the owner of the host directory. `docker/myriarch-sim.Dockerfile` has no data
+directory because the simulator writes nothing. A test (`internal/updater/deploy_image_contract_test.go`) checks the
+Dockerfile, the Compose file, the build script and the Helm chart against each other; the Docker build itself is not run by
+the tests.
+
 **Collector image.** `k8s/collector/Dockerfile` and `scripts/build-collector-image-crane.sh` add the files of the upstream
 OpenTelemetry software next to the project files: `/usr/share/licenses/opentelemetry-collector/LICENSE` (the Apache-2.0 text;
 it equals the upstream `LICENSE` of `opentelemetry-collector-contrib` and `opentelemetry-collector-releases` at v0.162.0 apart

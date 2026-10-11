@@ -220,12 +220,12 @@ func TestDockerfiles(t *testing.T) {
 
 // dockerCopy is one COPY instruction of a Dockerfile.
 type dockerCopy struct {
-	from, chmod string
-	srcs        []string
-	dst         string
+	from, chmod, chown string
+	srcs               []string
+	dst                string
 }
 
-// dockerCopies parses the COPY instructions (line continuations joined, comments skipped, flags --from and --chmod kept).
+// dockerCopies parses the COPY instructions (line continuations joined, comments skipped, flags --from, --chmod and --chown kept).
 func dockerCopies(dockerfile string) []dockerCopy {
 	var out []dockerCopy
 	for _, line := range strings.Split(strings.ReplaceAll(dockerfile, "\\\n", " "), "\n") {
@@ -241,6 +241,8 @@ func dockerCopies(dockerfile string) []dockerCopy {
 				c.from = v
 			case "--chmod":
 				c.chmod = v
+			case "--chown":
+				c.chown = v
 			}
 			args = args[1:]
 		}
