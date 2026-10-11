@@ -38,6 +38,7 @@ The scope of the first release is fixed by [ADR-0021](docs/adr/0021-publication-
 - Publication of the Helm chart as a signed OCI artifact.
 - A quickstart on kind.
 - A chart for the collector.
+- A production Docker Compose setup with TLS and a Git source (the Compose file of v0.1.0 is for evaluation only).
 
 **Version updates on Kubernetes** ([ADR-0026](docs/adr/0026-collector-version-updates-on-kubernetes.md))
 

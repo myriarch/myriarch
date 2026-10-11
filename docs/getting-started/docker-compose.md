@@ -8,18 +8,21 @@ This tutorial starts a complete system on one machine with Docker Compose: the s
 200 simulated collectors that connect to the example GitOps repository. You need no checkout of the source code and no
 Go or Node.js toolchain when you use the release images.
 
-> **Evaluation only.** The Compose file runs `myriarchd dev`: the logins (`admin` / `admin`) and the enrollment token are
-> well known, the cookies are not marked `Secure`, and the GitOps source is a directory without Git. The port is published
-> on `127.0.0.1` only. `myriarchd serve` refuses exactly these settings, so a single-machine setup without TLS and without
-> a Git server can only use dev mode. This is never a production setup. For production, read
-> [Install with Helm](../operations/install-helm.md) and the [production checklist](../operations/production-checklist.md).
+> **Warning: development mode, not a production setup.** The Compose file runs `myriarchd dev`. The logins (`admin` /
+> `admin`, `operator` / `operator`, `viewer` / `viewer`) and the enrollment token are well known, the cookies are not
+> marked `Secure`, there is no TLS, and the GitOps source is a directory without Git. The port is published on
+> `127.0.0.1` only; do not change that and do not expose the server to a network. `myriarchd serve` refuses exactly
+> these settings, so a single-machine setup without TLS and without a Git server can only use dev mode. For a real
+> installation, follow [Install with Helm](../operations/install-helm.md) and the
+> [production checklist](../operations/production-checklist.md). A production Compose setup with TLS and a Git source
+> is planned for v0.2.0.
 
 ## What you get
 
 | Service | What it is |
 |---|---|
 | `postgres` | PostgreSQL 17, the database of the server. Not published on the host; the data lives in the volume `pgdata`. |
-| `myriarchd` | The server in dev mode with the example GitOps repository `examples/quickstart` from the image. Web UI, REST API, OpAMP endpoint and `/metrics` on <http://localhost:8080>. |
+| `myriarchd` | The server in dev mode with the example GitOps repository `examples/quickstart` from the image. Web UI, REST API, OpAMP endpoint and `/metrics` on <http://localhost:8080>. Its data directory `/var/lib/myriarchd` (artifact cache and clone directory) is on the volume `myriarchd-data`. |
 | `myriarch-sim` | The simulator: 200 collectors and 180 updaters, spread over the fleets `linux-hosts`, `windows-hosts` and `k8s-gateway`. |
 
 ## Prerequisites
@@ -63,8 +66,10 @@ The log of `myriarchd` shows the `DEV MODE` warning and `http server listening` 
 SIM_AGENTS=50 docker compose -f quickstart.yaml up -d
 ```
 
-The containers run with a read-only root file system, an empty capability set and `no-new-privileges`. The image has no
-shell, so the services have no health check; `docker compose ps` shows them as running.
+The containers run as the user `65532` with a read-only root file system, an empty capability set and
+`no-new-privileges`. The image contains the empty data directory `/var/lib/myriarchd` owned by that user, so Docker
+creates the volume `myriarchd-data` writable for it. The image has no shell, so the services have no health check;
+`docker compose ps` shows them as running.
 
 ## Start from a checkout (before the first release)
 
@@ -148,12 +153,13 @@ page instead of a server started from source.
 ## Stop and reset
 
 ```bash
-docker compose -f quickstart.yaml down       # stops the containers, keeps the database in the volume pgdata
-docker compose -f quickstart.yaml down -v    # also deletes the database: the next start begins from scratch
+docker compose -f quickstart.yaml down       # stops the containers, keeps the volumes pgdata and myriarchd-data
+docker compose -f quickstart.yaml down -v    # also deletes both volumes: the next start begins from scratch
 ```
 
-Add the same `-f` options and variables that you used for `up`. The server keeps no state outside the database; the
-artifact cache lives on a temporary file system and is rebuilt on demand.
+Add the same `-f` options and variables that you used for `up`. All state of the server is in the database; the volume
+`myriarchd-data` holds only derived data (the artifact cache and the clone directory), which the server rebuilds on
+demand, so it survives restarts but you can delete it at any time.
 
 ## Next steps
 

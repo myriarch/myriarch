@@ -487,10 +487,11 @@ func TestDevComposePublishesOnlyOnLoopback(t *testing.T) {
 	}
 }
 
-// The Compose quickstart runs the release image (FROM scratch, non-root, no writable directory except /tmp) in dev mode
-// against a PostgreSQL container. The default image tag follows the chart, the postgres image is the one of the dev
-// compose file, and the paths it uses below /opt/myriarch/examples map to repository paths that the release image copies
-// there (examples/quickstart and examples/sim in scripts/build-image-crane.sh).
+// The Compose quickstart runs the release image (FROM scratch, user 65532, read-only root file system) in dev mode against
+// a PostgreSQL container. The data directory /var/lib/myriarchd, which the image creates for that user, is on a named
+// volume. The default image tag follows the chart, the postgres image is the one of the dev compose file, and the paths it
+// uses below /opt/myriarch/examples map to repository paths that the release image copies there (examples/quickstart and
+// examples/sim in scripts/build-image-crane.sh).
 func TestQuickstartCompose(t *testing.T) {
 	type service struct {
 		Image       string   `yaml:"image"`
@@ -530,15 +531,18 @@ func TestQuickstartCompose(t *testing.T) {
 		s := q.Services[name]
 		assert.Equal(t, wantImage, s.Image, "%s: the default image tag is the appVersion of the chart", name)
 		assert.True(t, s.ReadOnly, "%s: read_only", name)
-		assert.Equal(t, []string{"/tmp"}, s.Tmpfs, "%s: /tmp is the only writable directory", name)
+		assert.Empty(t, s.Tmpfs, "%s: nothing writes to the root file system, and the data directory is a volume", name)
 		assert.Equal(t, []string{"ALL"}, s.CapDrop, "%s: cap_drop", name)
 		assert.Equal(t, []string{"no-new-privileges:true"}, s.SecurityOpt, "%s: security_opt", name)
 	}
 
 	d := q.Services["myriarchd"]
-	for _, want := range []string{"dev", "--allow-nonlocal", "--data-dir=/tmp/myriarchd"} {
+	for _, want := range []string{"dev", "--allow-nonlocal", "--data-dir=/var/lib/myriarchd"} {
 		assert.Contains(t, d.Command, want, "myriarchd command")
 	}
+	assert.Equal(t, []string{"myriarchd-data:/var/lib/myriarchd"}, d.Volumes, "the data directory is a named volume")
+	assert.Contains(t, q.Volumes, "myriarchd-data")
+	assert.Empty(t, q.Services["myriarch-sim"].Volumes, "the simulator needs no data directory")
 	var gitops string
 	for _, a := range d.Command {
 		if v, ok := strings.CutPrefix(a, "--gitops-dir="); ok {

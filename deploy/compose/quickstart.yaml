@@ -6,7 +6,7 @@
 #   curl -fsSLO https://raw.githubusercontent.com/myriarch/myriarch/v0.1.0/deploy/compose/quickstart.yaml
 #   docker compose -f quickstart.yaml up -d
 #   docker compose -f quickstart.yaml logs -f myriarchd
-#   docker compose -f quickstart.yaml down -v           # stop and delete the database
+#   docker compose -f quickstart.yaml down -v           # stop and delete the database and the data directory
 #
 # The file needs no repository checkout: the image carries the example GitOps repository (examples/quickstart) and the
 # simulator profiles (examples/sim) below /opt/myriarch. The image is published from the first release on
@@ -17,12 +17,14 @@
 # UI/REST: http://localhost:8080 (dev login admin/admin, operator/operator, viewer/viewer)
 # OpAMP:   ws://localhost:8080/v1/opamp (in dev mode without a mandatory enrollment token)
 #
-# FOR EVALUATION ONLY: myriarchd runs in "dev" mode (well-known logins, insecure cookies, a well-known enrollment token),
-# because "myriarchd serve" refuses an http publicUrl and a directory as GitOps source. The port is published on
-# 127.0.0.1 only. Production: deploy/helm/myriarch with "myriarchd serve".
+# FOR EVALUATION ONLY, NOT A PRODUCTION SETUP: myriarchd runs in "dev" mode (well-known logins, insecure cookies, a
+# well-known enrollment token), because "myriarchd serve" refuses an http publicUrl and a directory as GitOps source. The
+# port is published on 127.0.0.1 only. For a real installation use deploy/helm/myriarch with "myriarchd serve" (see
+# docs/operations/install-helm.md); a production Compose setup with TLS and Git is planned for v0.2.0.
 #
-# The data directory is /tmp/myriarchd on a tmpfs: the image is built FROM scratch and runs as a non-root user, so there
-# is no writable directory except /tmp. All state lives in the database (the artifact cache is rebuilt on demand).
+# The data directory /var/lib/myriarchd (the artifact cache and the GitOps clone) is on the named volume myriarchd-data. The
+# image is built FROM scratch and runs as the user 65532; it contains the directory with that owner, so Docker initializes
+# the new volume with it. The root file system of the containers is read-only; the image needs no writable /tmp.
 name: myriarch-quickstart
 
 # The image of myriarchd and of the simulator. The default tag is the version of the release this file belongs to.
@@ -55,11 +57,11 @@ services:
       # inside the container myriarchd listens on all interfaces and talks to the Postgres container: dev mode
       # requires an explicit confirmation for that (the port below is bound to 127.0.0.1 only)
       - --allow-nonlocal
-      - --data-dir=/tmp/myriarchd
+      - --data-dir=/var/lib/myriarchd
       - --gitops-dir=${QUICKSTART_GITOPS_DIR:-/opt/myriarch/examples/quickstart}
+    volumes:
+      - myriarchd-data:/var/lib/myriarchd
     read_only: true
-    tmpfs:
-      - /tmp
     cap_drop:
       - ALL
     security_opt:
@@ -82,8 +84,6 @@ services:
     depends_on:
       - myriarchd
     read_only: true
-    tmpfs:
-      - /tmp
     cap_drop:
       - ALL
     security_opt:
@@ -91,3 +91,4 @@ services:
 
 volumes:
   pgdata:
+  myriarchd-data:
