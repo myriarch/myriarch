@@ -13,7 +13,7 @@
 #   <repository>  <registry>[:port]/<path> without tag, followed by the digest of the index. The digest is the SHA-256 of
 #                 index.json (IMAGE_INDEX_DIGEST of scripts/build-image-crane.sh); the script compares them before it pushes.
 #
-# Rules (spike: scratchpad/spike-oci/REPORT.md)
+# Rules (see "Published images" in deploy/README.md and ADR-0035)
 #   - A reference without @sha256:<64 hex> is refused. `crane push` and `crane copy` create the tag "latest" when they get a
 #     repository without tag and digest, and `latest` must not exist during v0.x.
 #   - The push is `crane push --index <layout> <repository>@<digest>`. crane uses the digest of the reference as the
