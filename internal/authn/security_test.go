@@ -599,6 +599,65 @@ func TestSessionCookieFlags(t *testing.T) {
 	}
 }
 
+// Logout expires both cookies with the attributes they were set with: the session cookie stays HttpOnly, the CSRF
+// cookie stays readable by the UI, Secure follows auth.cookieSecure.
+func TestLogoutExpiresCookiesWithTheirAttributes(t *testing.T) {
+	for _, secure := range []bool{false, true} {
+		e := newEnv(t, envOpts{auth: func(c *config.AuthConfig) { c.CookieSecure = secure }})
+		login := e.newClient().devLogin("admin", "admin-pw")
+		sessionName := authn.SessionCookie
+		if secure {
+			sessionName = authn.SessionCookieSecure
+		}
+		var session, csrf string
+		for _, c := range (&http.Response{Header: login.Header}).Cookies() {
+			switch c.Name {
+			case sessionName:
+				session = c.Value
+			case authn.CSRFCookie:
+				csrf = c.Value
+			}
+		}
+		if session == "" || csrf == "" {
+			t.Fatalf("secure=%v: login cookies missing: %v", secure, login.Header.Values("Set-Cookie"))
+		}
+		// the cookies are sent by hand: a cookie jar does not send Secure cookies over plain HTTP
+		req, err := http.NewRequest("POST", e.base+"/api/v1/auth/logout", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.AddCookie(&http.Cookie{Name: sessionName, Value: session})
+		req.AddCookie(&http.Cookie{Name: authn.CSRFCookie, Value: csrf})
+		req.Header.Set(authn.CSRFHeader, csrf)
+		resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("secure=%v: logout: %d", secure, resp.StatusCode)
+		}
+		var sawSession, sawCSRF bool
+		for _, c := range resp.Cookies() {
+			switch c.Name {
+			case sessionName:
+				sawSession = true
+				if !c.HttpOnly || c.MaxAge >= 0 || c.Value != "" || c.Path != "/" || c.SameSite != http.SameSiteLaxMode || c.Secure != secure {
+					t.Errorf("secure=%v: expired session cookie: %s", secure, c.String())
+				}
+			case authn.CSRFCookie:
+				sawCSRF = true
+				if c.HttpOnly || c.MaxAge >= 0 || c.Value != "" || c.Path != "/" || c.SameSite != http.SameSiteLaxMode || c.Secure != secure {
+					t.Errorf("secure=%v: expired csrf cookie: %s", secure, c.String())
+				}
+			}
+		}
+		if !sawSession || !sawCSRF {
+			t.Fatalf("secure=%v: logout must expire both cookies: %v", secure, resp.Header.Values("Set-Cookie"))
+		}
+	}
+}
+
 // AC-03: revoking an enrollment token publishes an event every replica reacts to.
 func TestEnrollmentTokenRevocationIsPublished(t *testing.T) {
 	bus := memBus()

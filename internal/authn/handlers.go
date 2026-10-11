@@ -85,14 +85,13 @@ func (s *Service) startSession(w http.ResponseWriter, r *http.Request, user *dom
 	return nil
 }
 
+// clearCookies expires the session and CSRF cookies with the attributes that startSession sets.
 func (s *Service) clearCookies(w http.ResponseWriter) {
-	for _, c := range []struct {
-		name     string
-		httpOnly bool
-	}{{s.sessionCookieName(), true}, {CSRFCookie, false}} {
-		http.SetCookie(w, &http.Cookie{Name: c.name, Value: "", Path: "/", MaxAge: -1, HttpOnly: c.httpOnly,
-			Secure: s.cfg.CookieSecure, SameSite: http.SameSiteLaxMode})
-	}
+	http.SetCookie(w, &http.Cookie{Name: s.sessionCookieName(), Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
+		Secure: s.cfg.CookieSecure, SameSite: http.SameSiteLaxMode})
+	// the web UI reads the CSRF cookie (double submit)
+	http.SetCookie(w, &http.Cookie{Name: CSRFCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: false,
+		Secure: s.cfg.CookieSecure, SameSite: http.SameSiteLaxMode})
 }
 
 // sessionCookieName is the name of the session cookie: with Secure cookies (production) it carries the __Host-
