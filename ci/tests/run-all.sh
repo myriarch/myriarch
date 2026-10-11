@@ -16,14 +16,16 @@
 #                      e2e-real-download-test.sh (download and checksum check of the real binaries, scripts/lib/real-binaries.sh),
 #                      tool-downloads-test.sh (checksum check of the syft and zizmor downloads and the source build of osslsigncode in
 #                      ci/install-tools.sh, pin checks of ci/check.sh),
-#                      release-sbom-test.sh (SBOM scripts: pnpm-prod-lock.py, deploy/release/sbom.sh),
+#                      release-sbom-test.sh (SBOM scripts: pnpm-prod-lock.py, deploy/release/sbom.sh in the environment that goreleaser gives
+#                      its sboms commands, also with the real goreleaser),
 #                      release-scripts-test.sh (the release scripts of ci/release: identity.env, meta.sh, artifact.sh, stage-assets.sh,
 #                      verify-dist.sh, verify-blob.sh with the real cosign, sign-*.sh, registry-login.sh, notes.sh, draft.sh, verify.sh,
-#                      finalize.sh),
+#                      finalize.sh; a scan for pinned tools called by their bare name),
 #                      release-smoke-test.sh (smoke tests of a published release: ci/release/smoke.sh with stubs, parameter handling
 #                      of ci/release/smoke-windows.ps1 with pwsh),
 #                      release-workflow-test.sh (shape of .github/workflows/release.yml: frozen identity, job graph, artifact
-#                      protocol, order of the registry writes; with one-change copies that prove the checks bite)
+#                      protocol, order of the registry writes, tool resolution through TOOLS_BIN; with one-change copies that prove the
+#                      checks bite)
 #   installers         installer-verify.sh (bundle verification in install-linux.sh/.ps1), install-tools-test.sh (stamps of
 #                      ci/install-tools.sh), verify-testenv-test.sh, release-guard-test.sh (tag-on-release-branch guard of ci/lib.sh,
 #                      snapshot mode of ci/build-release.sh), windows-hook-test.sh (Windows stages, signing hook and acceptance

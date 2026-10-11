@@ -234,10 +234,8 @@ resolve_crane() {
   # the pinned version of ci/versions.env, built from ci/tools/crane (go build, hashes from go.sum; cached by a stamp file)
   if TOOLS_BIN="${TOOLS_BIN}" "${ROOT}/ci/install-tools.sh" crane >&2 && [ -x "${TOOLS_BIN}/crane" ]; then
     CRANE="${TOOLS_BIN}/crane"
-  elif have crane; then
-    warn "could not build the pinned crane (ci/install-tools.sh crane failed): using $(command -v crane)"
-    CRANE="$(command -v crane)"
   else
+    # never a crane from PATH: its version is not the pinned one (the release workflow passes CRANE explicitly)
     die "crane not available: run ci/install-tools.sh crane (needs Go and access to the Go module proxy)"
   fi
 }
