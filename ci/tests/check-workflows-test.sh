@@ -9,7 +9,7 @@
 # that rule R8 compares with is passed through CHECK_WORKFLOWS_GATES. A case may also have a `findings` file with the exact
 # output of the check, so that it cannot fail for another reason than its own. Two more cases: a link that leads nowhere is
 # no workflow, and ci/lint-workflows.sh (run with stubs for actionlint and ShellCheck) hands actionlint the workflow files
-# that the check reads. No network, no ports.
+# that the check reads. No network, no ports. The zizmor step of ci/lint-workflows.sh has its own test (lint-workflows-test.sh).
 set -uo pipefail
 # shellcheck source=ci/tests/lib-test.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
@@ -56,15 +56,22 @@ mkdir -p "${lint}/ci" "${lint}/.github/workflows" "${TEST_TMP}/stubs"
 cp "${CI_DIR}/lib.sh" "${CI_DIR}/lint-workflows.sh" "${CI_DIR}/check-workflows.py" "${lint}/ci/"
 for f in ci.yml e2e.yaml Release.YML .hidden.yaml ci.yml.bak; do cp "${DATA}/good/.github/workflows/e2e.yml" "${lint}/.github/workflows/${f}"; done
 ln -s "nobody@host.123" "${lint}/.github/workflows/.#ci.yml"
+printf 'rules: {}\n' > "${lint}/zizmor.yml"
 cat > "${TEST_TMP}/stubs/actionlint" <<'EOF'
 #!/bin/sh
 if [ "$1" = -version ]; then echo "actionlint stub"; exit 0; fi
 for a in "$@"; do case "$a" in .github/*) echo "$a" ;; esac; done > "${ACTIONLINT_ARGS}"
 EOF
 printf '#!/bin/sh\nexit 0\n' > "${TEST_TMP}/stubs/shellcheck"
-chmod +x "${TEST_TMP}/stubs/actionlint" "${TEST_TMP}/stubs/shellcheck"
+# zizmor stub: records the .github files it is given
+cat > "${TEST_TMP}/stubs/zizmor" <<'ZEOF'
+#!/bin/sh
+if [ "$1" = --version ]; then echo "zizmor stub"; exit 0; fi
+for a in "$@"; do case "$a" in .github/*) echo "$a" ;; esac; done > "${ZIZMOR_ARGS}"
+ZEOF
+chmod +x "${TEST_TMP}/stubs/actionlint" "${TEST_TMP}/stubs/shellcheck" "${TEST_TMP}/stubs/zizmor"
 # TOOLS_BIN points at the stubs: ci/lib.sh exports the real tool directory, and lint-workflows.sh puts TOOLS_BIN first on the PATH
-ACTIONLINT_ARGS="${TEST_TMP}/actionlint.args" TOOLS_BIN="${TEST_TMP}/stubs" PATH="${TEST_TMP}/stubs:${PATH}" \
+ACTIONLINT_ARGS="${TEST_TMP}/actionlint.args" ZIZMOR_ARGS="${TEST_TMP}/zizmor.args" TOOLS_BIN="${TEST_TMP}/stubs" PATH="${TEST_TMP}/stubs:${PATH}" \
   bash "${lint}/ci/lint-workflows.sh" > /dev/null 2>&1
 want_files=".github/workflows/.hidden.yaml .github/workflows/Release.YML .github/workflows/ci.yml .github/workflows/e2e.yaml"
 got_files="$(LC_ALL=C sort "${TEST_TMP}/actionlint.args" 2> /dev/null | tr '\n' ' ')"
@@ -72,6 +79,13 @@ if [ "${got_files}" = "${want_files} " ]; then
   ok "lint-workflows.sh hands actionlint both extensions, any letter case and hidden names"
 else
   fail "lint-workflows.sh hands actionlint '${got_files}', expected '${want_files} '"
+fi
+
+got_zizmor="$(LC_ALL=C sort "${TEST_TMP}/zizmor.args" 2> /dev/null | tr '\n' ' ')"
+if [ "${got_zizmor}" = "${want_files} " ]; then
+  ok "lint-workflows.sh hands zizmor the same workflow files"
+else
+  fail "lint-workflows.sh hands zizmor '${got_zizmor}', expected '${want_files} '"
 fi
 
 # usage errors and the real repository

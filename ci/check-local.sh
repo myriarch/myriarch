@@ -182,10 +182,11 @@ gate_helm() {
   done
 }
 
-# GitHub Actions workflows: actionlint (with ShellCheck over the run: blocks) and the policy check ci/check-workflows.py (pinned
-# actions, read-only token, forbidden triggers, gate parity with ci.yml). No network after the tools are installed.
+# GitHub Actions workflows: actionlint (with ShellCheck over the run: blocks), zizmor (security audits, offline unless
+# ZIZMOR_ONLINE=1) and the policy check ci/check-workflows.py (pinned actions, read-only token, forbidden triggers, gate parity
+# with ci.yml). No network after the tools are installed.
 gate_workflows() {
-  ci/install-tools.sh actionlint shellcheck
+  ci/install-tools.sh actionlint shellcheck zizmor
   ci/lint-workflows.sh
 }
 
