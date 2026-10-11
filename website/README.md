@@ -93,17 +93,18 @@ Hugo takes it for a shortcode.
 - **A website-only page**: a file in `content/` with `title` and `description`; `weight`, `linkTitle`, `params` and the other keys
   that `python3 -I scripts/check-docs.py front-matter --site` allows are optional. Site-absolute links are fine here.
 - **A placeholder** for a page that a later change will write: a file at the website path of the page it replaces
-  (`docs/operations/install-helm.md` is `content/docs/operations/install-helm.md`) with
+  (`docs/operations/upgrade.md` is `content/docs/operations/upgrade.md`) with
 
   ```yaml
   params:
     placeholder:
       tracking: "operations-manual"
-      replaces: "docs/operations/install-helm.md"
+      replaces: "docs/operations/upgrade.md"
+      planned: "v0.2.0"
   ```
 
   and the `placeholder` shortcode as its body. The tracking value is never rendered; it is a lowercase topic slug (`operations-manual`) or a GitHub issue reference, which must be quoted (`"#123"`; an unquoted `#` starts a YAML comment). An optional `planned: "v0.2.0"` under `placeholder` makes the notice say
-  that the page is planned for that release. When `docs/operations/install-helm.md`
+  that the page is planned for that release. When `docs/operations/upgrade.md`
   exists, the placeholder has to go in the same change (`scripts/check-placeholders.py`).
 
 ## Overrides of Docsy files

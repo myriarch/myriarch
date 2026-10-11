@@ -37,7 +37,8 @@ chart is experimental. The levels and what they mean are in the [roadmap](/proje
 No. The server is one binary that needs PostgreSQL. It runs on a host, in a container or on Kubernetes with the
 [Helm chart](/docs/reference/helm-chart/). Collectors can run on Linux and Windows hosts at edge sites and in data centers, or
 in Kubernetes pods. A development setup needs no container runtime at all: see
-[Local development](/docs/getting-started/local-dev/).
+[Local development](/docs/getting-started/local-dev/). To try it with containers on one machine, use
+[Docker Compose](/docs/getting-started/docker-compose/), and for Kubernetes see [Install with Helm](/docs/operations/install-helm/).
 
 ## How many collectors does it handle?
 

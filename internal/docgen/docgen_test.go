@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,4 +37,31 @@ func TestWriteDiffAndStaleFiles(t *testing.T) {
 	assert.True(t, os.IsNotExist(err), "stale page removed")
 	_, err = os.Stat(filepath.Join(dir, "notes.txt"))
 	assert.NoError(t, err, "non-Markdown files are kept")
+}
+
+func TestWriteFileAndDiffFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "deep", "reference")
+	path := filepath.Join(dir, "page.md")
+	other := filepath.Join(dir, "hand-written.md")
+
+	assert.Equal(t, "missing: page.md", DiffFile(path, []byte("one\n")))
+	require.NoError(t, WriteFile(path, []byte("one\n")), "creates the parent directories")
+	assert.Equal(t, "", DiffFile(path, []byte("one\n")))
+	assert.Equal(t, "changed: page.md", DiffFile(path, []byte("two\n")))
+
+	// other files of the directory are never removed
+	require.NoError(t, os.WriteFile(other, []byte("keep\n"), 0o644))
+	require.NoError(t, WriteFile(path, []byte("two\n")))
+	assert.Equal(t, "", DiffFile(path, []byte("two\n")))
+	kept, err := os.ReadFile(other)
+	require.NoError(t, err)
+	assert.Equal(t, "keep\n", string(kept))
+
+	// identical content is not rewritten
+	old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	require.NoError(t, os.Chtimes(path, old, old))
+	require.NoError(t, WriteFile(path, []byte("two\n")))
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.True(t, info.ModTime().Equal(old), "an identical file is left untouched")
 }

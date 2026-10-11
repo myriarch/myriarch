@@ -69,6 +69,21 @@ cascade:
     params:
       generated: true
   - target:
+      path: '/docs/reference/configuration'
+    params:
+      generated: true
+      generated_from: the configuration struct and its doc comments
+  - target:
+      path: '/docs/reference/environment-variables'
+    params:
+      generated: true
+      generated_from: the configuration loader, the environment reads and the deployment templates
+  - target:
+      path: '/docs/reference/metrics'
+    params:
+      generated: true
+      generated_from: the metric definitions
+  - target:
       path: '{/docs/reference/api,/docs/reference/api/**}'
     params:
       generated: true

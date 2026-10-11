@@ -34,6 +34,8 @@ COPIES = [
      r'^  tag: "([^"\s]+)"[ \t]*$'),
     ("gitops-template/.gitlab-ci.yml", "myrctl image tag of the GitOps template",
      r'^  MYRCTL_IMAGE: [^\s:]+:([^\s]+)[ \t]*$'),
+    ("deploy/compose/quickstart.yaml", "default image tag of the Compose quickstart",
+     r'^x-image: &image \$\{QUICKSTART_IMAGE:-ghcr\.io/myriarch/myriarch:([^\s}]+)\}[ \t]*$'),
 ]
 
 VERSION_RE = re.compile(r'^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$')

@@ -13,9 +13,10 @@ start with the tutorials, then read the concepts.
 
 [Getting started](getting-started/_index.md) takes you from a fresh clone to a running system: the build, the development mode
 with an embedded PostgreSQL, the example GitOps repository, the simulator and the REST API. The central page is
-[Local development](getting-started/local-dev.md). A tutorial for Docker Compose and a guided first fleet and rollout are being
-written; the tutorial for Kubernetes on a local kind cluster is planned for v0.2.0. Until then, the kind probe is described in
-[hack/kind/README.md](../hack/kind/README.md).
+[Local development](getting-started/local-dev.md); [Your first fleet and rollout](getting-started/first-fleet-and-rollout.md)
+writes a fleet and a rollout policy and rolls out a change in waves, and [Docker Compose](getting-started/docker-compose.md)
+starts the whole system from the release images. The tutorial for Kubernetes on a local kind cluster is planned for v0.2.0.
+Until then, the kind probe is described in [hack/kind/README.md](../hack/kind/README.md).
 
 ## How-to guides: solve a problem
 
@@ -39,16 +40,21 @@ the components, the data flows and the rollout engine, and the [security model](
 ## Reference: look something up
 
 [Reference](reference/_index.md) holds the exact definitions: the [GitOps schema](reference/gitops-schema.md) with every kind,
-field, template function and issue code, the generated [command-line reference](reference/cli/_index.md), the REST contract in
+field, template function and issue code, the generated [command-line reference](reference/cli/_index.md), the generated
+references for the [server configuration](reference/configuration.md), the
+[environment variables](reference/environment-variables.md) and the [metrics](reference/metrics.md), the REST contract in
 [api/openapi.yaml](../api/openapi.yaml), and the values of the [Helm chart](../deploy/helm/myriarch/README.md). The design
 contracts in [design/](design/README.md) pin down protocols and behavior that code and tests follow.
 
 ## Operations and security: run it
 
-[Operations](operations/_index.md) is for people who run myriarch: [authentication](operations/authentication.md) (single
-sign-on, the bootstrap administrator, API tokens), the [production checklist](operations/production-checklist.md) with the
-security-relevant settings, and [troubleshooting](operations/troubleshooting.md). Guides for installation with Helm, upgrades,
-backup, high availability, air-gapped use and monitoring are being written.
+[Operations](operations/_index.md) is for people who run myriarch: [Install with Helm](operations/install-helm.md) for
+Kubernetes, [authentication](operations/authentication.md) (single sign-on, the bootstrap administrator, API tokens), the
+[production checklist](operations/production-checklist.md) with the security-relevant settings, and
+[troubleshooting](operations/troubleshooting.md).
+
+Guides for upgrades, backup and restore, high availability, monitoring, air-gapped installation and an artifact mirror are
+planned for v0.2.0.
 
 The [security section](security/_index.md) describes the controls of the system: trust boundaries, agent and user
 authentication, artifact verification, outbound connections and network policy. To report a vulnerability, read

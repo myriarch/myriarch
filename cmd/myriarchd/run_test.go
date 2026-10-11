@@ -27,8 +27,10 @@ import (
 
 	"github.com/myriarch/myriarch/internal/api"
 	"github.com/myriarch/myriarch/internal/api/dto"
+	"github.com/myriarch/myriarch/internal/brand"
 	"github.com/myriarch/myriarch/internal/config"
 	"github.com/myriarch/myriarch/internal/domain"
+	"github.com/myriarch/myriarch/internal/refdoc"
 	"github.com/myriarch/myriarch/internal/testutil/pgtest"
 )
 
@@ -300,6 +302,32 @@ func TestDevModeStartsServesAndShutsDownGracefully(t *testing.T) {
 	r.Body.Close()
 	if len(info.Replicas) != 1 || info.Replicas[0].Connections != 1 || info.LeaderID == "" || !info.Database.OK {
 		t.Fatalf("system info: %+v", info)
+	}
+
+	// every metric the running server exposes is in the metrics reference (docs/reference/metrics.md is generated from the metric
+	// definitions in the sources; this catches a metric that the source scan would miss)
+	_, metricsBody := get("/metrics")
+	documented, err := refdoc.ScanMetrics(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	types := map[string]string{}
+	for _, m := range documented {
+		types[m.Name] = m.Type
+	}
+	seen := 0
+	for _, line := range strings.Split(metricsBody, "\n") {
+		f := strings.Fields(line)
+		if len(f) != 4 || f[0] != "#" || f[1] != "TYPE" || !strings.HasPrefix(f[2], brand.MetricsNamespace+"_") {
+			continue
+		}
+		seen++
+		if want, ok := types[f[2]]; !ok || want != f[3] {
+			t.Errorf("the server exposes %s (%s), which the metrics reference does not list with that type (found: %q)", f[2], f[3], want)
+		}
+	}
+	if seen < 10 {
+		t.Errorf("only %d myriarch_ metrics found in the /metrics output, the cross-check looks broken", seen)
 	}
 
 	// graceful shutdown: the agent connection is closed by the server, the agent is marked offline, run returns nil

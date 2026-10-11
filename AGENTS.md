@@ -83,8 +83,11 @@ Some tests and scripts use fixed ports or a shared local cluster (`scripts/e2e.s
 - **Architecture decisions are ADRs.** Add a record under `docs/adr/` (copy `0000-template.md`, next free number) for decisions
   about architecture, interfaces, security, license or governance. Do not rewrite accepted records; supersede them.
 - **Keep generated and reference files in step.**
-  - Run `make docs-gen` when you change commands, flags or help texts or `api/openapi.yaml`; `docs/reference/cli/` (from the
-    commands) and `docs/reference/api/` (from the OpenAPI contract) are generated and not edited by hand.
+  - Run `make docs-gen` when you change commands, flags or help texts, `api/openapi.yaml`, a configuration key (or its doc
+    comment), an environment read or a metric; `docs/reference/cli/` (from the commands), `docs/reference/api/` (from the OpenAPI
+    contract) and `docs/reference/{configuration,environment-variables,metrics}.md` (from the code) are generated and not edited
+    by hand. The rules for the doc comments of `internal/config/config.go` are in
+    [docs/development.md](docs/development.md#generated-references).
   - Keep `docs/reference/gitops-schema.md` complete: every kind, field and option of the GitOps format is documented there,
     and a test fails otherwise.
   - Run `pnpm gen:api` in `web/` after a change of `api/openapi.yaml` (and `make docs-gen`, see above) and commit `web/src/api/schema.d.ts`.

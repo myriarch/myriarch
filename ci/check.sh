@@ -5,7 +5,7 @@
 # Static consistency check of the CI artifacts (runs locally and in CI, needs only bash/awk/grep):
 #  - scripts: executable (except the sourced contrib/enterprise-mirror/ca-env.sh), syntax ok (bash -n)
 #  - tool modules in ci/tools/<tool>: go.mod matches the version in ci/versions.env
-#  - image digests: golang/distroless identical across the Dockerfiles, every FROM and the compose postgres pinned by
+#  - image digests: golang/distroless identical across the Dockerfiles, every FROM and the postgres of both compose files pinned by
 #    digest (the postgres service of ci.yml uses the same digest)
 #  - OTELCOL_* pins agree with each other and with deploy/k8s/collector/Dockerfile
 #  - reuse (ci/tools/reuse): requirements.in and requirements.txt pin the version of ci/versions.env, the build
@@ -108,9 +108,12 @@ for f in deploy/docker/*.Dockerfile; do
   grep -E '^FROM ' "${f}" | grep -Evq '@sha256:[0-9a-f]{64}' && bad "${f}: FROM without digest"
 done
 grep -Eq 'image: postgres:[^[:space:]]+@sha256:[0-9a-f]{64}' deploy/compose/docker-compose.yaml || bad "deploy/compose/docker-compose.yaml: postgres image without digest"
+grep -Eq 'image: postgres:[^[:space:]]+@sha256:[0-9a-f]{64}' deploy/compose/quickstart.yaml || bad "deploy/compose/quickstart.yaml: postgres image without digest"
 # the PostgreSQL service of the Go tests in CI uses the digest of the compose file (a multi-architecture index: amd64 and arm64 runners)
 c1="$(digest_in deploy/compose/docker-compose.yaml 'image: postgres:')"
 c2="$(digest_in .github/workflows/ci.yml 'image: postgres:')"
+c3="$(digest_in deploy/compose/quickstart.yaml 'image: postgres:')"
+{ [ -n "${c1}" ] && [ "${c1}" = "${c3}" ]; } || bad "deploy/compose/quickstart.yaml: the postgres image (${c3:-no digest}) is not the digest of deploy/compose/docker-compose.yaml (${c1:-none})"
 { [ -n "${c1}" ] && [ "${c1}" = "${c2}" ]; } || bad ".github/workflows/ci.yml: the postgres service image (${c2:-no digest}) is not the digest of deploy/compose/docker-compose.yaml (${c1:-none})"
 
 # The kind probe (hack/kind): every image pin carries a digest, and the manifests only use @@PLACEHOLDER@@ images (the

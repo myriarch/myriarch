@@ -1,0 +1,59 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Values of the guide "Install with Helm" (docs/operations/install-helm.md): the minimal installation plus a GitOps
+# repository over HTTPS, a Gateway API HTTPRoute and one declared enrollment token. The chart renders it in CI
+# (ci/helm-conform.sh, case install-guide).
+#
+#   helm upgrade --install myriarch ./deploy/helm/myriarch -n myriarch \
+#     -f deploy/helm/myriarch/examples/install-guide.yaml
+#
+# Every host name and address is a documentation placeholder (example.com, RFC 5737). Replace them. The Secret
+# "myriarch-secrets" holds the keys database-dsn and git-token (the *File fields point to the files of the mounted
+# Secret, /etc/myriarchd/secrets/<key>); secrets never belong into this file.
+
+config:
+  server:
+    # Exactly the host name of the HTTPRoute below. Agents outside the cluster connect to wss://fleet.example.com/v1/opamp.
+    publicUrl: https://fleet.example.com
+    # REPLACE: the addresses myriarchd sees the connections from, that is the pods of the Gateway data plane (not the
+    # address of the load balancer). X-Forwarded-For and X-Forwarded-Proto are honored only from there.
+    trustedProxies:
+      - 192.0.2.0/24
+  gitops:
+    enabled: true
+    repoUrl: https://git.example.com/fleet/fleet-config.git
+    auth:
+      # Key git-token of the Secret myriarch-secrets: an access token with read access to the repository.
+      tokenFile: /etc/myriarchd/secrets/git-token
+  # A Git server at a private address is refused unless its range is allowed here, for example:
+  # outbound:
+  #   allowedCidrs: [198.51.100.0/24]
+
+httpRoute:
+  enabled: true
+  # The chart creates only the HTTPRoute; the Gateway exists already.
+  parentRefs:
+    - name: gateway
+      namespace: gateway-system
+  hostnames:
+    - fleet.example.com
+  # Confirms that the Gateway listener terminates TLS. The chart cannot check it.
+  tlsTerminatedAtGateway: true
+
+networkPolicy:
+  ingress:
+    # Port 8080 is reachable from the namespace of the Gateway pods only. allowSameNamespace must be false while
+    # trustedProxies is set: otherwise any pod of the namespace could forge the forwarded headers.
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: gateway-system
+    allowSameNamespace: false
+
+# A token that collectors present when they connect. The chart generates the Secret myriarch-enrollment-linux-hosts with
+# a random token; its labels are copied to every agent that registers with it.
+enrollmentTokens:
+  - name: linux-hosts
+    labels:
+      environment: production

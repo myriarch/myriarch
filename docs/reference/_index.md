@@ -14,6 +14,9 @@ instruct. For explanations see the [concepts](../concepts/_index.md), for instru
 | [Command line reference](cli/_index.md) | One page per command of `myriarchd`, `myrctl`, `myriarch-updater` and `myriarch-sim`, generated from the commands themselves. |
 | [REST API](api/_index.md) | The management API under `/api/v1`, generated from the OpenAPI 3.1 contract `api/openapi.yaml`: authentication, roles, error format, one page per tag with every operation and its permission, and the data types. |
 | [Helm chart and values](../../deploy/helm/myriarch/README.md) | Installation, profiles, network policy, storage and the configuration values of the chart `myriarch`. |
+| [Server configuration](configuration.md) | Every key of the `myriarchd` configuration file with its type, default and effect, generated from the configuration struct and its doc comments. |
+| [Environment variables](environment-variables.md) | The `MYRIARCH_*` overrides of the configuration keys, the other variables the programs read and the variables of the deployment templates. |
+| [Metrics](metrics.md) | The Prometheus metrics of `myriarchd` and `myriarch-sim` with type, labels and help text, and how to reach the endpoint. |
 | [Design contracts](../design/README.md) | The normative descriptions of version selection, the updater protocol, container mode and the OpAMP server. |
 
 ## Generated and checked references
@@ -27,9 +30,14 @@ drift:
 - The REST API reference is generated from `api/openapi.yaml` with `make docs-gen`. A test and the `docs` gate fail when the
   committed pages differ from the generated output. The types of the web UI are generated from the same file and checked for
   drift.
+- The server configuration reference is generated with `make docs-gen` from the configuration struct and its doc comments, the
+  defaults and the loader. A test and the `docs` gate fail when the committed page differs from the generated output.
+- The environment variable reference is generated with `make docs-gen` from the environment overrides of the loader, the
+  documented environment reads of the programs and the deployment templates. A test and the `docs` gate fail on drift, and a
+  test fails when the code reads an environment variable that the page does not list.
+- The metrics reference is generated with `make docs-gen` from the metric definitions in the sources. A test and the `docs` gate
+  fail on drift, and a server test compares the metrics that the running server exposes with the reference.
 - The Helm chart page is the README of the chart. Generated reference tables for its values are planned.
 
-A reference for the server configuration (every key of the `myriarchd` configuration file), the environment variables and the
-metrics of the server are being written for the first release. Until then, `myriarchd config print` shows the effective
-configuration with all defaults, and `myriarchd config validate` checks a file, see
-[`myriarchd config validate`](cli/myriarchd_config_validate.md).
+`myriarchd config print` shows the effective configuration of a file with all defaults, and `myriarchd config validate` checks
+it, see [`myriarchd config validate`](cli/myriarchd_config_validate.md).

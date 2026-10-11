@@ -472,17 +472,93 @@ func TestDeployReadmeListsEverything(t *testing.T) {
 // --- supply chain and network exposure (security review) -------------------
 
 func TestDevComposePublishesOnlyOnLoopback(t *testing.T) {
-	var c struct {
-		Services map[string]struct {
-			Ports []string `yaml:"ports"`
-		} `yaml:"services"`
-	}
-	require.NoError(t, yaml.Unmarshal(readDeploy(t, "compose/docker-compose.yaml"), &c))
-	for name, s := range c.Services {
-		for _, p := range s.Ports {
-			assert.True(t, strings.HasPrefix(p, "127.0.0.1:"), "%s publishes %q on all interfaces (dev mode has fixed logins)", name, p)
+	for _, file := range []string{"compose/docker-compose.yaml", "compose/quickstart.yaml"} {
+		var c struct {
+			Services map[string]struct {
+				Ports []string `yaml:"ports"`
+			} `yaml:"services"`
+		}
+		require.NoError(t, yaml.Unmarshal(readDeploy(t, file), &c), file)
+		for name, s := range c.Services {
+			for _, p := range s.Ports {
+				assert.True(t, strings.HasPrefix(p, "127.0.0.1:"), "%s: %s publishes %q on all interfaces (dev mode has fixed logins)", file, name, p)
+			}
 		}
 	}
+}
+
+// The Compose quickstart runs the release image (FROM scratch, user 65532, read-only root file system) in dev mode against
+// a PostgreSQL container. The data directory /var/lib/myriarchd, which the image creates for that user, is on a named
+// volume. The default image tag follows the chart, the postgres image is the one of the dev compose file, and the paths it
+// uses below /opt/myriarch/examples map to repository paths that the release image copies there (examples/quickstart and
+// examples/sim in scripts/build-image-crane.sh).
+func TestQuickstartCompose(t *testing.T) {
+	type service struct {
+		Image       string   `yaml:"image"`
+		Entrypoint  []string `yaml:"entrypoint"`
+		Command     []string `yaml:"command"`
+		ReadOnly    bool     `yaml:"read_only"`
+		Tmpfs       []string `yaml:"tmpfs"`
+		CapDrop     []string `yaml:"cap_drop"`
+		SecurityOpt []string `yaml:"security_opt"`
+		Ports       []string `yaml:"ports"`
+		Volumes     []string `yaml:"volumes"`
+	}
+	var q struct {
+		Name     string             `yaml:"name"`
+		Services map[string]service `yaml:"services"`
+		Volumes  map[string]any     `yaml:"volumes"`
+	}
+	require.NoError(t, yaml.Unmarshal(readDeploy(t, "compose/quickstart.yaml"), &q))
+	var dev struct {
+		Services map[string]service `yaml:"services"`
+	}
+	require.NoError(t, yaml.Unmarshal(readDeploy(t, "compose/docker-compose.yaml"), &dev))
+	var chart struct {
+		AppVersion string `yaml:"appVersion"`
+	}
+	require.NoError(t, yaml.Unmarshal(readDeploy(t, "helm/myriarch/Chart.yaml"), &chart))
+	require.NotEmpty(t, chart.AppVersion)
+
+	assert.Equal(t, "myriarch-quickstart", q.Name)
+	pg := q.Services["postgres"]
+	assert.Equal(t, dev.Services["postgres"].Image, pg.Image, "the quickstart uses the PostgreSQL image of the dev compose file")
+	assert.Empty(t, pg.Ports, "PostgreSQL is not published")
+	assert.Contains(t, q.Volumes, "pgdata")
+
+	wantImage := "${QUICKSTART_IMAGE:-ghcr.io/myriarch/myriarch:" + chart.AppVersion + "}"
+	for _, name := range []string{"myriarchd", "myriarch-sim"} {
+		s := q.Services[name]
+		assert.Equal(t, wantImage, s.Image, "%s: the default image tag is the appVersion of the chart", name)
+		assert.True(t, s.ReadOnly, "%s: read_only", name)
+		assert.Empty(t, s.Tmpfs, "%s: nothing writes to the root file system, and the data directory is a volume", name)
+		assert.Equal(t, []string{"ALL"}, s.CapDrop, "%s: cap_drop", name)
+		assert.Equal(t, []string{"no-new-privileges:true"}, s.SecurityOpt, "%s: security_opt", name)
+	}
+
+	d := q.Services["myriarchd"]
+	for _, want := range []string{"dev", "--allow-nonlocal", "--data-dir=/var/lib/myriarchd"} {
+		assert.Contains(t, d.Command, want, "myriarchd command")
+	}
+	assert.Equal(t, []string{"myriarchd-data:/var/lib/myriarchd"}, d.Volumes, "the data directory is a named volume")
+	assert.Contains(t, q.Volumes, "myriarchd-data")
+	assert.Empty(t, q.Services["myriarch-sim"].Volumes, "the simulator needs no data directory")
+	var gitops string
+	for _, a := range d.Command {
+		if v, ok := strings.CutPrefix(a, "--gitops-dir="); ok {
+			gitops = v
+		}
+	}
+	require.NotEmpty(t, gitops, "myriarchd command: --gitops-dir")
+	assert.Equal(t, "${QUICKSTART_GITOPS_DIR:-/opt/myriarch/examples/quickstart}", gitops)
+	assert.Equal(t, []string{"127.0.0.1:8080:8080"}, d.Ports)
+	assert.DirExists(t, filepath.Join(deployDir, "..", "examples", "quickstart"), "/opt/myriarch/examples/quickstart in the image")
+
+	sim := q.Services["myriarch-sim"]
+	assert.Equal(t, []string{"/usr/local/bin/myriarch-sim"}, sim.Entrypoint)
+	assert.Empty(t, sim.Ports, "the simulator publishes nothing")
+	assert.Contains(t, sim.Command, "--profile=/opt/myriarch/examples/sim/mixed-fleet.yaml")
+	assert.FileExists(t, filepath.Join(deployDir, "..", "examples", "sim", "mixed-fleet.yaml"), "/opt/myriarch/examples/sim in the image")
 }
 
 func TestContainerImagesArePinnedByDigest(t *testing.T) {

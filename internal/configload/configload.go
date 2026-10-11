@@ -303,12 +303,63 @@ func envName(path []string) string {
 	return EnvPrefix + strings.ToUpper(strings.Join(path, "_"))
 }
 
-// applyEnvOverrides applies MYRIARCH_<PATH> overrides to scalar and []string
-// fields. Slices of structs (dev users, notification channels) are not
-// overridable by environment.
+// overridable reports whether an environment variable can set a leaf of this type: durations, strings, booleans, signed and
+// unsigned integers, floats and lists of strings (comma separated). Maps and lists of structs (dev users, notification
+// channels, enrollment tokens) are not overridable.
+func overridable(t reflect.Type) bool {
+	if t == durationType {
+		return true
+	}
+	switch t.Kind() {
+	case reflect.String, reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return true
+	case reflect.Slice:
+		return t.Elem().Kind() == reflect.String
+	}
+	return false
+}
+
+// EnvOverride describes one setting that a MYRIARCH_<PATH> environment variable can override.
+type EnvOverride struct {
+	// Name is the environment variable, for example MYRIARCH_SERVER_PUBLICURL.
+	Name string
+	// Path is the dotted YAML path of the setting, for example server.publicUrl.
+	Path string
+	// Type is the Go type of the setting (time.Duration, string, bool, a number type or a list of strings).
+	Type reflect.Type
+}
+
+// EnvOverrides lists every setting that an environment variable can override, in the order of the configuration structure.
+// It is the same set that applyEnvOverrides applies, so the environment reference cannot drift from the loader.
+func EnvOverrides() []EnvOverride {
+	cfg := config.Default()
+	var out []EnvOverride
+	walkLeaves(reflect.ValueOf(&cfg).Elem(), nil, func(path []string, f reflect.Value) {
+		if !overridable(f.Type()) {
+			return
+		}
+		out = append(out, EnvOverride{Name: envName(path), Path: strings.Join(path, "."), Type: f.Type()})
+	})
+	return out
+}
+
+// YAMLKey returns the YAML key of a configuration field, or "" when the field is not part of the file format (`yaml:"-"`).
+func YAMLKey(f reflect.StructField) string { return yamlName(f) }
+
+// IsSecretKey reports whether the value of a YAML key is a secret that "myriarchd config print" redacts.
+func IsSecretKey(key string) bool { return redactedKeys[key] }
+
+// applyEnvOverrides applies MYRIARCH_<PATH> overrides to the overridable leaves (see overridable). Slices of structs (dev
+// users, notification channels) and maps are not overridable by environment.
 func applyEnvOverrides(cfg *config.Config, lookup func(string) (string, bool)) error {
 	var errs []error
 	walkLeaves(reflect.ValueOf(cfg).Elem(), nil, func(path []string, f reflect.Value) {
+		if !overridable(f.Type()) {
+			return
+		}
 		name := envName(path)
 		raw, ok := lookup(name)
 		if !ok {
