@@ -6,4 +6,10 @@
 #   <workflow file> <job id> <scope>
 #
 # for example `deploy.yml publish pages`. Each line needs a review of the job: which scope, why, and that the job does
-# not run code of a pull request. The file is empty on purpose.
+# not run code of a pull request.
+
+# CodeQL (.github/workflows/codeql.yml). The job `analyze` uploads the SARIF results of the analysis to code scanning, which needs
+# security-events: write; contents and actions are read-only. The job builds and analyses the code of a pull request, but only
+# of a pull request from a branch of this repository (its if: keeps forks and Dependabot out), it has no secret, and the scope
+# lets it write code scanning alerts only: no contents, packages, releases or deployments.
+codeql.yml analyze security-events
