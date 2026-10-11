@@ -2,27 +2,30 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Configuration of zizmor, the static analyser of the GitHub Actions workflows (ci/lint-workflows.sh; docs/development.md,
-# "Continuous integration"; docs/security/model.md). zizmor runs with the pedantic persona. This file holds the ignored findings
-# and nothing else: no audit is switched off or configured (rule R14 of ci/check-workflows.py enforces this), and the comment
-# above every audit below says why the finding does not apply. A finding that is not
-# listed here fails the workflows gate. Narrow entries: a rule, a file (and a line where the finding is about one place).
+# "Security rules of the workflows"; docs/security/model.md, "Static analysis in CI"). zizmor runs with the pedantic persona.
+# This file holds the ignored findings and nothing else: no audit is switched off or configured (rule R14 of
+# ci/check-workflows.py enforces this), and the comment above every audit below says why the finding does not apply. A finding
+# that is not listed here fails the workflows gate. Narrow entries: a rule, the base name of a workflow file (zizmor compares
+# nothing else: no directory, and action.yml would match every local action) and a line where the finding is about one place.
 #
 # Single places are ignored in the file itself with a trailing comment `# zizmor: ignore[<rule>]` (see the github-env entries in
-# .github/actions/setup/action.yml, each with its reason).
+# .github/actions/setup/action.yml, each with its reason); a finding in a local action can only be ignored that way.
 rules:
-  # `uses: ./...` should be `uses: $/...`. GitHub supports the second form since July 2026 (it cannot load an action that an
-  # earlier step cloned at run time), but actionlint (v1.7.12, ci/versions.env) rejects it as an invalid action reference, so the
-  # workflows gate would fail, and ci/check-workflows.py (R1, R8, R13) reads the local form. Move to `$/` when actionlint accepts
-  # it and rule R1 is extended, and drop these entries then. The audit only ever reports this one construct, so the entries cover
-  # nothing else in the two files; every other workflow uses no local action or workflow.
+  # `uses: ./...` should be `uses: $/...` for a local action or a reusable workflow (ci.yml uses ./.github/actions/setup and calls
+  # ./.github/workflows/e2e.yml, e2e.yml uses the action too). GitHub supports the second form since 2026-07-30 (GitHub changelog,
+  # "Reference same-repository actions with self-repository syntax"; it cannot load an action that an earlier step cloned at run
+  # time), but actionlint (v1.7.12, ci/versions.env) rejects it as an invalid action reference, so the workflows gate would fail,
+  # and ci/check-workflows.py (R1, R8, R13) reads the local form. Move to `$/` when actionlint accepts it and rule R1 is extended,
+  # and drop these entries then. The audit only ever reports this one construct, so the entries cover nothing else in the two
+  # files; every other workflow uses no local action or workflow.
   self-repository:
     ignore:
       - ci.yml
       - e2e.yml
-  # The workflow has no `concurrency:` group. scorecard.yml has the shape that the Scorecard API verifies and that rule R12 of
-  # ci/check-workflows.py fixes: only the keys name, on, permissions and jobs at the top. A key `concurrency` would make the API
-  # refuse the published results. The workflow runs on a push to main and weekly, writes nothing but the findings of the
-  # analysis, and a second run in parallel does no harm. Every other workflow has a concurrency group or is not affected.
+  # The workflow has no concurrency group: rule R12 of ci/check-workflows.py allows only the keys name, on, permissions and jobs at
+  # the top of scorecard.yml. That is stricter than the Scorecard API, which checks top-level env, defaults and write permissions
+  # but not concurrency (ADR-0033). The workflow runs on a push to main and weekly, writes nothing but the findings, and a second
+  # run in parallel does no harm. Every other workflow has a concurrency group or is not affected.
   concurrency-limits:
     ignore:
       - scorecard.yml

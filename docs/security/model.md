@@ -417,7 +417,7 @@ guidance after each item names what to do.
 - **One third-party action: OpenSSF Scorecard.** [ADR-0033](../adr/0033-openssf-scorecard-as-the-only-third-party-action.md)
   allows `ossf/scorecard-action`, pinned to a commit SHA, in `.github/workflows/scorecard.yml`, job `analysis`, and nowhere
   else. `ci/check-workflows.py` enforces the place (rule R1) and the shape that the Scorecard API requires for published
-  results (rule R12): triggers `push` to `main` and `schedule`, one job on a GitHub-hosted Ubuntu runner with exactly the
+  results, in places more strictly (rule R12): triggers `push` to `main` and `schedule`, one job on a GitHub-hosted Ubuntu runner with exactly the
   permissions `contents: read`, `actions: read`, `security-events: write` and `id-token: write`, only `uses:` steps from a
   fixed list, no secrets, no caches, no environment. Residual risk: the action runs third-party code with `id-token: write`
   and `security-events: write`; a compromised release could request tokens for the identity of that workflow or change

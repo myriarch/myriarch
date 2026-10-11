@@ -14,7 +14,7 @@
 # and .github/dependabot.yml; the policy check also covers the local composite actions.
 #
 # zizmor runs with the pedantic persona (it also asks for a reason next to a permission and for a concurrency group; the one
-# workflow that cannot have one, scorecard.yml, whose shape rule R12 fixes, is ignored in zizmor.yml) and the configuration
+# workflow without one, scorecard.yml, whose top-level keys rule R12 fixes, is ignored in zizmor.yml) and the configuration
 # zizmor.yml in the repository root, which lists every ignored finding with its reason; rule R14 of the policy check allows
 # nothing but ignore entries there. An input that zizmor cannot parse fails the gate (--strict-collection); by default zizmor
 # skips it with a warning. It runs offline: the audits that need the GitHub API (impostor commits, known vulnerable

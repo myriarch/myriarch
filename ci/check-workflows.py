@@ -60,7 +60,8 @@ Rules
       three must all be there. The Scorecard step sets `publish_results: true`. No secrets expression anywhere. The
       workflow-level `contents: read` is R3's. The restrictions come from the Scorecard API (README of
       ossf/scorecard-action, "Workflow Restrictions", and verify_workflow.go in ossf/scorecard-infra); this rule is
-      stricter where it can be (no harden-runner, no ubuntu-latest, no -arm runners, a fixed set of permissions).
+      stricter where it can be (no harden-runner, no ubuntu-latest, no -arm runners, a fixed set of permissions, and no
+      top-level key but name, on, permissions and jobs, so no concurrency group, which the API does not check).
   R13 .github/workflows/release.yml (and release.yaml) keeps build code away from the privileges (ADR-0033). Trigger:
       only `push` with `tags:` whose patterns start with v; no branches, pull_request or workflow_dispatch. No caches:
       no actions/cache, no `cache:` input other than `false`, `cache: false` on actions/setup-go and

@@ -6,8 +6,9 @@
 #
 # The shape of this file is dictated by the Scorecard API, which refuses to publish results of a workflow that differs: no top-level
 # env or defaults, no workflow-level write permission, one job without env, defaults, container or services on a GitHub-hosted
-# Ubuntu runner, and only `uses:` steps from a short list. Rule R12 of ci/check-workflows.py checks exactly this shape and nothing in
-# this workflow may be added without reading that rule and ADR-0033. ossf/scorecard-action is the only third-party action of the
+# Ubuntu runner, and only `uses:` steps from a short list. Rule R12 of ci/check-workflows.py checks this shape and is stricter in
+# places (for example, it allows no top-level key but name, on, permissions and jobs, so no concurrency group); nothing in this
+# workflow may be added without reading that rule and ADR-0033. ossf/scorecard-action is the only third-party action of the
 # repository and may appear only here.
 #
 # The job has no secrets. publish_results sends the result with the OIDC token of the run (id-token: write); no repo_token is set,
