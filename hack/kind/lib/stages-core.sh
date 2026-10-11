@@ -91,7 +91,7 @@ stage_2() {
     img_arch="$(crane config "${ref}" | jq -r .architecture)"
     check_eq "architecture of ${ref%%@*} equals the node architecture" "${node_arch}" "${img_arch}"
   done
-  check_eq "server image runs as a non-root numeric user" 1001 "$(crane config "${SERVER_REPO}@${SERVER_DIGEST}" | jq -r '.config.User')"
+  check_eq "server image runs as a non-root numeric user" 65532 "$(crane config "${SERVER_REPO}@${SERVER_DIGEST}" | jq -r '.config.User')"
   check_eq "collector image runs as a non-root numeric user" 10001:10001 "$(crane config "${COLLECTOR_REPO}@${COLLECTOR_DIGEST}" | jq -r '.config.User')"
   pass "image digests recorded" "server ${SERVER_DIGEST}, collector ${COLLECTOR_DIGEST}"
   state_set SERVER_DIGEST "${SERVER_DIGEST}"
