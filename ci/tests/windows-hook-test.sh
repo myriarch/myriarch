@@ -446,13 +446,20 @@ expect_fail "seal: an .exe that changed after the build hook" "\\[not_reproducib
 make_unsigned >/dev/null 2>&1 || fail "the unsigned set could not be made again"
 
 # ---- 21: the scripts in stage apply -----------------------------------------------------------------------------------------------
-if needs_ossl 14; then
+if needs_ossl 15; then
   accs() { # signed-dir trust-dir [extra]
     local d="$1" trust="$2"; shift 2
     rm -rf "${ST}"; mkdir -p "${ST}"
     env TOOLS_BIN="${TB}" python3 -I "${AUTHPY}" accept-scripts --root "${S}" --state "${ST}" --unsigned "${U}" --signed "${d}" --trust "${trust}" "$@"
   }
-  expect_ok "scripts: correct test signatures are accepted" accs "${SG_TEST}" "${T}/ca/trust"
+  # a restrictive umask must not leak into the staged scripts: the mode is set explicitly, like in the stage off staging
+  accs_umask() { ( umask 077; accs "$@" ); }
+  expect_ok "scripts: correct test signatures are accepted" accs_umask "${SG_TEST}" "${T}/ca/trust"
+  python3 -I - "${ST}" <<'PY' && ok "... the staged scripts have mode 0644 under a restrictive umask" || fail "... the staged scripts do not have mode 0644"
+import os, stat, sys
+for rel in ("scripts/install-windows.ps1", "windows/Set-ServiceEnvironment.ps1"):
+    assert stat.S_IMODE(os.stat(os.path.join(sys.argv[1], "archive", "windows", rel)).st_mode) == 0o644, rel
+PY
   expect_ok "... the staged scripts verify" env TOOLS_BIN="${TB}" python3 -I "${AUTHPY}" verify --root "${S}" --trust "${T}/ca/trust" \
     "${ST}/archive/windows/scripts/install-windows.ps1" "${ST}/archive/windows/windows/Set-ServiceEnvironment.ps1"
   cp "${S}/deploy/scripts/install-windows.ps1" "${TEST_TMP}/changed.ps1"; printf '# one more line\n' >> "${TEST_TMP}/changed.ps1"
