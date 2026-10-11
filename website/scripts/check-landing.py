@@ -18,6 +18,9 @@ Fails when
   - the mark in the hero is not exactly one inline svg (class landing-hero__mark) that is hidden from assistive technology (aria-hidden="true",
     focusable="false", no title) and consists of one path.ring and nine path.dot with the classes r1 to r3 and c0 to c3 in their rows, or the
     circles of these paths are not the circles of assets/brand/myriarch-icon.svg (same centres and radii within 0.01),
+  - the pause button of the mark is not exactly one <button type="button"> with the class landing-hero__motion, an aria-label that names the
+    action, aria-pressed="false" and the attribute hidden (the script shows it, so without JavaScript there is no button), or the page does
+    not load the script landing-mark (the loop of the mark and the pause button need it) from the site,
   - index.html or a stylesheet that it links requests one of the files /brand/myriarch-icon*.svg (the mark is inline, so that it takes the
     colour of the page and no file of the other appearance is fetched).
 
@@ -87,6 +90,8 @@ class LandingParser(HTMLParser):
         self.mark_has_title = False
         self._mark_depth = 0
         self.stylesheets = []  # href of every stylesheet link
+        self.motion_buttons = []  # attribute dicts of every <button> with the class landing-hero__motion ("hidden" is a key when set)
+        self.scripts = []  # src of every <script src>
         self.body_class = ""
         self.svg_roles = []  # (role, has_title) per inline <svg> with the diagram id
         self._svg_depth = 0
@@ -104,6 +109,10 @@ class LandingParser(HTMLParser):
             self.body_class = a.get("class", "")
         elif tag == "img":
             self.images.append(a)
+        elif tag == "button" and "landing-hero__motion" in a.get("class", "").split():
+            self.motion_buttons.append(a)
+        elif tag == "script" and a.get("src"):
+            self.scripts.append(a["src"])
         elif tag == "link" and "stylesheet" in a.get("rel", "").lower().split():
             self.stylesheets.append(a.get("href", ""))
         elif tag == "svg" and "landing-hero__mark" in a.get("class", "").split():
@@ -294,6 +303,27 @@ def check_mark(parser, icon_path):
     return problems
 
 
+def check_motion_control(parser):
+    """The pause button of the mark (WCAG 2.2.2) and the script that shows it."""
+    problems = []
+    if len(parser.motion_buttons) != 1:
+        problems.append("index.html: the hero must contain exactly one button with the class landing-hero__motion (pause), found %d" % len(parser.motion_buttons))
+    else:
+        button = parser.motion_buttons[0]
+        if button.get("type") != "button":
+            problems.append('index.html: the pause button of the mark must be a <button type="button">')
+        if not re.search(r"\bpause\b", button.get("aria-label", ""), re.IGNORECASE):
+            problems.append("index.html: the pause button of the mark needs an aria-label that names the action (pause)")
+        if button.get("aria-pressed") != "false":
+            problems.append('index.html: the pause button of the mark must start with aria-pressed="false"')
+        if "hidden" not in button:
+            problems.append("index.html: the pause button of the mark must carry the attribute hidden (the script shows it; without JavaScript the animation plays once)")
+    scripts = [src for src in parser.scripts if "landing-mark" in src]
+    if len(scripts) != 1 or re.match(r"^(https?:)?//", scripts[0]):
+        problems.append("index.html: the page must load exactly one script landing-mark from the site, found %s" % (scripts or "none"))
+    return problems
+
+
 def check_icon_requests(public, text, stylesheets):
     """The mark is inline: neither index.html nor a stylesheet that it links names /brand/myriarch-icon*.svg."""
     problems = []
@@ -338,6 +368,7 @@ def check_page(public, icon_path=ICON):
             problems.append("index.html: the architecture diagram needs role=img and a <title>")
 
     problems += check_mark(parser, icon_path)
+    problems += check_motion_control(parser)
     problems += check_icon_requests(public, text, parser.stylesheets)
 
     if not parser.images:
