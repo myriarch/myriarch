@@ -22,7 +22,7 @@ func TestOSExecutorAsEndsChildTreeAtTimeout(t *testing.T) {
 	if !canDropPrivileges() {
 		t.Skip("needs root")
 	}
-	exe, _, _, err := osExecutorAs(strconv.Itoa(os.Getuid()))
+	exe, err := osExecutorAs(strconv.Itoa(os.Getuid()))
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
@@ -30,4 +30,11 @@ func TestOSExecutorAsEndsChildTreeAtTimeout(t *testing.T) {
 	_, err = exe(ctx, nil, "/bin/sh", "-c", "sleep 60 & wait")
 	assert.Error(t, err)
 	assert.Less(t, time.Since(begin), 15*time.Second)
+}
+
+// An account that does not resolve is refused before anything runs.
+func TestOSExecutorAsRejectsUnknownAccount(t *testing.T) {
+	exe, err := osExecutorAs("myriarch-no-such-account.invalid")
+	require.Error(t, err)
+	assert.Nil(t, exe)
 }

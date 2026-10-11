@@ -26,21 +26,21 @@ func canDropPrivileges() bool { return os.Geteuid() == 0 }
 // supplementary groups. Used for the config preflight so that the new
 // collector binary resolves the supervisor's config with the supervisor's
 // own rights, not with root's.
-func osExecutorAs(account string) (Executor, int, int, error) {
+func osExecutorAs(account string) (Executor, error) {
 	u, err := user.Lookup(account)
 	if err != nil {
 		u, err = user.LookupId(account)
 	}
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("look up service account %q: %w", account, err)
+		return nil, fmt.Errorf("look up service account %q: %w", account, err)
 	}
 	uid, err := strconv.ParseUint(u.Uid, 10, 32)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("service account %q: invalid uid %q", account, u.Uid)
+		return nil, fmt.Errorf("service account %q: invalid uid %q", account, u.Uid)
 	}
 	gid, err := strconv.ParseUint(u.Gid, 10, 32)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("service account %q: invalid gid %q", account, u.Gid)
+		return nil, fmt.Errorf("service account %q: invalid gid %q", account, u.Gid)
 	}
 	exe := func(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
 		cmd := exec.CommandContext(ctx, name, args...)
@@ -73,5 +73,5 @@ func osExecutorAs(account string) (Executor, int, int, error) {
 		}
 		return out.buf.Bytes(), nil
 	}
-	return exe, int(uid), int(gid), nil
+	return exe, nil
 }

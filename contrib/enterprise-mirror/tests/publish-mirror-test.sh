@@ -81,6 +81,17 @@ expect_ok "verify-release.sh against the mirror (--base-url, --assets)" env VERI
 expect_fail "verify-release.sh without credentials fails" "HTTP 401" \
   "${MIRROR_DIR}/verify-release.sh" --public-key "${W}/cosign.pub" --base-url "http://127.0.0.1:${PORT}/myriarch-releases/v${VER}"
 
+# a request path that resolves outside of the store is refused: no file is created next to it, a read finds nothing
+code="$(curl -s -o /dev/null -w '%{http_code}' --path-as-is -X PUT -H "Authorization: Bearer ${MIRROR_TOKEN}" --data 'outside' "http://127.0.0.1:${PORT}/../outside.txt")"
+if [ "${code}" = "400" ] && [ ! -e "${W}/outside.txt" ]; then ok "a PUT outside of the store is refused (400) and creates nothing"; else fail "a PUT outside of the store answered ${code} or created a file"; fi
+# a sibling directory whose name starts with the name of the store is outside of it as well (the separator is part of the check)
+code="$(curl -s -o /dev/null -w '%{http_code}' --path-as-is -X PUT -H "Authorization: Bearer ${MIRROR_TOKEN}" --data 'sibling' "http://127.0.0.1:${PORT}/../store-sibling/x.txt")"
+if [ "${code}" = "400" ] && [ ! -e "${W}/store-sibling" ]; then ok "a PUT into a sibling directory with the same prefix is refused (400) and creates nothing"; else fail "a PUT into a sibling directory answered ${code} or created it"; fi
+printf 'secret\n' > "${W}/outside.txt"
+code="$(curl -s -o /dev/null -w '%{http_code}' --path-as-is -H "Authorization: Bearer ${MIRROR_TOKEN}" "http://127.0.0.1:${PORT}/../outside.txt")"
+if [ "${code}" = "404" ]; then ok "a GET outside of the store finds nothing (404)"; else fail "a GET outside of the store answered ${code}"; fi
+rm -f "${W}/outside.txt"
+
 # same version, different content (re-signed so that the signature check does not fail earlier) => abort
 cp -R "${D}" "${W}/dist2"
 printf 'changed updater\n' > "${W}/dist2/myriarch-updater_linux_amd64_v1/myriarch-updater"

@@ -457,7 +457,7 @@ func (in *Installer) prepareValidation(ctx context.Context, cfgPath string) (val
 			return validation{cleanup: noop, skip: "the service controller cannot report the supervisor's account"}, nil
 		}
 		if user != "" && user != "root" && user != "0" {
-			as, _, _, err := osExecutorAs(user)
+			as, err := osExecutorAs(user)
 			if err != nil {
 				return validation{cleanup: noop, skip: err.Error()}, nil
 			}
