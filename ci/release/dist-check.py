@@ -8,6 +8,10 @@
       after goreleaser in stage collect or apply (deploy/release/windows-signed.sh check-dist): the Windows files in dist/ are the
       files that the post-build hook accepted, the Windows scripts are only in the Windows updater archives, the binaries carry
       the version resources, and checksums.txt lists every release file (and LICENSE and THIRD_PARTY_NOTICES) with the right hash
+  dist-check.py assets --dist D
+      for ci/release/stage-assets.sh: prints "<name><TAB><path>" for every archive, bare binary, SBOM and the checksums file of dist/
+      artifacts.json (the path is mapped onto D and is the file to copy); it refuses duplicate names, a name with a slash or a leading
+      dot, a control character in a name or a path, and a dist without exactly one checksums file
   dist-check.py compare --first A --second B
       for the rehearsal: two dist directories of the same commit are identical (archives and binaries byte for byte, SBOMs without
       documentNamespace, creationInfo.created and syft's own temporary directory entry); the Windows files of myriarch-updater and myrctl are left out, because the
@@ -235,6 +239,44 @@ def check(args):
     return 1 if problems else 0
 
 
+def assets(args):
+    """The release files that goreleaser built, as "<name>\t<path>" lines (stage-assets.sh copies them under their names)."""
+    try:
+        arts = load_artifacts(args.dist)
+    except ValueError as e:
+        print("[ci] ERROR: [dist_mismatch] %s" % e, file=sys.stderr)
+        return 1
+    rows, seen, sums = [], set(), 0
+    for a in arts:
+        k = kind(a)
+        if a.get("type") == "Checksum":
+            k, sums = "checksums", sums + 1
+        if k not in ("archive", "bare", "sbom", "checksums"):
+            continue
+        name, path = a.get("name"), a.get("path")
+        if not isinstance(name, str) or not isinstance(path, str) or not name or "/" in name or "\\" in name or name.startswith("."):
+            print("[ci] ERROR: [dist_mismatch] artifact name '%s' is not a plain file name" % str(name)[:80], file=sys.stderr)
+            return 1
+        if any(ord(c) < 32 or ord(c) == 127 for c in name + path):
+            print("[ci] ERROR: [dist_mismatch] an artifact has a control character in its name or path", file=sys.stderr)
+            return 1
+        if name in seen:
+            print("[ci] ERROR: [dist_mismatch] artifact name '%s' occurs twice" % name, file=sys.stderr)
+            return 1
+        seen.add(name)
+        try:
+            rows.append((name, str(rebase(args.dist, path))))
+        except ValueError as e:
+            print("[ci] ERROR: [dist_mismatch] %s" % e, file=sys.stderr)
+            return 1
+    if sums != 1:
+        print("[ci] ERROR: [dist_mismatch] artifacts.json lists %d checksums files, expected one" % sums, file=sys.stderr)
+        return 1
+    for name, path in sorted(rows, key=lambda r: r[0].encode()):
+        print("%s\t%s" % (name, path))
+    return 0
+
+
 def strip_sbom(path):
     """The SBOM without what syft randomizes: documentNamespace, creationInfo.created and the entry for its own temporary extraction
     directory (a file named like .../syft-archive-contents-<random>, which nothing refers to)."""
@@ -303,6 +345,9 @@ def main(argv=None):
     p.add_argument("--state", required=True)
     p.add_argument("--version", required=True)
     p.set_defaults(func=check)
+    p = sub.add_parser("assets")
+    p.add_argument("--dist", required=True)
+    p.set_defaults(func=assets)
     p = sub.add_parser("compare")
     p.add_argument("--first", required=True)
     p.add_argument("--second", required=True)
