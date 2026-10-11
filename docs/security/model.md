@@ -435,7 +435,10 @@ guidance after each item names what to do.
   a shell or a wrapper that it does not know.
 - **Release pipeline controls are pending.** Protected release environments, signing jobs without caches, SBOM and
   provenance attestations and a verification step before publishing belong to the release workflow, which does not
-  exist yet. No release has been published.
+  exist yet. The release-time dependency, license and notices gates, building the web UI from the tagged checkout and running
+  without a tool cache moved from `ci/build-release.sh` to that workflow; until it exists they rest on `ci-ok` on the tagged
+  commit, which the release tag guard requires. The list is in [`deploy/release/README.md`](../../deploy/release/README.md).
+  No release has been published.
 - **Release tag guard.** `ci/release/guard.sh` is meant to run before any other step of a release. It refuses a tag that is
   not `vX.Y.Z` or `vX.Y.Z-rc.N`, a lightweight tag, a tag that points at another commit than the run's, a commit that is
   not on `origin/main`, a `VERSION` or a copy of it that differs from the tag, a final tag without a dated `CHANGELOG.md`

@@ -85,9 +85,11 @@ marker_get() { # key
 }
 
 check_marker() { # is-snapshot version
-  [ -f "${STATE}/stage" ] && [ "$(marker_get stage)" = "${MYRIARCH_WINDOWS_STAGE}" ] && [ "$(marker_get snapshot)" = "$1" ] \
-    && { [ -z "${2:-}" ] || [ "$(marker_get version)" = "$2" ]; } \
-    || die "[stage_marker] the before hook did not prepare this build (stage, version): run goreleaser with deploy/release/goreleaser.yaml"
+  if [ -f "${STATE}/stage" ] && [ "$(marker_get stage)" = "${MYRIARCH_WINDOWS_STAGE}" ] && [ "$(marker_get snapshot)" = "$1" ] \
+    && { [ -z "${2:-}" ] || [ "$(marker_get version)" = "$2" ]; }; then
+    return 0
+  fi
+  die "[stage_marker] the before hook did not prepare this build (stage, version): run goreleaser with deploy/release/goreleaser.yaml"
 }
 
 record_sha() { # name file

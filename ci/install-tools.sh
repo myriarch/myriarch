@@ -24,7 +24,7 @@ mkdir -p "${TOOLS_BIN}"
 # dependencies are therefore in the repository and enforced with -mod=readonly - even if GOPROXY is a proxy and
 # GOSUMDB was switched off. (`go install <module>@<version>` outside a module would have no committed hashes.)
 # To update: change the version in ci/versions.env, then run ci/tools/update.sh <tool>; ci/check.sh compares both.
-# Release builds with signing keys should run WITHOUT a restored tool cache; TOOLS_NO_CACHE=1 ignores existing binaries.
+# The release workflow runs without a restored tool cache (rule R13); TOOLS_NO_CACHE=1 ignores existing binaries.
 go_install() { # tool module-with-cmd version-var binary-name [no-trimpath] [main-toolchain]
   local tool="$1" module="$2" version="${!3}" bin="$4" trim="-trimpath" toolchain="local" suffix=""
   # go-licenses finds GOROOT through the binary; with -trimpath it reports nothing at all (exit status 0).

@@ -113,7 +113,7 @@ ci/tests/versions-test.sh
 ## Release build
 
 The release build (`deploy/release/goreleaser.yaml`) turns a tagged commit into the archives, the bare updater binaries, one SBOM
-per archive and `checksums.txt`. It holds no signing key: the Sigstore signature is made by the release workflow, and the Windows
+per archive and one for the web UI, and `checksums.txt`. It holds no signing key: the Sigstore signature is made by the release workflow, and the Windows
 files get their Authenticode signature through a hook in stages (`MYRIARCH_WINDOWS_STAGE`), whose mode comes from
 `deploy/release/windows-signing.env` (see [Windows signing rule](#windows-signing-rule) and
 [ADR-0034](adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Nothing in the repository publishes a release.
