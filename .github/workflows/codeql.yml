@@ -1,0 +1,112 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# CodeQL code scanning (docs/development.md, "Security rules of the workflows"; docs/security/model.md, "Static analysis in CI").
+# One matrix job per language:
+#
+#   go                      manual build, traced by CodeQL: `go build ./...` for Linux, with the build tags `embedui` and `devpg` (the
+#                           server with the embedded web UI and with an embedded development PostgreSQL), for Windows, also with
+#                           the tags (internal/devpg/lock_other.go is `devpg && !unix`, which no other build compiles), and for macOS
+#                           (the Windows-only code of the updater, which runs as SYSTEM, and the non-unix variants of files)
+#   javascript-typescript   the web UI (web/) and the JavaScript scripts of the website (website/scripts); no build needed
+#   python                  the Python scripts (ci/, scripts/, website/scripts/, assets/brand/source, contrib/enterprise-mirror);
+#                           no build needed
+#   actions                 the workflows and local actions below .github
+#
+# Default setup of code scanning stays off in the repository settings, because this workflow replaces it. The results go to the
+# code scanning alerts of the repository (Security tab); nothing here blocks a merge, a ruleset may require them later.
+#
+# Pull requests from forks and from Dependabot are analysed too. The token of a fork run is read-only whatever the workflow asks
+# for, and GitHub still lets code scanning upload the results of a `pull_request` run. A Dependabot run does receive
+# security-events: write: the token of Dependabot is read-only by default, and the permissions key of the job raises it. The scope
+# also allows dismissing alerts. That stays harmless because the steps of the job compile the code and run none of it (no test,
+# no package installation, no generator) and the job has no secret. The review is in ci/workflow-permissions.txt.
+#
+# Policy (ADR-0032, enforced by ci/check-workflows.py): only github/codeql-action from the pinned set, a SHA pin, a read-only token
+# at the top, no persisted checkout credentials, a timeout. The one write scope (security-events, to upload the results) is listed
+# in ci/workflow-permissions.txt. The three steps of github/codeql-action must stay on the same commit as upload-sarif in
+# scorecard.yml (rule R2).
+name: codeql
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # weekly: new queries and a new CodeQL version find alerts in code that did not change
+    - cron: '29 5 * * 2'
+
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels its running analysis. A run on main (a push or the weekly schedule) is not cancelled, but a
+# newer run of the group waits for it and replaces a run that is still pending, so the newest commit of main is always analysed
+# and a commit in between may not be.
+concurrency:
+  group: codeql-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      security-events: write # upload the results to code scanning (reviewed in ci/workflow-permissions.txt)
+      contents: read # check out the repository (the repository is public, so no actions: read is needed)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The Go toolchain comes from go.mod (GOTOOLCHAIN=local keeps the build from downloading another one).
+      - name: Set up Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+
+      # Manual build: CodeQL traces every `go build`. The tags devpg and embedui select files that the plain build leaves out
+      # (internal/webui/embed_on.go needs a built UI below internal/webui/dist, which is git-ignored: the placeholder page stands in,
+      # the Go code is the same). GOOS=windows and GOOS=darwin compile the files that exist only for those systems; the Windows
+      # files of the updater are security-relevant. Windows is built with the tags as well, because internal/devpg/lock_other.go
+      # (`devpg && !unix`) is compiled by no other build. The build commands follow the gate "go" of ci/check-local.sh.
+      - name: Build the Go packages
+        if: matrix.language == 'go'
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          go build ./...
+          mkdir -p internal/webui/dist
+          cp internal/webui/placeholder/index.html internal/webui/dist/index.html
+          go build -tags embedui,devpg ./...
+          GOOS=windows GOARCH=amd64 go build ./...
+          GOOS=windows GOARCH=amd64 go build -tags embedui,devpg ./...
+          GOOS=darwin GOARCH=arm64 go build ./...
+
+      - name: Perform the CodeQL analysis
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          category: /language:${{ matrix.language }}

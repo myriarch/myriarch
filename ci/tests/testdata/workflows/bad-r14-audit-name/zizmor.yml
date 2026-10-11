@@ -1,0 +1,5 @@
+rules:
+  # why
+  Self_Repository:
+    ignore:
+      - ci.yml

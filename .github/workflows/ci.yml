@@ -366,7 +366,7 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # ---- the workflows themselves: actionlint and the policy check ----------------------------------------------------------------------
+  # ---- the workflows themselves: actionlint, zizmor and the policy check ----------------------------------------------------------------
   workflows:
     name: workflows
     runs-on: ubuntu-24.04
@@ -378,9 +378,13 @@ jobs:
           persist-credentials: false
       - name: Set up the toolchain
         uses: ./.github/actions/setup
+      # Online mode of zizmor: the audits that ask the GitHub API about the pinned actions (impostor commits, known vulnerable
+      # versions, stale references). The token is the read-only token of the run.
       - name: Run the gates (workflows)
         env:
           ONLY: workflows
+          ZIZMOR_ONLINE: '1'
+          GH_TOKEN: ${{ github.token }}
         run: ci/check-local.sh
       - name: Upload the gate logs
         if: failure()
@@ -405,7 +409,7 @@ jobs:
       - name: Set up the toolchain
         uses: ./.github/actions/setup
         with:
-          tools: cosign helm crane pwsh gitleaks shellcheck syft yq apt:libssl-dev apt:zlib1g-dev osslsigncode
+          tools: cosign helm crane pwsh gitleaks shellcheck zizmor syft yq apt:libssl-dev apt:zlib1g-dev osslsigncode
       - name: Run the script tests
         run: make ci-test
 

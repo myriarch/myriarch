@@ -57,7 +57,8 @@ runs:
     - name: Enable pnpm through corepack
       if: inputs.node == 'true'
       shell: bash
-      run: |
+      # Why the finding is a false positive: the variable name is fixed and the value is a path below the temporary directory of the runner.
+      run: | # zizmor: ignore[github-env]
         corepack enable
         echo "npm_config_store_dir=${RUNNER_TEMP}/pnpm-store" >> "${GITHUB_ENV}"
 
@@ -96,4 +97,7 @@ runs:
     - name: Put the CI tools on PATH
       if: runner.os != 'Windows'
       shell: bash
-      run: echo "${GITHUB_WORKSPACE}/.cache/bin" >> "${GITHUB_PATH}"
+      # Why the finding is a false positive: the directory holds the tools of ci/install-tools.sh (SHA-256 verified) or a cache that a
+      # pull request writes only for itself, and the workflows that use this action run code of the repository anyway; none of them
+      # runs on pull_request_target or workflow_run (rule R4 of ci/check-workflows.py).
+      run: echo "${GITHUB_WORKSPACE}/.cache/bin" >> "${GITHUB_PATH}" # zizmor: ignore[github-env]

@@ -9,6 +9,10 @@
 # independent of the schedule, the groups and the limit: a pull request comes as soon as an advisory has a fix, one per
 # vulnerable dependency and directory.
 #
+# Cooldown: every entry waits 7 days after a release before Dependabot proposes it (zizmor, audit dependabot-cooldown). A
+# compromised or broken release is usually withdrawn within days, so the pull request then never appears. Security updates ignore
+# the cooldown.
+#
 # Pull requests: an update goes through the same checks as any other change. The required DCO check passes the commits that
 # a bot authored, so an unmodified Dependabot pull request needs no sign-off and its commits stay as they are; a commit that
 # a maintainer adds to the branch carries that maintainer's sign-off. Read the release notes before merging a major version.
@@ -32,6 +36,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
     groups:
       github-actions:
         patterns: ['*']
@@ -42,6 +48,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
     groups:
       go-modules:
         patterns: ['*']
@@ -57,6 +65,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 0
 
   # The web UI (pnpm). A changed version of a bundled package changes THIRD_PARTY_NOTICES (make notices).
@@ -65,6 +75,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
     groups:
       web-ui:
         patterns: ['*']
@@ -82,6 +94,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
     groups:
       website:
         patterns: ['*']
@@ -94,6 +108,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
     groups:
       brand-python:
         patterns: ['*']
@@ -104,6 +120,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
     groups:
       brand-node:
         patterns: ['*']

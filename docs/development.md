@@ -192,7 +192,8 @@ ships:
   verified against the `SYFT_SHA256_*` and `ZIZMOR_SHA256_*` values in `ci/versions.env`. Both publish binaries for macOS and for
   Linux, for arm64 and amd64 (zizmor only with glibc, `unknown-linux-gnu`; there is no musl build). syft is not built from source:
   only the upstream release binaries carry their version, which syft records in every SBOM it makes (a `go build` reports
-  "[not provided]"), and a Go module for it would bring its whole dependency graph into the repository. No gate runs zizmor yet.
+  "[not provided]"), and a Go module for it would bring its whole dependency graph into the repository. The `workflows` gate runs zizmor
+  ([Security rules of the workflows](#security-rules-of-the-workflows)).
   The SBOM jobs run syft with `SYFT_CHECK_FOR_APP_UPDATE=false`, so that it does not look for a newer release.
 - `osslsigncode` (signs and verifies the Authenticode signatures of the Windows release files) is built from the source archive of
   the pinned tag, verified against `OSSLSIGNCODE_SOURCE_SHA256` in `ci/versions.env` (`ci/install-tools.sh osslsigncode`). It is a C
@@ -237,7 +238,7 @@ make docs-check                                   # when you touched documentati
 | `build` | `make build` |
 | `examples` | `make validate-examples` (`myrctl validate --strict` on `examples/quickstart`, `gitops-template/config` and `hack/kind/gitops`) |
 | `shellcheck` | `ci/lint-shell.sh` over all shell scripts we ship or run |
-| `workflows` | `ci/lint-workflows.sh`: `actionlint` over `.github/workflows` and the policy check `ci/check-workflows.py` (pinned actions, read-only token, forbidden triggers, secrets only for listed deployment jobs, a timeout per job, parity with the gates, the shape of the Scorecard and release workflows; see [Continuous integration](#continuous-integration)) |
+| `workflows` | `ci/lint-workflows.sh`: `actionlint` over `.github/workflows`, `zizmor` over the workflows, the local action and `.github/dependabot.yml` (offline; `ZIZMOR_ONLINE=1` with `GH_TOKEN` adds the audits that ask the GitHub API, which the CI job does), and the policy check `ci/check-workflows.py` (pinned actions, read-only token, forbidden triggers, secrets only for listed deployment jobs, a timeout per job, parity with the gates, the shape of the Scorecard and release workflows; see [Continuous integration](#continuous-integration)) |
 | `helm` | `ci/lint-helm.sh` and `ci/helm-conform.sh` (renders the chart with the example values and validates it against the schemas of Kubernetes 1.30.0, the chart floor, and 1.34.12) |
 | `language` | the language guard for English (see below) |
 | `docs` | `make docs-check`: generated CLI reference up to date, links, front matter |
@@ -386,8 +387,9 @@ both, so a rule does not depend on how a file is named:
   or `environment`, only `uses:` steps (`actions/checkout`, `ossf/scorecard-action` with `publish_results: true`,
   `github/codeql-action/upload-sarif`, optionally `actions/upload-artifact`) and exactly the job permissions `contents: read`,
   `actions: read`, `security-events: write` and `id-token: write`. These are the restrictions of the Scorecard API for
-  published results; the two write scopes need lines in `ci/workflow-permissions.txt`. A change to the shape starts with the
-  README of `ossf/scorecard-action` ("Workflow Restrictions") and a change of rule R12.
+  published results, applied more strictly where the API is looser (for example R12 allows only the keys `name`, `on`,
+  `permissions` and `jobs` at the top of the file); the two write scopes need lines in `ci/workflow-permissions.txt`. A change
+  to the shape starts with the README of `ossf/scorecard-action` ("Workflow Restrictions") and a change of rule R12.
 - **The release workflow keeps build code away from privileges** (rule R13). `.github/workflows/release.yml` runs only for a
   pushed tag `v*` (no `workflow_dispatch`); uses no cache (no `actions/cache`, no `cache:` input, `cache: false` for
   `actions/setup-go`, `package-manager-cache: false` for `actions/setup-node`, no local action or called workflow); names
@@ -401,6 +403,51 @@ both, so a rule does not depend on how a file is named:
   patterns and arrays that mention `go` or `make` are fine; a program started through a variable, a script or an interpreter
   that is not a shell is out of reach, so the scripts that privileged jobs call are tested with a `PATH` without `go`, `node`
   and `pnpm`.
+- **zizmor audits the workflows.** `ci/lint-workflows.sh` runs the pinned `zizmor` (`ci/install-tools.sh zizmor`) between
+  `actionlint` and the policy check: template injection, dangerous triggers, excessive permissions, undocumented permissions,
+  persisted credentials, cache poisoning, unpinned and impostor actions, secrets outside environments, unsafe writes to
+  `GITHUB_ENV` and `GITHUB_PATH`, missing concurrency limits and the cooldown of Dependabot updates. It uses the pedantic
+  persona. A permission needs a trailing comment on its own line (`security-events: write # upload the results`), and a workflow
+  needs a concurrency group; `scorecard.yml` has none, because rule R12 allows only the keys `name`, `on`, `permissions` and
+  `jobs` at its top (stricter than the Scorecard API, which does not check concurrency), and is ignored for that audit in
+  `zizmor.yml`. The gate runs offline, so it needs no network and no token. The `workflows` job of `ci.yml` sets
+  `ZIZMOR_ONLINE=1` and passes the read-only token of the run as `GH_TOKEN`, which switches on the audits that ask the GitHub
+  API about the pinned actions. To run them locally, export a `GH_TOKEN` and `ZIZMOR_ONLINE=1`. A finding fails the gate, and so
+  does a file that zizmor cannot parse (`--strict-collection`; by default zizmor skips such a file with a warning). Fix the
+  workflow; if the finding is a false positive, ignore it as narrowly as possible, with the reason next to the ignore: a
+  trailing comment `# zizmor: ignore[<audit>]` on the line the finding names (it must be the line of the `run:` key for a
+  script), with a comment line above it or text behind the bracket that gives the reason, or an entry under
+  `rules.<audit>.ignore` in `zizmor.yml` (audit and workflow file, a line number where the finding is about one place) under a
+  comment that gives the reason. An entry is the base name of the file (`ci.yml`), because zizmor compares nothing else: a
+  directory never matches, and `action.yml` would match every local action, so a finding in a local action is ignored with a
+  comment in the file. Rule R14 of the policy check enforces this: `zizmor.yml` has nothing but ignore entries (no `disable`, no
+  `config`, no other key, no wildcard, no directory), written as a block with one audit per line, each under a comment line
+  whose reason has at least one word; an inline ignore needs a reason with a word as well, and a bare `# zizmor: ignore` fails.
+  R14 also makes sure that the policy check and zizmor read the same lines: a file that zizmor reads (`zizmor.yml`, the
+  workflows, the local action, `.github/dependabot.yml`) fails when it is not UTF-8 or holds U+0085, U+2028 or U+2029 (a YAML
+  parser takes them for line breaks, the check splits at LF and CR), a control character other than TAB, or a byte order mark.
+  The environment variables `ZIZMOR_CONFIG`, `ZIZMOR_OFFLINE`, `ZIZMOR_NO_ONLINE_AUDITS` and `GH_HOST` are ignored by the
+  script, which passes `--gh-hostname github.com` (the online audits and the token go to github.com and nowhere else).
+  `ci/tests/lint-workflows-test.sh` checks with the real zizmor that a finding fails the gate, also one that only the pedantic
+  persona reports, and that an ignore covers only its audit and file; with a stub it checks which options and environment
+  variables reach zizmor.
+- **CodeQL scans the code** (`.github/workflows/codeql.yml`, results in the code scanning alerts of the repository). One matrix
+  job `analyze` per language, with the `security-extended` queries: `go` with a manual build that CodeQL traces
+  (`go build ./...`, then with the tags `embedui,devpg` and a placeholder page for the git-ignored `internal/webui/dist`, then
+  for `GOOS=windows` (also with the tags, because `internal/devpg/lock_other.go` is `devpg && !unix` and no other build compiles
+  it) and `GOOS=darwin`, so that the code behind the build tags and the Windows-only code of the updater are analysed),
+  `javascript-typescript` (the web UI and the JavaScript scripts of the website), `python` (`ci/`, `scripts/`,
+  `website/scripts/`, `assets/brand/source`, `contrib/enterprise-mirror`) and `actions` (the workflows and the local action). It
+  runs on pushes to `main`, on every pull request to `main` and weekly. Pull requests from forks and from Dependabot are
+  analysed too, because GitHub always lets code scanning upload the results of a `pull_request` run (default setup would skip
+  forks; advanced setup does not). The job's one write scope, `security-events`, is listed in `ci/workflow-permissions.txt` with
+  its review: the token of a fork run is read-only, a Dependabot run receives the scope (the `permissions` key raises the
+  read-only default of Dependabot), and the scope also allows dismissing alerts. That stays harmless because the steps of the
+  job compile the code and run none of it, and the job has no secret. Default setup of code scanning must stay off in the
+  repository settings, because this workflow replaces it. `init`, `analyze` and the `upload-sarif` step of `scorecard.yml` use
+  the same pin of `github/codeql-action` (rule R2). A new language, build tag or operating system goes into the matrix and into
+  the build step, and the first run has to show that the extractor saw the new files; a new build tag in `ci/check-local.sh`
+  goes into the build step as well.
 - **A read-only token**: `permissions: contents: read` at the top of every workflow. A job-level write scope needs a line in
   `ci/workflow-permissions.txt` (`<workflow file> <job> <scope>`) and a review of the job.
 - **No `pull_request_target` and no `workflow_run`**, `persist-credentials: false` on every checkout, a timeout on
@@ -454,7 +501,8 @@ step in `.github/actions/setup/action.yml`. Move it to the next LTS line only af
 ## Dependency updates
 
 Dependabot (`.github/dependabot.yml`) proposes version updates every Monday, as one grouped pull request per directory, and
-security updates as soon as an advisory has a fix. The pull requests go through the same checks as any other change, and several
+security updates as soon as an advisory has a fix. Every entry has a cooldown of 7 days (zizmor, audit `dependabot-cooldown`): a version
+is proposed no earlier than a week after its release; security updates ignore the cooldown. The pull requests go through the same checks as any other change, and several
 of them need a follow-up commit on the same branch:
 
 | Ecosystem and directory | Group | What else the update has to change |
