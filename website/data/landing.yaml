@@ -48,8 +48,8 @@ features:
     - icon: fa-solid fa-shield-halved
       title: Signed artifacts
       text: The updater verifies the Sigstore bundle of a collector package before it installs it, offline if needed. The project's own releases, release candidates included, are signed keyless with Sigstore and carry build provenance.
-      link: /docs/adr/0007-package-offers-in-upstream-format-with-sigstore-bundles.md
-      link_label: Package offers and Sigstore bundles
+      link: /docs/security/verify-releases.md
+      link_label: Verify releases
     - icon: fa-solid fa-layer-group
       title: High availability on PostgreSQL
       text: Run several replicas of the server on one PostgreSQL database. State, events and the leader election for singleton jobs live there.

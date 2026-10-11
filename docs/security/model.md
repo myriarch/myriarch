@@ -565,7 +565,8 @@ guidance after each item names what to do.
   file any more.
 - **Exception for v0.1.0: unsigned Windows files.** `v0.1.0` ships `myriarch-updater.exe`, `myrctl.exe` and the two PowerShell
   scripts without Authenticode signatures, under a reviewed exception for exactly that tag; the release notes carry an
-  "unsigned" banner. Residual risk: Windows itself does not tell an operator who built an unsigned file, so integrity rests on
+  "unsigned" banner. Release candidates (`vX.Y.Z-rc.N`) may ship the same files unsigned, with the same "unsigned" banner and
+  the same verification advice. Residual risk: Windows itself does not tell an operator who built an unsigned file, so integrity rests on
   the Sigstore signature alone. Verify the Windows files with cosign before you run them, starting with `install-windows.ps1`
   itself (use a `cosign.exe` from a folder that only Administrators can write); the verified installer may then verify the
   binaries it downloads. Use `Unblock-File` only after that. Hosts with App Control allow the unsigned installer,

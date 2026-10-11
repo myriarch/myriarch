@@ -1012,8 +1012,7 @@ The project website (myriarch.dev, [ADR-0031](adr/0031-website-with-hugo-and-doc
 Docsy theme from the sources in `website/` and from the Markdown files of the repository that it mounts. It is a static
 site: the output is the directory `website/public`. `.github/workflows/website.yml` deploys it to production on pushes to
 `main` and builds protected previews for pull requests (see `website/README.md`, "Deployment"); the make targets below never
-deploy anything. The release status on the landing page comes from `website/data/release.yaml` ([Releasing](releasing.md),
-"After the publication").
+deploy anything. The release status on the landing page comes from `website/data/release.yaml` ([Releasing](releasing.md#after-every-publication)).
 
 ### Commands
 

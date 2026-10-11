@@ -198,7 +198,8 @@ These settings are made by a maintainer in GitHub, once. The workflow cannot che
 ### First candidate: what to observe
 
 Two things cannot be tested before the first candidate, and the first candidate is where they are settled. Record the result in
-the pull request that prepares the next candidate.
+the pull request of [After every publication](#after-every-publication), or in a follow-up pull request if the re-run has not
+been observed yet.
 
 1. **Run the kind smoke test once before you tag.** `smoke-kind` runs only after publication, where a failure can only be fixed
    forward, and no CI job runs kind. On a machine with a container runtime run `make kind-probe` (the same cluster configuration
@@ -272,9 +273,9 @@ exists, long after the sentence "no release has been published yet" stopped bein
 
 | Archive | Repository files in it |
 |---|---|
-| `myriarchd_*` (and the server image, which is built from it) | `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES`, `deploy/helm/`, `deploy/compose/`, `deploy/docker/`, `examples/quickstart/` |
+| `myriarchd_*` (the server image is built from the `myriarchd`, `myrctl` and `myriarch-sim` archives) | `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES`, `deploy/helm/`, `deploy/compose/`, `deploy/docker/`, `examples/quickstart/` |
 | `myrctl_*` | `README.md`, `CHANGELOG.md`, `LICENSE`, `THIRD_PARTY_NOTICES` |
-| `myriarch-updater_*` | `deploy/scripts/` (the installer of the platform), `deploy/supervisor/`, `deploy/systemd/`, `deploy/updater/`, `deploy/windows/README.md`, `LICENSE`, `THIRD_PARTY_NOTICES` |
+| `myriarch-updater_*` | `deploy/scripts/` (the installer of the platform), `deploy/supervisor/`, `deploy/systemd/`, `deploy/updater/`, `deploy/windows/` (`README.md`; on Windows also `Set-ServiceEnvironment.ps1`), `LICENSE`, `THIRD_PARTY_NOTICES` |
 | `myriarch-sim_*` | `examples/sim/`, `LICENSE`, `THIRD_PARTY_NOTICES` |
 
 The notes of a candidate are rendered from the "Unreleased" section of `CHANGELOG.md` (`ci/release/notes.sh`), so that section is
@@ -288,7 +289,7 @@ read as part of the release as well.
    published yet", "available from v0.1.0" or "will be published". Search the files of the table:
 
    ```bash
-   grep -rniE "no release|not (yet )?published|first release|available from|planned for|will be (published|released)" \
+   grep -rniE "no release|not (yet )?published|first release|available from|planned for|will be (published|released)|/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?/|--branch v[0-9]" \
      README.md CHANGELOG.md deploy examples
    ```
 
@@ -311,11 +312,12 @@ the archives, so they can follow the release:
    never writes this file (it has no write access to the repository), and `README.md` and `docs/` cannot read it: they are plain
    Markdown, which is why they describe the process.
 2. **The pages that say whether images exist or name a release:** `docs/getting-started/_index.md`,
-   `docs/getting-started/docker-compose.md` and `docs/operations/install-helm.md`. Check that every tag they name exists and that
+   `docs/getting-started/docker-compose.md`, `docs/operations/install-helm.md` and `docs/security/verify-releases.md`. Check that every tag they name exists and that
    their sentences about the images are true.
 3. **The deferred observations:** after the first candidate, write the result of the two observations of
-   [First candidate](#first-candidate-what-to-observe) here and in `docs/security/model.md` (the statement on re-run approvals),
-   and remove the wording that defers them.
+   [First candidate](#first-candidate-what-to-observe) in this pull request and in `docs/security/model.md` (the statement on
+   re-run approvals), and remove the wording that defers them. The kind result is known from before the tag; the re-run
+   observation may need a throw-away candidate, so it can follow in a pull request of its own.
 
 Texts in the archives (`README.md`, `CHANGELOG.md`, the files of `deploy/`) are not touched here: they are right already, or the
 next release corrects them.

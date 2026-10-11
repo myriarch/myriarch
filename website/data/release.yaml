@@ -1,5 +1,5 @@
 # Release status of the project, the single source for the status chip of the landing page (layouts/_partials/landing/hero.html).
-# Set it by hand after a release is published (docs/releasing.md, "After the publication"); the release workflow never writes it.
+# Set it by hand after a release is published (docs/releasing.md, "After every publication"); the release workflow never writes it.
 # Plain Markdown (README, docs/, SECURITY.md) does not read this file, so those texts describe the process, not the current state.
 #
 #   final:      tag of the latest final release (vX.Y.Z), or "" while there is none
