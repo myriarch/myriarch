@@ -1401,24 +1401,48 @@ grep -q 'stage-assets.sh --dist dist --root \. --version "\${snapshot_version}" 
 
 # ==== 15. tools.sh (check) and images.sh ======================================================================================================
 section "15. tools.sh check, images.sh"
+# a tree like the one that `tools.sh build --set signing` writes (the build itself needs the network and a C compiler)
 TL="${TEST_TMP}/tools"
 mkdir -p "${TL}/linux-amd64" "${TL}/linux-arm64" "${TL}/windows-amd64"
 printf 'a\n' > "${TL}/linux-amd64/cosign"; printf 'b\n' > "${TL}/linux-amd64/.stamp-cosign-v1-abc"; printf 'c\n' > "${TL}/linux-arm64/cosign"; printf 'd\n' > "${TL}/windows-amd64/cosign.exe"
-printf 'cosign v1\n' > "${TL}/VERSIONS"
-( cd "${TL}" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do printf '%s  %s\n' "$(sha256_of "${f}")" "${f}"; done > SHA256SUMS )
-for pl in linux-amd64 linux-arm64 windows-amd64; do expect_ok "tools check: ${pl}" run_priv "${REL}/tools.sh" check --dir "${TL}" --platform "${pl}"; done
+printf 'g\n' > "${TL}/linux-amd64/crane"; printf 'h\n' > "${TL}/linux-amd64/gh"
+printf 'cosign v1\ncrane v2\ngh v3\n' > "${TL}/VERSIONS"
+mksums() { ( cd "$1" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do printf '%s  %s\n' "$(sha256_of "${f}")" "${f}"; done > SHA256SUMS ); }
+mksums "${TL}"
+tc() { run_priv "${REL}/tools.sh" check --set "$1" --dir "${2:-${TL}}" --platform "$3"; }
+for pl in linux-amd64 linux-arm64 windows-amd64; do expect_ok "tools check: the signing set, ${pl}" tc signing "${TL}" "${pl}"; done
+expect_fail "tools check: a tree of the signing set is not the build set" "tools_sums.*VERSIONS names 'cosign crane gh', the build set is" tc build "${TL}" linux-amd64
+expect_fail "tools check: the set is required" "usage:" run_priv "${REL}/tools.sh" check --dir "${TL}" --platform linux-amd64
+expect_fail "tools check: an unknown set" "usage:" tc other "${TL}" linux-amd64
 printf 'x' >> "${TL}/linux-arm64/cosign"
-expect_fail "tools check: a changed file" "tools_sums.*linux-arm64/cosign" run_priv "${REL}/tools.sh" check --dir "${TL}" --platform linux-arm64
-expect_ok "tools check: the other platforms are not affected" run_priv "${REL}/tools.sh" check --dir "${TL}" --platform linux-amd64
+expect_fail "tools check: a changed file" "tools_sums.*linux-arm64/cosign" tc signing "${TL}" linux-arm64
+expect_ok "tools check: the other platforms are not affected" tc signing "${TL}" linux-amd64
 printf 'e\n' > "${TL}/linux-amd64/extra"
-expect_fail "tools check: a file that SHA256SUMS does not list" "tools_sums.*extra" run_priv "${REL}/tools.sh" check --dir "${TL}" --platform linux-amd64
-expect_fail "tools check: an unknown platform" "usage:" run_priv "${REL}/tools.sh" check --dir "${TL}" --platform macos
-expect_fail "tools build: a non-empty output directory" "out_not_empty" run_priv "${REL}/tools.sh" build --out "${TL}"
-grep -q 'TOOLS_NO_CACHE=1 TOOLS_BIN="${out}/linux-amd64" "${ROOT}/ci/install-tools.sh" goreleaser cosign crane syft gh go-winres yq osslsigncode' "${REL}/tools.sh" \
-  && ok "tools build: the linux-amd64 tool set and the cache switch" || fail "tools build: unexpected install-tools.sh call"
+expect_fail "tools check: a file that SHA256SUMS does not list" "tools_sums.*extra" tc signing "${TL}" linux-amd64
+expect_fail "tools check: an unknown platform" "usage:" tc signing "${TL}" macos
+TB="${TEST_TMP}/tools-build"; mkdir -p "${TB}/linux-amd64"
+for b in goreleaser syft yq go-winres osslsigncode; do printf '%s\n' "${b}" > "${TB}/linux-amd64/${b}"; done
+printf 'go-winres v1\ngoreleaser v2\nosslsigncode 3\nsyft v4\nyq v5\n' > "${TB}/VERSIONS"; mksums "${TB}"
+expect_ok "tools check: the build set" tc build "${TB}" linux-amd64
+expect_fail "tools check: a tree of the build set is not the signing set" "tools_sums.*the signing set is" tc signing "${TB}" linux-amd64
+printf 'go-winres v1\ngoreleaser v2\nosslsigncode 3\nsyft v4\n' > "${TB}/VERSIONS"; mksums "${TB}"
+expect_fail "tools check: VERSIONS lacks a tool of the set" "tools_sums.*VERSIONS names" tc build "${TB}" linux-amd64
+rm "${TB}/VERSIONS"
+expect_fail "tools check: VERSIONS is missing" "tools_sums.*VERSIONS is missing" tc build "${TB}" linux-amd64
+expect_fail "tools build: a non-empty output directory" "out_not_empty" run_priv "${REL}/tools.sh" build --set signing --out "${TL}"
+expect_fail "tools build: the set is required" "usage:" run_priv "${REL}/tools.sh" build --out "${TEST_TMP}/tools-x"
+expect_fail "tools build: an unknown set" "usage:" run_priv "${REL}/tools.sh" build --set all --out "${TEST_TMP}/tools-x"
+grep -q 'TOOLS_NO_CACHE=1 TOOLS_BIN="${bin}" "${ROOT}/ci/install-tools.sh" cosign crane gh ' "${REL}/tools.sh" \
+  && ok "tools build: the signing set is cosign, crane and gh without the cache" || fail "tools build: unexpected install-tools.sh call for the signing set"
+grep -q 'TOOLS_NO_CACHE=1 TOOLS_BIN="${bin}" "${ROOT}/ci/install-tools.sh" goreleaser syft go-winres yq osslsigncode ' "${REL}/tools.sh" \
+  && ok "tools build: the build set is goreleaser, syft, go-winres, yq and osslsigncode without the cache" || fail "tools build: unexpected install-tools.sh call for the build set"
+# the signing set is built before anything else is installed, and never needs apt or a C compiler
+signing_part="$(sed -n '/if \[ "\${set}" = signing \]; then/,/^  else$/p' "${REL}/tools.sh")"
+case "${signing_part}" in *apt:*|*osslsigncode*|*goreleaser*|*syft*|*yq*) fail "tools build: the signing branch installs or runs a build tool" ;; *) ok "tools build: the signing branch installs and runs no build tool" ;; esac
 for c in 'cosign github.com/sigstore/cosign/v3/cmd/cosign linux arm64' 'crane github.com/google/go-containerregistry/cmd/crane linux arm64' 'cosign github.com/sigstore/cosign/v3/cmd/cosign windows amd64'; do
   grep -q "cross_build ${c} " "${REL}/tools.sh" && ok "tools build: cross build ${c}" || fail "tools build: missing cross build ${c}"
 done
+contains "tools build: the job summary records VERSIONS and SHA256SUMS" 'summary "## Tools of this run: ${set}"' "$(cat "${REL}/tools.sh")"
 # images.sh with a stub of scripts/build-image-crane.sh
 IR="${TEST_TMP}/imgroot"
 mkdir -p "${IR}/ci/release" "${IR}/scripts"

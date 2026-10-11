@@ -69,28 +69,30 @@ U, UA, W = "ubuntu-24.04", "${{ matrix.os }}", "windows-2025"
 CR = {"contents": "read"}
 JOBS = {
     "guard": ([], {"contents": "read", "checks": "read"}, None, 10, U),
-    "tools": (["guard"], CR, None, 30, U),
+    "signing-tools": (["guard"], CR, None, 30, U),
+    "build-tools": (["guard"], CR, None, 30, U),
     "ui": (["guard"], CR, None, 30, U),
-    "build-windows": (["guard", "tools"], CR, None, 30, U),
+    "build-windows": (["guard", "build-tools"], CR, None, 30, U),
     "sign-windows": (["guard", "build-windows"], CR, "release", 30, U),
-    "package": (["guard", "tools", "ui", "build-windows", "sign-windows"], CR, None, 45, U),
-    "images": (["guard", "tools", "package"], CR, None, 30, U),
-    "sign-blobs": (["guard", "tools", "package", "sign-windows"], {"contents": "read", "id-token": "write", "attestations": "write"}, None, 15, U),
-    "push-images": (["guard", "tools", "images", "sign-windows"], {"contents": "read", "id-token": "write", "attestations": "write", "packages": "write"}, None, 30, U),
-    "draft": (["guard", "tools", "package", "images", "sign-windows", "sign-blobs", "push-images"], {"contents": "write"}, None, 20, U),
-    "verify": (["guard", "tools", "package", "images", "sign-blobs", "push-images"], {"contents": "read", "packages": "read", "attestations": "read"}, None, 30, U),
-    "verify-images": (["guard", "tools", "images", "push-images"], {"contents": "read", "packages": "read"}, None, 15, UA),
+    "package": (["guard", "build-tools", "ui", "build-windows", "sign-windows"], CR, None, 45, U),
+    "images": (["guard", "build-tools", "signing-tools", "package"], CR, None, 30, U),
+    "sign-blobs": (["guard", "signing-tools", "package", "sign-windows"], {"contents": "read", "id-token": "write", "attestations": "write"}, None, 15, U),
+    "push-images": (["guard", "signing-tools", "images", "sign-windows"], {"contents": "read", "id-token": "write", "attestations": "write", "packages": "write"}, None, 30, U),
+    "draft": (["guard", "signing-tools", "package", "images", "sign-windows", "sign-blobs", "push-images"], {"contents": "write"}, None, 20, U),
+    "verify": (["guard", "signing-tools", "package", "images", "sign-blobs", "push-images"], {"contents": "read", "packages": "read", "attestations": "read"}, None, 30, U),
+    "verify-images": (["guard", "signing-tools", "images", "push-images"], {"contents": "read", "packages": "read"}, None, 15, UA),
     "verify-windows": (["guard", "package", "sign-windows"], CR, None, 20, W),
-    "finalize": (["guard", "tools", "images", "push-images", "draft", "verify", "verify-images", "verify-windows"], {"contents": "write", "packages": "write", "attestations": "read"}, "release", 20, U),
-    "smoke-assets": (["guard", "tools", "images", "finalize"], {"contents": "read", "attestations": "read"}, None, 20, U),
-    "smoke-linux": (["guard", "tools", "images", "finalize"], CR, None, 30, UA),
-    "smoke-windows": (["guard", "tools", "finalize"], CR, None, 30, W),
+    "finalize": (["guard", "signing-tools", "images", "push-images", "draft", "verify", "verify-images", "verify-windows"], {"contents": "write", "packages": "write", "attestations": "read"}, "release", 20, U),
+    "smoke-assets": (["guard", "signing-tools", "images", "finalize"], {"contents": "read", "attestations": "read"}, None, 20, U),
+    "smoke-linux": (["guard", "signing-tools", "images", "finalize"], CR, None, 30, UA),
+    "smoke-windows": (["guard", "signing-tools", "finalize"], CR, None, 30, W),
     "smoke-kind": (["guard", "images", "finalize"], CR, None, 45, U),
 }
 MATRIX_JOBS = {"verify-images", "smoke-linux"}
-PRODUCERS = {"tools", "ui", "build-windows", "sign-windows", "package", "images", "sign-blobs", "verify"}
+PRODUCERS = {"signing-tools", "build-tools", "ui", "build-windows", "sign-windows", "package", "images", "sign-blobs", "verify"}
 # the only steps that may set TOOLS_NO_CACHE (it would make a consumer of the tools artifact ignore the stamps of the tools)
-TOOLS_NO_CACHE_STEPS = {("tools", "Build the release tools"), ("ui", "Install go-licenses"), ("smoke-kind", "Install kind, kubectl and helm")}
+TOOLS_NO_CACHE_STEPS = {("signing-tools", "Build the signing tools"), ("build-tools", "Build the build tools"), ("ui", "Install go-licenses"),
+                        ("smoke-kind", "Install kind, kubectl and helm")}
 # the keys under which the token of the job may appear in a step env
 TOKEN_KEYS = {"GITHUB_TOKEN", "GH_TOKEN", "REGISTRY_TOKEN"}
 
@@ -292,6 +294,10 @@ for jid, steps in steps_of.items():
                 check(sha == "${{ needs.%s.outputs.sha256 }}" % m.group(1), "job %s, step '%s': the unpack must check the sha256 output of the same producer %s" % (jid, name, m.group(1)))
                 check(m.group(1) in PRODUCERS, "job %s: %s does not produce an artifact" % (jid, m.group(1)))
             check("artifact.sh unpack" in tar and '--sha256 "${TAR_SHA256}"' in tar, "job %s, step '%s': an unpack step with --sha256 \"${TAR_SHA256}\" must follow" % (jid, name))
+            if m and m.group(1) in ("signing-tools", "build-tools"):
+                kind = m.group(1).split("-")[0]
+                check(re.search(r"tools\.sh check --set %s --dir \S+ --platform \S+" % kind, tar) is not None,
+                      "job %s, step '%s': the unpack of %s must be followed by tools.sh check --set %s in the same step" % (jid, name, m.group(1), kind))
             path = tx(w.get("path")) or ""
             base = path.rsplit("/", 1)[-1]
             check(path == "${{ runner.temp }}/in/%s" % base and ("/in/%s/%s.tar" % (base, base)) in tar, "job %s, step '%s': the unpack reads another file than the download wrote" % (jid, name))
@@ -299,9 +305,32 @@ for jid, steps in steps_of.items():
     uploads = sum(1 for s in steps if tx(s.get("uses")) == UPLOAD)
     check(uploads == (1 if jid in PRODUCERS else 0), "job %s: %d uploads" % (jid, uploads))
 
+# ---- the two tool sets ------------------------------------------------------------------------------------------------------
+# The jobs with id-token, attestations, packages or contents write (and the Windows jobs) execute only the signing set, which is built on a
+# runner of its own before anything else is installed or run there; the build set (goreleaser, syft, yq, go-winres, osslsigncode, which
+# needs apt packages and a C compiler) reaches only jobs with contents: read.
+SIGNING_USERS = {"images", "sign-blobs", "push-images", "draft", "verify", "verify-images", "finalize", "smoke-assets", "smoke-linux", "smoke-windows"}
+BUILD_USERS = {"build-windows", "package", "images"}
+for jid, (needs, perms, env, _, _) in JOBS.items():
+    uses_signing, uses_build = "signing-tools" in needs, "build-tools" in needs
+    check(uses_signing == (jid in SIGNING_USERS), "job %s: needs signing-tools = %s, expected %s" % (jid, uses_signing, jid in SIGNING_USERS))
+    check(uses_build == (jid in BUILD_USERS), "job %s: needs build-tools = %s, expected %s" % (jid, uses_build, jid in BUILD_USERS))
+    if env is not None or any(v != "read" for v in perms.values()):
+        check(not uses_build, "job %s has write scopes or an environment and must not execute the build tools" % jid)
+        check("signing-tools" in needs or jid in ("sign-windows", "guard"), "job %s has write scopes or an environment: its tools come from the signing set" % jid)
+for jid, flag in (("signing-tools", "signing"), ("build-tools", "build")):
+    runs = [(tx(s.get("name")), tx(s.get("run")) or "", tx(s.get("uses")) or "") for s in steps_of.get(jid, [])]
+    check([n for n, _, _ in runs] == ["Check out the tagged commit", "Set up Go", "Build the %s tools" % flag, "Pack %s-tools" % flag, "Upload %s-tools" % flag],
+          "job %s: the steps must be checkout, setup-go, the build, pack and upload and nothing else (found %s)" % (jid, [n for n, _, _ in runs]))
+    check(['ci/release/tools.sh build --set %s --out "${RUNNER_TEMP}/tools"' % flag] == [r for _, r, _ in runs if "tools.sh" in r],
+          "job %s: the only build step is tools.sh build --set %s" % (jid, flag))
+
 # ---- scripts: who may call what -----------------------------------------------------------------------------------------------
 OWNERS = {
-    "ci/release/guard.sh": {"guard"}, "ci/release/meta.sh": {"guard"}, "ci/release/tools.sh": {"tools"},
+    "ci/release/guard.sh": {"guard"}, "ci/release/meta.sh": {"guard"},
+    "ci/release/tools.sh build --set signing": {"signing-tools"}, "ci/release/tools.sh build --set build": {"build-tools"},
+    "ci/release/tools.sh check --set signing": SIGNING_USERS, "ci/release/tools.sh check --set build": BUILD_USERS,
+    
     "windows-sign-hook.sh": {"sign-windows"}, "ci/release/stage-assets.sh": {"package"}, "ci/release/images.sh": {"images"},
     "sign-checksums.sh": {"sign-blobs"}, "push-images.sh": {"push-images"}, "sign-image.sh": {"push-images"},
     "ci/release/notes.sh": {"draft"}, "ci/release/draft.sh": {"draft"}, "ci/release/verify.sh": {"verify"},
@@ -472,7 +501,7 @@ expect_fail "a write to GITHUB_ENV is refused" 'GITHUB_ENV or GITHUB_PATH' \
 expect_fail "a third environment user is refused" 'exactly sign-windows and finalize|job smoke-assets: environment' \
   mutated $'    name: smoke-assets\n' $'    name: smoke-assets\n    environment: release\n'
 expect_fail "a missing sign-windows in the needs of package is refused" 'job package: needs' \
-  mutated 'needs: [guard, tools, ui, build-windows, sign-windows]' 'needs: [guard, tools, ui, build-windows]'
+  mutated 'needs: [guard, build-tools, ui, build-windows, sign-windows]' 'needs: [guard, build-tools, ui, build-windows]'
 expect_fail "a wider permission is refused" 'job sign-blobs: permissions' \
   mutated $'      attestations: write # store the attestations in GitHub\'s attestation API\n    outputs:' \
           $'      attestations: write # store the attestations in GitHub\'s attestation API\n      packages: write # x\n    outputs:'
@@ -487,11 +516,11 @@ expect_fail "an upload with compression is refused" 'an upload needs archive: fa
 expect_fail "a longer retention is refused" 'retention-days: 1' \
   mutated 'retention-days: 1' 'retention-days: 7'
 expect_fail "a download by name is refused" 'download by artifact-ids' \
-  mutated 'artifact-ids: ${{ needs.tools.outputs.artifact-id }}' 'name: release-tools'
+  mutated 'artifact-ids: ${{ needs.build-tools.outputs.artifact-id }}' 'name: build-tools'
 expect_fail "a download without the digest check is refused" 'digest-mismatch must be error' \
   mutated 'digest-mismatch: error' 'digest-mismatch: warn'
 expect_fail "an unpack against another producer is refused" 'same producer' \
-  mutated 'TAR_SHA256: ${{ needs.tools.outputs.sha256 }}' 'TAR_SHA256: ${{ needs.images.outputs.sha256 }}'
+  mutated 'TAR_SHA256: ${{ needs.build-tools.outputs.sha256 }}' 'TAR_SHA256: ${{ needs.images.outputs.sha256 }}'
 expect_fail "an attestation with a storage record is refused" 'create no storage record' \
   mutated 'create-storage-record: false' 'create-storage-record: true'
 expect_fail "an eighth attestation is refused" 'exactly 7 times' \
@@ -515,7 +544,7 @@ expect_fail "a changed timeout is refused" 'job finalize: timeout-minutes' \
 expect_fail "a changed runner is refused" 'job verify-windows: runs-on' \
   mutated 'runs-on: windows-2025' 'runs-on: windows-latest'
 expect_fail "an if: on a job other than guard is refused" 'only guard has an if' \
-  mutated $'    name: tools\n' $'    name: tools\n    if: always()\n'
+  mutated $'    name: signing-tools\n' $'    name: signing-tools\n    if: always()\n'
 expect_fail "continue-on-error on a step is refused" 'no if: and no continue-on-error' \
   mutated $'      - name: Run the tag guard\n' $'      - name: Run the tag guard\n        continue-on-error: true\n'
 expect_fail "github.sha outside guard is refused" 'only guard does' \
@@ -532,6 +561,12 @@ expect_fail "a smoke test without the commit is refused" "job smoke-linux, step 
   mutated 'smoke.sh linux --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}" --arch' 'smoke.sh linux --tag "${RELEASE_TAG}" --arch'
 expect_fail "a Windows smoke test without the commit is refused" "job smoke-windows, step 'Smoke test the Windows installation': the script must be called with the commit" \
   mutated ' -Commit $env:RELEASE_COMMIT' ''
+expect_fail "the build tools in a privileged job are refused" 'job sign-blobs: needs is' \
+  mutated 'needs: [guard, signing-tools, package, sign-windows]' 'needs: [guard, signing-tools, build-tools, package, sign-windows]'
+expect_fail "a consumer without the check of the tool set is refused" "job images, step 'Download signing-tools': the unpack of signing-tools must be followed by tools.sh check --set signing" \
+  mutated $'          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/signing-tools" --platform linux-amd64\n' ''
+expect_fail "an extra step in the signing-tools job is refused" 'job signing-tools: the steps must be' \
+  mutated $'      - name: Pack signing-tools\n' $'      - name: Install more\n        run: ci/install-tools.sh yq\n      - name: Pack signing-tools\n'
 expect_fail "a renamed workflow file is refused" 'must be named release.yml' \
   bash -c 'mkdir -p "$1/renamed" && cp "$2" "$1/renamed/publish.yml" && python3 -I "$3" "$1/renamed/publish.yml" "$4"' _ "${TEST_TMP}" "${WORKFLOW}" "${CHECKER}" "${CI_DIR}/check-workflows.py"
 

@@ -14,7 +14,8 @@
 #
 # For each kind it runs, with a temporary DIST_DIR that holds copies of the assets and of metadata.json:
 #   IMAGE_SOURCE=dist IMAGE_KIND=server|updater DIST_DIR=... OUT_DIR=... scripts/build-image-crane.sh
-# which needs a clean work tree, Go (for go version -m) and the pinned syft in TOOLS_BIN. The test knobs of that script (ALLOW_DIRTY,
+# which needs a clean work tree, Go (for go version -m), the pinned syft in TOOLS_BIN and crane (CRANE, or TOOLS_BIN/crane; the
+# release workflow passes the crane of the signing set in CRANE). The test knobs of that script (ALLOW_DIRTY,
 # IMAGE_PLATFORMS, IMAGE_SBOM, SOURCE_URL, IMAGE_RELEASE_VERSION) must not be set [image_env].
 #
 # stdout (GITHUB_OUTPUT lines): server-index, server-amd64, server-arm64, updater-index, updater-amd64, updater-arm64 (sha256:<64 hex>).

@@ -89,10 +89,11 @@ jobs:
           RELEASE_COMMIT: ${{ github.sha }}
         run: ci/release/meta.sh >> "${GITHUB_OUTPUT}"
 
-  # Builds every tool of the run once from ci/tools (no tool cache) for the three platforms that need them. The other jobs
-  # take them from the artifact release-tools.tar, which carries SHA256SUMS.
-  tools:
-    name: tools
+  # Builds the tools that the jobs with id-token, attestations, packages or contents write execute (cosign, crane, gh) on a runner of
+  # their own, before anything else is installed or run there: no apt package, no C compiler, no other tool. The tar file carries
+  # VERSIONS and SHA256SUMS; the job summary records both. See ci/release/tools.sh and docs/security/model.md.
+  signing-tools:
+    name: signing-tools
     needs: [guard]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -111,18 +112,57 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Build the release tools
+      - name: Build the signing tools
         env:
           TOOLS_NO_CACHE: '1'
-        run: ci/release/tools.sh build --out "${RUNNER_TEMP}/tools"
-      - name: Pack release-tools
+        run: ci/release/tools.sh build --set signing --out "${RUNNER_TEMP}/tools"
+      - name: Pack signing-tools
         id: pack
-        run: ci/release/artifact.sh pack --dir "${RUNNER_TEMP}/tools" --out "${RUNNER_TEMP}/out/release-tools.tar" >> "${GITHUB_OUTPUT}"
-      - name: Upload release-tools
+        run: ci/release/artifact.sh pack --dir "${RUNNER_TEMP}/tools" --out "${RUNNER_TEMP}/out/signing-tools.tar" >> "${GITHUB_OUTPUT}"
+      - name: Upload signing-tools
         id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          path: ${{ runner.temp }}/out/release-tools.tar
+          path: ${{ runner.temp }}/out/signing-tools.tar
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: false
+
+  # Builds goreleaser, syft, yq, go-winres and osslsigncode (which needs apt packages and a C compiler). Only jobs with
+  # contents: read execute them.
+  build-tools:
+    name: build-tools
+    needs: [guard]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build the build tools
+        env:
+          TOOLS_NO_CACHE: '1'
+        run: ci/release/tools.sh build --set build --out "${RUNNER_TEMP}/tools"
+      - name: Pack build-tools
+        id: pack
+        run: ci/release/artifact.sh pack --dir "${RUNNER_TEMP}/tools" --out "${RUNNER_TEMP}/out/build-tools.tar" >> "${GITHUB_OUTPUT}"
+      - name: Upload build-tools
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/out/build-tools.tar
           archive: false
           retention-days: 1
           if-no-files-found: error
@@ -187,7 +227,7 @@ jobs:
   # Builds the Windows targets unsigned (stage collect of deploy/release/windows-signed.sh) for the signing slot.
   build-windows:
     name: build-windows
-    needs: [guard, tools]
+    needs: [guard, build-tools]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -207,16 +247,18 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Download release-tools
+      - name: Download build-tools
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          artifact-ids: ${{ needs.tools.outputs.artifact-id }}
-          path: ${{ runner.temp }}/in/release-tools
+          artifact-ids: ${{ needs.build-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/build-tools
           digest-mismatch: error
-      - name: Unpack release-tools
+      - name: Unpack build-tools
         env:
-          TAR_SHA256: ${{ needs.tools.outputs.sha256 }}
-        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-tools/release-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          TAR_SHA256: ${{ needs.build-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/build-tools/build-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set build --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
       - name: Build the Windows targets (stage collect)
         env:
           TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
@@ -294,7 +336,7 @@ jobs:
   # Builds and packages all targets, accepts the signed Windows set (stage apply) and stages the release assets.
   package:
     name: package
-    needs: [guard, tools, ui, build-windows, sign-windows]
+    needs: [guard, build-tools, ui, build-windows, sign-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -313,16 +355,18 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Download release-tools
+      - name: Download build-tools
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          artifact-ids: ${{ needs.tools.outputs.artifact-id }}
-          path: ${{ runner.temp }}/in/release-tools
+          artifact-ids: ${{ needs.build-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/build-tools
           digest-mismatch: error
-      - name: Unpack release-tools
+      - name: Unpack build-tools
         env:
-          TAR_SHA256: ${{ needs.tools.outputs.sha256 }}
-        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-tools/release-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          TAR_SHA256: ${{ needs.build-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/build-tools/build-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set build --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
       - name: Download webui-dist
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -388,7 +432,7 @@ jobs:
   # Builds the OCI layouts of both images from the released archives (no registry, no daemon).
   images:
     name: images
-    needs: [guard, tools, package]
+    needs: [guard, build-tools, signing-tools, package]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -413,16 +457,30 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Download release-tools
+      - name: Download build-tools
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          artifact-ids: ${{ needs.tools.outputs.artifact-id }}
-          path: ${{ runner.temp }}/in/release-tools
+          artifact-ids: ${{ needs.build-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/build-tools
           digest-mismatch: error
-      - name: Unpack release-tools
+      - name: Unpack build-tools
         env:
-          TAR_SHA256: ${{ needs.tools.outputs.sha256 }}
-        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-tools/release-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          TAR_SHA256: ${{ needs.build-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/build-tools/build-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set build --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/signing-tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/signing-tools" --platform linux-amd64
       - name: Download release-assets
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -437,6 +495,7 @@ jobs:
         id: build
         env:
           TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          CRANE: ${{ runner.temp }}/signing-tools/linux-amd64/crane
           RELEASE_VERSION: ${{ needs.guard.outputs.version }}
         run: ci/release/images.sh --release "${RUNNER_TEMP}/release" --version "${RELEASE_VERSION}" --out "${RUNNER_TEMP}/oci" >> "${GITHUB_OUTPUT}"
       - name: Pack oci-layouts
@@ -455,7 +514,7 @@ jobs:
   # Signs checksums.txt keyless and attests the build provenance of its 39 files. No contents, packages or release access.
   sign-blobs:
     name: sign-blobs
-    needs: [guard, tools, package, sign-windows]
+    needs: [guard, signing-tools, package, sign-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -476,16 +535,18 @@ jobs:
             ci/release
             deploy/release
           sparse-checkout-cone-mode: false
-      - name: Download release-tools
+      - name: Download signing-tools
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          artifact-ids: ${{ needs.tools.outputs.artifact-id }}
-          path: ${{ runner.temp }}/in/release-tools
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
           digest-mismatch: error
-      - name: Unpack release-tools
+      - name: Unpack signing-tools
         env:
-          TAR_SHA256: ${{ needs.tools.outputs.sha256 }}
-        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-tools/release-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
       - name: Download release-assets
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -530,7 +591,7 @@ jobs:
   # writes to ghcr.io before finalize. No contents or release access.
   push-images:
     name: push-images
-    needs: [guard, tools, images, sign-windows]
+    needs: [guard, signing-tools, images, sign-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -551,16 +612,18 @@ jobs:
             ci/image-labels.env
             scripts/lib
           sparse-checkout-cone-mode: false
-      - name: Download release-tools
+      - name: Download signing-tools
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          artifact-ids: ${{ needs.tools.outputs.artifact-id }}
-          path: ${{ runner.temp }}/in/release-tools
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
           digest-mismatch: error
-      - name: Unpack release-tools
+      - name: Unpack signing-tools
         env:
-          TAR_SHA256: ${{ needs.tools.outputs.sha256 }}
-        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-tools/release-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
       - name: Download oci-layouts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -662,7 +725,7 @@ jobs:
   # editable until finalize publishes it.
   draft:
     name: draft
-    needs: [guard, tools, package, images, sign-windows, sign-blobs, push-images]
+    needs: [guard, signing-tools, package, images, sign-windows, sign-blobs, push-images]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -681,16 +744,18 @@ jobs:
             deploy/release
             CHANGELOG.md
           sparse-checkout-cone-mode: false
-      - name: Download release-tools
+      - name: Download signing-tools
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          artifact-ids: ${{ needs.tools.outputs.artifact-id }}
-          path: ${{ runner.temp }}/in/release-tools
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
           digest-mismatch: error
-      - name: Unpack release-tools
+      - name: Unpack signing-tools
         env:
-          TAR_SHA256: ${{ needs.tools.outputs.sha256 }}
-        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-tools/release-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
       - name: Download release-assets
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -750,7 +815,7 @@ jobs:
   # Read scopes only. Its summary is what the reviewer of approval 2 reads.
   verify:
     name: verify
-    needs: [guard, tools, package, images, sign-blobs, push-images]
+    needs: [guard, signing-tools, package, images, sign-blobs, push-images]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -772,16 +837,18 @@ jobs:
             deploy/release
             ci/image-labels.env
           sparse-checkout-cone-mode: false
-      - name: Download release-tools
+      - name: Download signing-tools
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          artifact-ids: ${{ needs.tools.outputs.artifact-id }}
-          path: ${{ runner.temp }}/in/release-tools
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
           digest-mismatch: error
-      - name: Unpack release-tools
+      - name: Unpack signing-tools
         env:
-          TAR_SHA256: ${{ needs.tools.outputs.sha256 }}
-        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-tools/release-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
       - name: Download release-assets
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -839,7 +906,7 @@ jobs:
   # Runs both images on amd64 and arm64 by digest before publication.
   verify-images:
     name: verify-images (${{ matrix.os }})
-    needs: [guard, tools, images, push-images]
+    needs: [guard, signing-tools, images, push-images]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -866,16 +933,19 @@ jobs:
             ci/release
             deploy/release
           sparse-checkout-cone-mode: false
-      - name: Download release-tools
+      - name: Download signing-tools
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          artifact-ids: ${{ needs.tools.outputs.artifact-id }}
-          path: ${{ runner.temp }}/in/release-tools
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
           digest-mismatch: error
-      - name: Unpack release-tools
+      - name: Unpack signing-tools
         env:
-          TAR_SHA256: ${{ needs.tools.outputs.sha256 }}
-        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-tools/release-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+          TOOLS_PLATFORM: ${{ matrix.tools }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform "${TOOLS_PLATFORM}"
       - name: Log in to ghcr.io (read)
         env:
           REGISTRY_TOKEN: ${{ github.token }}
@@ -955,7 +1025,7 @@ jobs:
   # sets the image tags and publishes the release, which becomes immutable. Nothing here builds or runs project code.
   finalize:
     name: finalize
-    needs: [guard, tools, images, push-images, draft, verify, verify-images, verify-windows]
+    needs: [guard, signing-tools, images, push-images, draft, verify, verify-images, verify-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: release
@@ -978,16 +1048,18 @@ jobs:
             ci/image-labels.env
             scripts/lib
           sparse-checkout-cone-mode: false
-      - name: Download release-tools
+      - name: Download signing-tools
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          artifact-ids: ${{ needs.tools.outputs.artifact-id }}
-          path: ${{ runner.temp }}/in/release-tools
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
           digest-mismatch: error
-      - name: Unpack release-tools
+      - name: Unpack signing-tools
         env:
-          TAR_SHA256: ${{ needs.tools.outputs.sha256 }}
-        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-tools/release-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
       - name: Download verified
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1027,7 +1099,7 @@ jobs:
   # images anonymously.
   smoke-assets:
     name: smoke-assets
-    needs: [guard, tools, images, finalize]
+    needs: [guard, signing-tools, images, finalize]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -1044,16 +1116,18 @@ jobs:
             ci/release
             deploy/release
           sparse-checkout-cone-mode: false
-      - name: Download release-tools
+      - name: Download signing-tools
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          artifact-ids: ${{ needs.tools.outputs.artifact-id }}
-          path: ${{ runner.temp }}/in/release-tools
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
           digest-mismatch: error
-      - name: Unpack release-tools
+      - name: Unpack signing-tools
         env:
-          TAR_SHA256: ${{ needs.tools.outputs.sha256 }}
-        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-tools/release-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
       # gh refuses to run without a token; every registry read is anonymous, so there is no registry login.
       - name: Smoke test the published assets and images
         env:
@@ -1074,7 +1148,7 @@ jobs:
   # runs both images by tag, on amd64 and arm64.
   smoke-linux:
     name: smoke-linux (${{ matrix.os }})
-    needs: [guard, tools, images, finalize]
+    needs: [guard, signing-tools, images, finalize]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -1101,16 +1175,19 @@ jobs:
             ci/release
             deploy/release
           sparse-checkout-cone-mode: false
-      - name: Download release-tools
+      - name: Download signing-tools
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          artifact-ids: ${{ needs.tools.outputs.artifact-id }}
-          path: ${{ runner.temp }}/in/release-tools
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
           digest-mismatch: error
-      - name: Unpack release-tools
+      - name: Unpack signing-tools
         env:
-          TAR_SHA256: ${{ needs.tools.outputs.sha256 }}
-        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/release-tools/release-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+          TOOLS_PLATFORM: ${{ matrix.tools }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform "${TOOLS_PLATFORM}"
       - name: Smoke test the Linux installation
         env:
           TOOLS_BIN: ${{ runner.temp }}/tools/${{ matrix.tools }}
@@ -1125,7 +1202,7 @@ jobs:
   # Installs the published Windows updater in staging mode with the documented verification.
   smoke-windows:
     name: smoke-windows
-    needs: [guard, tools, finalize]
+    needs: [guard, signing-tools, finalize]
     runs-on: windows-2025
     timeout-minutes: 30
     permissions:
@@ -1146,18 +1223,19 @@ jobs:
             ci/release
             deploy/release
           sparse-checkout-cone-mode: false
-      - name: Download release-tools
+      - name: Download signing-tools
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          artifact-ids: ${{ needs.tools.outputs.artifact-id }}
-          path: ${{ runner.temp }}/in/release-tools
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
           digest-mismatch: error
-      - name: Unpack release-tools
+      - name: Unpack signing-tools
         env:
-          TAR_SHA256: ${{ needs.tools.outputs.sha256 }}
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
         run: |
           root="$(cygpath -u "${RUNNER_TEMP}")"
-          ci/release/artifact.sh unpack --file "${root}/in/release-tools/release-tools.tar" --sha256 "${TAR_SHA256}" --into "${root}/tools"
+          ci/release/artifact.sh unpack --file "${root}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${root}/tools"
+          ci/release/tools.sh check --set signing --dir "${root}/tools" --platform windows-amd64
       - name: Smoke test the Windows installation
         shell: pwsh
         env:
