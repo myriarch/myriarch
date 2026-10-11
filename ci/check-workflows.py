@@ -92,8 +92,10 @@ Rules
       `rules`, written as a block with one audit per line (never `rules: {...}`); each audit under it has only the key
       `ignore` (so no `disable`, no `config` and no other key) with a list of workflow files, optionally with `:line` or
       `:line:column`. zizmor compares an entry with the base name of the file, so an entry is `ci.yml` without a directory
-      and without a wildcard, and `action.yml` is refused (it would match every local action; ignore a finding in a local
-      action with an inline comment). A comment line directly above the audit gives the reason, with at least one word. An
+      and without a wildcard, and `action.yml` is refused: zizmor 1.30.1 applies such an entry to every local action
+      (checked against the binary; its documentation says that findings in actions cannot be ignored in zizmor.yml), so a
+      finding in a local action is ignored with an inline comment. A comment line directly above the audit gives the
+      reason, with at least one word. An
       inline ignore in a file below .github needs the rule names in brackets (`# zizmor: ignore[github-env]`, never a bare
       `# zizmor: ignore`) and a reason of at least one word: a comment line directly above it, or text behind the closing
       bracket. The rule reads the configuration with the reader of R12 and R13.
