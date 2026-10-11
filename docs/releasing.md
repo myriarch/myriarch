@@ -213,7 +213,8 @@ Every candidate, the first one included, goes through these steps. A candidate i
 release.
 
 1. **Prepare.** Open a pull request that runs `scripts/set-version.sh X.Y.Z-rc.N` (see [One version source](#one-version-source))
-   and has the entries of the candidate under "Unreleased" in `CHANGELOG.md`. Squash-merge it.
+   and has the entries of the candidate under "Unreleased" in `CHANGELOG.md`. In the same pull request, or one merged before it,
+   do the [review of the texts](#review-the-texts-before-every-tag): the archives cannot be corrected after the tag. Squash-merge it.
 2. **Wait for `ci-ok`** on the merge commit of `main`. The guard refuses a commit without it.
 3. **Tag** the merge commit with an annotated tag and push it:
 
@@ -244,6 +245,7 @@ release.
    immutable.
 8. **Check the smoke jobs** (`smoke-assets`, `smoke-linux`, `smoke-windows`, `smoke-kind`). They run after publication. A failure
    here is fixed forward (see [When something fails](#when-something-fails)).
+9. **Update the status** in a pull request after the publication, see [After every publication](#after-every-publication).
 
 ## Release a final version
 
@@ -254,8 +256,69 @@ A final release is a normal release and is marked as the latest release when it 
    `CHANGELOG.md` with an empty "Unreleased" section above it, and, **only for a reviewed exception**, `WINDOWS_UNSIGNED_FINAL_TAG`
    in `deploy/release/windows-signing.env` (see [Windows signing rule](#windows-signing-rule)). Remove the exception again in the
    next pull request after the release.
-2. Follow steps 2 to 8 of [Release a candidate](#release-a-candidate) with the tag `vX.Y.Z`. Step 6 is not needed any more.
+   The same pull request turns the texts that describe the phase before the final release into texts for the final one: the
+   "Status" section of `README.md`, "Supported versions" in `SECURITY.md` and the first paragraph of "Unreleased" in
+   `CHANGELOG.md` (all three say that v0.1.0 is published first as release candidates). `README.md` and `CHANGELOG.md` are in the
+   archives, so they change before the tag, not after it.
+2. Follow steps 2 to 9 of [Release a candidate](#release-a-candidate) with the tag `vX.Y.Z`. Step 6 is not needed any more.
 3. A final tag can be used **once**. If a problem shows up after publication, fix it and release `vX.Y.(Z+1)`.
+
+## Review the texts before every tag
+
+A release archive is immutable. Some repository files are copied into it, and the text in them is read for as long as the release
+exists, long after the sentence "no release has been published yet" stopped being true. Read the files below against the
+"Unreleased" section of `CHANGELOG.md` and the changes since the last tag before you tag. `deploy/release/goreleaser.yaml`
+(`archives`, `files`) is the authority; this list is its state at the time of writing:
+
+| Archive | Repository files in it |
+|---|---|
+| `myriarchd_*` (and the server image, which is built from it) | `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES`, `deploy/helm/`, `deploy/compose/`, `deploy/docker/`, `examples/quickstart/` |
+| `myrctl_*` | `README.md`, `CHANGELOG.md`, `LICENSE`, `THIRD_PARTY_NOTICES` |
+| `myriarch-updater_*` | `deploy/scripts/` (the installer of the platform), `deploy/supervisor/`, `deploy/systemd/`, `deploy/updater/`, `deploy/windows/README.md`, `LICENSE`, `THIRD_PARTY_NOTICES` |
+| `myriarch-sim_*` | `examples/sim/`, `LICENSE`, `THIRD_PARTY_NOTICES` |
+
+The notes of a candidate are rendered from the "Unreleased" section of `CHANGELOG.md` (`ci/release/notes.sh`), so that section is
+read as part of the release as well.
+
+1. **Compare, do not trust.** Read `README.md`, the pages of `docs/` and the website against the changelog and the commits since
+   the last tag: commands, flags, defaults, version numbers, platforms, support levels and what is signed. A sentence that claims
+   more than the release delivers (a signed Windows file, a signed macOS binary, an OCI chart) is wrong, whatever the plan says.
+2. **Files in the archives describe the process.** Every sentence must be true when the archive is created and still true after
+   publication, until the next version. Write "v0.1.0 is published first as release candidates", not "no release has been
+   published yet", "available from v0.1.0" or "will be published". Search the files of the table:
+
+   ```bash
+   grep -rniE "no release|not (yet )?published|first release|available from|planned for|will be (published|released)" \
+     README.md CHANGELOG.md deploy examples
+   ```
+
+   Every hit is read, not only the ones that look wrong. Commands that fetch a file or a branch of a tag must not name a tag that
+   does not exist yet: use a placeholder such as `v<version>`.
+3. **Other texts may name the state, but only if the update after publication changes them.** `SECURITY.md`, `docs/` and the
+   website are not in the archives. Prefer wording that needs no edit; where a page must name the state, it is on the list of
+   [After every publication](#after-every-publication).
+4. **Run the gates for the texts:** `make docs-check` and `make website-check`.
+
+## After every publication
+
+When `finalize` is green and the smoke jobs have been checked, open a pull request that updates the status. These files are not in
+the archives, so they can follow the release:
+
+1. **`website/data/release.yaml`**, the single source of the release status. After a candidate set `candidate: "vX.Y.Z-rc.N"` (and
+   `final: ""`); after a final release set `final: "vX.Y.Z"` and `candidate: ""`. The status chip of the landing page
+   (`website/layouts/_partials/landing/hero.html`) is derived from it, and `website/scripts/check-landing.py` fails when the
+   chip and the file differ. A candidate of a later version does not replace a final release in the chip. The release workflow
+   never writes this file (it has no write access to the repository), and `README.md` and `docs/` cannot read it: they are plain
+   Markdown, which is why they describe the process.
+2. **The pages that say whether images exist or name a release:** `docs/getting-started/_index.md`,
+   `docs/getting-started/docker-compose.md` and `docs/operations/install-helm.md`. Check that every tag they name exists and that
+   their sentences about the images are true.
+3. **The deferred observations:** after the first candidate, write the result of the two observations of
+   [First candidate](#first-candidate-what-to-observe) here and in `docs/security/model.md` (the statement on re-run approvals),
+   and remove the wording that defers them.
+
+Texts in the archives (`README.md`, `CHANGELOG.md`, the files of `deploy/`) are not touched here: they are right already, or the
+next release corrects them.
 
 ## rc numbering and re-runs
 
