@@ -12,13 +12,17 @@
 #     workflow or another workflow, never add another trigger.
 #   - Build code (go, node, pnpm, goreleaser, make) runs only in jobs with contents: read. The jobs with write scopes, id-token,
 #     attestations: write or an environment call only the scripts below ci/release, cosign, crane, gh and actions/attest.
+#   - Two tool sets: cosign, crane and gh (signing-tools, built first on a runner of its own) are the only tools that jobs with a
+#     write scope, id-token, attestations or an environment execute; goreleaser, syft, yq, go-winres and osslsigncode (build-tools)
+#     reach only jobs with contents: read. Every consumer runs ci/release/tools.sh check after the unpack.
 #   - Jobs exchange files only as artifacts of this run: one tar file each, uploaded without compression, downloaded by artifact
 #     ID with the digest check of the artifact service, and unpacked after the SHA-256 that the producing job reported (see
 #     ci/release/artifact.sh). Artifacts live one day.
 #   - Values reach the scripts through env: of the step, never through a ${{ }} expression inside run: text. Nothing writes to
 #     GITHUB_ENV or GITHUB_PATH; tools are reached through TOOLS_BIN.
 #   - Exactly two jobs use the environment release (approval 1: sign-windows, before anything is signed or pushed; approval 2:
-#     finalize, after the draft and every verification). v0.1.0 reads no secret.
+#     finalize, after the draft and every verification). A gate is passed once per run, and the job draft (contents: write) runs
+#     before gate 2: only finalize is stopped by it. v0.1.0 reads no secret.
 #   - The registry credentials live in $HOME/.docker/config.json (written by ci/release/registry-login.sh): actions/attest reads
 #     only that file. DOCKER_CONFIG is never set.
 #   - Pushes, signatures and attestations for one image digest run as strictly sequential steps of the job push-images.

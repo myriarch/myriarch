@@ -27,9 +27,11 @@ scorecard.yml analysis security-events
 scorecard.yml analysis id-token
 
 # Release workflow (ADR-0035; .github/workflows/release.yml, shape fixed by rule R13). It runs only for a pushed v* tag, never
-# for a pull request, and holds no secret in v0.1.0. Every job below runs after approval 1 (the job sign-windows of the
-# environment release) and takes only artifacts of the same run, downloaded by ID and checked against the SHA-256 that the
-# producing job reported; build code (go, node, pnpm, goreleaser, make) runs only in jobs with contents: read.
+# for a pull request, and holds no secret in v0.1.0. Every job below needs the job sign-windows (approval 1, the environment
+# release) in its chain of needs and takes only artifacts of the same run, downloaded by ID and checked against the SHA-256 that
+# the producing job reported; build code (go, node, pnpm, goreleaser, make) runs only in jobs with contents: read, and these
+# jobs execute only the signing tool set (cosign, crane, gh), which is built on a runner of its own. A gate is passed once per
+# run, not once per attempt: "Re-run failed jobs" runs a failed job below again without asking for approval 1 again.
 #
 # sign-blobs signs checksums.txt keyless (cosign sign-blob) and attests the build provenance of its 39 subjects (actions/attest):
 # id-token: write mints the OIDC token of release.yml at the tag (the signing identity of ADR-0029), attestations: write stores
@@ -43,7 +45,9 @@ release.yml push-images id-token
 release.yml push-images attestations
 release.yml push-images packages
 # draft creates the draft release of the tag with the verified-to-be file set; contents: write is the only scope that the
-# Releases API accepts for that. A draft is invisible to the public and stays editable until finalize.
+# Releases API accepts for that. A draft is invisible to the public and stays editable until finalize. The job runs before
+# approval 2 and has no environment: approval 2 stops finalize only, so draft runs nothing but the signing tool set and
+# ci/release scripts (docs/security/model.md).
 release.yml draft contents
 # finalize runs after approval 2 (environment release): it checks that the draft still holds exactly the verified files
 # (GitHub's asset digests), sets the image tags with crane and publishes the release, which becomes immutable.

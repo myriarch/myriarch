@@ -161,12 +161,16 @@ gh attestation verify "myriarch-updater_${VERSION}_linux_amd64" --repo myriarch/
   --source-ref "refs/tags/${TAG}" --deny-self-hosted-runners
 ```
 
-`--signer-workflow` with `@refs/tags/${TAG}` pins the workflow **and** the tag. `--source-ref` pins the tag the build ran for,
-and `--deny-self-hosted-runners` refuses a build that did not run on a GitHub-hosted runner. To pin the commit as well, add
+`--signer-workflow` with `@refs/tags/${TAG}` pins the workflow **and** the tag from gh **2.102.0** on. Older versions match that
+value only as a prefix (`@refs/tags/v0.1.0` would also accept `v0.1.0-rc.1`) or do not escape it at all, so use gh 2.102.0 or newer.
+`--source-ref` pins the tag the build ran for and is an exact check in every version, so keep it. `--deny-self-hosted-runners`
+refuses a build that did not run on a GitHub-hosted runner. To pin the commit as well, add
 `--source-digest <commit>` (the commit of the tag, shown in the release notes).
 
 The provenance is also a release asset, `myriarch_<version>_provenance.intoto.jsonl`. With `--bundle` the check needs no login
-and no call to the attestation API (it still needs the Sigstore trusted root, which gh caches; see
+and no call to the attestation API. It still needs the Sigstore trusted root: gh caches it for **one day** and fetches it again
+after that, so an offline host passes a trusted root file with `--custom-trusted-root trusted_root.json` (`gh attestation
+trusted-root` prints the current one; `myriarch-updater fetch-trusted-root` writes the same kind of file, see
 [Offline and behind a proxy](#offline-and-behind-a-proxy)):
 
 ```bash
@@ -191,8 +195,15 @@ gh release verify-asset "${TAG}" checksums.txt --repo myriarch/myriarch
 ```
 
 `gh release verify` checks that the release of the tag is immutable and that its attestation is valid. `gh release verify-asset`
-checks that a file you downloaded is an asset of that release, so a swapped file fails. If the first command reports that the
-release is not immutable, do not rely on the contents of the assets; report it in the issue tracker.
+checks that a file you downloaded is an asset of that release, so a swapped file fails. Both commands need a login of gh
+(`gh auth login`, or `GH_TOKEN`) even though the release is public. If the first command reports that the release is not
+immutable, do not rely on the contents of the assets; report it in the issue tracker.
+
+**`gh release verify-asset` is the proof that a file was released.** A signature or an attestation of the release identity proves
+that the workflow run for that tag created the file, but the workflow creates signatures, attestations and image signatures before
+it verifies the release and before the second approval, also in runs that never published (a failed attempt, an abandoned
+candidate, a "Re-run all jobs"). Those credentials stay valid for the tag; deleting a draft revokes none of them. Only the
+membership in the published, immutable release shows that the file was released.
 
 ## Verify the container images
 
@@ -217,7 +228,9 @@ the digest**.
      --certificate-oidc-issuer https://token.actions.githubusercontent.com
    ```
 
-   Repeat it for `ghcr.io/myriarch/myriarch-updater` with its own digest.
+   Repeat it for `ghcr.io/myriarch/myriarch-updater` with its own digest. `cosign verify` also accepts the provenance and SBOM
+   attestations of the same identity as a "signature" of the digest; the JSON it prints shows the type of each verified entry, and
+   `https://sigstore.dev/cosign/sign/v1` is the signature made by `cosign sign`.
 
 3. Verify the build provenance of the image index. The attestations are stored in the registry, next to the image:
 

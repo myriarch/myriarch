@@ -45,6 +45,12 @@ including `checksums.txt` and `checksums.txt.sigstore.json`, below the same dire
 
    It needs cosign 3.0.4 or newer (`[cosign_outdated]` otherwise) and the exact version: a bundle of another tag fails with
    `[signature_invalid]`, a changed file with `[checksum_mismatch]`.
+
+   The signature proves that the release workflow created `checksums.txt` for that tag, not that the release was published:
+   the workflow signs before it verifies and before its second approval, also in runs that never publish, and those signatures
+   stay valid. Before you mirror a release, check the files that you took from the project against the published, immutable
+   release with `gh release verify <tag> --repo myriarch/myriarch` and `gh release verify-asset <tag> <file> --repo
+   myriarch/myriarch` (they need a login of gh); that membership is the proof of publication.
 4. Point the hosts at the mirror: `--updater-url`, `--updater-checksums-url` (the bundle is expected at
    `<checksums-url>.sigstore.json`, or pass `--updater-bundle-url`) and, for hosts without access to the Sigstore
    infrastructure, `--trusted-root` with a `trusted_root.json` that you fetched with `myriarch-updater fetch-trusted-root`.

@@ -485,26 +485,41 @@ guidance after each item names what to do.
   - *Job isolation (R13).* Build code runs only in jobs with `contents: read`; privileged jobs run reviewed scripts, cosign,
     crane, gh and `actions/attest` and take only artifacts of the same run, downloaded by ID and checked against the digest of
     the artifact service and the SHA-256 that the producing job reported. The tools are built from `ci/tools` in the run (no
-    cache) and travel as an artifact. Artifacts are kept one day.
+    cache) and travel as two artifacts: the signing set (cosign, crane, gh) is built first, in a job of its own where nothing
+    else is installed or run, and is the only set that jobs with a write scope, `id-token`, `attestations` or an environment
+    execute; the build set (goreleaser, syft, yq, go-winres, osslsigncode) reaches only jobs with `contents: read`. Every consumer
+    runs `ci/release/tools.sh check` after the unpack, and VERSIONS and SHA256SUMS of both sets are in the job summaries.
+    Artifacts are kept one day.
   - *Two approvals.* Exactly two jobs use the environment `release` (no administrator bypass, tags `v*` only): `sign-windows`,
-    before anything is signed or pushed, and `finalize`, after the draft release exists and every verification passed.
+    before anything is signed or pushed, and `finalize`, after the draft release exists and every verification passed. A gate is
+    passed once per run, not once per attempt: "Re-run failed jobs" re-runs only the failed jobs and their dependents, so
+    `sign-blobs`, `push-images` and `draft` run again without a new approval of gate 1 (whether `finalize` asks again after an
+    approved attempt is observed on the first candidate). Gate 2 is a technical boundary for `finalize` only: the job `draft`
+    holds `contents: write` without the environment and runs before it, with the signing tool set and the reviewed scripts as its
+    whole trust base.
   - *Keyless signing and provenance.* `checksums.txt` is signed with a cosign bundle (it covers the 39 other files), and the
     build provenance of those files is attested with `actions/attest`. Both images are pushed by digest only (`push-images.sh`
     refuses any other reference, so the images have no release tag before verification), signed with `cosign sign --recursive`
     and given provenance and SBOM attestations, strictly one after the other. No long-lived signing key or registry secret
     exists; the registry token is `GITHUB_TOKEN`.
-  - *Verification before publication.* The jobs `verify`, `verify-images` and `verify-windows` check the draft with the commands
-    that users run (exact identity with repository, ref, commit and trigger, the pattern of ADR-0029, the pattern bound to the
+  - *Verification before publication.* The jobs `verify`, `verify-images` and `verify-windows` check the files and the images from
+    which the draft was created (the artifacts of the run and the pushed digests, not the draft itself) with the commands that
+    users run (exact identity with repository, ref, commit and trigger, the pattern of ADR-0029, the pattern bound to the
     version, provenance with `--deny-self-hosted-runners`, image index, configuration, signatures and attestations, absence of a
-    `latest` tag, a run of both images on amd64 and arm64, version resources and Authenticode state of the Windows files).
+    `latest` tag, a run of both images on amd64 and arm64, version resources and Authenticode state of the Windows files). The
+    contents of the draft are bound to that result only by `finalize`; the reviewer of gate 2 checks the count of 42 assets.
   - *Finalize.* After the second approval `finalize` checks that the draft still holds exactly the verified files by comparing
     GitHub's SHA-256 digest of every asset with the verified manifest, that the release is a draft of this tag by
-    `github-actions[bot]`, and that both packages are readable without credentials; it refuses to move an immutable image tag;
-    only then it sets the image tags and publishes. After publication it requires that the release is immutable and that
-    GitHub's release attestation verifies.
+    `github-actions[bot]`, that `refs/tags/<tag>` still resolves to the tagged commit (`tag_moved`; `draft.sh` also sets the commit
+    as the target of the release) and that both packages are readable without credentials; it refuses to move an immutable image
+    tag; it sets the image tags, reads the draft by ID again and repeats the asset and tag checks directly before it publishes.
+    After publication it reads the release once more and compares its assets with the verified manifest again
+    (`release_assets_changed` says that the release is immutable and wrong), and it requires that the release is immutable and
+    that GitHub's release attestation verifies.
   - *Smoke tests.* After publication, jobs of the same workflow with read scopes only download and verify the release
     anonymously, install it on amd64 and arm64, stage the Windows installer, run both images and install the Helm chart of the tag
     on kind.
+
   The release-time dependency, license and notices gates run in the job `ui`. Residual risks: one account can tag and approve
   both gates until a second reviewer exists (the second organization owner is for emergencies, ADR-0029); deleting the
   `sha256-<hex>` tags or package versions of a released digest breaks the verification of that image; the job token cannot read
@@ -512,6 +527,17 @@ guidance after each item names what to do.
   (`release_not_immutable`, the release stays mutable); artifacts live for one day; the release depends on the availability of
   GitHub, ghcr.io and the Sigstore public-good instance. The first push of a new package makes it private, and an organization
   owner makes it public by hand (irreversible) before the second approval; `finalize` refuses to continue while it is private.
+  Further residual risks of the release workflow: (1) a replacement of an asset in the short window between the last read of the
+  draft and the PATCH is found only afterwards, when the release is immutable; (2) every run, also a failed or abandoned one,
+  creates valid credentials for the identity at the tag before verification and gate 2 (Rekor-logged cosign bundles of
+  `checksums.txt`, image signatures and attestations in the `sha256-<hex>` tags, build provenance in GitHub's attestation API)
+  and deleting a draft revokes none of them, so a check with the exact or version-bound identity does not prove that a file was
+  released, only `gh release verify-asset` does (membership in the published, immutable release); (3) write access to Actions
+  allows re-running the privileged jobs of a run that passed gate 1; (4) a KMS route for Windows signing that needs `id-token`
+  makes `sign-windows` a holder of the release identity (ADR-0035, point 7); (5) the resume path of `finalize` cannot tell a
+  release published by hand between two attempts from its own; (6) the signing tool set is built from the pinned modules in the
+  run, so the dependency trees of cosign, crane and gh (and of `actions/attest` and the other GitHub-owned actions) are part of
+  the trust base of the privileged jobs, no longer the trees of the build tools.
   The list of the release build is in [`deploy/release/README.md`](../../deploy/release/README.md), the maintainer's runbook is
   [Releasing](../releasing.md), the user's commands are [Verify releases](verify-releases.md).
 - **Release tag guard.** `ci/release/guard.sh` runs as the first job (`guard`) of `release.yml`. It refuses a tag that is

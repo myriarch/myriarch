@@ -44,14 +44,29 @@ Facts about the platform shape the design:
    in a fork.
 2. **Job isolation.** Code of the repository and of its dependencies (Go, Node.js, pnpm, goreleaser, make) runs only in jobs with
    `contents: read` and no environment. The release tools are built once per run from `ci/tools` (no tool cache, no action cache)
-   and travel as an artifact. Privileged jobs call only reviewed scripts under `ci/release/`, cosign, crane, gh and
+   and travel as two artifacts. The signing set (cosign, crane, gh) is built first, in the job `signing-tools` on a runner where
+   nothing else is installed or run, and it is the only set that the privileged jobs execute; the build set (goreleaser, syft,
+   yq, go-winres, osslsigncode, which needs apt packages and a C compiler) is built in `build-tools` and reaches only jobs with
+   `contents: read`. Each consumer runs `ci/release/tools.sh check` right after the unpack, and both producers write VERSIONS and
+   SHA256SUMS to the job summary. Privileged jobs call only reviewed scripts under `ci/release/`, cosign, crane, gh and
    `actions/attest`, and take only artifacts of the same run: each is one tar file, downloaded by artifact ID, checked against the
    digest that the artifact service recorded and against the SHA-256 that the producing job reported as a job output. Artifacts
    are kept one day. Rule R13 of `ci/check-workflows.py` and `ci/tests/release-workflow-test.sh` enforce the shape.
 3. **Exactly two approvals** of the environment `release`. The job `sign-windows` asks first, before anything is signed or pushed
    to a registry; it is also the slot of the Windows signing provider. The job `finalize` asks second, after the draft release
    exists and every verification has passed. Administrators cannot bypass the environment. With one maintainer this is a review
-   step and not four eyes; that is a residual risk of the project, not a property of the workflow.
+   step and not four eyes; that is a residual risk of the project, not a property of the workflow. Two limits belong to the
+   design and are not hidden:
+   - Gate 2 is a technical boundary for `finalize` only. The job `draft` holds `contents: write` without the environment and runs
+     before gate 2, so anything that executes in `draft` (the pinned `gh`, `ci/release/draft.sh`) could publish or change a release
+     without the second approval. Only gate 1 and the code at the tag stand in front of it, which is why `draft` takes only the
+     signing set and runs no other code.
+   - A gate is passed once per run, not once per attempt. "Re-run failed jobs" re-runs only the failed jobs and the jobs that depend
+     on them: a `sign-windows` that already passed is not asked again, so `sign-blobs`, `push-images` and `draft` (id-token,
+     attestations, packages and contents write) run again without a new approval, by anyone with write access to Actions.
+     Whether `finalize` asks again after an approved attempt is to be observed on the first candidate (the checklist in
+     `docs/releasing.md`). The effect is bounded: a re-run executes the same code at the same tag on artifacts checked against
+     their SHA-256.
 4. **What is signed.**
    - `checksums.txt` carries a keyless cosign bundle, `checksums.txt.sigstore.json`. Because `checksums.txt` lists the SHA-256 of
      the 39 other files (archives, bare updater binaries, SBOMs, `LICENSE` and `THIRD_PARTY_NOTICES`), the one signature covers
@@ -63,8 +78,9 @@ Facts about the platform shape the design:
      attestation (each platform manifest) stored in ghcr.io. The signatures and attestations live in `sha256-<hex>` fallback tags.
    - The OCI chart of ADR-0023 follows in v0.2.0.
    - A release has 42 assets: the 40 files of the build stage and the two signature files.
-5. **Verification before publication.** The jobs `verify`, `verify-images` and `verify-windows` run against the draft and the
-   private images, with read scopes only.
+5. **Verification before publication.** The jobs `verify`, `verify-images` and `verify-windows` check the files and the private
+   images from which the draft was created (the artifacts of this run and the pushed digests), with read scopes only. They do
+   not read the draft, and `verify` does not need the job `draft`; `finalize` binds the draft to their result.
    - Files: the exact identity (repository, workflow, tag, commit, trigger `push`), the pattern of
      [ADR-0029](0029-host-under-the-myriarch-organization.md) that users run, and the version-bound pattern that the installers
      use; then every file against `checksums.txt`.
@@ -76,8 +92,12 @@ Facts about the platform shape the design:
    - Windows: version resources and Authenticode state, as `signer.json` says.
    - Then `finalize`, after the second approval, binds the draft to what was verified: the draft must still hold exactly the
      verified files, and GitHub's own SHA-256 digest of every asset must equal the verified manifest. It refuses unless both
-     packages can be read without credentials, sets the image tags with `crane tag`, publishes the release, and checks that the
-     release is immutable and that GitHub's release attestation verifies.
+     packages can be read without credentials and `refs/tags/<tag>` still resolves to the tagged commit (an annotated tag is
+     dereferenced; `draft.sh` also passes the commit as the target of the release), sets the image tags with `crane tag`, reads
+     the draft by ID again and repeats the asset and tag checks directly before the publication, publishes the release, reads the
+     published release once more and compares its assets with the verified manifest again (a difference is reported as an
+     immutable, wrong release: `release_assets_changed`), and checks that the release is immutable and that GitHub's release
+     attestation verifies.
 6. **Version and tag policy.** `VERSION` holds the next tag and every copy follows it. A release candidate is a GitHub
    pre-release and is never marked as the latest release. A final tag is marked latest when it is the highest final tag. Image
    tags are `X.Y.Z-rc.N` for a candidate and `X.Y.Z` plus the moving `X.Y` (only forward) for a final release; there is no
@@ -87,7 +107,11 @@ Facts about the platform shape the design:
    `deploy/release/windows-signing.env`; the contract, the acceptance check in the packaging job and the exception for `v0.1.0`
    are those of [ADR-0034](0034-authenticode-signing-of-windows-release-artifacts.md). The release workflow holds no secret in
    v0.1.0. A provider adds a scope or a secret line to `ci/workflow-permissions.txt` or `ci/workflow-secrets.txt` for this one
-   job; the job, its environment and its place in the graph do not change.
+   job; the job, its environment and its place in the graph do not change. A route that gives `sign-windows` `id-token: write` (for
+   example a KMS route) makes that job a holder of the release identity: the job runs in `release.yml` at the tag and can mint OIDC
+   tokens, Sigstore ones included, and with them certificates of the frozen identity. The acceptance check in `package` protects the
+   Windows files, not that identity. Such a provider pull request therefore needs a review of the job equal to one for
+   `sign-blobs`, no third-party code in it (R13) and no action that is not GitHub-owned; routes without `id-token` are preferred.
 8. **Image contract** ([ADR-0024](0024-container-registry-and-image-set.md)). Both images are `FROM scratch` with one layer and
    user and group 65532, built from the released archives without a container runtime and with the same digest for the same
    inputs. The server image holds `myriarchd`, `myrctl`, `myriarch-sim` and the example repositories; the updater image holds the
@@ -117,8 +141,10 @@ Facts about the platform shape the design:
   the workflow at the tag, with short-lived certificates and a transparency log.
 - Everything is verified, with the commands that users run, while the release is still a draft and the images are private. The
   release becomes immutable only after that, so a bad release candidate can be deleted and replaced by a new one.
-- `finalize` publishes what was verified and nothing else: an asset swapped in the draft after verification fails the digest
-  check.
+- `finalize` compares the draft with the verified files by GitHub's own digests, twice before it publishes (once early, once
+  directly before the PATCH, after the image tags took their time), and compares the published, immutable release once more. An
+  asset swapped in the draft after verification is refused; a swap in the short window between the last read and the PATCH is
+  not prevented but is found afterwards and reported as an immutable, wrong release, which is then not used (a new tag follows).
 - A re-run is safe. A push by digest changes nothing, extra signatures are harmless, stale drafts of the tag are replaced, and
   `finalize` resumes after a publication.
 - The release carries signed artifacts (`*.sigstore.json`, `*.intoto.jsonl`) that the Signed-Releases check of OpenSSF Scorecard
@@ -131,6 +157,16 @@ Facts about the platform shape the design:
 - Artifacts live one day. An approval later than 24 hours after the start of a run needs "Re-run all jobs", which builds a new
   draft and new signatures; the image digests stay the same.
 - ghcr.io shows `sha256-<hex>` tags in the package view. They hold the signatures and attestations and must not be deleted.
+- Before gate 2 the job `draft` holds `contents: write` (the Releases API accepts no narrower scope for a draft), so the second
+  approval is a technical boundary for `finalize` only; see point 3. The trust base of that job is kept small on purpose: the
+  signing tool set and reviewed scripts.
+- Every run creates durable credentials for the identity at the tag before verification and before gate 2, also for failed and
+  abandoned runs and for "Re-run all jobs" attempts: Rekor-logged cosign bundles of `checksums.txt`, signatures and attestations
+  of the images in the `sha256-<hex>` fallback tags in ghcr.io, and build provenance in GitHub's attestation API. Deleting a draft
+  revokes none of them. A check with the exact or the version-bound identity therefore does not prove that a file was released;
+  only `gh release verify-asset` (membership in the published, immutable release) does.
+- The resume path of `finalize` (an attempt above 1) accepts a release that is already published when its assets match, and it
+  cannot tell a publication by `finalize` from one by hand between two attempts, which the runbook forbids.
 - The job token cannot read the setting for immutable releases. If it is off, `finalize` publishes and then fails with
   `release_not_immutable`; that release stays mutable and the setting must be fixed before the next tag.
 - The `Token-Permissions` check of OpenSSF Scorecard can lose points for the write scopes of the privileged jobs.

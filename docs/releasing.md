@@ -144,7 +144,8 @@ the release the way a user does.
 | Job | What it does | Approval |
 |---|---|---|
 | `guard` | Tag guard and `meta.sh` (above); the outputs of all later jobs. | |
-| `tools` | Builds goreleaser, cosign, crane, syft, gh, go-winres, yq and osslsigncode (and cosign, crane for other platforms) once from `ci/tools`; no cache. | |
+| `signing-tools` | Builds cosign, crane and gh (and cosign, crane for other platforms) once from `ci/tools` on a runner of its own, before anything else is installed or run there; no cache. The only tools the privileged jobs execute. | |
+| `build-tools` | Builds goreleaser, syft, yq, go-winres and osslsigncode once from `ci/tools`; no cache. Only jobs with `contents: read` execute them. | |
 | `ui` | Builds the web UI (the only job with Node.js) and runs the release dependency and license gates. | |
 | `build-windows` | `goreleaser build` of the Windows targets in stage `collect`. | |
 | `sign-windows` | Runs the Windows signing hook (mode `off` in v0.1.0). | **Gate 1** |
@@ -152,11 +153,11 @@ the release the way a user does.
 | `images` | Builds the OCI layouts of both images from the release archives and their SBOMs. | |
 | `sign-blobs` | Signs `checksums.txt` keyless and attests the build provenance of its 39 files. | |
 | `push-images` | Pushes both images by digest (no release tags), signs them and attaches provenance and SBOM attestations. | |
-| `draft` | Renders the release notes and creates the draft release with 42 assets. | |
-| `verify` | Verifies signatures, provenance, images and the draft contents; writes the verified manifest and a summary. | |
+| `draft` | Renders the release notes and creates the draft release with 42 assets. It holds `contents: write` and runs before gate 2. | |
+| `verify` | Verifies signatures, provenance and images, and the files from which the draft was created (not the draft itself); writes the verified manifest and a summary. | |
 | `verify-images` | Runs both images on amd64 and arm64. | |
 | `verify-windows` | Checks version resources and Authenticode state of the Windows files on a Windows runner. | |
-| `finalize` | Checks that the draft holds exactly the verified files, that both packages are public, tags the images, publishes the release and checks that it is immutable. | **Gate 2** |
+| `finalize` | Binds the draft to the verified files (GitHub's asset digests), checks that the tag still points at the tagged commit and that both packages are public, tags the images, reads the draft again directly before it publishes, publishes the release, compares the published release with the verified files once more and checks that it is immutable. | **Gate 2** |
 | `smoke-assets`, `smoke-linux`, `smoke-windows`, `smoke-kind` | Anonymous downloads and verification, installers on amd64 and arm64, Windows staging, `docker run`, the Helm chart on kind. | |
 
 Rules that hold for all of it:
@@ -170,6 +171,8 @@ Rules that hold for all of it:
 - **Artifacts between jobs** are tar files, downloaded by artifact ID and checked against the SHA-256 that the producing job
   reported. They are kept **one day**. This matters for gate 2 (below).
 - **Two approvals.** Exactly the jobs `sign-windows` and `finalize` use the environment `release`. Each asks for its own approval.
+  A gate is passed once per run, not once per attempt (see [Re-runs](#rc-numbering-and-re-runs)), and only `finalize` is stopped
+  by gate 2: the job `draft` holds `contents: write` without the environment and runs before it.
 - **No secrets** exist in v0.1.0. The jobs use `GITHUB_TOKEN` and the OIDC token of the run.
 
 ## Before the first release
@@ -192,6 +195,18 @@ These settings are made by a maintainer in GitHub, once. The workflow cannot che
 5. **A second owner** of the organization exists for emergencies ([ADR-0029](adr/0029-host-under-the-myriarch-organization.md)).
    Until a second person can approve gate 2, the two gates are a review step by one person.
 
+### First candidate: what to observe
+
+Two things cannot be tested before the first candidate, and the first candidate is where they are settled. Record the result in
+the pull request that prepares the next candidate.
+
+1. **Run the kind smoke test once before you tag.** `smoke-kind` runs only after publication, where a failure can only be fixed
+   forward, and no CI job runs kind. On a machine with a container runtime run `make kind-probe` (the same cluster configuration
+   and chart), or `ci/release/smoke.sh kind` against an image that you built locally, and fix what it finds before the tag.
+2. **Observe re-run approvals.** After the first candidate went through gate 2, re-run one failed or completed job on a throw-away
+   candidate if you can, and write down whether "Re-run failed jobs" asks for gate 1 or gate 2 again. The runbook and the security
+   model state the safe reading (no new approval for the privileged jobs before `finalize`) until you have observed it.
+
 ## Release a candidate
 
 Every candidate, the first one included, goes through these steps. A candidate is a GitHub pre-release and never the latest
@@ -211,7 +226,9 @@ release.
    you do.
 5. **Review the draft.** When `draft`, `verify`, `verify-images` and `verify-windows` are green, open the draft release and the
    summary of the job `verify`, and check:
-   - the draft has 42 assets and the pre-release flag (a candidate) is set;
+   - the draft has 42 assets and the pre-release flag (a candidate) is set. `verify` checked the files and images from which the
+     draft was created, not the draft: the count is yours to check, and `finalize` binds the draft to the verified files by
+     their digests;
    - the notes show the expected banners (the release candidate banner; the unsigned banner while `WINDOWS_SIGNING=off`) and
      the right changes section;
    - the digests of both images in the notes equal the digests in the summary of `verify`;
@@ -245,9 +262,18 @@ A final release is a normal release and is marked as the latest release when it 
 - **Every attempt that needs a code or content change is a new candidate** (`rc.N+1`), prepared by a pull request that bumps
   `VERSION`. A tag is never moved, deleted or reused.
 - **"Re-run failed jobs"** is the answer to a transient failure (a runner, a network or a registry error, an outage of GitHub or
-  Sigstore). The approvals are asked again, stale drafts of the tag are deleted and replaced, a second push of the same digest
-  changes nothing, duplicate signatures and attestations are harmless, and `finalize` resumes after a run in which it had
-  already published.
+  Sigstore). It re-runs only the failed jobs and the jobs that depend on them. **A gate is passed once per run:** a `sign-windows`
+  that already passed is not asked again, so the privileged jobs `sign-blobs`, `push-images` and `draft` run again without a new
+  approval, by anyone with write access to Actions. Whether `finalize` asks again after an approved attempt is not documented
+  by GitHub in a form we could confirm: observe it on the first candidate (see [First candidate](#first-candidate-what-to-observe)).
+  Stale drafts of the tag are deleted and replaced, a second push of the same digest changes nothing, duplicate signatures and
+  attestations are harmless, and `finalize` resumes after a run in which it had already published.
+- **The resume path of `finalize`** (an attempt above 1) accepts a release that is already published when its assets are exactly
+  the verified files. It cannot tell a publication by `finalize` from one made by hand between two attempts, which is forbidden
+  (see [Never](#never)). After a re-run, check in the log of the failed attempt that `finalize` itself got as far as the PATCH.
+- **Every run leaves valid credentials for the tag**, also a failed or abandoned one and each "Re-run all jobs" attempt: the
+  signature bundle of `checksums.txt`, the signatures and attestations of the images and the build provenance. Deleting a draft
+  does not revoke them. Proof that a file was released is `gh release verify-asset <tag> <file>`, not a valid signature.
 - **Artifacts expire after one day.** If gate 2 waits longer than that, or a job has to be repeated after that, use "Re-run all
   jobs": it builds a new draft and new signatures. The image digests stay the same, because the images are reproducible.
 
@@ -256,14 +282,17 @@ A final release is a normal release and is marked as the latest release when it 
 | Job | Cause | What to do |
 |---|---|---|
 | `guard` | A guard check or `workflow_ref_mismatch` | The message names the cause. Fix it in a pull request and tag the next candidate, or wait for `ci-ok` and re-run. |
-| `tools`, `ui`, `build-windows`, `package`, `images` | A build, a gate (dependencies, licenses, notices) or an artifact check failed | Fix it in a pull request and tag the next candidate. |
+| `signing-tools`, `build-tools`, `ui`, `build-windows`, `package`, `images` | A build, a gate (dependencies, licenses, notices) or an artifact check failed | Fix it in a pull request and tag the next candidate. |
 | `sign-windows` | The signing provider failed (v0.1.0: only the copy of the files) | Re-run. A provider issue is handled in the provider's change. |
 | `sign-blobs`, `push-images` | Sigstore or ghcr.io unavailable, a token problem | Re-run failed jobs. |
-| `draft` | `release_exists` or `draft_foreign` | A published release of the tag exists, or someone else made a draft of it: tag the next candidate, or delete the foreign draft by hand and re-run. |
+| `draft` | `release_exists` or `draft_foreign` | A published release of the tag exists, or someone else made a draft of it: tag the next candidate (the next patch version for a final tag), or delete the foreign draft by hand and re-run. |
 | `verify`, `verify-images`, `verify-windows` | A verification failed | **Do not approve gate 2.** Fix forward with the next candidate. |
 | `finalize`, `ghcr_not_public` | A package is still private | Make both packages public (step 6 above), then "Re-run failed jobs". |
 | `finalize`, `image_tag_conflict` | An immutable image tag points to another digest | Investigate. Never move an immutable tag. |
 | `finalize`, `release_not_immutable` | The release is published but not immutable | The release stays mutable. Enable release immutability before the next tag, and announce nothing until it is fixed. |
+| `finalize`, `tag_moved` | `refs/tags/<tag>` does not resolve to the tagged commit | Nothing was published. The tag was moved or re-created, against the ruleset: investigate, do not approve again, tag the next candidate. |
+| `finalize`, `release_assets_changed` | After the PATCH the release (now immutable) differs from the verified files | **Do not use this release and do not announce it.** It cannot be changed or deleted into shape; say in its notes that it is void and publish the next version. |
+| `finalize`, `release_state`, `release_attestation`, `release_asset_attestation` | The release is published, but GitHub does not (yet) show it as published or attested | "Re-run failed jobs": `finalize` resumes because the attempt is above 1, tags nothing twice and repeats the checks. |
 | `smoke-*` | A problem found after publication | The release is immutable: fix forward in the next version and describe the problem in the release notes, which stay editable. |
 
 **Abandoned candidates.** Delete the draft of a candidate that never went through gate 2 with
