@@ -142,7 +142,7 @@ The mark may play one short animation, the rollout. It tells the story of the ma
 comes up first, the control plane. Then the fleet connects: nine small seed dots appear, one per collector, because every
 collector is there but none is on the new revision yet. Then the rollout updates the fleet row by row: the canary (2 dots) grows to
 full size, then the first wave (3 dots), then the second wave (4 dots), which is the full fleet. The animation ends on the
-unchanged mark. The website plays it once, on the mark of the landing page.
+unchanged mark. The website plays it on the mark of the landing page and repeats it (see [Looping](#looping)).
 
 The animation needs the parts of the mark as separate shapes. `myriarch-icon-parts.svg` has them: one path `ring` and nine paths
 `dot` with the classes `r1` to `r3` (the row, from the top) and `c0` to `c3` (the column, from the left). It is generated from the same
@@ -170,13 +170,33 @@ Rules for every animation of the mark:
   transparency, no distortion) hold in every frame, not only in the last.
 - The ring never rotates and always points up.
 - Always end on the unchanged mark: every part at scale 1, in the colour of the static mark.
-- Play once. Do not loop, and do not replay on hover or focus; the mark is decoration and not a control.
+- Play the rollout once, or loop it only as described under [Looping](#looping). Do not replay it on hover or focus; the mark is
+  decoration and not a control.
 - Respect `prefers-reduced-motion`: the static mark is the base style, and the animation is added only inside
   `@media (prefers-reduced-motion: no-preference)`. With reduced motion, in print and where CSS animations are unsupported the unchanged
   mark shows.
 - Show the animated mark at 96 px tall or more. Below that the seed dots are too small to read, and the static mark is used.
 
 The web UI may reuse the same timeline later, for example as a loading indicator.
+
+### Looping
+
+The landing page keeps the mark alive by repeating the rollout. A loop is allowed under these conditions, which the website meets:
+
+- **Calm timing.** One cycle takes 10 s: the rollout (about 2.4 s), then the unchanged mark held until 9.4 s (7 s after the last dot is
+  full size), then the nine dots retract to scale 0 in the last 0.6 s (`ease-in-out`, all together), so that the next rollout starts from
+  the state in which the first one started and nothing jumps. The ring grows once, on load, and stays in place afterwards. A cycle
+  never ends on a half-grown mark: the unchanged mark is what the visitor sees for most of the time.
+- **A way to pause it** (WCAG 2.2.2, Pause, Stop, Hide: motion that starts by itself and lasts longer than 5 s). The landing page has a
+  small pause button next to the mark. While paused the unchanged mark shows. With `prefers-reduced-motion: reduce` nothing animates and
+  the button is not shown.
+- **Only while visible.** The loop stops (unchanged mark, no running animation) when the hero is out of view or the document is hidden,
+  and starts again at the beginning of a cycle. Nothing runs on a timer: the browser runs the animation, and a stopped mark has none.
+- **Without JavaScript** the rollout plays once and the page keeps the unchanged mark (and shows no button, since nothing needs to be
+  paused).
+
+The stylesheet holds the timeline (`website/assets/scss/_landing.scss`; the loop has one keyframes rule per dot because the stagger of
+the columns has to repeat in every cycle) and `website/assets/js/landing-mark.js` decides when it runs.
 
 ## License
 

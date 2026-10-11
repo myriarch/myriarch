@@ -4,7 +4,7 @@ SPDX-License-Identifier: Apache-2.0
 */ -}}
 {{- /*
   Landing page (home). The text is in data/landing.yaml and content/_index.md; every section is a partial in _partials/landing/.
-  The page needs no JavaScript of its own; the dark appearance follows [data-bs-theme] (assets/scss/_landing.scss).
+  The page works without JavaScript; the one script (assets/js/landing-mark.js, loaded by the hero) only loops the animation of the mark and pauses it. The dark appearance follows [data-bs-theme] (assets/scss/_landing.scss).
 */ -}}
 {{ define "main" -}}
 {{ partial "landing/hero.html" . }}

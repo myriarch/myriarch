@@ -9,6 +9,10 @@ SPDX-License-Identifier: Apache-2.0
   both appearances and so that a stylesheet can play the rollout on its parts (assets/brand/README.md, "Motion"). It is decoration: the
   heading and the logo in the navbar carry the name, so the title and the label of the file are dropped and the element is hidden from
   assistive technology.
+  The animation of the mark loops (rollout, hold, retraction; assets/scss/_landing.scss). Motion that starts by itself and lasts longer than
+  5 seconds needs a way to pause it (WCAG 2.2.2), so the mark comes with a pause button. The button is hidden in the markup and shown by
+  assets/js/landing-mark.js, because without the script the rollout plays once and stops by itself; with prefers-reduced-motion: reduce the
+  stylesheet hides it, since nothing moves. The script is the site's own file (fingerprinted, no inline code, nothing from another origin).
 */ -}}
 {{ $hero := hugo.Data.landing.hero -}}
 {{ $markFile := resources.Get "brand/myriarch-icon-parts.svg" -}}
@@ -20,6 +24,7 @@ SPDX-License-Identifier: Apache-2.0
 {{ if or (in $mark "<title") (in $mark "aria-label") (not (in $mark `aria-hidden="true"`)) -}}
   {{ errorf "landing: the mark file is not in the expected form (title, aria-label and role are rewritten for decoration)" }}
 {{ end -}}
+{{ $script := resources.Get "js/landing-mark.js" | resources.Minify | resources.Fingerprint -}}
 <section class="landing-hero" aria-labelledby="landing-hero-title">
   <div class="landing-container landing-hero__grid">
     <div class="landing-hero__copy">
@@ -43,6 +48,13 @@ SPDX-License-Identifier: Apache-2.0
         {{ end -}}
       </p>
     </div>
-    {{ $mark | safeHTML }}
+    <div class="landing-hero__art">
+      {{ $mark | safeHTML }}
+      <button type="button" class="landing-hero__motion" aria-label="Pause logo animation" aria-pressed="false" hidden>
+        <i class="fa-solid fa-pause landing-hero__motion-pause" aria-hidden="true"></i>
+        <i class="fa-solid fa-play landing-hero__motion-play" aria-hidden="true"></i>
+      </button>
+    </div>
   </div>
 </section>
+<script src="{{ $script.RelPermalink }}" integrity="{{ $script.Data.Integrity }}" defer></script>

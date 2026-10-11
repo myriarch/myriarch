@@ -12,7 +12,9 @@
 //   dark   Mist on Night 16.3, on #1e293b 13.4; #cbd5e1 on Night 12.0, on #1e293b 9.9; Orchid on Night 7.98, on #1e293b 6.5;
 //          Night on Orchid 7.98, on the hover colour #f8b9df 11.0
 // No web fonts (system stack, see _variables_project.scss). Motion only when the visitor has not asked for less; the animation of
-// the mark ends on the unchanged mark.
+// the rollout of the mark ends on the unchanged mark, and a button pauses the loop (see "The mark").
+
+@use 'sass:math';
 
 // Blush, the background of the brand's social images (assets/brand/README.md); it has no variable in _variables_project.scss.
 $landing-blush: #fbf6f9;
@@ -246,27 +248,26 @@ $landing-blush: #fbf6f9;
   }
 }
 
-// The mark: the inline SVG of assets/brand/myriarch-icon-parts.svg (layouts/_partials/landing/hero.html), hidden on narrow screens.
-// Shown at 15 rem; the clear space of 1u is far exceeded. Its parts take the colour of the element (currentColor), so the mark is
-// Tyrian on the light page and Orchid on the dark one, and follows the manual switch of the theme.
-//
-// Motion (assets/brand/README.md, "Motion"): the mark plays the rollout once and ends on the unchanged mark. The control plane (the
-// ring) grows first. Then the fleet connects: every collector appears as a small seed dot, because it is present but not yet on the
-// new revision. Then the rollout updates the fleet row by row: the canary (2 dots) grows to full size, then the 3-dot wave, then the
-// 4-dot wave, which is the whole fleet. Only the size of the parts moves (transform: scale): no transparency, no second colour, no
-// rotation and no overshoot (an overshoot would close the gaps of 3 units), so every frame obeys the brand rules, not only the last.
-// The static mark is the base style; the animation is added only for visitors who have not asked for less motion, so with reduced
-// motion, in print and wherever CSS animations are unsupported the unchanged mark shows. The rows share one clock of 2.2 s; the
-// dots of a row start 60 ms apart from left to right.
-.landing-hero__mark {
+// The mark: the inline SVG of assets/brand/myriarch-icon-parts.svg (layouts/_partials/landing/hero.html) in .landing-hero__art, hidden on
+// narrow screens. Shown at 15 rem; the clear space of 1u is far exceeded. Its parts take the colour of the element (currentColor), so the
+// mark is Tyrian on the light page and Orchid on the dark one, and follows the manual switch of the theme.
+.landing-hero__art {
   display: none;
+
+  @include media-breakpoint-up(lg) {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.75rem;
+    width: 15rem;
+  }
+}
+
+.landing-hero__mark {
+  display: block;
   width: 15rem;
   height: auto;
   color: var(--landing-accent);
-
-  @include media-breakpoint-up(lg) {
-    display: block;
-  }
 
   .ring,
   .dot {
@@ -274,6 +275,59 @@ $landing-blush: #fbf6f9;
   }
 }
 
+// The pause button (WCAG 2.2.2: motion that starts by itself and lasts longer than 5 s needs a way to pause it). The script
+// (assets/js/landing-mark.js) shows it; without JavaScript it stays hidden, because the animation then plays once and stops by itself.
+// It is a 2 rem target (24 CSS px at least) and uses the muted text colour (Mauve on Blush 7.97, #cbd5e1 on Night 12.0) for the glyph and
+// the border; the focus ring is the one of the links. aria-pressed is true while the animation is paused, and the icon follows it.
+.landing-hero__motion {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  font-size: 0.75rem;
+  line-height: 1;
+  color: var(--landing-muted);
+  background: transparent;
+  border: 1px solid var(--landing-muted);
+  border-radius: 50%;
+  cursor: pointer;
+
+  &[hidden] {
+    display: none;
+  }
+
+  &:hover {
+    color: var(--landing-accent);
+    border-color: var(--landing-accent);
+  }
+
+  &:focus-visible {
+    outline: 3px solid var(--landing-accent);
+    outline-offset: 3px;
+  }
+
+  &[aria-pressed='true'] .landing-hero__motion-pause,
+  &[aria-pressed='false'] .landing-hero__motion-play {
+    display: none;
+  }
+}
+
+// Motion (assets/brand/README.md, "Motion"): the mark plays the rollout and ends on the unchanged mark. The control plane (the ring)
+// grows first. Then the fleet connects: every collector appears as a small seed dot, because it is present but not yet on the new
+// revision. Then the rollout updates the fleet row by row: the canary (2 dots) grows to full size, then the 3-dot wave, then the 4-dot
+// wave, which is the whole fleet. Only the size of the parts moves (transform: scale): no transparency, no second colour, no rotation
+// and no overshoot (an overshoot would close the gaps of 3 units), so every frame obeys the brand rules, not only the last. The static
+// mark is the base style; the animation is added only for visitors who have not asked for less motion, so with reduced motion, in
+// print and wherever CSS animations are unsupported the unchanged mark shows. The rows share one clock of 2.2 s; the dots of a row
+// start 60 ms apart from left to right.
+//
+// Without JavaScript the rollout plays once (the base animations below). The script adds .is-looping, and the dots then play the
+// loop: the same rollout, then a hold on the unchanged mark, then a short retraction of the dots, so that the next rollout starts from
+// the state in which the first one started. The ring grows once, on load; the loop leaves it in place. The script adds .is-static for
+// a paused or hidden mark (no animation, the unchanged mark) and .is-resumed after the first start (the ring does not grow again).
 @media (prefers-reduced-motion: no-preference) {
   @keyframes myr-ring {
     from {
@@ -380,6 +434,91 @@ $landing-blush: #fbf6f9;
     .c3 {
       animation-delay: 0.18s;
     }
+  }
+
+  // The loop: one keyframes rule per dot, because the 60 ms stagger of the columns has to repeat in every cycle (an animation-delay
+  // counts only once). Times are in seconds on the clock of one cycle of 10 s: the rollout takes 2.2 s plus the stagger (2.38 s at
+  // most), the unchanged mark is held until 9.4 s (7 s after the last dot is full), and the dots retract in the last 0.6 s. The rows
+  // use the stops of the keyframes above.
+  $myr-cycle: 10;
+  $myr-retract-at: 9.4;
+  $myr-rollout: 2.2;
+  $myr-stagger: 0.06;
+  // Row: (stop where the seed ends, stop where the dot is full, number of dots), as fractions of the rollout.
+  $myr-rows: (
+    1: (0.34, 0.5, 2),
+    2: (0.59, 0.75, 3),
+    3: (0.84, 1, 4),
+  );
+
+  @function myr-at($seconds) {
+    @return math.div($seconds, $myr-cycle) * 100%;
+  }
+
+  @each $row, $cfg in $myr-rows {
+    @for $col from 0 to nth($cfg, 3) {
+      $delay: $col * $myr-stagger;
+
+      @keyframes myr-loop-r#{$row}c#{$col} {
+        0%,
+        #{myr-at(0.16 * $myr-rollout + $delay)} {
+          transform: scale(0);
+        }
+
+        #{myr-at(0.25 * $myr-rollout + $delay)},
+        #{myr-at(nth($cfg, 1) * $myr-rollout + $delay)} {
+          transform: scale(0.3);
+        }
+
+        #{myr-at(nth($cfg, 2) * $myr-rollout + $delay)} {
+          transform: none;
+        }
+
+        #{myr-at($myr-retract-at)} {
+          transform: none;
+          animation-timing-function: ease-in-out;
+        }
+
+        100% {
+          transform: scale(0);
+        }
+      }
+    }
+  }
+
+  .landing-hero__mark.is-looping {
+    .dot {
+      animation-duration: #{$myr-cycle}s;
+      animation-iteration-count: infinite;
+      // The first start continues the rollout that the base style began (the script sets --myr-offset to minus its progress).
+      animation-delay: var(--myr-offset, 0s);
+    }
+
+    @each $row, $cfg in $myr-rows {
+      @for $col from 0 to nth($cfg, 3) {
+        .r#{$row}.c#{$col} {
+          animation-name: myr-loop-r#{$row}c#{$col};
+        }
+      }
+    }
+  }
+
+  .landing-hero__mark.is-resumed .ring {
+    animation: none;
+  }
+
+  .landing-hero__mark.is-static {
+    .ring,
+    .dot {
+      animation: none;
+    }
+  }
+}
+
+// With reduced motion nothing animates, so there is nothing to pause.
+@media (prefers-reduced-motion: reduce) {
+  .landing-hero__motion {
+    display: none;
   }
 }
 
