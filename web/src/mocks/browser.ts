@@ -12,7 +12,7 @@ export async function startMocking(): Promise<void> {
   restoreSession();
   const worker = setupWorker(...handlers);
   await worker.start({
-    onUnhandledRequest: 'bypass',
+    onUnhandledFrame: 'bypass',
     quiet: true,
     serviceWorker: { url: '/mockServiceWorker.js' },
   });

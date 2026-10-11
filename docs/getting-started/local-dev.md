@@ -14,7 +14,7 @@ download of real collector binaries in [Connect a real supervisor](../tasks/conn
 | Tool | Version | Needed for |
 |---|---|---|
 | Go | the version in `go.mod` | building everything |
-| Node.js and pnpm | Node as in `.node-version` (at least 22.12), pnpm 10 | building the web UI (`make web-build`) |
+| Node.js and pnpm | Node as in `.node-version` (at least 22.22.2 or 24.15), pnpm 10 | building the web UI (`make web-build`) |
 | make, curl, jq | any recent version | the make targets and the examples on this page |
 | Python 3 | 3.9 or newer | only the helper scripts of the end-to-end tests |
 

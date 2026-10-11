@@ -42,7 +42,7 @@ beforeAll(() => {
     Object.defineProperty(document, 'fonts', { value: { addEventListener() {}, removeEventListener() {}, ready: Promise.resolve() } });
   }
   setMockLatency(0);
-  server.listen({ onUnhandledRequest: 'error' });
+  server.listen({ onUnhandledFrame: 'error' });
 });
 
 beforeEach(() => {
