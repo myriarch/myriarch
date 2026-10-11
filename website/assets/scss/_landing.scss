@@ -327,7 +327,8 @@ $landing-blush: #fbf6f9;
 // Without JavaScript the rollout plays once (the base animations below). The script adds .is-looping, and the dots then play the
 // loop: the same rollout, then a hold on the unchanged mark, then a short retraction of the dots, so that the next rollout starts from
 // the state in which the first one started. The ring grows once, on load; the loop leaves it in place. The script adds .is-static for
-// a paused or hidden mark (no animation, the unchanged mark) and .is-resumed after the first start (the ring does not grow again).
+// a paused or hidden mark (no animation, the unchanged mark) and .is-resumed after the first start (the ring does not grow again, and
+// the loop resumes at the retraction, so that the full mark does not jump to scale 0).
 @media (prefers-reduced-motion: no-preference) {
   @keyframes myr-ring {
     from {
@@ -503,8 +504,15 @@ $landing-blush: #fbf6f9;
     }
   }
 
-  .landing-hero__mark.is-resumed .ring {
-    animation: none;
+  // A start after a stop (play, the hero back in view, the document visible again) begins at the retraction that ends a cycle: the
+  // dots shrink from the full mark in 0.6 s and the rollout follows at once. Starting at 0 would jump from the full mark to scale 0.
+  // The ring grows once, on load, and does not grow again.
+  .landing-hero__mark.is-resumed {
+    --myr-offset: -#{$myr-retract-at}s;
+
+    .ring {
+      animation: none;
+    }
   }
 
   .landing-hero__mark.is-static {

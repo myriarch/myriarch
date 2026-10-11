@@ -191,7 +191,8 @@ The landing page keeps the mark alive by repeating the rollout. A loop is allowe
   small pause button next to the mark. While paused the unchanged mark shows. With `prefers-reduced-motion: reduce` nothing animates and
   the button is not shown.
 - **Only while visible.** The loop stops (unchanged mark, no running animation) when the hero is out of view or the document is hidden,
-  and starts again at the beginning of a cycle. Nothing runs on a timer: the browser runs the animation, and a stopped mark has none.
+  and starts again at the retraction that ends a cycle (the dots shrink from the full mark and the rollout follows at once, so nothing
+  jumps). Nothing runs on a timer: the browser runs the animation, and a stopped mark has none.
 - **Without JavaScript** the rollout plays once and the page keeps the unchanged mark (and shows no button, since nothing needs to be
   paused).
 

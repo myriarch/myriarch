@@ -8,8 +8,9 @@
 //   - not with prefers-reduced-motion: reduce (the stylesheet plays nothing and hides the button),
 //   - not while the visitor has paused it with the button (WCAG 2.2.2: Pause, Stop, Hide),
 //   - not while the hero is out of view or the document is hidden.
-// A stopped mark shows the unchanged mark (class is-static, no animation). The loop starts again from the beginning of a cycle. There is
-// no timer: the browser runs the animation, and a stopped mark has none.
+// A stopped mark shows the unchanged mark (class is-static, no animation). The loop starts again at the retraction that ends a cycle (class
+// is-resumed, the stylesheet sets the offset), so that the dots shrink from the full mark and nothing jumps, and the rollout follows at
+// once. There is no timer: the browser runs the animation, and a stopped mark has none.
 (function () {
   "use strict";
 
@@ -28,13 +29,20 @@
   }
 
   // Progress of the rollout that the base style began on load, in ms: the loop continues it where it is, so that a script that
-  // arrives late does not restart the dots.
+  // arrives late does not restart the dots. The dots start together but end at different times (the last one 180 ms after the first), and
+  // a finished animation keeps its end time (fill-mode both), so the largest time over all dots is the progress of the rollout.
   function progress() {
-    var dot = mark.querySelector(".dot");
-    if (!dot || typeof dot.getAnimations !== "function") return 0;
-    var animations = dot.getAnimations();
-    var time = animations.length > 0 ? Number(animations[0].currentTime) : 0;
-    return isFinite(time) && time > 0 ? time : 0;
+    var dots = mark.querySelectorAll(".dot");
+    var time = 0;
+    for (var i = 0; i < dots.length; i++) {
+      if (typeof dots[i].getAnimations !== "function") return 0;
+      var animations = dots[i].getAnimations();
+      for (var j = 0; j < animations.length; j++) {
+        var t = Number(animations[j].currentTime);
+        if (isFinite(t) && t > time) time = t;
+      }
+    }
+    return time;
   }
 
   function apply() {
@@ -42,7 +50,9 @@
     if (run === playing) return;
     playing = run;
     if (run) {
-      mark.style.setProperty("--myr-offset", started ? "0s" : "-" + progress() + "ms");
+      // The first start continues the rollout of the base style; a later start (class is-resumed) takes the offset of the stylesheet.
+      if (started) mark.style.removeProperty("--myr-offset");
+      else mark.style.setProperty("--myr-offset", "-" + progress() + "ms");
       mark.classList.remove("is-static");
       mark.classList.add("is-looping");
       if (started) mark.classList.add("is-resumed");
