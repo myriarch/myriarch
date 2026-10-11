@@ -405,6 +405,17 @@ while i < len(lines):
     else:
         i += 1
 
+# ---- Windows jobs keep the LF line endings of the scripts (GitHub's Windows images set core.autocrlf=true) -------------------
+for jid, steps in steps_of.items():
+    if not JOBS[jid][4].startswith("windows-"):
+        continue
+    first = steps[0] if steps else {}
+    first_run = tx(first.get("run")) or ""
+    check("git config --global core.autocrlf false" in first_run and "git config --global core.eol lf" in first_run and "shell" not in first,
+          "job %s: the first step must set core.autocrlf false and core.eol lf (bash) before the checkout, or Git Bash cannot run the scripts" % jid)
+    positions = [i for i, s in enumerate(steps) if (tx(s.get("uses")) or "").startswith("actions/checkout@")]
+    check(positions and positions[0] > 0, "job %s: the checkout must come after the line-ending step" % jid)
+
 # ---- Windows jobs use bash and pwsh only -------------------------------------------------------------------------------------
 for jid, steps in steps_of.items():
     for s in steps:
@@ -497,6 +508,8 @@ expect_fail "the token in another key is refused" 'the token goes only into' \
   mutated 'REGISTRY_TOKEN: ${{ github.token }}' 'OTHER_TOKEN: ${{ github.token }}'
 expect_fail "a secret is refused" 'reads no secret' \
   mutated $'      - name: Run the tag guard\n        env:\n' $'      - name: Run the tag guard\n        env:\n          X: ${{ secrets.X }}\n'
+expect_fail "a Windows job without the line-ending step is refused" 'job verify-windows: the first step must set core.autocrlf false' \
+  mutated 'git config --global core.autocrlf false' 'git config --global core.autocrlf true'
 expect_fail "a renamed workflow file is refused" 'must be named release.yml' \
   bash -c 'mkdir -p "$1/renamed" && cp "$2" "$1/renamed/publish.yml" && python3 -I "$3" "$1/renamed/publish.yml" "$4"' _ "${TEST_TMP}" "${WORKFLOW}" "${CHECKER}" "${CI_DIR}/check-workflows.py"
 

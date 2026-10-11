@@ -903,6 +903,11 @@ jobs:
     permissions:
       contents: read # check out the repository and read the files of the tagged commit
     steps:
+      # GitHub's Windows images set core.autocrlf=true: without this step the checkout turns ci/release/*.sh into CRLF files that Git Bash cannot run.
+      - name: Keep the line endings of the repository (Windows)
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
       - name: Check out the release scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1123,6 +1128,11 @@ jobs:
     permissions:
       contents: read # check out the repository and read the files of the tagged commit
     steps:
+      # GitHub's Windows images set core.autocrlf=true: without this step the checkout turns ci/release/*.sh into CRLF files that Git Bash cannot run.
+      - name: Keep the line endings of the repository (Windows)
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
       - name: Check out the release scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
