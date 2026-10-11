@@ -68,6 +68,11 @@ updates:
     groups:
       web-ui:
         patterns: ['*']
+    # TypeScript 7 no longer exposes the compiler API that openapi-typescript (pnpm gen:api) uses, and typescript-eslint does
+    # not support it yet; one incompatible major would break the whole web-ui group. Remove this entry once both support it.
+    ignore:
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
     open-pull-requests-limit: 3
 
   # The website tooling (pnpm). A shipped package also needs its new version in website/data/third_party.yaml
