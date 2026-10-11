@@ -22,19 +22,21 @@
 #                   (GITHUB_RUN_ATTEMPT > 1) after it was published by this job - published with the same assets [release_not_draft]
 #   4. assets       the names equal the manifest; each asset is uploaded [asset_state] by github-actions[bot] [asset_foreign], has the
 #                   size [asset_size_mismatch] and the SHA-256 digest of the manifest [asset_digest_missing] [asset_digest_mismatch];
-#                   refs/tags/TAG resolves (an annotated tag is dereferenced) to RELEASE_COMMIT [tag_moved]
+#                   refs/tags/TAG exists and resolves (an annotated tag is dereferenced) to RELEASE_COMMIT [tag_moved]
 #   5. image tags   per repository from `crane ls`: an immutable tag (X.Y.Z-rc.N, X.Y.Z) is set when absent, kept when it already
 #                   points at the index, and a conflict otherwise [image_tag_conflict]; the moving tag X.Y (final tags only) is set when
 #                   absent, re-set when its image has a lower version, left alone (and logged) when its version is higher, and a
 #                   conflict when unreadable; a repository with a tag latest is refused. After tagging, `crane digest` of every tag
 #                   that was set or kept equals the index [image_tag_mismatch]
-#   6. publish      directly before: the release is read by ID again and checks 3 and 4 are repeated (the draft may have changed while
-#                   the image tags were set), and the tag is resolved again [tag_moved]. Then
+#   6. publish      directly before: the release is read by ID again and checks 3 and 4 are repeated, the uniqueness of the release of
+#                   the tag [draft_ambiguous] included (the draft may have changed while the image tags were set), and the tag is
+#                   resolved again [tag_moved]. Then
 #                   gh api -X PATCH repos/<repository>/releases/ID -F draft=false -f make_latest=<RELEASE_LATEST> [publish_failed]
 #   7. post checks  (each retried up to 10 times, RELEASE_RETRY_DELAY seconds apart, default 15: the release attestation appears shortly
 #                   after publication) gh release view: not a draft, the same ID, the prerelease flag, immutable [release_not_immutable];
-#                   the release is read by ID once more and check 4 is repeated on the published, now immutable release
-#                   [release_assets_changed: the run must say that the release is immutable and wrong]; gh release verify
+#                   the release is read by ID once more, it is the only release of the tag and published [release_state] [draft_ambiguous],
+#                   and check 4 is repeated on the published, now immutable release [release_assets_changed: the run must say that the
+#                   release is immutable and wrong]; gh release verify
 #                   [release_attestation]; gh release verify-asset on checksums.txt [release_asset_attestation]
 #   8. stdout       release-url=https://github.com/<repository>/releases/tag/TAG
 #
@@ -171,18 +173,24 @@ if not ok:
 print(str(r["draft"]).lower())
 PY
 }
-read_release "read release ${rid}"
-draft="$(release_draft_flag)" || exit 1
-rows="$(release_rows "${tag}")"
-n=0
-while IFS='|' read -r id _ _ _ _; do
-  [ -n "${id}" ] || continue
-  n=$((n + 1))
-  [ "${id}" = "${rid}" ] || err draft_ambiguous "tag ${tag} has another release (${id}) besides ${rid}"
-done <<EOT
+# check_single_release: release ${rid} is the only release of TAG (drafts included); repeated at every re-read of the release
+check_single_release() {
+  local rows n=0 id _
+  rows="$(release_rows "${tag}")"
+  while IFS='|' read -r id _ _ _ _; do
+    [ -n "${id}" ] || continue
+    n=$((n + 1))
+    [ "${id}" = "${rid}" ] || err draft_ambiguous "tag ${tag} has another release (${id}) besides ${rid}"
+  done <<EOT
 ${rows}
 EOT
-[ "${n}" -eq 1 ] || err draft_ambiguous "tag ${tag} has ${n} releases, expected exactly release ${rid}"
+  [ "${n}" -eq 1 ] || err draft_ambiguous "tag ${tag} has ${n} releases, expected exactly release ${rid}"
+}
+read_release "read release ${rid}"
+# The flag is captured on its own line: a refusal of release_draft_flag ([draft_foreign]) ends the script here, instead of its lost output
+# being compared with true or false and reported as another code.
+draft="$(release_draft_flag)" || exit 1
+check_single_release
 published=0
 if [ "${draft}" = false ]; then
   if [ "${attempt}" -le 1 ]; then
@@ -257,14 +265,14 @@ print(o["type"], o["sha"])
 }
 check_tag() {
   local f line otype osha _
-  f="$(gh_json "resolve the tag ${tag}" api "repos/${repo}/git/ref/tags/${tag}")"
+  f="$(GH_JSON_NOT_FOUND=tag_moved gh_json "resolve the tag ${tag}" api "repos/${repo}/git/ref/tags/${tag}")"
   line="$(tag_object "${f}")" || { rm -f "${f}"; err tag_moved "the ref of the tag ${tag} is not a commit or a tag object"; }
   rm -f "${f}"
   for _ in 1 2 3; do
     otype="${line%% *}"
     osha="${line#* }"
     [ "${otype}" = tag ] || break
-    f="$(gh_json "read the tag object ${osha}" api "repos/${repo}/git/tags/${osha}")"
+    f="$(GH_JSON_NOT_FOUND=tag_moved gh_json "read the tag object ${osha}" api "repos/${repo}/git/tags/${osha}")"
     line="$(tag_object "${f}")" || { rm -f "${f}"; err tag_moved "the tag object of ${tag} is not a commit or a tag object"; }
     rm -f "${f}"
   done
@@ -354,7 +362,9 @@ EOT
 if [ "${published}" = 0 ]; then
   # the draft is read again directly before the publication: the tags above took time, and the files of a draft stay editable
   read_release "read release ${rid} again"
-  [ "$(release_draft_flag)" = true ] || err release_not_draft "release ${rid} of ${tag} was published while this job set the image tags"
+  flag="$(release_draft_flag)" || exit 1
+  [ "${flag}" = true ] || err release_not_draft "release ${rid} of ${tag} was published while this job set the image tags"
+  check_single_release
   check_assets
   check_tag
   info "publishing release ${rid} of ${tag}"
@@ -391,7 +401,9 @@ retry release_state "release ${tag} is not published as release ${rid} with the 
 retry release_not_immutable "release ${tag} is published but NOT immutable: enable release immutability for the organization or repository before the next tag (it applies only to later releases); this release stays mutable" immutable_ok
 # the release is immutable now: its files are final. Compare them with the verified files once more.
 read_release "read the published release ${rid}"
-[ "$(release_draft_flag)" = false ] || err release_state "release ${rid} of ${tag} is not published"
+flag="$(release_draft_flag)" || exit 1
+[ "${flag}" = false ] || err release_state "release ${rid} of ${tag} is not published"
+check_single_release
 check_assets release_assets_changed
 info "the published, immutable release holds exactly the verified files"
 retry release_attestation "gh release verify ${tag} failed: the release attestation is missing or invalid" \

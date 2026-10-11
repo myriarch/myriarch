@@ -263,13 +263,18 @@ need_gh() {
   check_text gh_token "GH_TOKEN" "${GH_TOKEN}"
 }
 
-# gh_json <description> <gh arguments...>: runs gh, writes its stdout to a new temp file and prints the path; a failure is [gh_failed]
+# gh_json <description> <gh arguments...>: runs gh, writes its stdout to a new temp file and prints the path; a failure is [gh_failed],
+# or - when GH_JSON_NOT_FOUND names a code and gh reports HTTP 404 - that code
 gh_json() {
   local what="$1" f last
   shift
   f="$(mktemp "${TMPDIR:-/tmp}/myriarch-gh.XXXXXX")"
   if ! "${TOOLS_BIN}/gh" "$@" > "${f}" 2> "${f}.err"; then
     last="$(grep -v '^[[:space:]]*$' "${f}.err" | tail -n 1 | cut -c 1-200 || true)"
+    if [ -n "${GH_JSON_NOT_FOUND:-}" ] && grep -q 'HTTP 404' "${f}.err"; then
+      rm -f "${f}" "${f}.err"
+      err "${GH_JSON_NOT_FOUND}" "gh could not ${what}: it does not exist (${last:-HTTP 404})"
+    fi
     rm -f "${f}" "${f}.err"
     err gh_failed "gh could not ${what}: ${last:-no message}"
   fi

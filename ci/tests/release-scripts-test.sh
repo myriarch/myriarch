@@ -92,8 +92,12 @@ case "$1" in
     done
     case "${method}:${path}" in
       GET:repos/*/releases\?per_page=100) n="$(counter list.count)"; f="${d}/list.${n}.json"; [ -f "${f}" ] || f="${d}/list.json"; cat "${f}" ;;
-      GET:repos/*/git/ref/tags/*) n="$(counter ref.count)"; f="${d}/ref.${n}.json"; [ -f "${f}" ] || f="${d}/ref.json"; cat "${f}" ;;
-      GET:repos/*/git/tags/*) cat "${d}/tagobj.${path##*/}.json" ;;
+      GET:repos/*/git/ref/tags/*) n="$(counter ref.count)"; f="${d}/ref.${n}.json"; [ -f "${f}" ] || f="${d}/ref.json"
+        # ref.<n>.404 (or ref.404): the n-th read of the ref answers like the API for a missing ref
+        if [ -f "${d}/ref.${n}.404" ] || [ -f "${d}/ref.404" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+        cat "${f}" ;;
+      GET:repos/*/git/tags/*) if [ -f "${d}/tagobj.${path##*/}.404" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+        cat "${d}/tagobj.${path##*/}.json" ;;
       GET:repos/*/releases/*)
         # the n-th read of a release is release.<id>.<n>.json when that file exists (a release that changes between two reads)
         # after the PATCH the verified state is published (draft false); a numbered variant is returned as it is
@@ -1229,11 +1233,12 @@ eq "finalize rc: no other crane call uses an anonymous config" "0" "$(call_count
 eq "finalize rc: crane tag for both repositories" "2" "$(call_count crane '^tag ')"
 has_call crane "^tag ${REPO_S}@${SERVER_INDEX_DIGEST} 9.9.9-rc.1 " && has_call crane "^tag ${REPO_U}@${UPDATER_INDEX_DIGEST} 9.9.9-rc.1 " && ok "finalize rc: tag 9.9.9-rc.1 on the index digests" || fail "finalize rc: wrong crane tag calls"
 no_call crane '(^| )latest( |$)' && ok "finalize rc: no call with latest" || fail "finalize rc: a call with latest"
-eq "finalize rc: the publish call (draft=false, make_latest=false)" "api -X PATCH repos/myriarch/myriarch/releases/4711 -F draft=false -f make_latest=false" "$(call_line gh 6)"
-eq "finalize rc: gh calls: read, list, tag, read again, tag again, PATCH, view x2, read published, verify, verify-asset" "11" "$(call_count gh '.')"
+eq "finalize rc: the publish call (draft=false, make_latest=false)" "api -X PATCH repos/myriarch/myriarch/releases/4711 -F draft=false -f make_latest=false" "$(call_line gh 7)"
+eq "finalize rc: gh calls: read, list, tag, read again, list again, tag again, PATCH, view x2, read published, list again, verify, verify-asset" "13" "$(call_count gh '.')"
+eq "finalize rc: the releases of the tag are listed three times (draft, directly before the PATCH, published)" "3" "$(call_count gh '^api --paginate --slurp repos/myriarch/myriarch/releases\?per_page=100$')"
 eq "finalize rc: the release is read three times (draft, directly before the PATCH, published)" "3" "$(call_count gh '^api repos/myriarch/myriarch/releases/4711$')"
 eq "finalize rc: the tag is resolved twice" "2" "$(call_count gh '^api repos/myriarch/myriarch/git/ref/tags/v9.9.9-rc.1$')"
-eq "finalize rc: the second read comes directly before the tag check and the PATCH" "api repos/myriarch/myriarch/releases/4711|api repos/myriarch/myriarch/git/ref/tags/v9.9.9-rc.1|api -X PATCH repos/myriarch/myriarch/releases/4711 -F draft=false -f make_latest=false" "$(call_line gh 4)|$(call_line gh 5)|$(call_line gh 6)"
+eq "finalize rc: the second read and the second listing come directly before the tag check and the PATCH" "api repos/myriarch/myriarch/releases/4711|api --paginate --slurp repos/myriarch/myriarch/releases?per_page=100|api repos/myriarch/myriarch/git/ref/tags/v9.9.9-rc.1|api -X PATCH repos/myriarch/myriarch/releases/4711 -F draft=false -f make_latest=false" "$(call_line gh 4)|$(call_line gh 5)|$(call_line gh 6)|$(call_line gh 7)"
 has_call gh '^release verify v9.9.9-rc.1 --repo myriarch/myriarch$' && has_call gh "^release verify-asset v9.9.9-rc.1 ${FVER}/checksums.txt --repo myriarch/myriarch\$" && ok "finalize rc: release verify and verify-asset" || fail "finalize rc: post checks missing"
 [ "$(seq_last 'crane manifest')" -lt "$(seq_line 'crane tag')" ] && [ "$(seq_last 'crane tag')" -lt "$(seq_line 'PATCH')" ] && ok "finalize rc: anonymous reads, then tags, then the publication" || fail "finalize rc: wrong order"
 fsetup v9.9.9
@@ -1242,7 +1247,7 @@ eq "finalize final: four crane tag calls" "4" "$(call_count crane '^tag ')"
 for r in "${REPO_S}@${SERVER_INDEX_DIGEST}" "${REPO_U}@${UPDATER_INDEX_DIGEST}"; do
   has_call crane "^tag ${r} 9.9.9 " && has_call crane "^tag ${r} 9.9 " && ok "finalize final: 9.9.9 and 9.9 on ${r:0:40}" || fail "finalize final: tags missing on ${r}"
 done
-contains "finalize final: make_latest=true" "make_latest=true" "$(call_line gh 6)"
+contains "finalize final: make_latest=true" "make_latest=true" "$(call_line gh 7)"
 # the moving tag X.Y
 other="sha256:$(printf 'e%.0s' $(seq 64))"
 mv_setup() { # label (empty for none) [digest]
@@ -1363,6 +1368,38 @@ fsetup v9.9.9-rc.1; alt_release 3 "digest_wrong=LICENSE" draft=0
 expect_fail "finalize: a changed digest after the publication" "release_assets_changed.*asset_digest_mismatch.*LICENSE" fr
 fsetup v9.9.9-rc.1; alt_release 3 draft=1
 expect_fail "finalize: a release that is a draft after the PATCH" "release_state" fr
+# a refusal of the identity check of a re-read ends the script with its own code, not with release_not_draft or release_state
+fsetup v9.9.9-rc.1; alt_release 2 author=someone
+refuse_case "a foreign author between the check and the publication" "draft_foreign"
+lacks "finalize: the foreign draft before the PATCH is not reported as release_not_draft" "release_not_draft" "${OUT}"
+fsetup v9.9.9-rc.1; alt_release 3 author=someone draft=0
+expect_fail "finalize: a foreign author after the publication" "draft_foreign" fr
+lacks "finalize: the foreign release after the PATCH is not reported as release_state" "release_state" "${OUT}"
+no_call gh '^release verify ' && ok "finalize: no attestation check passes over a foreign release" || fail "finalize: verified a foreign release"
+# the release of the tag must still be the only one at every re-read
+alt_list() { # n options...: the n-th listing of the releases returns the variant, the others the verified state
+  local n="$1"; shift
+  gen release "${S}" 4711 "${FTAG}" "${FV}" "${FVER}/verified-manifest.txt" "$@"
+  mv "${S}/list.json" "${S}/list.${n}.json"
+  gen release "${S}" 4711 "${FTAG}" "${FV}" "${FVER}/verified-manifest.txt"
+}
+fsetup v9.9.9-rc.1; alt_list 2 "others=4712,1,github-actions[bot]"
+refuse_case "a second release of the tag between the check and the publication" "draft_ambiguous.*4712"
+no_call gh '^release (view|verify)' && ok "finalize: nothing is checked after the second release appeared before the PATCH" || fail "finalize: post checks ran"
+fsetup v9.9.9-rc.1; alt_list 3 "others=4712,0,github-actions[bot]"
+expect_fail "finalize: a second release of the tag after the publication" "draft_ambiguous.*4712" fr
+has_call gh '-X PATCH' && ok "finalize: the second release is found after the PATCH" || fail "finalize: no PATCH before the post listing"
+no_call gh '^release verify ' && ok "finalize: no attestation check passes over an ambiguous tag" || fail "finalize: verified an ambiguous tag"
+# a tag that does not exist (any more) is tag_moved, not gh_failed
+fsetup v9.9.9-rc.1; touch "${S}/ref.404"
+refuse_case "a tag that does not exist" "tag_moved.*does not exist"
+lacks "finalize: a missing tag is not reported as gh_failed" "gh_failed" "${OUT}"
+fsetup v9.9.9-rc.1; touch "${S}/ref.2.404"
+refuse_case "a tag that was deleted while the image tags were set" "tag_moved.*does not exist"
+has_call crane '^tag ' && ok "finalize: the deleted tag is found after the image tags" || fail "finalize: no crane tag before the second tag check"
+fsetup v9.9.9-rc.1; T40="$(printf '7%.0s' $(seq 40))"
+printf '{"object":{"type":"tag","sha":"%s"}}\n' "${T40}" > "${S}/ref.json"; touch "${S}/tagobj.${T40}.404"
+refuse_case "an annotated tag whose object does not exist" "tag_moved.*does not exist"
 # the tag must still point at the commit that was signed and verified
 fsetup v9.9.9-rc.1; FR_COMMIT="$(printf 'f%.0s' $(seq 40))"
 refuse_case "a tag on another commit than RELEASE_COMMIT" "tag_moved.*resolves to ${C40}"

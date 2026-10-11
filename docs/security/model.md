@@ -512,8 +512,10 @@ guidance after each item names what to do.
     GitHub's SHA-256 digest of every asset with the verified manifest, that the release is a draft of this tag by
     `github-actions[bot]`, that `refs/tags/<tag>` still resolves to the tagged commit (`tag_moved`; `draft.sh` also sets the commit
     as the target of the release) and that both packages are readable without credentials; it refuses to move an immutable image
-    tag; it sets the image tags, reads the draft by ID again and repeats the asset and tag checks directly before it publishes.
-    After publication it reads the release once more and compares its assets with the verified manifest again
+    tag; it sets the image tags, reads the draft by ID again and repeats the checks of the draft (author, title, pre-release flag,
+    the only release of the tag), the asset checks and the tag check directly before it publishes; a tag that no longer exists is
+    reported as `tag_moved`. After publication it reads the release once more, repeats the identity and uniqueness checks and
+    compares its assets with the verified manifest again
     (`release_assets_changed` says that the release is immutable and wrong), and it requires that the release is immutable and
     that GitHub's release attestation verifies.
   - *Smoke tests.* After publication, jobs of the same workflow with read scopes only download and verify the release
