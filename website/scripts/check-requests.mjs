@@ -448,7 +448,7 @@ async function checkLoop(browser, base, scheme, findings) {
 }
 
 /**
- * The keyboard: Tab reaches the mark, the focus ring shows (contrast 3:1), Enter and Space (on keyup, like a native button, without
+ * The keyboard: Tab reaches the mark, the focus ring shows (contrast 3:1), Enter and Space (on keyup after a keydown on the mark, like a native button, without
  * scrolling the page) pause and resume it, and aria-pressed follows.
  */
 async function checkKeyboard(browser, base, scheme, findings) {
@@ -488,6 +488,11 @@ async function checkKeyboard(browser, base, scheme, findings) {
   await sleep(150);
   const up = await json(page, CONTROL_STATE);
   if (up.pressed !== "true") findings.push(`${label}: Space did not toggle the mark on key up (aria-pressed ${JSON.stringify(up.pressed)})`);
+  // A key up without a key down on the mark (the focus moved in between) changes nothing, like on a native button.
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: KEYS.Space.key, code: KEYS.Space.code, windowsVirtualKeyCode: KEYS.Space.windowsVirtualKeyCode });
+  await sleep(150);
+  const stray = await json(page, CONTROL_STATE);
+  if (stray.pressed !== "true") findings.push(`${label}: a Space key up without a key down toggled the mark (aria-pressed ${JSON.stringify(stray.pressed)})`);
 }
 
 /** With prefers-reduced-motion: reduce nothing animates, and the mark is a plain image: no role, not focusable, no pause button. */

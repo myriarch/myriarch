@@ -25,6 +25,7 @@
   var visible = true; // the hero is in the viewport (until the observer says otherwise)
   var playing = null; // null until the first decision
   var started = false;
+  var spaceDown = false; // Space went down on the mark (a native button acts on Space only when it saw the keydown)
 
   function wanted() {
     return !reduced.matches && !paused && visible && !document.hidden;
@@ -96,17 +97,23 @@
   // Like a native button: Enter acts on keydown, Space on keyup (and does not scroll the page).
   mark.addEventListener("keydown", function (event) {
     if (reduced.matches) return;
-    if (event.key === " " || event.key === "Spacebar") event.preventDefault();
-    else if (event.key === "Enter" && !event.repeat && !event.altKey && !event.ctrlKey && !event.metaKey) {
+    if (event.key === " " || event.key === "Spacebar") {
+      event.preventDefault();
+      spaceDown = true;
+    } else if (event.key === "Enter" && !event.repeat && !event.altKey && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
       toggle();
     }
   });
   mark.addEventListener("keyup", function (event) {
-    if (!reduced.matches && (event.key === " " || event.key === "Spacebar")) {
-      event.preventDefault();
-      toggle();
-    }
+    if (event.key !== " " && event.key !== "Spacebar") return;
+    event.preventDefault();
+    var armed = spaceDown;
+    spaceDown = false;
+    if (armed && !reduced.matches) toggle();
+  });
+  mark.addEventListener("blur", function () {
+    spaceDown = false;
   });
 
   function onReducedChange() {
