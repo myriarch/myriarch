@@ -112,7 +112,7 @@ goreleaser; otherwise stage `apply` fails with `[not_reproducible]`.
 | `MYRIARCH_AUTHENTICODE_DIR` | the trust anchors, default `deploy/release/authenticode`; only snapshot builds may set it |
 | `MYRIARCH_WINDOWS_SIGNING` | stage `apply`: the configured signing mode (`off`, `signpath` or `kms`), parsed by the release workflow from `deploy/release/windows-signing.env` and set in the packaging job. Required for release builds (`[mode_missing]`); `signer.json` has to name the same provider (`[provider_mismatch]`). Snapshots may leave it unset. |
 | `WINDOWS_SIGNING` | the mode of the hook: `off` (or `signpath`, `kms`, `test`, see below); the release workflow takes it from `deploy/release/windows-signing.env` |
-| `TOOLS_BIN` | where the pinned tools are found (go-winres, osslsigncode, syft and yq here), default `.cache/bin`; `sbom.sh` has no default |
+| `TOOLS_BIN` | where the pinned tools are found (go-winres, osslsigncode, syft and yq here), default `.cache/bin`; `sbom.sh` has no default. go-winres is accepted only with the stamp of the pinned version next to it (`[winres_missing]`) |
 
 The unsigned and signed directories are staging areas: inside the work tree they have to be git-ignored (use `.cache/` or a path
 outside the repository), otherwise `[staging_dir]`. The state of the hooks is in `.cache/release/windows`.
