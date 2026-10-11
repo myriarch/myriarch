@@ -30,8 +30,8 @@ directory of its own. The directories of container mode (`collector.installDir`,
 runs the updater, which is the collector image (`/var/lib/myriarch`, writable for its user 10001 and group 0, see
 `deploy/k8s/collector/Dockerfile`). The server image `ghcr.io/myriarch/myriarch` is a different case: it has the data directory
 `/var/lib/myriarchd` for the non-root user 65532, because the server writes the GitOps clone and the artifact cache there.
-Build
-the collector image with `--build-arg UPDATER_SOURCE=image --build-arg
+
+Build the collector image with `--build-arg UPDATER_SOURCE=image --build-arg
 UPDATER_IMAGE=ghcr.io/myriarch/myriarch-updater@sha256:<digest>` to copy that binary instead of compiling the updater from your
 checkout; without the build arguments the Dockerfile compiles it. The digest is named in the release notes.
 

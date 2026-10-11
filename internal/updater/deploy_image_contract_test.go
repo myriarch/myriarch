@@ -179,6 +179,7 @@ func TestServerImageContentComesFromTheReleaseArchives(t *testing.T) {
 			srcs[a.ID] = append(srcs[a.ID], f.Src)
 		}
 		if a.ID == brand.CLIBinary || a.ID == brand.SimBinary {
+			require.NotEmpty(t, a.Formats, "%s: formats", a.ID)
 			assert.Equal(t, []string{"tar.gz"}, a.Formats[:1], "%s: the image reads the tar.gz archive", a.ID)
 			assert.Equal(t, a.ID+"_{{ .Version }}_{{ .Os }}_{{ .Arch }}", a.NameTemplate, a.ID)
 		}
