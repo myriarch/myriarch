@@ -13,7 +13,7 @@
 #  - .node-version holds one exact Node.js release of 22 or newer, and the web stage of myriarchd.Dockerfile uses its major
 #  - goreleaser.yaml has no signs: block and references the Windows stage script and the SBOM script, which exist
 #  - one version source: VERSION and every copy of the product version agree (ci/check-versions.sh)
-#  - ci/ and contrib/enterprise-mirror/ script paths mentioned in the Makefile, goreleaser.yaml and the scripts exist
+#  - ci/ and contrib/enterprise-mirror/ script paths mentioned in the Makefile, goreleaser.yaml, the workflows and the scripts exist
 #    (scripts/ is deliberately not covered here)
 set -euo pipefail
 # shellcheck source=ci/lib.sh
@@ -165,13 +165,13 @@ for f in deploy/release/windows-signed.sh deploy/release/sbom.sh; do
   grep -q "${f}" deploy/release/goreleaser.yaml || bad "goreleaser.yaml does not reference ${f}"
 done
 
-# Script paths below ci/ and contrib/enterprise-mirror/ that are mentioned in the Makefile, goreleaser.yaml and the
-# ci/ and contrib/ scripts must exist.
+# Script paths below ci/ and contrib/enterprise-mirror/ that are mentioned in the Makefile, goreleaser.yaml, the workflows
+# and the ci/ and contrib/ scripts must exist (also in the form ./ci/..., which the workflows use for PowerShell scripts).
 while IFS= read -r f; do
   while IFS= read -r p; do
     [ -f "${p}" ] || bad "${f} references ${p}, but the file does not exist"
-  done < <(grep -Eo '(^|[^A-Za-z0-9_./-])(ci|contrib/enterprise-mirror)/[A-Za-z0-9_./-]+\.(sh|py|env)' "${f}" | sed -E 's|^[^cC]*||' | sort -u)
-done < <({ printf '%s\n' Makefile deploy/release/goreleaser.yaml; find ci contrib -name '*.sh' -type f; } | sort -u)
+  done < <(grep -Eo '(^|[^A-Za-z0-9_./-]|\./)(ci|contrib/enterprise-mirror)/[A-Za-z0-9_./-]+\.(sh|py|env|ps1)' "${f}" | sed -E 's|^[^cC]*||' | sort -u)
+done < <({ printf '%s\n' Makefile deploy/release/goreleaser.yaml .github/workflows/*.yml; find ci contrib -name '*.sh' -type f; } | sort -u)
 
 # one version source: VERSION and every copy of the product version (chart, web UI, OpenAPI, examples) agree
 "${CI_DIR}/check-versions.sh" || status=1
