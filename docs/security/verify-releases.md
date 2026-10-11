@@ -15,7 +15,7 @@ build provenance follows with the release workflow.
 
 ## What is signed
 
-A release contains the archives and the bare `myriarch-updater` binaries, their SBOMs, `LICENSE`, `THIRD_PARTY_NOTICES` and two
+A release contains the archives and the bare `myriarch-updater` binaries, the SBOMs of the archives and of the web UI, `LICENSE`, `THIRD_PARTY_NOTICES` and two
 files that carry the trust:
 
 | File | Content |

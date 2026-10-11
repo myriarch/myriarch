@@ -4,7 +4,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Test for require_tag_on_release_branch (ci/lib.sh): a release tag must be on the release branch, otherwise nothing is
-# signed. Local git repositories (origin = bare repo), no network.
+# signed. Local git repositories (origin = bare repo), no network. The second part tests ci/build-release.sh, which has only the
+# snapshot mode: the removed key path (release mode, COSIGN_KEY, AUTHENTICODE_PFX) must not come back.
 # shellcheck source=ci/tests/lib-test.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
 set -u
@@ -49,37 +50,40 @@ shallow_guard() { ( cd "${sh_}" && env RELEASE_GIT_DIR="${sh_}" RELEASE_COMMIT="
 expect_fail "shallow clone: a feature commit is rejected" "is not on branch main" shallow_guard "${cc}"
 expect_ok   "shallow clone: a commit on main is accepted" shallow_guard "${a}"
 
-# ---- release mode: tools without the cache, UI rebuilt from the tag ----------------------------------------------------------
-# A copy of the build script runs in a scratch tree with stubs for the tools and gates; the stubs record what the signing job sees.
+# ---- snapshot mode: the only mode of ci/build-release.sh ------------------------------------------------------------------------
+# A copy of the build script runs in a scratch tree with stubs for the tools; the stubs record what goreleaser sees.
 S="${TEST_TMP}/release-tree"
-mkdir -p "${S}/ci" "${S}/scripts" "${S}/deploy/release" "${S}/contrib/enterprise-mirror" "${S}/internal/webui/dist" "${S}/bin"
+mkdir -p "${S}/ci" "${S}/bin"
 cp "${CI_DIR}/lib.sh" "${CI_DIR}/build-release.sh" "${CI_DIR}/versions.env" "${S}/ci/"
-printf 'key\n' > "${S}/deploy/release/cosign.pub"
-printf '<html>planted by an earlier build</html>\n' > "${S}/internal/webui/dist/index.html"
 cat > "${S}/ci/install-tools.sh" <<'STUB'
 #!/usr/bin/env bash
-echo "TOOLS_NO_CACHE=${TOOLS_NO_CACHE:-unset} tools=$*" >> "${RECORD}"
+echo "tools=$*" >> "${RECORD}"
 STUB
-cat > "${S}/ci/check-release-licenses.sh" <<'STUB'
-#!/usr/bin/env bash
-exit 0
-STUB
-cp "${S}/ci/check-release-licenses.sh" "${S}/scripts/gen-third-party-notices.sh"
-cp "${S}/ci/check-release-licenses.sh" "${S}/contrib/enterprise-mirror/verify-release.sh"
 cat > "${S}/bin/goreleaser" <<'STUB'
 #!/usr/bin/env bash
-if [ -e internal/webui/dist/index.html ]; then echo "goreleaser: stale UI present" >> "${RECORD}"; else echo "goreleaser: no UI present" >> "${RECORD}"; fi
-echo "goreleaser: TOOLS_NO_CACHE=${TOOLS_NO_CACHE:-unset}" >> "${RECORD}"
+echo "goreleaser: argv=$*" >> "${RECORD}"
+echo "goreleaser: stage=${MYRIARCH_WINDOWS_STAGE:-unset}" >> "${RECORD}"
+echo "goreleaser: cosign=${COSIGN_KEY:-unset} pfx=${AUTHENTICODE_PFX:-unset}" >> "${RECORD}"
 mkdir -p dist
 STUB
-chmod 0755 "${S}"/ci/*.sh "${S}"/scripts/*.sh "${S}"/contrib/enterprise-mirror/*.sh "${S}"/bin/goreleaser
-git init -q -b main "${S}" && git -C "${S}" add -A && git -C "${S}" commit -q -m release && git -C "${S}" tag v1.2.3
+chmod 0755 "${S}"/ci/*.sh "${S}"/bin/goreleaser
+git init -q -b main "${S}" && git -C "${S}" add -A && git -C "${S}" commit -q -m release
 RECORD="${TEST_TMP}/record.txt"; : > "${RECORD}"
-t_release_mode() { ( cd "${S}" && env RECORD="${RECORD}" TOOLS_BIN="${S}/bin" RELEASE_GIT_DIR="${S}" RELEASE_ALLOW_ANY_COMMIT=1 RELEASE_TAG=v1.2.3 \
-  COSIGN_KEY=key COSIGN_PASSWORD=pw AUTHENTICODE_PFX=pfx AUTHENTICODE_PFX_PASSWORD_FILE=pw TOOLS_NO_CACHE=0 bash ci/build-release.sh release ); }
-OUT="$(t_release_mode 2>&1)" || true
-if grep -q 'tools=goreleaser cosign' "${RECORD}" && ! grep 'tools=goreleaser cosign' "${RECORD}" | grep -vq 'TOOLS_NO_CACHE=1'; then ok "release mode installs the tools without the tool cache (TOOLS_NO_CACHE=1)"; else fail "release mode did not set TOOLS_NO_CACHE=1 for the tool installation"; cat "${RECORD}" "${OUT:+/dev/null}" >&2; printf '%s\n' "${OUT}" | sed 's/^/        /' >&2; fi
-if grep -q 'goreleaser: TOOLS_NO_CACHE=1' "${RECORD}"; then ok "... and for goreleaser"; else fail "goreleaser did not see TOOLS_NO_CACHE=1"; fi
-if grep -q 'goreleaser: no UI present' "${RECORD}"; then ok "release mode removes a leftover internal/webui/dist (the hook rebuilds it)"; else fail "a leftover internal/webui/dist is still present when goreleaser runs"; fi
+build() { ( cd "${S}" && env RECORD="${RECORD}" TOOLS_BIN="${S}/bin" "$@" bash ci/build-release.sh "${BUILD_MODE-}" ); }
+BUILD_MODE=release;  expect_fail "release mode was removed"           "release was removed" build
+BUILD_MODE=;         expect_fail "no argument prints the usage"       "usage" build
+BUILD_MODE=snapshot; expect_fail "snapshot without the built UI"      "make web-build" build
+mkdir -p "${S}/internal/webui/dist"; echo '<html></html>' > "${S}/internal/webui/dist/index.html"
+: > "${RECORD}"
+BUILD_MODE=snapshot; expect_ok "snapshot with the built UI"           build
+grep -q '^tools=goreleaser syft go-winres yq$' "${RECORD}" && ok "snapshot installs goreleaser, syft, go-winres and yq" || fail "unexpected tools: $(grep '^tools=' "${RECORD}")"
+grep -q '^goreleaser: argv=release --snapshot --clean --skip=publish -f deploy/release/goreleaser.yaml$' "${RECORD}" && ok "goreleaser runs a snapshot without a sign skip" || fail "unexpected goreleaser arguments: $(grep argv "${RECORD}")"
+grep -q 'skip=.*sign' "${RECORD}" && fail "the arguments mention signing"
+grep -q '^goreleaser: stage=off$' "${RECORD}" && ok "the Windows stage is off" || fail "the Windows stage is not off: $(grep stage "${RECORD}")"
+# the removed key path: signing variables in the environment change nothing
+: > "${RECORD}"
+BUILD_MODE=snapshot; expect_ok "snapshot with signing variables in the environment" build COSIGN_KEY=key COSIGN_PASSWORD=pw AUTHENTICODE_PFX=pfx AUTHENTICODE_PFX_PASSWORD_FILE=pw
+grep -q '^goreleaser: argv=release --snapshot --clean --skip=publish -f deploy/release/goreleaser.yaml$' "${RECORD}" && ok "... the arguments do not change" || fail "the signing variables changed the goreleaser arguments"
+grep -q '^goreleaser: stage=off$' "${RECORD}" && ok "... the stage stays off" || fail "the signing variables changed the stage"
 
 finish_tests release-guard-test

@@ -2,13 +2,11 @@
 
 Scripts for organizations that **mirror releases into a private registry or artifact repository and re-sign them with their
 own keys** (for example behind a proxy, without access to GitHub, or with their own PKI). The toolkit is key-based:
-signatures follow the format contract in [`deploy/release/README.md`](../../deploy/release/README.md) and are checked with
-`openssl` (cosign is optional).
+signatures follow the format contract in [`signing.md`](signing.md) and are checked with `openssl` (cosign is optional).
 
-Until the keyless release pipeline ([ADR-0023](../../docs/adr/0023-keyless-release-signing.md)) is in place, the interim
-key-based release path (`ci/build-release.sh`, `deploy/release/goreleaser.yaml`) signs with `sign-blob.sh` and cross-checks with
-`verify-release.sh` from this directory. After that, the project's releases are signed keyless with Sigstore, and this toolkit
-serves only operators who mirror and re-sign releases.
+The project's releases carry no key-based signatures: they are signed keyless with Sigstore by the release workflow
+([ADR-0023](../../docs/adr/0023-keyless-release-signing.md)). This toolkit serves operators who mirror releases and re-sign them
+with their own key. Keyless support of these scripts comes with the release workflow change.
 
 ## Mirroring keyless releases
 
@@ -35,7 +33,7 @@ The scripts in this directory still follow the key-based format below and have n
 |---|---|
 | `publish-mirror.sh` | Copies the host artifacts of a release into an Artifactory or Nexus repository. Immutable (a file with different content is never overwritten), verifies all signatures before the upload and every file after it. |
 | `verify-release.sh` | Verifies a release (from a mirror URL, a directory or a goreleaser `dist/`): signature of `checksums.txt`, optionally every file against `checksums.txt` and its own `.sig`. The auth header is never forwarded to another host on a redirect. |
-| `sign-blob.sh` | Signs a file with `cosign sign-blob` and a key (key file or any KMS URI cosign supports), without a transparency log, and re-verifies the result with `openssl`. Used by `deploy/release/goreleaser.yaml`. |
+| `sign-blob.sh` | Signs a file with `cosign sign-blob` and a key (key file or any KMS URI cosign supports), without a transparency log, and re-verifies the result with `openssl`. |
 | `verify-upstream-images.sh` | Checks that the binaries in the pinned upstream collector images are bit-identical to the signed upstream release artifacts (SHA-256 and Sigstore bundle). |
 | `ca-env.sh` | Makes an extra CA file known to go, crane, cosign, helm, node, curl, python and git (source it; see below). |
 

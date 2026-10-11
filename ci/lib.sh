@@ -79,7 +79,7 @@ release_version() {
 # Path of the Go binary from the goreleaser build (linux/amd64; the directory name contains the GOAMD64 level).
 dist_binary() { # name
   local p="${ROOT}/dist/${1}_linux_amd64_v1/${1}"
-  [ -f "${p}" ] || die "binary missing: ${p} (goreleaser build: ci/build-release.sh snapshot|release?)"
+  [ -f "${p}" ] || die "binary missing: ${p} (goreleaser build: ci/build-release.sh snapshot?)"
   printf '%s' "${p}"
 }
 

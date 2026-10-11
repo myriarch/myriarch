@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Continuous integration (ADR-0032). The jobs run the gates of ci/check-local.sh (one source of commands, local and in CI),
-# plus what only a runner can prove: the platform matrix of the Go tests, the release snapshot, the commit range scan and the
+# plus what only a runner can prove: the platform matrix of the Go tests, the release rehearsal, the commit range scan and the
 # end-to-end test. "ci-ok" is the only required check of the branch ruleset.
 #
 # Policy (enforced by ci/check-workflows.py): only GitHub-owned actions pinned to a commit SHA, a read-only token, no
@@ -213,11 +213,11 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # ---- binaries, examples and the release snapshot (unsigned, nothing is published) -------------------------------------------
+  # ---- binaries, examples and the release rehearsal (a throwaway test CA signs, nothing is published) ----------------------------
   build:
     name: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -227,15 +227,16 @@ jobs:
         uses: ./.github/actions/setup
         with:
           node: 'true'
-          tools: goreleaser
+          # osslsigncode is built from source: the headers are no-ops on the runner image, the call keeps the job independent of it
+          tools: goreleaser syft go-winres yq apt:libssl-dev apt:zlib1g-dev osslsigncode
       - name: Build the UI that the binaries embed
         run: make web-build
       - name: Run the gates (build, examples)
         env:
           ONLY: build,examples
         run: ci/check-local.sh
-      - name: Build the release snapshot (all platforms, unsigned)
-        run: make release-snapshot
+      - name: Rehearse the release build (collect, test-CA signing pass, apply, dist and reproducibility checks)
+        run: make release-rehearsal
       - name: Upload the gate logs
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -404,7 +405,7 @@ jobs:
       - name: Set up the toolchain
         uses: ./.github/actions/setup
         with:
-          tools: cosign helm crane pwsh gitleaks shellcheck
+          tools: cosign helm crane pwsh gitleaks shellcheck syft yq apt:libssl-dev apt:zlib1g-dev osslsigncode
       - name: Run the script tests
         run: make ci-test
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -626,25 +627,178 @@ func TestUpdaterUnitIsSandboxed(t *testing.T) {
 	assert.NotContains(t, unit, "CAP_SYS_ADMIN")
 }
 
-func TestReleaseSigningIsMandatoryForBinariesAndArchives(t *testing.T) {
+// The release build holds no signing key: goreleaser signs nothing (releases are signed keyless by the release workflow, and the
+// Windows files get Authenticode through the hook of deploy/release/windows-signed.sh), and the key-based tooling is gone.
+func TestGoreleaserReleaseBuildHasNoSigningKey(t *testing.T) {
+	raw := readDeploy(t, "release/goreleaser.yaml")
+	var top map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &top))
+	assert.NotContains(t, top, "signs", "goreleaser.yaml has no signs: block")
+	for _, banned := range []string{"cosign", "sign-blob", "authenticode.sh", "COSIGN_", "AUTHENTICODE_", "pnpm", "npm ", "corepack", "--enrich"} {
+		assert.NotContains(t, string(raw), banned, "goreleaser.yaml must not mention %q", banned)
+	}
 	var g struct {
-		Signs []struct {
-			ID        string `yaml:"id"`
-			Artifacts string `yaml:"artifacts"`
-		} `yaml:"signs"`
+		Release struct {
+			Disable bool `yaml:"disable"`
+		} `yaml:"release"`
+		Changelog struct {
+			Disable string `yaml:"disable"`
+		} `yaml:"changelog"`
+	}
+	require.NoError(t, yaml.Unmarshal(raw, &g))
+	assert.True(t, g.Release.Disable, "release publishing stays disabled")
+	assert.Equal(t, "true", g.Changelog.Disable, "the release notes come from the CHANGELOG")
+	assert.NoFileExists(t, filepath.Join(deployDir, "release/authenticode.sh"))
+	assert.NoFileExists(t, filepath.Join(deployDir, "release/cosign.pub"))
+}
+
+type goreleaserHook struct {
+	Cmd string `yaml:"cmd"`
+}
+
+type goreleaserHooks struct {
+	Pre  []goreleaserHook `yaml:"pre"`
+	Post []goreleaserHook `yaml:"post"`
+}
+
+// The hooks that tie the build to deploy/release/windows-signed.sh: version resources and stage marker before, the UI check as a
+// pre hook of myriarchd only (a build of the Windows programs alone needs no UI), the stage hook after the Windows builds.
+func TestGoreleaserHooks(t *testing.T) {
+	var g struct {
+		Before struct {
+			Hooks []string `yaml:"hooks"`
+		} `yaml:"before"`
+		Builds []struct {
+			ID    string          `yaml:"id"`
+			Hooks goreleaserHooks `yaml:"hooks"`
+		} `yaml:"builds"`
 	}
 	require.NoError(t, yaml.Unmarshal(readDeploy(t, "release/goreleaser.yaml"), &g))
-	got := map[string]bool{}
-	for _, s := range g.Signs {
-		got[s.Artifacts] = true
+	assert.Equal(t, []string{`bash deploy/release/windows-signed.sh prepare "{{ .Version }}" "{{ .IsSnapshot }}"`}, g.Before.Hooks)
+	seen := map[string]bool{}
+	for _, b := range g.Builds {
+		seen[b.ID] = true
+		switch b.ID {
+		case "myriarchd":
+			require.Len(t, b.Hooks.Pre, 1, "myriarchd checks the prebuilt UI")
+			assert.Contains(t, b.Hooks.Pre[0].Cmd, "internal/webui/dist/index.html")
+			assert.Empty(t, b.Hooks.Post)
+		case "myriarch-updater", "myrctl":
+			assert.Empty(t, b.Hooks.Pre, b.ID)
+			require.Len(t, b.Hooks.Post, 1, b.ID)
+			assert.Equal(t, `bash deploy/release/windows-signed.sh build `+b.ID+` "{{ .Path }}" "{{ .Os }}" "{{ .Arch }}" "{{ .IsSnapshot }}" "{{ .Version }}"`,
+				b.Hooks.Post[0].Cmd, b.ID)
+		case "myriarch-sim":
+			assert.Empty(t, b.Hooks.Pre, b.ID)
+			assert.Empty(t, b.Hooks.Post, b.ID)
+		default:
+			t.Errorf("unexpected build %q", b.ID)
+		}
 	}
-	for _, want := range []string{"checksum", "binary", "archive"} {
-		assert.True(t, got[want], "goreleaser signs %s artifacts", want)
+	assert.Len(t, seen, 4)
+	for _, rel := range []string{"release/windows-signed.sh", "release/sbom.sh"} {
+		info, err := os.Stat(filepath.Join(deployDir, rel))
+		require.NoError(t, err, rel)
+		if runtime.GOOS != "windows" {
+			assert.NotZero(t, info.Mode()&0o111, "%s is executable", rel)
+		}
 	}
-	raw := string(readDeploy(t, "release/goreleaser.yaml"))
-	assert.Contains(t, raw, "authenticode.sh", "Windows binaries get an Authenticode signature")
-	assert.Contains(t, raw, "local test only", "--skip=sign is documented as snapshot-only")
-	assert.FileExists(t, filepath.Join(deployDir, "release/authenticode.sh"))
+}
+
+// One SPDX JSON SBOM per archive and one for the web UI, both made by deploy/release/sbom.sh (pinned syft, no network, no enrichment).
+func TestGoreleaserSBOMs(t *testing.T) {
+	var g struct {
+		SBOMs []struct {
+			ID        string   `yaml:"id"`
+			Artifacts string   `yaml:"artifacts"`
+			Documents []string `yaml:"documents"`
+			Cmd       string   `yaml:"cmd"`
+			Args      []string `yaml:"args"`
+		} `yaml:"sboms"`
+	}
+	require.NoError(t, yaml.Unmarshal(readDeploy(t, "release/goreleaser.yaml"), &g))
+	require.Len(t, g.SBOMs, 2)
+	archives, webui := g.SBOMs[0], g.SBOMs[1]
+	assert.Equal(t, "archives", archives.ID)
+	assert.Equal(t, "archive", archives.Artifacts)
+	assert.Equal(t, []string{"{{ .ArtifactName }}.sbom.json"}, archives.Documents)
+	assert.Equal(t, "bash", archives.Cmd)
+	assert.Equal(t, []string{"../deploy/release/sbom.sh", "archive", "$artifact", "$document"}, archives.Args)
+	assert.Equal(t, "webui", webui.ID)
+	assert.Equal(t, "any", webui.Artifacts)
+	assert.Equal(t, []string{"myriarch-webui_{{ .Version }}.sbom.json"}, webui.Documents)
+	assert.Equal(t, "bash", webui.Cmd)
+	assert.Equal(t, []string{"../deploy/release/sbom.sh", "webui", "{{ .Version }}", "$document"}, webui.Args)
+	assert.FileExists(t, filepath.Join(deployDir, "release/syft.yaml"))
+}
+
+// LICENSE and THIRD_PARTY_NOTICES are release assets of their own and are listed in checksums.txt.
+func TestGoreleaserChecksumExtraFiles(t *testing.T) {
+	var g struct {
+		Checksum struct {
+			ExtraFiles []struct {
+				Glob string `yaml:"glob"`
+			} `yaml:"extra_files"`
+		} `yaml:"checksum"`
+	}
+	require.NoError(t, yaml.Unmarshal(readDeploy(t, "release/goreleaser.yaml"), &g))
+	var globs []string
+	for _, f := range g.Checksum.ExtraFiles {
+		globs = append(globs, f.Glob)
+	}
+	assert.Equal(t, []string{"./LICENSE", "./THIRD_PARTY_NOTICES"}, globs)
+}
+
+// The Windows scripts ship only in the Windows updater archives (ADR-0034): the tracked scripts are not archived by a glob, and the
+// two staged entries match nothing for other systems.
+func TestGoreleaserWindowsScriptsOnlyInWindowsArchives(t *testing.T) {
+	var g struct {
+		Archives []struct {
+			ID    string `yaml:"id"`
+			Files []struct {
+				Src         string `yaml:"src"`
+				Dst         string `yaml:"dst"`
+				StripParent bool   `yaml:"strip_parent"`
+			} `yaml:"files"`
+		} `yaml:"archives"`
+	}
+	require.NoError(t, yaml.Unmarshal(readDeploy(t, "release/goreleaser.yaml"), &g))
+	found := false
+	for _, a := range g.Archives {
+		if a.ID != "myriarch-updater" {
+			continue
+		}
+		found = true
+		staged := map[string]string{}
+		for _, f := range a.Files {
+			assert.False(t, strings.HasSuffix(f.Src, ".ps1"), "%s is a Windows script", f.Src)
+			assert.NotEqual(t, "deploy/scripts/*", f.Src)
+			assert.NotEqual(t, "deploy/windows/*", f.Src)
+			if strings.HasPrefix(f.Src, ".cache/release/windows/archive/") {
+				assert.True(t, f.StripParent, f.Src)
+				staged[f.Src] = f.Dst
+			}
+		}
+		assert.Equal(t, map[string]string{
+			".cache/release/windows/archive/{{ .Os }}/scripts/*": "deploy/scripts",
+			".cache/release/windows/archive/{{ .Os }}/windows/*": "deploy/windows",
+		}, staged)
+	}
+	assert.True(t, found, "the myriarch-updater archive")
+}
+
+// The version resources that the release build generates are never committed, and ignoring them keeps the build reproducible (Go
+// stamps vcs.modified=false).
+func TestReleaseGitignoresWindowsResources(t *testing.T) {
+	data, err := os.ReadFile("../../.gitignore")
+	require.NoError(t, err)
+	lines := map[string]bool{}
+	for _, l := range strings.Split(string(data), "\n") {
+		lines[strings.TrimSpace(l)] = true
+	}
+	for _, want := range []string{"/.cache/", "/cmd/myriarch-updater/rsrc_windows_*.syso", "/cmd/myrctl/rsrc_windows_*.syso"} {
+		assert.True(t, lines[want], ".gitignore has %s", want)
+	}
 }
 
 // The collector pods run configuration from Git: no Kubernetes API credential is mounted into them, and the

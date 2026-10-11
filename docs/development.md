@@ -95,7 +95,10 @@ licensed, but `xi2/xz` is public domain (not on the license allowlist), and the 
 runtime (see below), which is not wanted in a release artifact. `ci/check-release-deps.sh` verifies this with `go list -deps`
 for linux, windows and darwin and fails if one of the forbidden modules is linked. The same script checks that the UI
 bundle contains no font files and that `web/package.json` has no `@fontsource` dependency (the UI uses system font
-stacks). `make check-local` runs it as part of the `go` gate. `ci/build-release.sh release` runs it, and the drift check of `THIRD_PARTY_NOTICES`, before goreleaser and aborts on a finding.
+stacks). `make check-local` runs it as part of the `go` gate, and the aggregate CI job `ci-ok`, which the release guard requires on the tagged commit,
+covers it, so a released commit has passed it. The release build itself (`ci/build-release.sh`, goreleaser) does not run it again; the release
+workflow has to run it, `ci/check-release-licenses.sh` and `scripts/gen-third-party-notices.sh --check` before it packages
+(`deploy/release/README.md`, section on the release workflow).
 
 ### License check of the release builds
 
@@ -191,6 +194,14 @@ ships:
   only the upstream release binaries carry their version, which syft records in every SBOM it makes (a `go build` reports
   "[not provided]"), and a Go module for it would bring its whole dependency graph into the repository. No gate runs zizmor yet.
   The SBOM jobs run syft with `SYFT_CHECK_FOR_APP_UPDATE=false`, so that it does not look for a newer release.
+- `osslsigncode` (signs and verifies the Authenticode signatures of the Windows release files) is built from the source archive of
+  the pinned tag, verified against `OSSLSIGNCODE_SOURCE_SHA256` in `ci/versions.env` (`ci/install-tools.sh osslsigncode`). It is a C
+  program, upstream publishes no Linux binary, and the build needs no cmake: one `cc` call over the C files and a minimal
+  `config.h`. It is not part of the default `TOOLS`, because it needs a C compiler, the OpenSSL 3 headers and zlib (Debian and
+  Ubuntu: `libssl-dev` and `zlib1g-dev`, for example `ci/install-tools.sh apt:libssl-dev apt:zlib1g-dev`; macOS: the Xcode command
+  line tools and Homebrew `openssl@3`, or `OSSLSIGNCODE_OPENSSL_PREFIX`). `ci/release/rehearsal.sh` and the CI jobs `build` and `scripts` install it on demand.
+  A distribution package is never used, because Ubuntu 24.04 ships 2.8, which predates the verification fixes of 2.12 and 2.13, and
+  the release build runs it on files that a signing provider returns.
 
 `ci/tools/update.sh gh go-winres` regenerates the modules after a version change. It also raises dependencies for which
 `govulncheck -mode=binary -show verbose .cache/bin/<tool>` lists a fixed version (see `raised()` in the script: `golang.org/x/net`
@@ -324,7 +335,7 @@ is a collapsible log group; a failed job uploads `.cache/check-local/` (the gate
 | `go-test-linux` | `go-test` with `-race` against a PostgreSQL 17 service (`PGTEST_DSN`, `max_connections` 300), then the render budget test | ubuntu-24.04 and ubuntu-24.04-arm |
 | `go-test-native` | `go-test`: macOS with `-race`, the embedded PostgreSQL and the render budget test; Windows without `-race`, with `PGTEST_SKIP=1` and without the budget test (`GO_TEST_PERF=0`) | macos-latest, windows-latest |
 | `web` | `web` | ubuntu-24.04 |
-| `build` | `build`, `examples`, then `make release-snapshot` (the full release matrix, unsigned, nothing published) | ubuntu-24.04 |
+| `build` | `build`, `examples`, then `make release-rehearsal` (the full release matrix in stage collect, a signing pass with a throwaway test CA, stage apply, dist and reproducibility checks; nothing is published) | ubuntu-24.04 |
 | `shell-helm` | `shellcheck`, `helm` | ubuntu-24.04 |
 | `workflows` | `workflows` | ubuntu-24.04 |
 | `docs` | `language`, `docs` | ubuntu-24.04 |

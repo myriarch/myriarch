@@ -65,7 +65,7 @@ need_cmd curl openssl
 if [ -z "${version}" ]; then version="$(release_version)"; fi
 [[ "${version}" =~ ^[0-9A-Za-z][0-9A-Za-z.+-]*$ ]] || die "invalid version: ${version}"
 pub="${COSIGN_PUBLIC_KEY:-${ROOT}/deploy/release/cosign.pub}"
-[ -r "${pub}" ] || die "public key is missing: ${pub} (deploy/release/README.md)"
+[ -r "${pub}" ] || die "public key is missing: ${pub} (contrib/enterprise-mirror/signing.md)"
 
 work="$(mktemp -d)"; trap 'rm -rf "${work}"' EXIT
 stage="${work}/stage"

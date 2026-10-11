@@ -11,7 +11,7 @@
 #  - reuse (ci/tools/reuse): requirements.in and requirements.txt pin the version of ci/versions.env, the build
 #    requirements pin poetry-core, and every pinned package carries hashes
 #  - .node-version holds one exact Node.js release of 22 or newer, and the web stage of myriarchd.Dockerfile uses its major
-#  - goreleaser.yaml references the signing script, which exists
+#  - goreleaser.yaml has no signs: block and references the Windows stage script and the SBOM script, which exist
 #  - one version source: VERSION and every copy of the product version agree (ci/check-versions.sh)
 #  - ci/ and contrib/enterprise-mirror/ script paths mentioned in the Makefile, goreleaser.yaml and the scripts exist
 #    (scripts/ is deliberately not covered here)
@@ -24,7 +24,7 @@ status=0
 bad() { printf '[ci] ERROR: %s\n' "$*" >&2; status=1; }
 
 for f in ci/*.sh ci/release/*.sh ci/tests/*.sh ci/tools/*.sh contrib/enterprise-mirror/*.sh contrib/enterprise-mirror/tests/*.sh \
-         scripts/set-version.sh deploy/scripts/install-linux.sh deploy/release/authenticode.sh hack/kind/*.sh hack/kind/fault/*.sh; do
+         scripts/set-version.sh deploy/scripts/install-linux.sh deploy/release/*.sh hack/kind/*.sh hack/kind/fault/*.sh; do
   case "${f}" in
     contrib/enterprise-mirror/ca-env.sh) ;;   # sourced, not executed: syntax only (below)
     *) [ -x "${f}" ] || bad "${f} is not executable (chmod +x)" ;;
@@ -149,13 +149,21 @@ done
 # syft and zizmor are release downloads: the version has no "v" prefix (the asset URLs use it with one), and the pins above are the digests of that release
 printf '%s' "${SYFT_VERSION:-}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || bad "SYFT_VERSION in ci/versions.env is missing or not a plain version (for example 1.54.1)"
 printf '%s' "${ZIZMOR_VERSION:-}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || bad "ZIZMOR_VERSION in ci/versions.env is missing or not a plain version (for example 1.30.1)"
+# osslsigncode is built from a source archive: the pin is a SHA-256 of the archive and the version a plain version
+printf '%s' "${OSSLSIGNCODE_SOURCE_SHA256:-}" | grep -Eq '^[0-9a-f]{64}$' || bad "OSSLSIGNCODE_SOURCE_SHA256 is missing or not a SHA-256 in ci/versions.env"
+printf '%s' "${OSSLSIGNCODE_VERSION:-}" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$' || bad "OSSLSIGNCODE_VERSION in ci/versions.env is missing or not a plain version (for example 2.14)"
 [ ! -e ci/tools/syft ] || bad "ci/tools/syft exists: syft is a release download pinned in ci/versions.env, not a Go module"
 case "${OTELCOL_CONTRIB_IMAGE}"    in *":${OTELCOL_VERSION}@sha256:"*) ;; *) bad "OTELCOL_CONTRIB_IMAGE does not match OTELCOL_VERSION" ;; esac
 case "${OTELCOL_SUPERVISOR_IMAGE}" in *":${OTELCOL_VERSION}@sha256:"*) ;; *) bad "OTELCOL_SUPERVISOR_IMAGE does not match OTELCOL_VERSION" ;; esac
 
-if [ ! -f contrib/enterprise-mirror/sign-blob.sh ] || ! grep -q 'contrib/enterprise-mirror/sign-blob.sh' deploy/release/goreleaser.yaml; then
-  bad "goreleaser.yaml does not reference contrib/enterprise-mirror/sign-blob.sh (or the script is missing)"
+# The release build holds no signing key (the release workflow signs keyless) and runs the Windows stages and the SBOMs through its scripts
+if grep -Eq '^signs:' deploy/release/goreleaser.yaml; then
+  bad "deploy/release/goreleaser.yaml has a signs: block: the release build holds no signing key"
 fi
+for f in deploy/release/windows-signed.sh deploy/release/sbom.sh; do
+  [ -f "${f}" ] || bad "${f} is missing"
+  grep -q "${f}" deploy/release/goreleaser.yaml || bad "goreleaser.yaml does not reference ${f}"
+done
 
 # Script paths below ci/ and contrib/enterprise-mirror/ that are mentioned in the Makefile, goreleaser.yaml and the
 # ci/ and contrib/ scripts must exist.

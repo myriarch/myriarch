@@ -76,7 +76,7 @@ derived="${work}/derived.pub"
 cosign public-key --key "${key}" --outfile "${derived}" >/dev/null 2>&1 || die "the public key cannot be derived from COSIGN_KEY (COSIGN_PASSWORD?)"
 if [ -f "${repo_pub}" ] && ! cmp -s <(tr -d '\r' < "${repo_pub}") <(tr -d '\r' < "${derived}"); then
   rm -f "${sigfile}"
-  die "[key_mismatch] COSIGN_KEY does not match deploy/release/cosign.pub: wrong or rotated key? (rotation: deploy/release/README.md)"
+  die "[key_mismatch] COSIGN_KEY does not match deploy/release/cosign.pub: wrong or rotated key? (rotation: contrib/enterprise-mirror/signing.md)"
 fi
 pub="${COSIGN_PUBLIC_KEY:-${derived}}"
 openssl base64 -d -A -in "${sigfile}" -out "${work}/sig.der" || die "the signature is not Base64"

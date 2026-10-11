@@ -4,8 +4,8 @@
 
 # Installs the CI tools into ${TOOLS_BIN} (default: .cache/bin, safe to cache between runs).
 #
-#   ci/install-tools.sh goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee actionlint syft gh go-winres zizmor
-#   ci/install-tools.sh apt:osslsigncode apt:python3
+#   ci/install-tools.sh goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee actionlint syft gh go-winres zizmor osslsigncode
+#   ci/install-tools.sh apt:libssl-dev apt:zlib1g-dev apt:python3
 #
 # Go tools are built from ci/tools/<tool>/ (go.mod + go.sum in the repository) through the configured GOPROXY (no
 # downloads from GitHub needed); the versions are in ci/versions.env. A stamp per tool, version and content of its go.mod and
@@ -17,14 +17,14 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 load_versions
 
-[ "$#" -gt 0 ] || die "usage: ci/install-tools.sh <tool>... (goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee actionlint syft gh go-winres zizmor apt:<package>)"
+[ "$#" -gt 0 ] || die "usage: ci/install-tools.sh <tool>... (goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee actionlint syft gh go-winres zizmor osslsigncode apt:<package>)"
 mkdir -p "${TOOLS_BIN}"
 
 # Built from ci/tools/<tool>/ (a separate Go module per tool with go.mod AND go.sum in the repository): the hashes of all
 # dependencies are therefore in the repository and enforced with -mod=readonly - even if GOPROXY is a proxy and
 # GOSUMDB was switched off. (`go install <module>@<version>` outside a module would have no committed hashes.)
 # To update: change the version in ci/versions.env, then run ci/tools/update.sh <tool>; ci/check.sh compares both.
-# Release builds with signing keys should run WITHOUT a restored tool cache; TOOLS_NO_CACHE=1 ignores existing binaries.
+# The release workflow runs without a restored tool cache (rule R13); TOOLS_NO_CACHE=1 ignores existing binaries.
 go_install() { # tool module-with-cmd version-var binary-name [no-trimpath] [main-toolchain]
   local tool="$1" module="$2" version="${!3}" bin="$4" trim="-trimpath" toolchain="local" suffix=""
   # go-licenses finds GOROOT through the binary; with -trimpath it reports nothing at all (exit status 0).
@@ -481,6 +481,86 @@ release_install_zizmor() {
   log "zizmor ${version}: installed (sha256 verified)"
 }
 
+# osslsigncode (Authenticode signing and verification of the Windows release files) is built from the source archive of the tag,
+# verified against OSSLSIGNCODE_SOURCE_SHA256 of ci/versions.env (read from the file; the environment cannot override it).
+# Upstream publishes no Linux binary, and a distribution package is too old (Ubuntu 24.04 ships 2.8, which predates the
+# verification fixes of 2.12 and 2.13). The build needs no cmake: one cc call over the C files and a minimal config.h. It needs a
+# C compiler, the OpenSSL 3 headers and zlib, which is why osslsigncode is not part of the default tool set of the Makefile.
+# OSSLSIGNCODE_BASE_URL points the download at an internal mirror (the path below it is <version>.tar.gz);
+# OSSLSIGNCODE_OPENSSL_PREFIX selects the OpenSSL 3 installation (default: /usr on Linux, Homebrew openssl@3 on macOS).
+release_install_osslsigncode() {
+  local version="${OSSLSIGNCODE_VERSION}" bin="${TOOLS_BIN}/osslsigncode"
+  local stamp="${TOOLS_BIN}/.stamp-osslsigncode-${version}"
+  if [ "${TOOLS_NO_CACHE:-0}" != 1 ] && [ -x "${bin}" ] && [ -f "${stamp}" ]; then
+    log "osslsigncode ${version}: cached"
+    return 0
+  fi
+  local want
+  want="$(sed -n 's/^OSSLSIGNCODE_SOURCE_SHA256=//p' "${CI_DIR}/versions.env" | head -n 1)"
+  if [ -n "${OSSLSIGNCODE_SOURCE_SHA256:-}" ] && [ "${OSSLSIGNCODE_SOURCE_SHA256}" != "${want}" ]; then
+    warn "osslsigncode: ignoring OSSLSIGNCODE_SOURCE_SHA256 from the environment, using the pin in ci/versions.env"
+  fi
+  printf '%s' "${want}" | grep -Eq '^[0-9a-f]{64}$' || die "osslsigncode: OSSLSIGNCODE_SOURCE_SHA256 in ci/versions.env is missing or not a SHA-256"
+  printf '%s' "${version}" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$' || die "osslsigncode: OSSLSIGNCODE_VERSION '${version}' is not a plain version (for example 2.14)"
+  need_cmd curl tar cc
+  # OpenSSL 3 headers (and zlib on Linux; the macOS SDK provides zlib)
+  local prefix="" cand header major
+  case "$(uname -s)" in
+    Darwin)
+      local cands=()
+      [ -z "${OSSLSIGNCODE_OPENSSL_PREFIX:-}" ] || cands+=("${OSSLSIGNCODE_OPENSSL_PREFIX}")
+      if have brew; then cands+=("$(brew --prefix openssl@3 2>/dev/null || true)"); fi
+      cands+=(/opt/homebrew/opt/openssl@3 /usr/local/opt/openssl@3)
+      for cand in "${cands[@]}"; do
+        if [ -n "${cand}" ] && [ -f "${cand}/include/openssl/opensslv.h" ]; then prefix="${cand}"; break; fi
+      done ;;
+    *)
+      prefix="${OSSLSIGNCODE_OPENSSL_PREFIX:-/usr}"
+      [ -f /usr/include/zlib.h ] || prefix="" ;;
+  esac
+  header="${prefix}/include/openssl/opensslv.h"
+  major=""
+  if [ -n "${prefix}" ] && [ -f "${header}" ]; then
+    major="$(sed -n -E 's/^# *define OPENSSL_VERSION_MAJOR +([0-9]+).*/\1/p' "${header}" | head -n 1)"
+  fi
+  if [ -z "${major}" ] || [ "${major}" -lt 3 ]; then
+    die "osslsigncode: the OpenSSL 3 and zlib headers were not found (Debian/Ubuntu: ci/install-tools.sh apt:libssl-dev apt:zlib1g-dev; macOS: brew install openssl@3, or set OSSLSIGNCODE_OPENSSL_PREFIX)"
+  fi
+  local url="${OSSLSIGNCODE_BASE_URL:-https://github.com/mtrojnar/osslsigncode/archive/refs/tags}/${version}.tar.gz" tmp src got
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "${tmp}"' EXIT
+  log "downloading the source of osslsigncode ${version}"
+  website_download osslsigncode "${url}" "${tmp}/src.tar.gz" "${want}"
+  tar -xzf "${tmp}/src.tar.gz" -C "${tmp}" || die "osslsigncode: cannot extract the source archive"
+  src="${tmp}/osslsigncode-${version}"
+  [ -f "${src}/osslsigncode.c" ] || die "osslsigncode: the source archive has no osslsigncode-${version}/osslsigncode.c"
+  mkdir -p "${tmp}/build"
+  {
+    printf '#define VERSION_MAJOR "%s"\n' "${version%%.*}"
+    printf '#define VERSION_MINOR "%s"\n' "$(printf '%s' "${version}" | cut -d. -f2)"
+    printf '#define PACKAGE_STRING "osslsigncode %s"\n' "${version}"
+    printf '#define HAVE_TERMIOS_H\n#define HAVE_GETPASS\n#define HAVE_SYS_MMAN_H\n#define HAVE_MMAP\n'
+  } > "${tmp}/build/config.h"
+  local incl=() libs=()
+  if [ "${prefix}" != /usr ]; then incl=("-I${prefix}/include"); libs=("-L${prefix}/lib"); fi
+  # -std=gnu11 (not c11): getpass and mmap are hidden under strict c11 on glibc. osslsigncode parses files that a signing provider
+  # returns, so the build is hardened explicitly (Debian and Ubuntu compilers do it by default, Apple clang does not): fortified
+  # libc calls, stack protector and, on Linux, immediate binding with a read-only relocation table.
+  local harden=(-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fstack-protector-strong)
+  case "$(uname -s)" in Linux) harden+=("-Wl,-z,relro,-z,now") ;; esac
+  ( cd "${src}" && cc -std=gnu11 -O2 "${harden[@]}" -Wno-deprecated-declarations -DHAVE_CONFIG_H=1 -I"${tmp}/build" ${incl[@]+"${incl[@]}"} \
+      osslsigncode.c helpers.c utf.c msi.c pe.c cab.c cat.c appx.c script.c \
+      ${libs[@]+"${libs[@]}"} -lssl -lcrypto -lz -o "${tmp}/osslsigncode" ) >&2 \
+    || die "osslsigncode: the build failed (C compiler, OpenSSL 3 and zlib headers?)"
+  install -m 755 "${tmp}/osslsigncode" "${bin}"
+  rm -rf "${tmp}"; trap - EXIT
+  got="$("${bin}" --version 2>/dev/null | head -n 1)" || got=""
+  [ "${got}" = "osslsigncode ${version}, using:" ] || { rm -f "${bin}"; die "osslsigncode: '--version' reports '${got:-nothing}', expected 'osslsigncode ${version}, using:'"; }
+  rm -f "${TOOLS_BIN}/.stamp-osslsigncode-"*
+  : > "${stamp}"
+  log "osslsigncode ${version}: built from source (sha256 verified)"
+}
+
 apt_install() { # package
   local pkg="$1"
   # A command of the same name is already present (for example in the job image or locally), or the package is installed: nothing to do
@@ -514,6 +594,7 @@ for t in "$@"; do
     gh)           go_install gh           github.com/cli/cli/v2/cmd/gh                 GH_VERSION         gh ;;
     go-winres)    go_install go-winres    github.com/tc-hib/go-winres                  GOWINRES_VERSION   go-winres ;;
     zizmor)       release_install_zizmor ;;
+    osslsigncode) release_install_osslsigncode ;;
     kind)         go_install kind         sigs.k8s.io/kind                             KIND_VERSION       kind ;;
     kubectl)      release_install_kubectl ;;
     shellcheck)   release_install_shellcheck ;;

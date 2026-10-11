@@ -31,3 +31,5 @@ website/node_modules
 website/public
 website/resources
 website/.hugo_build.lock
+cmd/myriarch-updater/rsrc_windows_*.syso
+cmd/myrctl/rsrc_windows_*.syso

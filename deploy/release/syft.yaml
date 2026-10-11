@@ -1,0 +1,19 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Configuration of every syft run of the release build (deploy/release/sbom.sh passes it with -c, which also stops syft from
+# reading a .syft.yaml of the working directory or of the user). No network access and no enrichment, so that the SBOM depends
+# only on the scanned files.
+check-for-app-update: false
+enrich: []
+golang:
+  search-local-mod-cache-licenses: false
+  search-local-vendor-licenses: false
+  search-remote-licenses: false
+javascript:
+  search-remote-licenses: false
+  include-dev-dependencies: false
+file:
+  metadata:
+    selection: all
+    digests: [sha256]
