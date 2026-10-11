@@ -19,7 +19,8 @@
 # nothing but ignore entries there. An input that zizmor cannot parse fails the gate (--strict-collection); by default zizmor
 # skips it with a warning. It runs offline: the audits that need the GitHub API (impostor commits, known vulnerable
 # actions, ref confusion, stale action references) are skipped, so the gate needs no network and no token. ZIZMOR_ONLINE=1
-# switches them on; the token comes from GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN (the workflows job of ci.yml sets GH_TOKEN).
+# switches them on; the token comes from GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN (the workflows job of ci.yml sets GH_TOKEN)
+# and goes to github.com only, whatever GH_HOST says.
 set -euo pipefail
 # shellcheck source=ci/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -42,8 +43,9 @@ log "actionlint $(actionlint -version | head -n 1) over ${#files[@]} workflow(s)
 actionlint -no-color -shellcheck "$(command -v shellcheck)" -pyflakes= "${files[@]}"
 
 # The inputs of zizmor: the same workflow files, every action file below .github/actions and the Dependabot configuration.
-# The environment must not be able to point zizmor at another configuration or to switch it offline or online by itself.
-unset ZIZMOR_CONFIG ZIZMOR_OFFLINE ZIZMOR_NO_ONLINE_AUDITS
+# The environment must not be able to point zizmor at another configuration, to switch it offline or online by itself, or to send
+# the online audits and the token to another GitHub host (zizmor reads the host from GH_HOST).
+unset ZIZMOR_CONFIG ZIZMOR_OFFLINE ZIZMOR_NO_ONLINE_AUDITS GH_HOST
 [ -f zizmor.yml ] || die "zizmor.yml is missing in the repository root"
 inputs=("${files[@]}")
 while IFS= read -r f; do inputs+=("${f}"); done < <(find .github/actions -type f \( -iname 'action.yml' -o -iname 'action.yaml' \) 2> /dev/null | LC_ALL=C sort)
@@ -51,7 +53,7 @@ for f in .github/dependabot.yml .github/dependabot.yaml; do
   if [ -f "${f}" ]; then inputs+=("${f}"); fi
 done
 # --strict-collection: without it zizmor skips an input that it cannot parse with a warning, and the gate would pass over the file.
-zizmor_args=(--no-progress --strict-collection --persona pedantic --config zizmor.yml --cache-dir "${ROOT}/.cache/zizmor")
+zizmor_args=(--no-progress --strict-collection --persona pedantic --config zizmor.yml --gh-hostname github.com --cache-dir "${ROOT}/.cache/zizmor")
 if [ "${ZIZMOR_ONLINE:-}" = 1 ]; then
   [ -n "${GH_TOKEN:-${GITHUB_TOKEN:-${ZIZMOR_GITHUB_TOKEN:-}}}" ] || die "ZIZMOR_ONLINE=1 needs GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN"
   mode="online"

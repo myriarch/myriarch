@@ -423,9 +423,11 @@ both, so a rule does not depend on how a file is named:
   least one word; an inline ignore needs a reason with a word as well, and a bare `# zizmor: ignore` fails. R14 also makes sure that the policy check and zizmor read the same
   lines: a file that zizmor reads (`zizmor.yml`, the workflows, the local action, `.github/dependabot.yml`) fails when it is not
   UTF-8 or holds U+0085, U+2028 or U+2029 (a YAML parser takes them for line breaks, the check splits at LF and CR), another
-  control character than TAB, or a byte order mark. The environment variables `ZIZMOR_CONFIG`, `ZIZMOR_OFFLINE` and
-  `ZIZMOR_NO_ONLINE_AUDITS` are ignored by the script. `ci/tests/lint-workflows-test.sh` checks with the real zizmor that a
-  finding fails the gate and that an ignore covers only its audit and file.
+  control character than TAB, or a byte order mark. The environment variables `ZIZMOR_CONFIG`, `ZIZMOR_OFFLINE`,
+  `ZIZMOR_NO_ONLINE_AUDITS` and `GH_HOST` are ignored by the script, which passes `--gh-hostname github.com` (the online audits
+  and the token go to github.com and nowhere else). `ci/tests/lint-workflows-test.sh` checks with the real zizmor that a
+  finding fails the gate, also one that only the pedantic persona reports, and that an ignore covers only its audit and file;
+  with a stub it checks which options and environment variables reach zizmor.
 - **CodeQL scans the code** (`.github/workflows/codeql.yml`, results in the code scanning alerts of the repository). One matrix
   job `analyze` per language, with the `security-extended` queries: `go` with a manual build that CodeQL traces (`go build ./...`,
   then with the tags `embedui,devpg` and a placeholder page for the git-ignored `internal/webui/dist`, then for `GOOS=windows`

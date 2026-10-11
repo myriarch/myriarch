@@ -2,11 +2,12 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Test of the zizmor step of ci/lint-workflows.sh with the real zizmor (ci/install-tools.sh zizmor): a finding fails the gate
-# (also one in a local action and in the Dependabot configuration), an ignore comment or an entry of zizmor.yml for exactly that
-# rule lets it pass, the environment cannot replace the configuration, the online mode needs a token, and the workflows of this
-# repository pass. actionlint and ShellCheck are stubs (they are tested by their own gate), the policy check is the real one.
-# No network, no ports: zizmor runs with --offline.
+# Test of the zizmor step of ci/lint-workflows.sh with the real zizmor (ci/install-tools.sh zizmor): a finding fails the gate (also
+# one in a local action, one in the Dependabot configuration and one that only the pedantic persona reports), so does an input that
+# zizmor cannot parse, an ignore comment or an entry of zizmor.yml for exactly that rule lets a finding pass, the environment
+# cannot replace the configuration (a stub of zizmor records the options and the variables that reach it), the online mode needs a
+# token, and the workflows of this repository pass. actionlint and ShellCheck are stubs (they are tested by their own gate), the
+# policy check is the real one. No network, no ports: zizmor runs with --offline.
 set -uo pipefail
 # shellcheck source=ci/tests/lib-test.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
@@ -97,6 +98,12 @@ t="$(newtree ignore-other-file)"; inject "${t}"
 printf 'rules:\n  template-injection:\n    ignore:\n      - e2e.yml\n' > "${t}/zizmor.yml"
 expect_fail "an ignore entry for another file does not hide the finding" 'template-injection' lint "${t}"
 
+# a finding that only the pedantic persona reports (a workflow without a concurrency group) fails the gate: the script asks for it
+t="$(newtree pedantic-only)"
+sed -i.bak '/^concurrency:$/,/^  cancel-in-progress: true$/d' "${t}/.github/workflows/ci.yml"; rm -f "${t}/.github/workflows/ci.yml.bak"
+expect_fail "a finding of the pedantic persona alone fails the gate" 'concurrency-limits' lint "${t}"
+expect_ok   "the same workflow passes zizmor with the regular persona" bash -c 'cd "$1" && zizmor --offline --no-progress --persona regular --config zizmor.yml .github/workflows/ci.yml' _ "${t}"
+
 t="$(newtree env-config)"; inject "${t}"
 printf 'rules:\n  template-injection:\n    disable: true\n' > "${TEST_TMP}/permissive.yml"
 expect_fail "ZIZMOR_CONFIG cannot replace zizmor.yml" 'template-injection' env ZIZMOR_CONFIG="${TEST_TMP}/permissive.yml" bash -c 'cd "$1" && TOOLS_BIN="$2" PATH="$2:$PATH" bash ci/lint-workflows.sh' _ "${t}" "${STUBS}"
@@ -153,18 +160,38 @@ t="$(newtree config-disable)"; inject "${t}"
 printf 'rules:\n  template-injection:\n    disable: true\n' > "${t}/zizmor.yml"
 expect_fail "zizmor.yml with disable: true fails the gate" 'R14' lint "${t}"
 
-# the environment cannot drop the online audits, and a missing zizmor fails
+# the environment cannot drop the online audits, switch zizmor offline, replace the configuration or send the audits and the token
+# to another host: a stub records the options and the variables that reach zizmor
 t="$(newtree no-online-env)"
 ENVSTUBS="${TEST_TMP}/envstubs"; mkdir -p "${ENVSTUBS}"
 cp "${STUBS}/actionlint" "${STUBS}/shellcheck" "${ENVSTUBS}/"
 cat > "${ENVSTUBS}/zizmor" <<'ZEOF'
 #!/bin/sh
 if [ "$1" = --version ]; then echo "zizmor stub"; exit 0; fi
-echo "no-online-audits=${ZIZMOR_NO_ONLINE_AUDITS-unset}" > "${ZIZMOR_ENV_FILE}"
+{
+  echo "no-online-audits=${ZIZMOR_NO_ONLINE_AUDITS-unset}"
+  echo "offline=${ZIZMOR_OFFLINE-unset}"
+  echo "config=${ZIZMOR_CONFIG-unset}"
+  echo "gh-host=${GH_HOST-unset}"
+  for a in "$@"; do echo "arg=${a}"; done
+} > "${ZIZMOR_ENV_FILE}"
 ZEOF
 chmod +x "${ENVSTUBS}/zizmor"
-ZIZMOR_ENV_FILE="${TEST_TMP}/zizmor.env" ZIZMOR_NO_ONLINE_AUDITS=1 ZIZMOR_ONLINE=1 GH_TOKEN=x TOOLS_BIN="${ENVSTUBS}" PATH="${ENVSTUBS}:${PATH}" bash -c 'cd "$1" && bash ci/lint-workflows.sh' _ "${t}" > /dev/null 2>&1
-if [ "$(cat "${TEST_TMP}/zizmor.env" 2> /dev/null)" = "no-online-audits=unset" ]; then ok "ZIZMOR_NO_ONLINE_AUDITS is ignored by the script"; else fail "ZIZMOR_NO_ONLINE_AUDITS reached zizmor"; fi
+hostile_env() { # <file for the record of the stub> <value of ZIZMOR_ONLINE>: runs the gate with a hostile environment and the stub
+  ZIZMOR_ENV_FILE="$1" ZIZMOR_ONLINE="$2" ZIZMOR_NO_ONLINE_AUDITS=1 ZIZMOR_OFFLINE=1 ZIZMOR_CONFIG="${TEST_TMP}/permissive.yml" \
+    GH_HOST=ghes.example.test GH_TOKEN=x TOOLS_BIN="${ENVSTUBS}" PATH="${ENVSTUBS}:${PATH}" bash -c 'cd "$1" && bash ci/lint-workflows.sh' _ "${t}" > /dev/null 2>&1
+}
+hostile_env "${TEST_TMP}/zizmor-online.env" 1
+for v in no-online-audits offline config gh-host; do
+  if grep -Fxq "${v}=unset" "${TEST_TMP}/zizmor-online.env" 2> /dev/null; then ok "the variable behind ${v} does not reach zizmor (online mode)"; else fail "the variable behind ${v} reached zizmor (online mode)"; fi
+done
+if grep -Fx -A1 'arg=--gh-hostname' "${TEST_TMP}/zizmor-online.env" 2> /dev/null | grep -Fxq 'arg=github.com'; then ok "zizmor gets --gh-hostname github.com"; else fail "zizmor does not get --gh-hostname github.com"; fi
+if grep -Fx -A1 'arg=--persona' "${TEST_TMP}/zizmor-online.env" 2> /dev/null | grep -Fxq 'arg=pedantic'; then ok "zizmor gets --persona pedantic"; else fail "zizmor does not get --persona pedantic"; fi
+if grep -Fx -A1 'arg=--config' "${TEST_TMP}/zizmor-online.env" 2> /dev/null | grep -Fxq 'arg=zizmor.yml'; then ok "zizmor gets --config zizmor.yml"; else fail "zizmor does not get --config zizmor.yml"; fi
+if grep -Fxq 'arg=--strict-collection' "${TEST_TMP}/zizmor-online.env" 2> /dev/null; then ok "zizmor gets --strict-collection"; else fail "zizmor does not get --strict-collection"; fi
+if ! grep -Fxq 'arg=--offline' "${TEST_TMP}/zizmor-online.env" 2> /dev/null; then ok "ZIZMOR_ONLINE=1 does not run zizmor offline"; else fail "zizmor runs offline although ZIZMOR_ONLINE=1"; fi
+hostile_env "${TEST_TMP}/zizmor-offline.env" ""
+if grep -Fxq 'arg=--offline' "${TEST_TMP}/zizmor-offline.env" 2> /dev/null && grep -Fxq 'offline=unset' "${TEST_TMP}/zizmor-offline.env" && grep -Fxq 'gh-host=unset' "${TEST_TMP}/zizmor-offline.env"; then ok "the default mode is offline by option, not by variable"; else fail "the default mode of the gate is not offline by option"; fi
 NOZ="${TEST_TMP}/nozizmor"; mkdir -p "${NOZ}"; cp "${STUBS}/actionlint" "${STUBS}/shellcheck" "${NOZ}/"
 expect_fail "a missing zizmor fails" "command 'zizmor' not found" bash -c 'cd "$1" && TOOLS_BIN="$2" PATH="$2:/usr/bin:/bin" bash ci/lint-workflows.sh' _ "${t}" "${NOZ}"
 
