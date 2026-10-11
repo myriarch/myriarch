@@ -733,7 +733,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
-      contents: write # create the draft release and publish it (the Releases API accepts no narrower scope)
+      contents: write # create the draft release; no narrower scope exists, and this job runs before approval 2 (docs/security/model.md)
     outputs:
       release-id: ${{ steps.draft.outputs.release-id }}
     steps:
