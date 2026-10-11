@@ -409,7 +409,7 @@ jobs:
       - name: Set up the toolchain
         uses: ./.github/actions/setup
         with:
-          tools: cosign helm crane pwsh gitleaks shellcheck zizmor syft yq apt:libssl-dev apt:zlib1g-dev osslsigncode
+          tools: cosign helm crane pwsh gitleaks shellcheck zizmor syft yq goreleaser apt:libssl-dev apt:zlib1g-dev osslsigncode
       - name: Run the script tests
         run: make ci-test
 

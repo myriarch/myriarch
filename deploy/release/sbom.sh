@@ -13,12 +13,22 @@
 # SYFT_CHECK_FOR_APP_UPDATE=false keeps syft from looking for a newer release. The pins (syft, yq) are read from ci/versions.env,
 # not from the environment, and the tools have to report exactly the pinned version.
 #
+# The tools come from ${TOOLS_BIN} only, never from PATH and never from the default directory of ci/lib.sh: goreleaser starts an
+# sboms command with a reduced environment (HOME, USER, TMPDIR, PATH and a few more, plus sboms[].env), so deploy/release/goreleaser.yaml
+# passes TOOLS_BIN explicitly. Without TOOLS_BIN the script stops instead of looking around.
+#
 # The web UI SBOM is made from a lockfile that only holds the production dependencies (ci/release/pnpm-prod-lock.py), because syft
 # cannot drop the dev dependencies of a pnpm lockfile. SPDX output is not reproducible (syft writes a random documentNamespace and the
 # creation time); the rehearsal compares SBOMs without these two fields.
 set -euo pipefail
+if [ -z "${TOOLS_BIN:-}" ]; then
+  printf '[ci] ERROR: [tools_bin_missing] TOOLS_BIN is not set: deploy/release/goreleaser.yaml passes it to the sboms commands of goreleaser\n' >&2
+  exit 1
+fi
 # shellcheck source=ci/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../../ci/lib.sh"
+SYFT="${TOOLS_BIN}/syft"
+YQ="${TOOLS_BIN}/yq"
 
 pin() { sed -n "s/^$1=//p" "${CI_DIR}/versions.env" | head -n 1; }
 SYFT_PIN="$(pin SYFT_VERSION)"
@@ -28,8 +38,8 @@ YQ_PIN="$(pin YQ_VERSION)"
 while IFS= read -r v; do unset "${v}"; done < <(compgen -e | grep '^SYFT_' || true)
 export SYFT_CHECK_FOR_APP_UPDATE=false
 
-have syft || die "[syft_version] syft not found (ci/install-tools.sh syft)"
-got="$(syft version 2>/dev/null | awk '$1 == "Version:" { print $2; exit }')" || got=""
+[ -x "${SYFT}" ] || die "[syft_version] syft not found in TOOLS_BIN (${TOOLS_BIN}): ci/install-tools.sh syft"
+got="$("${SYFT}" version 2>/dev/null | awk '$1 == "Version:" { print $2; exit }')" || got=""
 [ "${got}" = "${SYFT_PIN}" ] || die "[syft_version] syft reports ${got:-nothing}, expected ${SYFT_PIN} (ci/install-tools.sh syft)"
 CONFIG="${ROOT}/deploy/release/syft.yaml"
 
@@ -40,21 +50,21 @@ case "${mode}" in
     artifact="$2"; document="$3"
     case "${artifact}" in *.tar.gz|*.zip) ;; *) die "[sbom_artifact] ${artifact} is not a .tar.gz or .zip archive" ;; esac
     [ -f "${artifact}" ] && [ ! -L "${artifact}" ] || die "[sbom_artifact] ${artifact} is not a regular file"
-    syft scan -q -c "${CONFIG}" --from file "${artifact}" -o "spdx-json=${document}" ;;
+    "${SYFT}" scan -q -c "${CONFIG}" --from file "${artifact}" -o "spdx-json=${document}" ;;
   webui)
     [ "$#" = 3 ] || die "usage: sbom.sh webui <version> <document>"
     version="$2"; document="$3"
     [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$ ]] || die "[sbom_version] '${version}' is not a version"
-    have yq || die "[yq_version] yq not found (ci/install-tools.sh yq)"
-    case "$(yq --version 2>/dev/null)" in
+    [ -x "${YQ}" ] || die "[yq_version] yq not found in TOOLS_BIN (${TOOLS_BIN}): ci/install-tools.sh yq"
+    case "$("${YQ}" --version 2>/dev/null)" in
       *"version v${YQ_PIN#v}") ;;
       *) die "[yq_version] yq does not report version v${YQ_PIN#v} (ci/install-tools.sh yq)" ;;
     esac
     tmp="$(mktemp -d)"
     trap 'rm -rf "${tmp}"' EXIT
-    yq -o=json '.' "${ROOT}/web/pnpm-lock.yaml" > "${tmp}/lock.json"
+    "${YQ}" -o=json '.' "${ROOT}/web/pnpm-lock.yaml" > "${tmp}/lock.json"
     python3 -I "${ROOT}/ci/release/pnpm-prod-lock.py" --package-json "${ROOT}/web/package.json" < "${tmp}/lock.json" > "${tmp}/pnpm-lock.yaml"
-    syft scan -q -c "${CONFIG}" --from file "${tmp}/pnpm-lock.yaml" --source-name myriarch-webui --source-version "${version}" \
+    "${SYFT}" scan -q -c "${CONFIG}" --from file "${tmp}/pnpm-lock.yaml" --source-name myriarch-webui --source-version "${version}" \
       -o "spdx-json=${document}" ;;
   *) die "usage: sbom.sh archive <artifact> <document> | webui <version> <document>" ;;
 esac

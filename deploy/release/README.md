@@ -61,6 +61,14 @@ archive) together with the relationships that name it.
 and no `SYFT_*` variable of the caller. `-c` also stops syft from reading a `.syft.yaml` of the working directory. goreleaser
 calls the script with the working directory `dist/`.
 
+goreleaser starts an `sboms` command with a reduced environment: from its own environment it passes only variables of the
+`HOME`, `USER`, `TMPDIR` and `PATH` kind, plus `sboms[].env`. Hooks, in contrast, get the whole environment. `goreleaser.yaml`
+therefore hands `TOOLS_BIN` to both `sboms` entries (`env: ["TOOLS_BIN={{ .Env.TOOLS_BIN }}"]`), and `sbom.sh` finds syft and yq
+only in `${TOOLS_BIN}`: it stops with `[tools_bin_missing]` when the variable is not set and does not use `PATH` or the default
+directory. The release workflow keeps the pinned tools out of `PATH` on purpose (it never writes `GITHUB_PATH`), so this is the only way
+they reach the script. A new `sboms` entry that calls a pinned tool needs the same `env` line; `ci/tests/release-workflow-test.sh`
+checks it.
+
 The web UI SBOM is made from `web/pnpm-lock.yaml` reduced to the production dependencies of the root project
 (`ci/release/pnpm-prod-lock.py`): syft cannot drop the dev dependencies of a pnpm lockfile (`javascript.include-dev-dependencies`
 has no effect on lockfile version 9), so without the reduction the SBOM would list the test and build tools as well.
@@ -104,7 +112,7 @@ goreleaser; otherwise stage `apply` fails with `[not_reproducible]`.
 | `MYRIARCH_AUTHENTICODE_DIR` | the trust anchors, default `deploy/release/authenticode`; only snapshot builds may set it |
 | `MYRIARCH_WINDOWS_SIGNING` | stage `apply`: the configured signing mode (`off`, `signpath` or `kms`), parsed by the release workflow from `deploy/release/windows-signing.env` and set in the packaging job. Required for release builds (`[mode_missing]`); `signer.json` has to name the same provider (`[provider_mismatch]`). Snapshots may leave it unset. |
 | `WINDOWS_SIGNING` | the mode of the hook: `off` (or `signpath`, `kms`, `test`, see below); the release workflow takes it from `deploy/release/windows-signing.env` |
-| `TOOLS_BIN` | where go-winres and osslsigncode are found, default `.cache/bin` |
+| `TOOLS_BIN` | where the pinned tools are found (go-winres, osslsigncode, syft and yq here), default `.cache/bin`; `sbom.sh` has no default |
 
 The unsigned and signed directories are staging areas: inside the work tree they have to be git-ignored (use `.cache/` or a path
 outside the repository), otherwise `[staging_dir]`. The state of the hooks is in `.cache/release/windows`.
