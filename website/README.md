@@ -121,6 +121,27 @@ to the project header of each of these files, so that the derivation is machine-
 3. Update `Docsy` in `data/third_party.yaml`, the Mermaid version in `config/_default/params.yaml` if the theme moved it, and run
    `make website-check` and the browser check (`node website/scripts/check-requests.mjs`).
 
+## Updating Mermaid
+
+Mermaid is self-hosted: `config/_default/module.yaml` mounts `mermaid.esm.min.mjs` and `chunks/mermaid.esm.min/**` from
+`node_modules/mermaid/dist` to `/vendor/mermaid/`, and the Docsy plugin imports the first file. A new version needs, besides
+`package.json` and the lockfile:
+
+1. The version in `config/_default/params.yaml` and in `data/third_party.yaml` (`check-notices.py` fails on a difference).
+2. A check that the mounted files still exist and that the chunks import only each other (a relative `import` that points outside
+   `chunks/mermaid.esm.min/` would be a 404 in the built site), and that no file of the bundle names another host
+   (`check-third-party.py` scans `public/`).
+3. A look at every diagram, not only at the build: `check-requests.mjs` stops at the first SVG of a page, and a diagram that fails to
+   parse is also an SVG. The diagrams are in `docs/architecture.md` (four) and `docs/design/version-selection.md` (one); open both
+   pages in the light and in the dark appearance and compare them with the previous version.
+4. The release notes of the major versions in between. Mermaid 12 made the ELK layout, the redux-color theme and the neo look the defaults, so the
+   `options` of the plugin in `params.yaml` pin `layout: dagre`, `look: classic` and `theme: default`, which render the diagrams as
+   Mermaid 11 did. Drop the options only together with a review of every diagram; the ELK layout of the overview in
+   `docs/architecture.md` is too small to read in the width of the content column. Keep the `version:` first in that line, because
+   `check-notices.py` reads it with a pattern.
+5. The browser floor. Mermaid 12 needs an ES2024 browser (Safari 17.4 or newer, for example). In an older browser the Docsy plugin
+   only logs "Mermaid failed to render" and the page shows the diagram source instead of the diagram.
+
 ## Node dependency overrides
 
 `package.json` pins its direct dependencies exactly and `pnpm-lock.yaml` pins everything below them. The Vercel CLI and
@@ -154,7 +175,7 @@ decision, an override or a row here:
 
 KaTeX has no override because it would not change what the site serves. Mermaid and markdownlint accept only a KaTeX range below
 0.18, which excludes the fix (0.18.2), and the Mermaid files that the site ships (`mermaid.esm.min.mjs` and
-`chunks/mermaid.esm.min/**`) contain their own copy of KaTeX (0.16.47 in Mermaid 11.17.2). An override would only change the
+`chunks/mermaid.esm.min/**`) contain their own copy of KaTeX (0.16.47 in Mermaid 11.17.2 and in 12.1.0). An override would only change the
 installed copy under `node_modules`, which nothing that the site ships uses; markdownlint loads it but parses Markdown without
 rendering math. The lockfile would then report a version that the site does not serve, and a later advisory that affects the
 shipped copy but not 0.18.2 would raise no alert. The advisory needs an `Object.prototype` that is already polluted and
