@@ -132,7 +132,12 @@ PY
   # tools (TOOLS_BIN)
   mkstub "${R}/bin/cosign" cosign 'case "$1" in
   version) printf "GitVersion:    %s\n" "${STUB_COSIGN_VERSION}" ;;
-  verify) echo "[]" ;;
+  verify)
+    # like cosign v3: one JSON entry per verified bundle; cosign.type picks what the registry holds (a signature by default)
+    for ref in "$@"; do :; done
+    type=https://sigstore.dev/cosign/sign/v1
+    [ ! -f "${STUB_STATE}/cosign.type" ] || type="$(cat "${STUB_STATE}/cosign.type")"
+    printf "[{\"critical\":{\"identity\":{\"docker-reference\":\"%s\"},\"image\":{\"docker-manifest-digest\":\"%s\"},\"type\":\"%s\"},\"optional\":{}}]\n" "${ref%@*}" "${ref#*@}" "${type}" ;;
 esac
 exit 0'
   mkstub "${R}/bin/crane" crane 'case "$1" in
@@ -310,6 +315,11 @@ new_root assets-fail-cosign
 fill_release
 printf '%s\n' "${UPDATER_REPO}@${UIDX}" > "${STUB_STATE}/cosign.fail"
 expect_fail "assets: a failing image signature" '\[signature_invalid\] cosign verify' run_smoke assets --tag "${TAG}" --commit "${COMMIT}"
+
+new_root assets-attestation-only
+fill_release
+printf 'https://spdx.dev/Document\n' > "${STUB_STATE}/cosign.type"
+expect_fail "assets: an attestation of the identity is not an image signature" '\[signature_invalid\] cosign verify.*no cosign signature' run_smoke assets --tag "${TAG}" --commit "${COMMIT}"
 
 new_root assets-fail-attest
 fill_release

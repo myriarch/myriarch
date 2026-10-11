@@ -207,12 +207,36 @@ for name, kind in rows:
 PY
 }
 
+# image_signature_present <digest>: reads the JSON that `cosign verify` printed on stdin and succeeds when at least one entry is a
+# signature made by `cosign sign` (critical.type https://sigstore.dev/cosign/sign/v1) for exactly this digest. cosign v3 verifies every
+# Sigstore bundle that refers to the digest, so an attestation of the same identity (provenance, SBOM) would satisfy `cosign verify`
+# although nothing signed the image itself.
+image_signature_present() {
+  python3 -I -c '
+import json, sys
+
+try:
+    doc = json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
+want = sys.argv[1]
+ok = isinstance(doc, list) and any(
+    isinstance(e, dict)
+    and (e.get("critical") or {}).get("type") == "https://sigstore.dev/cosign/sign/v1"
+    and ((e.get("critical") or {}).get("image") or {}).get("docker-manifest-digest") == want
+    for e in doc)
+sys.exit(0 if ok else 1)
+' "$1"
+}
+
 # verify_image_signature <repository> <digest> <tag> <commit>: `cosign verify` of REPO@DIGEST against the exact identity of the run (the
-# same claims as `verify-blob.sh --mode exact`); the identity values are those of identity.env. [signature_invalid]
+# same claims as `verify-blob.sh --mode exact`); the identity values are those of identity.env. The output must contain a cosign
+# signature of the digest, not only an attestation (see image_signature_present). [signature_invalid]
 verify_image_signature() {
-  local errfile last
+  local errfile outfile last
   need_tool cosign
   errfile="$(mktemp "${TMPDIR:-/tmp}/myriarch-verify-image.XXXXXX")"
+  outfile="${errfile}.out"
   if ! "${TOOLS_BIN}/cosign" verify \
       --certificate-identity "$(identity_exact "$3")" \
       --certificate-oidc-issuer "${RELEASE_OIDC_ISSUER}" \
@@ -220,12 +244,16 @@ verify_image_signature() {
       --certificate-github-workflow-ref "refs/tags/$3" \
       --certificate-github-workflow-sha "$4" \
       --certificate-github-workflow-trigger "${RELEASE_TRIGGER}" \
-      "$1@$2" > /dev/null 2> "${errfile}"; then
+      "$1@$2" > "${outfile}" 2> "${errfile}"; then
     last="$(grep -v '^[[:space:]]*$' "${errfile}" | tail -n 1 | cut -c 1-300 || true)"
-    rm -f "${errfile}"
+    rm -f "${errfile}" "${outfile}"
     err signature_invalid "signature verification of $1@$2 failed: ${last:-cosign printed nothing}"
   fi
-  rm -f "${errfile}"
+  if ! image_signature_present "$2" < "${outfile}"; then
+    rm -f "${errfile}" "${outfile}"
+    err signature_invalid "cosign verify of $1@$2 found no cosign signature of the digest (an attestation is not a signature)"
+  fi
+  rm -f "${errfile}" "${outfile}"
 }
 
 # need_gh: gh from TOOLS_BIN at the pinned version and a token in GH_TOKEN (gh reads it itself; it is never printed)

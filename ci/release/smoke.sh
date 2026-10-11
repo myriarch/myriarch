@@ -281,7 +281,8 @@ blob_verify() { # mode bundle blob
   TOOLS_BIN="${TOOLS_BIN}" "${VERIFY_BLOB}" "${args[@]}" "${blob}"
 }
 
-# cosign_verify_image DIGEST REPO: cosign verify with the exact identity flags (3.8 of the design), anonymously.
+# cosign_verify_image REPO@DIGEST: cosign verify with the exact identity flags (3.8 of the design), anonymously. cosign v3 also accepts
+# the attestations of the same identity, so the output must contain a cosign signature (critical.type .../cosign/sign/v1) of the digest.
 cosign_verify_image() { # repo@digest
   anon "${TOOLS_BIN}/cosign" verify \
     --certificate-identity "$(exact_identity)" \
@@ -290,7 +291,23 @@ cosign_verify_image() { # repo@digest
     --certificate-github-workflow-ref "refs/tags/${TAG}" \
     --certificate-github-workflow-sha "${COMMIT}" \
     --certificate-github-workflow-trigger "${ID_TRIGGER}" \
-    "$1"
+    "$1" | python3 -I -c '
+import json, sys
+
+try:
+    doc = json.load(sys.stdin)
+except ValueError:
+    doc = None
+want = sys.argv[1].split("@", 1)[1]
+ok = isinstance(doc, list) and any(
+    isinstance(e, dict)
+    and (e.get("critical") or {}).get("type") == "https://sigstore.dev/cosign/sign/v1"
+    and ((e.get("critical") or {}).get("image") or {}).get("docker-manifest-digest") == want
+    for e in doc)
+if not ok:
+    print("cosign verify found no cosign signature of %s (an attestation is not a signature)" % want, file=sys.stderr)
+sys.exit(0 if ok else 1)
+' "$1"
 }
 
 # ---- assets ------------------------------------------------------------------------------------------------------------

@@ -59,6 +59,13 @@ if [ "$1" = sign-blob ]; then
     shift
   done
 fi
+if [ "$1" = verify ]; then
+  # like cosign v3: one JSON entry per verified Sigstore bundle of the digest; cosign.type picks what the registry holds
+  ref="${*: -1}"
+  type="https://sigstore.dev/cosign/sign/v1"
+  [ ! -f "${d}/cosign.type" ] || type="$(cat "${d}/cosign.type")"
+  printf '[{"critical":{"identity":{"docker-reference":"%s"},"image":{"docker-manifest-digest":"%s"},"type":"%s"},"optional":{}}]\n' "${ref%@*}" "${ref#*@}" "${type}"
+fi
 exit 0
 STUB
 cat > "${SB}/gh" <<'STUB'
@@ -298,7 +305,7 @@ def cmd_images(state, commit, v, *opts):
         plats = {}
         for arch in ("amd64", "arm64"):
             cfg = {"architecture": arch, "os": "linux",
-                   "config": {"User": o.get("user", "65532:65532"), "Entrypoint": [ep], "Labels": labels},
+                   "config": {"User": o.get("user", "65532:65532"), "Entrypoint": [o.get("entrypoint", ep)], "Labels": labels},
                    "rootfs": {"type": "layers", "diff_ids": ["sha256:" + sha(("layer" + kind + arch).encode())]}}
             cfg_raw = json.dumps(cfg, sort_keys=True).encode()
             layers = [{"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": "sha256:" + sha(b"l" + arch.encode()), "size": 10}]
@@ -791,6 +798,8 @@ reset_stubs; echo 'verify .*@sha256:c' > "${S}/cosign.fail"
 expect_fail "sign-image: a failing verification of the arm64 digest" "signature_invalid" si ghcr.io/myriarch/myriarch
 reset_stubs; echo '^sign ' > "${S}/cosign.fail"
 expect_fail "sign-image: a failing signature" "sign_failed" si ghcr.io/myriarch/myriarch
+reset_stubs; echo 'https://spdx.dev/Document' > "${S}/cosign.type"
+expect_fail "sign-image: an attestation is not a signature" "signature_invalid.*no cosign signature" si ghcr.io/myriarch/myriarch
 
 # ==== 9. registry-login.sh ===================================================================================================================
 section "9. registry-login.sh"
@@ -1127,6 +1136,16 @@ vfail "a label revision of another commit" "image_config.*revision" labelrevisio
 vfail "a tag latest" "image_tag_latest" tags=latest
 vfail "an unexpected tag foo" "image_tag_unexpected.*foo" tags=foo
 vfail "a tag with a v prefix" "image_tag_unexpected" tags=v1.0.0
+vfail "a shell as the entrypoint" "image_config.*entrypoint" entrypoint=/bin/sh
+vfail "the entrypoint of the updater in the server image" "image_config.*entrypoint" entrypoint=/usr/local/bin/myriarch-updater
+vsetup; printf ' ' >> "${S}/crane/manifest.$(ckey "${REPO_S}@${SERVER_INDEX_DIGEST}")"
+expect_fail "verify: an index that does not hash to the digest of this run" "image_index.*does not hash to ${SERVER_INDEX_DIGEST}" vr
+vsetup; printf ' ' >> "${S}/crane/manifest.$(ckey "${REPO_U}@${UPDATER_AMD64_DIGEST}")"
+expect_fail "verify: a platform manifest that does not hash to its digest" "image_config.*does not hash to ${UPDATER_AMD64_DIGEST}" vr
+vsetup; echo 'https://spdx.dev/Document' > "${S}/cosign.type"
+expect_fail "verify: an attestation of the identity is not a signature of the image" "signature_invalid.*no cosign signature" vr
+vsetup; echo 'https://sigstore.dev/cosign/sign/v1' > "${S}/cosign.type"
+expect_ok "verify: the signature type of cosign sign is accepted" vr
 vsetup "tags=0.1.0-rc.1,0.1.0,0.1,sha256-$(printf 'a%.0s' $(seq 64))"
 expect_ok "verify: version tags of earlier releases and signature tags are accepted" vr
 vsetup; echo "verify .*@${SERVER_ARM64_DIGEST}" > "${S}/cosign.fail"
