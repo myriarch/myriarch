@@ -37,10 +37,12 @@ class H(http.server.BaseHTTPRequestHandler):
         return h == want
 
     def target(self):
-        rel = os.path.normpath(self.path.split("?")[0].lstrip("/"))
-        if rel.startswith(".."):
+        """The file below --dir that the request path names, or None when the path resolves outside of --dir."""
+        base = os.path.realpath(args.dir)
+        p = os.path.realpath(os.path.join(base, self.path.split("?")[0].lstrip("/")))
+        if not p.startswith(base + os.sep):
             return None
-        return os.path.join(args.dir, rel)
+        return p
 
     def do_GET(self):
         if not self.authorized():
@@ -58,6 +60,8 @@ class H(http.server.BaseHTTPRequestHandler):
         if not self.authorized():
             self.send_response(401); self.end_headers(); return
         p = self.target()
+        if not p:
+            self.send_response(400); self.end_headers(); return
         n = int(self.headers.get("Content-Length", "0"))
         data = self.rfile.read(n)
         want = self.headers.get("X-Checksum-Sha256")
