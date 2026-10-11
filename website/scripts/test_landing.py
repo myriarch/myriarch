@@ -279,12 +279,17 @@ class LandingTest(unittest.TestCase):
         self.assertIn("still has a visible pause control (<div> with the class landing-hero__motion)", out)
 
     def test_mark_that_is_a_control_in_the_markup(self):
-        for attrs in (' role="button"', ' tabindex="0"', ' aria-pressed="false"'):
+        cases = (
+            (' role="button"', "no title, aria-label or role"),
+            (' tabindex="0"', "no tabindex or aria-pressed"),
+            (' aria-pressed="false"', "no tabindex or aria-pressed"),
+        )
+        for attrs, message in cases:
             with self.subTest(attrs=attrs):
                 self.page_with_mark(mark_svg(svg_attrs=' aria-hidden="true" focusable="false"' + attrs))
                 rc, out, _ = self.run_check()
                 self.assertEqual(rc, 1)
-                self.assertTrue("no tabindex or aria-pressed" in out or "no title, aria-label or role" in out, out)
+                self.assertIn(message, out)
 
     def test_page_without_the_script_of_the_mark(self):
         self.page(GOOD_PAGE.replace("/js/landing-mark.min.0123.js", "/js/other.js"))

@@ -15,7 +15,7 @@
 // the next one resumes at the retraction of a cycle without a jump and the ring does not grow again, aria-pressed follows, the focus ring
 // shows for keyboard focus and not after a mouse click, and the loop stands still while the hero is out of view or the document is hidden;
 // with prefers-reduced-motion: reduce nothing animates and the mark has no role and is not focusable; without JavaScript the rollout plays
-// once and the mark is a plain image. The check takes about a minute and a half.
+// once and the mark is a plain image. The check takes about a minute.
 //
 // Serve the production build first (make website-preview, port 1313). Every page is loaded in the light and in the dark appearance.
 // Chrome: the environment variable CHROME, else Google Chrome on macOS, else google-chrome or chromium (see cdp.mjs). Node.js 22 or newer.
