@@ -169,7 +169,7 @@ else
     bash "${MIRROR_DIR}/verify-release.sh" --keyless --version "${VER}" --dir "${RC}/rel" --trusted-root "${FIX}/trusted_root.json"; }
   expect_fail "real cosign: a genuine bundle of another identity is refused" "signature_invalid.*expected SAN value" rv
   printf '0000\n' >> "${RC}/rel/checksums.txt"
-  expect_fail "real cosign: a tampered checksums.txt is refused" "signature_invalid" rv
+  expect_fail "real cosign: a tampered checksums.txt is refused by the signature check, not only by the identity" "signature_invalid.*invalid signature" rv
 fi
 
 # a tampered file behind the redirect must be detected

@@ -132,7 +132,9 @@ case "$1" in
     [ ! -f "${d}/crane.login.rc" ] || exit "$(cat "${d}/crane.login.rc")"
     mkdir -p "${cfg_dir}"
     auth="$(printf '%s:%s' "${user}" "${tok}" | base64 | tr -d '\n')"
-    if [ -f "${d}/crane.login.helper" ]; then printf '{"credsStore":"desktop","auths":{"ghcr.io":{}}}\n' > "${cfg_dir}/config.json"
+    # a usable auth entry together with a helper: only the credsStore/credHelpers rule of registry-login.sh may refuse it
+    if [ -f "${d}/crane.login.helper" ]; then printf '{"credsStore":"desktop","auths":{"ghcr.io":{"auth":"%s"}}}\n' "${auth}" > "${cfg_dir}/config.json"
+    elif [ -f "${d}/crane.login.credhelpers" ]; then printf '{"credHelpers":{"ghcr.io":"desktop"},"auths":{"ghcr.io":{"auth":"%s"}}}\n' "${auth}" > "${cfg_dir}/config.json"
     else printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "${auth}" > "${cfg_dir}/config.json"; fi
     chmod 644 "${cfg_dir}/config.json"
     echo "logged in with ${tok}" >&2 ;;
@@ -515,6 +517,8 @@ eq "rc v0.1.1-rc.1 starts at v0.1.0" "v0.1.0" "$(meta_key v0.1.1-rc.1 notes-star
 eq "latest for the highest final" "true" "$(meta_key v0.10.0 latest)"
 eq "not latest below a higher final" "false" "$(meta_key v0.1.1 latest)"
 eq "an rc is never latest" "false" "$(meta_key v0.1.1-rc.1 latest)"
+eq "an rc above every final is never latest" "false" "$(meta_key v0.11.0-rc.1 latest)"
+eq "the rc of the next version after the highest final is not latest" "false" "$(meta_key v0.10.1-rc.1 latest)"
 eq "kind of a final tag" "final" "$(meta_key v0.1.1 kind)"
 expect_fail "workflow_ref_mismatch: renamed workflow file" "workflow_ref_mismatch" \
   meta_run v0.1.0 GITHUB_WORKFLOW_REF=myriarch/myriarch/.github/workflows/release2.yml@refs/tags/v0.1.0
@@ -592,7 +596,11 @@ make("good", [reg("ok/x")])
 open("%s/notatar.tar" % d, "w").write("this is not a tar file\n")
 PY
 for hostile in dotdot dotdot2 abs symlink hardlink device fifo notatar; do
-  expect_fail "unpack refuses ${hostile}" "artifact_entry_invalid" run_priv "${REL}/artifact.sh" unpack --file "${AR}/${hostile}.tar" --sha256 "$(sha256_of "${AR}/${hostile}.tar")" --into "${AR}/h_${hostile}"
+  case "${hostile}" in
+    dotdot|dotdot2|abs) want="artifact_entry_invalid.*absolute path or has a \\.\\. component" ;; # the check of the script itself, on every tar
+    *) want="artifact_entry_invalid" ;;
+  esac
+  expect_fail "unpack refuses ${hostile}" "${want}" run_priv "${REL}/artifact.sh" unpack --file "${AR}/${hostile}.tar" --sha256 "$(sha256_of "${AR}/${hostile}.tar")" --into "${AR}/h_${hostile}"
   [ ! -e "${AR}/h_${hostile}" ] || [ -z "$(ls -A "${AR}/h_${hostile}")" ] && ok "nothing extracted for ${hostile}" || fail "files were extracted for ${hostile}"
 done
 expect_ok "unpack accepts an ordinary tar" run_priv "${REL}/artifact.sh" unpack --file "${AR}/good.tar" --sha256 "$(sha256_of "${AR}/good.tar")" --into "${AR}/h_good"
@@ -840,6 +848,8 @@ expect_fail "login: an empty token" "login_input" rl_notoken
 expect_fail "login: an empty actor" "login_input" rl_noactor
 reset_stubs; touch "${S}/crane.login.helper"
 expect_fail "login: a credsStore hides the entry" "login_unusable" rl login
+reset_stubs; touch "${S}/crane.login.credhelpers"
+expect_fail "login: a credHelpers entry hides the credentials" "login_unusable" rl login
 reset_stubs; echo 1 > "${S}/crane.login.rc"
 expect_fail "login: a crane failure" "login_failed.*crane auth login failed" rl login
 reset_stubs
