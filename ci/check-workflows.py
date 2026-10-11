@@ -86,6 +86,12 @@ Rules
       `false`, at job and at step level (a failed guard, approval or verification counts as passed). R12 and R13 read the
       YAML with a small reader for block style (anchors, aliases, tags, multi-line flow collections and multi-line
       scalars are findings of their own).
+  R14 zizmor stays strict (ADR-0032). zizmor.yml in the repository root holds ignore entries and nothing else: the only
+      top-level key is `rules`, each audit under it has only the key `ignore` (so no `disable`, no `config` and no other
+      key) with a list of workflow or action files, optionally with `:line` or `:line:column`, no wildcards, and a comment
+      line directly above the audit that gives the reason. An inline ignore in a file below .github needs the rule names
+      in brackets (`# zizmor: ignore[github-env]`, never a bare `# zizmor: ignore`) and a reason: a comment line directly
+      above it, or text behind the closing bracket. The rule reads the configuration with the reader of R12 and R13.
 
 --remote (needs network, for updating pins): `git ls-remote` for every pinned action and a comparison of the SHA with
 the tag that the comment names.
@@ -134,6 +140,10 @@ WORKFLOW_FILE = re.compile(r"\.ya?ml$", re.I)  # a file below .github/workflows 
 ACTION_FILE = re.compile(r"^action\.ya?ml$", re.I)  # the metadata file of a local action
 ALLOW_JOB = re.compile(r"^[A-Za-z0-9_-]+$")
 ALLOW_SECRET = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+ZIZMOR_AUDIT = re.compile(r"^[a-z][a-z0-9-]*$")
+ZIZMOR_IGNORE_PATH = re.compile(r"^[A-Za-z0-9._/-]+\.ya?ml(?::[0-9]+(?::[0-9]+)?)?$")
+ZIZMOR_COMMENT = re.compile(r"#\s*zizmor\s*:\s*ignore", re.I)
+ZIZMOR_COMMENT_OK = re.compile(r"#\s*zizmor\s*:\s*ignore\[\s*[a-z][a-z0-9-]*(?:\s*,\s*[a-z][a-z0-9-]*)*\s*\](.*)$", re.I)
 TRIGGER_KEY = re.compile(r"^\s*(pull_request_target|workflow_run)\s*:")
 TRIGGER_INLINE = re.compile(r"^on\s*:.*\b(pull_request_target|workflow_run)\b")
 
@@ -994,6 +1004,7 @@ class Checker:
                 self.rule_scorecard(path, lines)
             if os.path.basename(path).lower() in ("release.yml", "release.yaml"):
                 self.rule_release(path, lines)
+        self.rule_zizmor_comments(path, lines)
 
     def job_at(self, lines, index):
         """The id of the job that contains the line with the index `index`, or None."""
@@ -1304,6 +1315,69 @@ class Checker:
             for i, w in enumerate(where):
                 if w is not None and w[2].startswith("*"):
                     self.add(path, i + 1, "R10", "an alias (*name) in a workflow with a secrets expression could copy the secret into a job that is not listed")
+
+    # ---- R14: zizmor stays strict ---------------------------------------------------------------------------
+    def rule_zizmor_comments(self, path, lines):
+        """An inline `# zizmor: ignore[...]` names its rules and says why: a comment line right above or text behind the bracket."""
+        for i, line in enumerate(lines):
+            m = ZIZMOR_COMMENT.search(line)
+            if not m:
+                continue
+            ok = ZIZMOR_COMMENT_OK.search(line)
+            if not ok:
+                self.add(path, i + 1, "R14", "an inline zizmor ignore must name its rules: `# zizmor: ignore[<audit>]`, not a bare ignore")
+            elif not (ok.group(1).strip() or (i > 0 and lines[i - 1].strip().startswith("#"))):
+                self.add(path, i + 1, "R14", "an inline zizmor ignore needs its reason in a comment line directly above or behind the bracket")
+
+    def rule_zizmor_config(self):
+        """zizmor.yml in the repository root: `rules: {<audit>: {ignore: [<file>[:line[:column]]]}}` and nothing else."""
+        path = os.path.join(self.root, "zizmor.yml")
+        if not os.path.isfile(path):
+            return
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().split("\n")
+        root, errors = MiniYaml(lines).parse()
+        if errors:
+            no, problem = min(errors)
+            self.add(path, no, "R14", "cannot read zizmor.yml: %s (rule R14 reads block style, one key per line)" % problem)
+            return
+        top = as_map(root)
+        if top is None:
+            self.add(path, root.line, "R14", "zizmor.yml must be a mapping with the key rules")
+            return
+        for key, node in top.items():
+            if key != "rules":
+                self.add(path, node.line, "R14", "zizmor.yml may only have the key rules, not '%s'" % key)
+        rules_node = top.get("rules")
+        if rules_node is None or as_text(rules_node) == "":
+            return
+        rules = as_map(rules_node)
+        if rules is None:
+            self.add(path, rules_node.line, "R14", "rules: must be a mapping of audits")
+            return
+        for audit, node in rules.items():
+            if not ZIZMOR_AUDIT.match(audit):
+                self.add(path, node.line, "R14", "'%s' is not the name of an audit" % audit)
+            body = as_map(node)
+            if body is None:
+                self.add(path, node.line, "R14", "audit %s: only `ignore:` with a list of files is allowed" % audit)
+                continue
+            for key, sub in body.items():
+                if key != "ignore":
+                    self.add(path, sub.line, "R14", "audit %s: only `ignore:` is allowed, not '%s' (no audit is switched off or weakened)" % (audit, key))
+            entries = body.get("ignore")
+            if entries is None:
+                continue
+            items = as_list(entries)
+            if items is None:
+                self.add(path, entries.line, "R14", "audit %s: ignore: must be a list of files" % audit)
+                continue
+            for item in items:
+                text = as_text(item)
+                if text is None or not ZIZMOR_IGNORE_PATH.match(text):
+                    self.add(path, item.line, "R14", "audit %s: an ignore entry is a workflow or action file, optionally with :line or :line:column (no wildcards)" % audit)
+            if node.line < 2 or not lines[node.line - 2].strip().startswith("#"):
+                self.add(path, node.line, "R14", "audit %s: a comment line directly above the audit must give the reason for its ignores" % audit)
 
     def rule_secret_entries(self):
         """Stale entries of ci/workflow-secrets.txt: the workflow file, the job or the use of the secret is gone."""
@@ -1749,6 +1823,12 @@ def main(argv):
     if os.path.isfile(ci):
         c.rule_parity(ci)
     c.rule_secret_entries()
+    c.rule_zizmor_config()
+    for name in ("dependabot.yml", "dependabot.yaml"):
+        dep = os.path.join(root, ".github", name)
+        if os.path.isfile(dep):
+            with open(dep, encoding="utf-8") as f:
+                c.rule_zizmor_comments(dep, f.read().split("\n"))
     for rel, line, rule, msg in sorted(set(c.findings)):
         print("%s:%d: %s: %s" % (rel, line, rule, msg))
     status = 1 if c.findings else 0

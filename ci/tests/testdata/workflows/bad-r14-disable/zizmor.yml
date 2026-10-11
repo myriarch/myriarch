@@ -1,0 +1,4 @@
+rules:
+  # why
+  template-injection:
+    disable: true

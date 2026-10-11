@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Configuration of zizmor, the static analyser of the GitHub Actions workflows (ci/lint-workflows.sh; docs/development.md,
-# "Continuous integration"; docs/security/model.md). zizmor runs with the regular persona. This file holds the ignored findings
-# and nothing else: no audit is switched off, and every entry below says why the finding does not apply. A finding that is not
+# "Continuous integration"; docs/security/model.md). zizmor runs with the pedantic persona. This file holds the ignored findings
+# and nothing else: no audit is switched off or configured (rule R14 of ci/check-workflows.py enforces this), and the comment
+# above every audit below says why the finding does not apply. A finding that is not
 # listed here fails the workflows gate. Narrow entries: a rule, a file (and a line where the finding is about one place).
 #
 # Single places are ignored in the file itself with a trailing comment `# zizmor: ignore[<rule>]` (see the github-env entries in
@@ -18,3 +19,10 @@ rules:
     ignore:
       - ci.yml
       - e2e.yml
+  # The workflow has no `concurrency:` group. scorecard.yml has the shape that the Scorecard API verifies and that rule R12 of
+  # ci/check-workflows.py fixes: only the keys name, on, permissions and jobs at the top. A key `concurrency` would make the API
+  # refuse the published results. The workflow runs on a push to main and weekly, writes nothing but the findings of the
+  # analysis, and a second run in parallel does no harm. Every other workflow has a concurrency group or is not affected.
+  concurrency-limits:
+    ignore:
+      - scorecard.yml

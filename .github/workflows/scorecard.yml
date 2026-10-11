@@ -30,14 +30,12 @@ jobs:
     name: analysis
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # the two write scopes are reviewed in ci/workflow-permissions.txt
     permissions:
-      # read the repository and the workflow runs (reviewed in ci/workflow-permissions.txt for the two write scopes below)
-      contents: read
-      actions: read
-      # upload the findings to code scanning
-      security-events: write
-      # the OIDC token that authenticates the published result at the Scorecard API
-      id-token: write
+      contents: read # check out the repository
+      actions: read # part of the permission set that the Scorecard API accepts (rule R12)
+      security-events: write # upload the findings to code scanning
+      id-token: write # the OIDC token that authenticates the published result at the Scorecard API
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

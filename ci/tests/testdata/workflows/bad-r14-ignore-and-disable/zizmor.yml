@@ -1,0 +1,6 @@
+rules:
+  # why
+  template-injection:
+    ignore:
+      - ci.yml
+    disable: true

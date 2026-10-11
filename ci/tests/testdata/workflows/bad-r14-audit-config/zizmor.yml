@@ -1,0 +1,5 @@
+rules:
+  # why
+  excessive-permissions:
+    config:
+      allow: all

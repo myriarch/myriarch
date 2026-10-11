@@ -1,0 +1,125 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+name: ci
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  go:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup # zizmor: ignore[self-repository]
+      - name: Gates
+        env:
+          ONLY: go,web
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          echo "head: ${HEAD_REF}"
+          ci/check-local.sh
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # The word secrets is no expression, and the expression in this comment is not read: ${{ secrets.NOT_READ }}
+      - name: Scan for secrets
+        if: ${{ contains(github.event.head_commit.message, 'secrets') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTE: ${{ format('{0} secrets', 'no') }}
+        run: |
+          echo "no secrets here"
+          gh --version
+  manifest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # The word secrets followed by a colon is text, not a key of the workflow, inside a script, a folded text, a string and
+      # a quoted title.
+      - name: "Write the manifests, secrets: none"
+        env:
+          SAMPLE: '{"secrets": []}'
+          NOTE: "first line
+            secrets: none
+            last line"
+        run: |
+          cat > compose.yml <<'EOF'
+          services:
+            app:
+              image: example.test/app:1
+              secrets:
+                - token
+          secrets:
+            token:
+              file: ./token.txt
+          EOF
+          echo '{"secrets": []}' > config.json
+          printf '%s\n' "${SAMPLE} ${NOTE}"
+      - name: Folded text
+        uses: ./.github/actions/setup
+        with:
+          tools: >
+            secrets: none,
+            {"secrets": 1}
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Deploy
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          REGION: edge-1  # a comment is no expression: ${{ secrets.REGION }}
+        run: ./deploy.sh
+  preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
+      url: ${{ steps.publish.outputs.url }}
+    env:
+      PREVIEW_KEY: ${{secrets.PREVIEW_KEY}}
+    steps:
+      - id: publish
+        name: Publish
+        env:
+          PREVIEW_TOKEN: ${{ secrets.PREVIEW_TOKEN }}  # a trailing comment
+        run: ./preview.sh
+  staging:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: { name: staging, url: 'https://staging.example.test' }
+    steps:
+      - name: Deploy
+        env:
+          STAGING_TOKEN: ${{ secrets.STAGING_TOKEN }}
+        run: ./deploy.sh
+  e2e:
+    uses: ./.github/workflows/e2e.yml
+  ci-ok:
+    if: always()
+    needs: [go, e2e]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - run: echo ok

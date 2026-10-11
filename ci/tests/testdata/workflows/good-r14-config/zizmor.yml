@@ -1,0 +1,15 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+rules:
+  # why the finding does not apply
+  self-repository:
+    ignore:
+      - ci.yml
+      - e2e.yml:12
+      - .github/actions/setup/action.yml:7:3
+  # more than one line of reason
+  # second line
+  concurrency-limits:
+    ignore:
+      - scorecard.yml
