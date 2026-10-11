@@ -22,6 +22,9 @@
 #        drafts of github-actions[bot] (left by an earlier attempt) -> deleted by id (gh api -X DELETE), each logged
 #   3. gh release create TAG --repo <repository> --draft --verify-tag --target SHA --title TAG --notes-file FILE --generate-notes
 #        [--notes-start-tag NOTES_START_TAG] [--prerelease] <the 42 files sorted by name>      [create_failed]
+#      NOTES_START_TAG is only used when that tag has a published (not draft) release: guard.sh names the highest tag below the
+#      current one, which has no release when an earlier attempt failed before publication (a tag is never reused). Without a
+#      published release the option is left out and the log says so, and GitHub picks the start of the generated change list itself.
 #      --prerelease exactly when RELEASE_PRERELEASE=true; never --latest. The notes of FILE come first, then GitHub's generated list.
 #   4. reads the list again: exactly one draft of the tag by github-actions[bot] [draft_ambiguous] [draft_missing], with exactly the
 #      42 names [asset_missing] [asset_unexpected] and the requested prerelease flag [prerelease_mismatch]
@@ -102,6 +105,21 @@ for id in ${stale}; do
 done
 
 # --- 3. create ---------------------------------------------------------------------------------------------------------------
+if [ -n "${start_tag}" ]; then
+  start_rows="$(release_rows "${start_tag}")"
+  published=0
+  while IFS='|' read -r id draft _; do
+    if [ -n "${id}" ] && [ "${draft}" = false ]; then published=1; fi
+  done <<EOT
+${start_rows}
+EOT
+  if [ "${published}" = 1 ]; then
+    info "the generated change list starts at ${start_tag}"
+  else
+    info "${start_tag} has no published release (an earlier attempt failed before publication): the generated change list starts where GitHub puts it"
+    start_tag=""
+  fi
+fi
 names=()
 while IFS= read -r name; do names+=("${real}/${name}"); done < <(asset_set "${version}" names)
 args=(release create "${tag}" --repo "${repo}" --draft --verify-tag --target "${commit}" --title "${tag}" --notes-file "${notes}" --generate-notes)

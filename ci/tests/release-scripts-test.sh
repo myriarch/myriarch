@@ -1064,10 +1064,27 @@ no_call gh '(^| )(-X DELETE)' && ok "draft: nothing to delete" || fail "draft: u
 eq "draft: three gh calls (list, create, list)" "3" "$(call_count gh '.')"
 reset_stubs
 gen list "${S}" list.1.json v9.9.9-rc.1 ""
-gen list "${S}" list.2.json v9.9.9-rc.1 "55,1,${bot},${ALLN_RC}"
-RP_START=v9.9.8-rc.1 expect_ok "draft: an rc with a start tag" dr v9.9.9-rc.1 "${TEST_TMP}/far" "${TEST_TMP}/sigsr"
+gen list "${S}" list.2.json v9.9.8-rc.1 "30,0,someone,${ALLN_RC}"
+gen list "${S}" list.3.json v9.9.9-rc.1 "55,1,${bot},${ALLN_RC}"
+RP_START=v9.9.8-rc.1 expect_ok "draft: an rc with a start tag that has a published release" dr v9.9.9-rc.1 "${TEST_TMP}/far" "${TEST_TMP}/sigsr"
 contains "draft rc: the draft id" "release-id=55" "${OUT}"
-eq "draft rc: --notes-start-tag then --prerelease" "release create v9.9.9-rc.1 --repo myriarch/myriarch --draft --verify-tag --target ${C40} --title v9.9.9-rc.1 --notes-file NOTES --generate-notes | --notes-start-tag v9.9.8-rc.1 --prerelease | 42 files in 1 directory" "$(create_view 2 | head -n 1)"
+contains "draft rc: the start tag is logged" "the generated change list starts at v9.9.8-rc.1" "${OUT}"
+eq "draft rc: --notes-start-tag then --prerelease" "release create v9.9.9-rc.1 --repo myriarch/myriarch --draft --verify-tag --target ${C40} --title v9.9.9-rc.1 --notes-file NOTES --generate-notes | --notes-start-tag v9.9.8-rc.1 --prerelease | 42 files in 1 directory" "$(create_view 3 | head -n 1)"
+eq "draft rc: the start tag is looked up after the listing of the tag" "4" "$(call_count gh '.')"
+# the start tag was never published (the attempt failed before publication) or only exists as a draft: the option is left out
+reset_stubs
+gen list "${S}" list.1.json v9.9.9-rc.1 ""
+gen list "${S}" list.2.json v9.9.8-rc.1 ""
+gen list "${S}" list.3.json v9.9.9-rc.1 "56,1,${bot},${ALLN_RC}"
+RP_START=v9.9.8-rc.1 expect_ok "draft: an rc whose start tag has no release" dr v9.9.9-rc.1 "${TEST_TMP}/far" "${TEST_TMP}/sigsr"
+contains "draft rc: the missing release of the start tag is logged" "v9.9.8-rc.1 has no published release" "${OUT}"
+eq "draft rc: no --notes-start-tag" "release create v9.9.9-rc.1 --repo myriarch/myriarch --draft --verify-tag --target ${C40} --title v9.9.9-rc.1 --notes-file NOTES --generate-notes | --prerelease | 42 files in 1 directory" "$(create_view 3 | head -n 1)"
+reset_stubs
+gen list "${S}" list.1.json v9.9.9-rc.1 ""
+gen list "${S}" list.2.json v9.9.8-rc.1 "31,1,${bot},${ALLN_RC}"
+gen list "${S}" list.3.json v9.9.9-rc.1 "57,1,${bot},${ALLN_RC}"
+RP_START=v9.9.8-rc.1 expect_ok "draft: an rc whose start tag only has a draft" dr v9.9.9-rc.1 "${TEST_TMP}/far" "${TEST_TMP}/sigsr"
+eq "draft rc: a draft of the start tag does not count" "release create v9.9.9-rc.1 --repo myriarch/myriarch --draft --verify-tag --target ${C40} --title v9.9.9-rc.1 --notes-file NOTES --generate-notes | --prerelease | 42 files in 1 directory" "$(create_view 3 | head -n 1)"
 reset_stubs
 gen list "${S}" list.1.json v9.9.9-rc.1 "7,1,${bot},;8,1,${bot},old.txt"
 gen list "${S}" list.2.json v9.9.9-rc.1 "56,1,${bot},${ALLN_RC}"

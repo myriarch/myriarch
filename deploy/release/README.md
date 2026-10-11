@@ -256,7 +256,8 @@ release candidate, `## [X.Y.Z] - YYYY-MM-DD` for a final release.
 * The notes carry the banners (release candidate; Windows files unsigned, with the sentence about the reviewed exception for a
   final tag), the support levels, the known limitations, the image table, the commands of
   [Verify releases](../../docs/security/verify-releases.md) with the exact tag, identity and digests, and the changelog section.
-  GitHub appends the generated list of merged pull requests.
+  GitHub appends the generated list of merged pull requests. It starts at the previous tag only when that tag has a published release
+  (`draft.sh`); a candidate that follows one that failed before publication leaves the start to GitHub.
 * The rendered text must be at most 100,000 characters and must not contain `SPDX-License-Identifier`.
 
 ## Authenticode (Windows)
