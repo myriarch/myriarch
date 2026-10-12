@@ -320,16 +320,21 @@ depend on it, and so do operators who write `$(myriarch-updater status)`.
 
 - **stdout** carries what the command produces: the version (`<binary> version` prints one line whose first word is the
   version), the help text, the result of `status`, `validate`, `render`, `config print`, `verify-bundle` and the other commands.
-- **stderr** carries diagnostics: log lines and error messages. A failing command prints one message that starts with the name of
-  the binary (`myriarch-sim: ...`) and leaves stdout empty.
-- **Exit codes:** 0 for success, 1 for an error. `myrctl` uses 2 for a usage error and 1 for validation findings.
+  The findings and the summary of `myrctl validate`, `myrctl render` and `myriarchd config validate` are results, so they go to
+  stdout as well, with one exception: the `ERROR:` lines of `myriarchd config validate` and `config print` go to stderr.
+- **stderr** carries diagnostics: log lines and the error that ends a command, printed as `<binary>: <message>`
+  (`myriarch-sim: ...`). A command can print results on stdout before it fails (`myriarch-updater status` prints the service
+  status first and then the error of a missing configuration).
+- **Exit codes:** `myrctl` and the `auth` and `config` commands of `myriarchd` use 2 for a usage error and 1 for invalid input or
+  findings. Every other command uses 0 for success and 1 for an error.
 
 Write results with `fmt.Fprint*(cmd.OutOrStdout(), ...)`, never with cobra's `cmd.Print`, `cmd.Println` or `cmd.Printf`: those
-write to stderr unless the program called `SetOut`, which is how `myriarch-sim version` printed nothing on stdout in the first
-release candidate. `cmd/myriarchd/outputcontract_test.go` refuses `cmd.Print*` and `fmt.Print*` in the commands. A binary gets
-a `Run(args, stdout, stderr)` entry (`internal/myrctl`, `internal/sim`, `internal/updater`) so that a test can use separate
-writers. `internal/testutil/clitest` runs the real `main` of a binary in a child process, and every `cmd/<binary>` package checks
-the contract with it (version, help and an unknown command, each with the real `os.Stdout` and `os.Stderr`). The smoke test of the
+write to stderr unless the program called `SetOut`, which is how `myriarch-sim version` printed nothing on stdout in the image
+check of v0.1.0-rc.2. `cmd/myriarchd/outputcontract_test.go` refuses `cmd.Print*` and `fmt.Print*` in the commands. A binary
+gets a `Run` entry that takes the argument list and the two writers (`Run(args, stdout, stderr)` in `internal/sim` and
+`internal/updater`, `Run(ctx, args, stdout, stderr)` in `internal/myrctl`) so that a test can use separate writers.
+`internal/testutil/clitest` runs the real `main` of a binary in a child process, and every `cmd/<binary>` package checks the
+contract with it (version, help and an unknown command, each with the real `os.Stdout` and `os.Stderr`). The smoke test of the
 release images reads the version of every program from stdout; `ci/tests/release-smoke-test.sh` runs it against the programs of
 this tree through a docker double.
 

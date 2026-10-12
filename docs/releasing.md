@@ -197,7 +197,7 @@ These settings are made by a maintainer in GitHub, once. The workflow cannot che
 
 ### First candidate: what to observe
 
-Two things cannot be tested before the first candidate, and the first candidate is where they are settled. Record the result in
+Three things cannot be tested before the first candidate, and the first candidate is where they are settled. Record the result in
 the pull request of [After every publication](#after-every-publication), or in a follow-up pull request if the re-run has not
 been observed yet.
 
@@ -208,6 +208,11 @@ been observed yet.
 2. **Observe re-run approvals.** After the first candidate went through gate 2, re-run one failed or completed job on a throw-away
    candidate if you can, and write down whether "Re-run failed jobs" asks for gate 1 or gate 2 again. The runbook and the security
    model state the safe reading (no new approval for the privileged jobs before `finalize`) until you have observed it.
+3. **Read the `smoke-windows` log for the ACL of `cosign.exe`.** The job sets the owner and the ACL of the directory that holds
+   `cosign.exe` with `icacls` (best effort) so that `Test-AdminOnlyDirectory` of the installer accepts it. Neither the `icacls`
+   calls nor that function have run on a Windows runner before the first publication, and no CI row tests them. If the log shows
+   the warning `icacls could not set the owner and the ACL` or the installer stops with `directory_unsafe`, fix it forward and
+   add a Windows CI step that creates an administrator-only and a user-writable directory and runs the real function on both.
 
 ## Release a candidate
 
