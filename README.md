@@ -45,8 +45,8 @@ Myriarch closes that gap and keeps operators in control:
 
 ## Status
 
-Myriarch is **alpha**. v0.1.0 is published first as release candidates (`v0.1.0-rc.N`, GitHub pre-releases on the
-[releases page](https://github.com/myriarch/myriarch/releases)); v0.1.0 follows as the first final release. Interfaces,
+Myriarch is **alpha**. v0.1.0 is the first final release. Release candidates (`vX.Y.Z-rc.N`) are published as GitHub
+pre-releases; all releases are on the [releases page](https://github.com/myriarch/myriarch/releases). Interfaces,
 configuration and the GitOps format (`myriarch.dev/v1alpha1`) can still change. Every release, release candidates
 included, is signed keyless and carries build provenance; [verify it](docs/security/verify-releases.md) before you run it.
 

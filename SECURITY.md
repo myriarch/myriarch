@@ -35,20 +35,15 @@ a fix needs a coordinated change in an upstream project.
 
 ## Supported versions
 
-myriarch is in alpha. Interfaces and configuration keys may still change. v0.1.0 is published first as release candidates
-(`v0.1.0-rc.N`, GitHub pre-releases).
-
-**Until v0.1.0:** security fixes are made on the `main` branch and go into the next release candidate; a published candidate is
-never patched. Use the newest candidate or build from the latest commit of `main`.
-
-**From v0.1.0 on:**
+myriarch is in alpha. Interfaces and configuration keys may still change. v0.1.0 is the first final release; release
+candidates (`vX.Y.Z-rc.N`) are GitHub pre-releases.
 
 | Version | Receives security fixes |
 |---|---|
 | `main` | yes |
 | The latest minor release (`v0.N.x`) | yes, as a new patch release |
 | Earlier minor releases | no; upgrade to the latest minor release |
-| Release candidates (`-rc.N`) | no, once the final release of that version is out |
+| Release candidates (`-rc.N`) | no; a published candidate is never patched (fixes go into the next candidate or release) |
 
 While the major version is 0, a minor release can contain breaking changes; the [changelog](CHANGELOG.md) lists them
 and how to upgrade. The binaries, container images, the Helm chart and the installers of a release share its version
