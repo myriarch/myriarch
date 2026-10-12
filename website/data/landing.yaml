@@ -1,5 +1,5 @@
 # Text of the landing page (layouts/home.html and layouts/_partials/landing/*). Sources: README.md, ROADMAP.md and the decision records;
-# nothing here claims more than the README status (alpha; v0.1.0 is published first as release candidates). The release status in the
+# nothing here claims more than the README status (alpha; v0.1.0 is the first final release). The release status in the
 # chip of the hero comes from data/release.yaml, not from this file. Links that start with "/" must name a page of the site
 # (with or without the .md suffix); the build fails when a page does not exist.
 hero:

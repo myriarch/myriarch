@@ -276,8 +276,8 @@ A final release is a normal release and is marked as the latest release when it 
    next pull request after the release.
    The same pull request turns the texts that describe the phase before the final release into texts for the final one: the
    "Status" section of `README.md`, "Supported versions" in `SECURITY.md` and the first paragraph of "Unreleased" in
-   `CHANGELOG.md` (all three say that v0.1.0 is published first as release candidates). `README.md` and `CHANGELOG.md` are in the
-   archives, so they change before the tag, not after it.
+   `CHANGELOG.md` (before v0.1.0, all three said that v0.1.0 is published first as release candidates). `README.md` and
+   `CHANGELOG.md` are in the archives, so they change before the tag, not after it.
 2. Follow steps 2 to 9 of [Release a candidate](#release-a-candidate) with the tag `vX.Y.Z`. Step 6 is not needed any more.
 3. A final tag can be used **once**. If a problem shows up after publication, fix it and release `vX.Y.(Z+1)`.
 

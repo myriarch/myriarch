@@ -21,7 +21,7 @@
 image:
   repository: registry.example.com/myriarch/myriarch
   # Release version without "v" (tag v0.1.0 -> 0.1.0); empty = appVersion of the chart
-  tag: "0.1.0-rc.4"
+  tag: "0.1.0"
   # Recommended for every real deployment: the immutable digest of the released image. When set, the image is
   # referenced as repository@digest and the tag is ignored:
   #   helm upgrade ... --set image.digest=sha256:<64 hex characters>
