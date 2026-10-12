@@ -21,7 +21,8 @@
 #
 # Output keys, in this order: tag, version, base-version, commit, kind (rc|final), prerelease (true|false), latest (true|false),
 # image-tags (rc: X.Y.Z-rc.N; final: X.Y.Z,X.Y; never latest), notes-start-tag, windows-signing, windows-unsigned-final-tag.
-# notes-start-tag is the highest release below this one (a final tag looks at final tags only, an rc at every tag), or empty.
+# notes-start-tag is the highest TAG below this one (a final tag looks at final tags only, an rc at every tag), or empty. A tag
+# is not always a release: draft.sh uses it only when the tag has a published release.
 # latest is true for a final tag that is higher than every other final tag. Versions are ordered numerically, and X.Y.Z-rc.N is
 # below X.Y.Z.
 #

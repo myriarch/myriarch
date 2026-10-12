@@ -14,7 +14,12 @@
 #   - no ${{ }} expression in a run text, no write to GITHUB_ENV or GITHUB_PATH, no DOCKER_CONFIG, no secret, no cache;
 #   - the registry writes: push, cosign sign and the six attestations of both images run as strictly sequential steps of the job
 #     push-images, each attestation after the signature of its image, and no other job pushes, signs or attests images;
-#   - the pins: the six GitHub-owned actions at the SHAs the other workflows use (actions/attest is new).
+#   - the pins: the six GitHub-owned actions at the SHAs the other workflows use (actions/attest is new);
+#   - tool resolution: the pinned tools are reached only through TOOLS_BIN (the workflow never writes GITHUB_PATH). Every step that
+#     calls a script or a program that needs a pinned tool sets TOOLS_BIN to the directory of a tool set that the same job unpacked
+#     for its platform, and that set contains the tools. No run text calls a pinned tool by its bare name. Every sboms entry of
+#     deploy/release/goreleaser.yaml that runs a script passes TOOLS_BIN on, because goreleaser starts such a command with a
+#     reduced environment (the cause of the failure of the first release candidate).
 # The checks run on the real file and, to prove that they bite, on copies with one change each. The test loads MiniYaml from
 # ci/check-workflows.py (no second parser). No network, no ports.
 # The mutations below are literal workflow text with ${{ }} expressions: nothing in them is meant to expand.
@@ -32,10 +37,13 @@ import os
 import re
 import sys
 
-workflow, policy = sys.argv[1], sys.argv[2]
+workflow, policy, goreleaser = sys.argv[1], sys.argv[2], sys.argv[3]
 spec = importlib.util.spec_from_file_location("check_workflows", policy)
 cw = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cw)
+bt_spec = importlib.util.spec_from_file_location("bare_tools", os.path.join(os.path.dirname(policy), "tests", "bare-tools.py"))
+bt = importlib.util.module_from_spec(bt_spec)
+bt_spec.loader.exec_module(bt)
 
 problems = []
 checks = 0
@@ -325,6 +333,120 @@ for jid, flag in (("signing-tools", "signing"), ("build-tools", "build")):
     check(['ci/release/tools.sh build --set %s --out "${RUNNER_TEMP}/tools"' % flag] == [r for _, r, _ in runs if "tools.sh" in r],
           "job %s: the only build step is tools.sh build --set %s" % (jid, flag))
 
+# ---- tool resolution ----------------------------------------------------------------------------------------------------------
+# The workflow never writes GITHUB_PATH, so a pinned tool is found only through TOOLS_BIN (or CRANE for the image scripts). The first
+# release candidate failed because a goreleaser command got no TOOLS_BIN; this part ties every step to the tool set it can use.
+TOOLSET = {("signing", "linux-amd64"): {"cosign", "crane", "gh"}, ("signing", "linux-arm64"): {"cosign", "crane"},
+           ("signing", "windows-amd64"): {"cosign"},
+           ("build", "linux-amd64"): {"goreleaser", "syft", "yq", "go-winres", "osslsigncode"}}
+BUILD_ALL = {"goreleaser", "syft", "yq", "go-winres", "osslsigncode"}
+# entry point in a run text -> the pinned tools that it (or what it starts) takes from TOOLS_BIN
+ENTRIES = [
+    (r'"\$\{TOOLS_BIN\}/goreleaser"', BUILD_ALL),
+    (r"windows-signed\.sh", {"go-winres", "osslsigncode"}),
+    (r"ci/release/images\.sh", {"syft"}),
+    (r"registry-login\.sh login", {"crane"}),
+    (r"sign-checksums\.sh sign", {"cosign"}),
+    (r"sign-image\.sh", {"cosign"}),
+    (r"ci/release/draft\.sh", {"gh"}),
+    (r"ci/release/verify\.sh", {"gh", "cosign", "crane"}),
+    (r"ci/release/finalize\.sh", {"gh", "crane"}),
+    (r"smoke\.sh assets", {"cosign", "crane", "gh"}),
+    (r"smoke\.sh linux", {"cosign"}),
+]
+CRANE_USERS = r"ci/release/(images|push-images)\.sh"
+PINNED_NAMES = ["cosign", "crane", "gh", "syft", "yq", "goreleaser", "go-winres", "osslsigncode", "kind", "kubectl", "helm"]
+
+
+def matrix_platforms(jid):
+    include = ls(mp(mp(mp(jobs.get(jid)).get("strategy")).get("matrix")).get("include"))
+    return [tx(mp(i).get("tools")) for i in include]
+
+
+def unpacked_sets(jid):
+    """directory key (tools, signing-tools) -> (set kind, platforms) of the tool sets that the job unpacks and checks."""
+    res = {}
+    for s in steps_of[jid]:
+        run = tx(s.get("run")) or ""
+        for m in re.finditer(r'tools\.sh check --set (\w+) --dir "\$\{(?:RUNNER_TEMP|root)\}/([a-z-]+)" --platform (\S+)', run):
+            kind, d, plat = m.group(1), m.group(2), m.group(3).strip('"')
+            if plat == "${TOOLS_PLATFORM}":
+                check(tx(mp(s.get("env")).get("TOOLS_PLATFORM")) == "${{ matrix.tools }}", "job %s: TOOLS_PLATFORM must be ${{ matrix.tools }}" % jid)
+                plats = matrix_platforms(jid)
+            else:
+                plats = [plat]
+            check(('--into "${RUNNER_TEMP}/%s"' % d in run) or ('--into "${root}/%s"' % d in run),
+                  "job %s: the tool set in %s is checked in another directory than the one it was unpacked into" % (jid, d))
+            res[d] = (kind, plats)
+    return res
+
+
+def tool_dir(value):
+    """('tools'|'signing-tools', 'linux-amd64'|'linux-arm64'|matrix) of a TOOLS_BIN value of the form runner.temp/<dir>/<platform>."""
+    m = re.fullmatch(r"\$\{\{ runner\.temp \}\}/(tools|signing-tools)/(linux-amd64|linux-arm64|\$\{\{ matrix\.tools \}\})", value or "")
+    return (m.group(1), m.group(2)) if m else None
+
+
+for jid, steps in steps_of.items():
+    if JOBS[jid][4].startswith("windows-"):
+        continue  # the pwsh scripts get explicit paths (-Cosign); the Git Bash steps only unpack and check
+    un = unpacked_sets(jid)
+    for s in steps:
+        run, env, name = tx(s.get("run")) or "", mp(s.get("env")), tx(s.get("name"))
+        need = set()
+        for rx, tools in ENTRIES:
+            if re.search(rx, run):
+                need |= tools
+        if need:
+            td = tool_dir(tx(env.get("TOOLS_BIN")))
+            check(td is not None, "job %s, step '%s': TOOLS_BIN must be runner.temp/<tools|signing-tools>/<platform>, found '%s'" % (jid, name, tx(env.get("TOOLS_BIN"))))
+            if td:
+                d, plat = td
+                check(d in un, "job %s, step '%s': TOOLS_BIN points into %s, which this job does not unpack and check" % (jid, name, d))
+                if d in un:
+                    kind, plats = un[d]
+                    if plat.startswith("${{"):
+                        want = matrix_platforms(jid)
+                    else:
+                        want = [plat]
+                        check(jid not in MATRIX_JOBS, "job %s, step '%s': TOOLS_BIN must follow the matrix (runner.temp/%s/${{ matrix.tools }}), not a fixed platform" % (jid, name, d))
+                    for p in want:
+                        check(p in plats, "job %s, step '%s': TOOLS_BIN names the platform %s, which this job does not unpack" % (jid, name, p))
+                        missing = need - TOOLSET.get((kind, p), set())
+                        check(not missing, "job %s, step '%s': the %s set of %s lacks %s" % (jid, name, kind, p, sorted(missing)))
+        if re.search(CRANE_USERS, run):
+            m = re.fullmatch(r"\$\{\{ runner\.temp \}\}/(tools|signing-tools)/(linux-amd64)/crane", tx(env.get("CRANE")) or "")
+            check(m is not None and m.group(1) in un, "job %s, step '%s': CRANE must point into a tool set that the job unpacks (found '%s')" % (jid, name, tx(env.get("CRANE"))))
+            if m and m.group(1) in un:
+                check("crane" in TOOLSET.get((un[m.group(1)][0], m.group(2)), set()), "job %s, step '%s': CRANE points into a set without crane" % (jid, name))
+        # no pinned tool by its bare name in command position (the tokenizer is shared with release-scripts-test.sh)
+        for lineno, tool in bt.scan_text(run, PINNED_NAMES):
+            check(False, "job %s, step '%s': the pinned tool %s is called by its bare name (use \"${TOOLS_BIN}/%s\")" % (jid, name, tool, tool))
+
+# smoke-kind is the one exception: the install step and the smoke step both use the default directory .cache/bin
+sk = steps_of.get("smoke-kind", [])
+check(not any("TOOLS_BIN" in mp(s.get("env")) or "TOOLS_BIN" in (tx(s.get("run")) or "") for s in sk),
+      "smoke-kind: no step sets TOOLS_BIN (the install step and the smoke script share the default directory)")
+check([tx(s.get("run")) for s in sk if "install-tools" in (tx(s.get("run")) or "")] == ["ci/install-tools.sh kind kubectl helm"], "smoke-kind: the only install step is ci/install-tools.sh kind kubectl helm")
+
+# the sboms entries of the goreleaser configuration: a command that runs a script gets TOOLS_BIN from the configuration, because
+# goreleaser gives it only a reduced environment
+with open(goreleaser, encoding="utf-8") as f:
+    gr_lines = f.read().split("\n")
+start = next((i for i, l in enumerate(gr_lines) if l.startswith("sboms:")), None)
+check(start is not None, "deploy/release/goreleaser.yaml has no sboms block")
+if start is not None:
+    end = next((i for i in range(start + 1, len(gr_lines)) if gr_lines[i] and not gr_lines[i].startswith((" ", "#"))), len(gr_lines))
+    sb_root, sb_errors = cw.MiniYaml(gr_lines[start:end]).parse()
+    check(not sb_errors, "the sboms block cannot be read by the policy reader: %s" % sb_errors[:3])
+    entries = [mp(e) for e in ls(mp(sb_root).get("sboms"))]
+    check(len(entries) >= 2, "the sboms block has %d entries, expected the archives and the web UI" % len(entries))
+    for e in entries:
+        if tx(e.get("cmd")) == "syft":
+            continue  # syft itself needs no TOOLS_BIN, but nothing else in the configuration may call it by name either
+        check([tx(x) for x in ls(e.get("env"))] == ["TOOLS_BIN={{ .Env.TOOLS_BIN }}"],
+              "sboms entry '%s': env must be exactly TOOLS_BIN={{ .Env.TOOLS_BIN }} (goreleaser starts the command with a reduced environment)" % tx(e.get("id")))
+
 # ---- scripts: who may call what -----------------------------------------------------------------------------------------------
 OWNERS = {
     "ci/release/guard.sh": {"guard"}, "ci/release/meta.sh": {"guard"},
@@ -474,7 +596,8 @@ if problems:
 print("release-workflow: %d checks passed" % checks)
 PY
 
-run_checker() { python3 -I "${CHECKER}" "$1" "${CI_DIR}/check-workflows.py"; }
+GORELEASER_CONFIG="${ROOT}/deploy/release/goreleaser.yaml"
+run_checker() { python3 -I "${CHECKER}" "$1" "${CI_DIR}/check-workflows.py" "${2:-${GORELEASER_CONFIG}}"; }
 
 expect_ok "release.yml has the shape of ADR-0035" run_checker "${WORKFLOW}"
 
@@ -567,7 +690,70 @@ expect_fail "a consumer without the check of the tool set is refused" "job image
   mutated $'          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/signing-tools" --platform linux-amd64\n' ''
 expect_fail "an extra step in the signing-tools job is refused" 'job signing-tools: the steps must be' \
   mutated $'      - name: Pack signing-tools\n' $'      - name: Install more\n        run: ci/install-tools.sh yq\n      - name: Pack signing-tools\n'
+# ---- tool resolution: one change each ---------------------------------------------------------------------------------------------
+# a copy of goreleaser.yaml with one change; the workflow stays as it is
+mutated_gr() {
+  local from="$1" to="$2"
+  MUT=$((MUT + 1))
+  mkdir -p "${TEST_TMP}/m${MUT}"
+  MUT_FROM="${from}" MUT_TO="${to}" python3 -I -c '
+import os, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+if os.environ["MUT_FROM"] not in text:
+    sys.exit("mutation source not found: " + os.environ["MUT_FROM"])
+open(sys.argv[2], "w", encoding="utf-8").write(text.replace(os.environ["MUT_FROM"], os.environ["MUT_TO"]))
+' "${GORELEASER_CONFIG}" "${TEST_TMP}/m${MUT}/goreleaser.yaml" || return 1
+  run_checker "${WORKFLOW}" "${TEST_TMP}/m${MUT}/goreleaser.yaml"
+}
+expect_fail "an sboms entry without the TOOLS_BIN env is refused (the failure of the first release candidate)" "sboms entry 'archives': env must be exactly TOOLS_BIN" \
+  mutated_gr $'    env: ["TOOLS_BIN={{ .Env.TOOLS_BIN }}"]\n    args: ["../deploy/release/sbom.sh", "archive"' $'    args: ["../deploy/release/sbom.sh", "archive"'
+expect_fail "an sboms entry with another env is refused" "sboms entry 'webui': env must be exactly TOOLS_BIN" \
+  mutated_gr $'env: ["TOOLS_BIN={{ .Env.TOOLS_BIN }}"]\n    args: ["../deploy/release/sbom.sh", "webui"' $'env: ["TOOLS_BIN=/usr/bin"]\n    args: ["../deploy/release/sbom.sh", "webui"'
+expect_fail "the package step without TOOLS_BIN is refused" "job package, step 'Build, package and check \\(stage apply\\)': TOOLS_BIN must be" \
+  mutated $'      - name: Build, package and check (stage apply)\n        env:\n          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64\n' $'      - name: Build, package and check (stage apply)\n        env:\n'
+expect_fail "the build-windows step without TOOLS_BIN is refused" "job build-windows, step 'Build the Windows targets \\(stage collect\\)': TOOLS_BIN must be" \
+  mutated $'      - name: Build the Windows targets (stage collect)\n        env:\n          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64\n' $'      - name: Build the Windows targets (stage collect)\n        env:\n'
+expect_fail "TOOLS_BIN in the wrong directory is refused" "job package, step 'Build, package and check \\(stage apply\\)': TOOLS_BIN points into signing-tools, which this job does not unpack" \
+  mutated $'      - name: Build, package and check (stage apply)\n        env:\n          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64\n' $'      - name: Build, package and check (stage apply)\n        env:\n          TOOLS_BIN: ${{ runner.temp }}/signing-tools/linux-amd64\n'
+expect_fail "the signing set for goreleaser is refused" "job images, step 'Build the image layouts': the signing set of linux-amd64 lacks" \
+  mutated $'        id: build\n        env:\n          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64\n' $'        id: build\n        env:\n          TOOLS_BIN: ${{ runner.temp }}/signing-tools/linux-amd64\n'
+expect_fail "the arm64 row of smoke-linux with the amd64 tools is refused" "job smoke-linux, step 'Smoke test the Linux installation': TOOLS_BIN must follow the matrix" \
+  mutated 'TOOLS_BIN: ${{ runner.temp }}/tools/${{ matrix.tools }}
+          RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
+          ARCH:' 'TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
+          ARCH:'
+expect_fail "a matrix row with a platform that the job did not unpack is refused" "job smoke-linux, step 'Smoke test the Linux installation': TOOLS_BIN names the platform" \
+  mutated $'          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform "${TOOLS_PLATFORM}"\n      - name: Smoke test the Linux installation' $'          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64\n      - name: Smoke test the Linux installation'
+expect_fail "the image build without CRANE is refused" "job images, step 'Build the image layouts': CRANE must point into a tool set" \
+  mutated $'          CRANE: ${{ runner.temp }}/signing-tools/linux-amd64/crane\n          RELEASE_VERSION' $'          RELEASE_VERSION'
+expect_fail "a push without CRANE is refused" "job push-images, step 'Push the server image by digest': CRANE must point into a tool set" \
+  mutated $'          CRANE: ${{ runner.temp }}/tools/linux-amd64/crane\n          IMAGE_DIGEST: ${{ needs.images.outputs.server-index }}' $'          IMAGE_DIGEST: ${{ needs.images.outputs.server-index }}'
+expect_fail "a pinned tool called by its bare name is refused" "the pinned tool cosign is called by its bare name" \
+  mutated 'run: ci/release/registry-login.sh logout
+' 'run: cosign version
+'
+expect_fail "a pinned tool after a pipe by its bare name is refused" "the pinned tool gh is called by its bare name" \
+  mutated 'run: ci/release/meta.sh >> "${GITHUB_OUTPUT}"' 'run: ci/release/meta.sh | gh version'
+expect_fail "a pinned tool after a variable assignment is refused" "the pinned tool cosign is called by its bare name" \
+  mutated 'run: ci/release/registry-login.sh logout
+' 'run: X=1 cosign version
+'
+expect_fail "a pinned tool in an if condition is refused" "the pinned tool cosign is called by its bare name" \
+  mutated 'run: ci/release/registry-login.sh logout
+' 'run: if cosign version; then :; fi
+'
+expect_fail "a pinned tool after exec is refused" "the pinned tool gh is called by its bare name" \
+  mutated 'run: ci/release/registry-login.sh logout
+' 'run: exec gh version
+'
+expect_fail "smoke-kind with its own TOOLS_BIN is refused" "smoke-kind: no step sets TOOLS_BIN" \
+  mutated $'      - name: Smoke test the chart on kind\n        env:\n' $'      - name: Smoke test the chart on kind\n        env:\n          TOOLS_BIN: ${{ runner.temp }}/tools\n'
 expect_fail "a renamed workflow file is refused" 'must be named release.yml' \
-  bash -c 'mkdir -p "$1/renamed" && cp "$2" "$1/renamed/publish.yml" && python3 -I "$3" "$1/renamed/publish.yml" "$4"' _ "${TEST_TMP}" "${WORKFLOW}" "${CHECKER}" "${CI_DIR}/check-workflows.py"
+  bash -c 'mkdir -p "$1/renamed" && cp "$2" "$1/renamed/publish.yml" && python3 -I "$3" "$1/renamed/publish.yml" "$4" "$5"' _ "${TEST_TMP}" "${WORKFLOW}" "${CHECKER}" "${CI_DIR}/check-workflows.py" "${GORELEASER_CONFIG}"
 
 finish_tests "release-workflow-test"

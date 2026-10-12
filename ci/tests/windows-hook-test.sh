@@ -68,6 +68,7 @@ out=""; while [ "$#" -gt 0 ]; do case "$1" in --out) out="$2"; shift ;; esac; sh
 : > "${out}_windows_amd64.syso"; : > "${out}_windows_arm64.syso"
 STUB
 chmod +x "${TB}/go-winres"
+: > "${TB}/.stamp-go-winres-${GOWINRES_VERSION}-0123456789ab"  # go-winres has no version output: ci/install-tools.sh stamps it
 [ "${have_ossl}" = 1 ] && ln -s "${OSSL}" "${TB}/osslsigncode"
 
 # a tiny Windows program (the real programs are far too big for a test)
@@ -119,6 +120,24 @@ expect_fail "stage off with is-snapshot=false"         "\\[stage_off_release\\]"
 expect_fail "a version that is not a version"          "\\[version_invalid\\]" ws MYRIARCH_WINDOWS_STAGE=off bash "${WSH}" prepare latest true
 rm -rf "${S}/.cache"
 expect_fail "build without the before hook"            "\\[stage_marker\\]" ws MYRIARCH_WINDOWS_STAGE=off bash "${WSH}" build myrctl dist/x/myrctl.exe windows amd64 true "${VER}"
+
+# ---- go-winres comes from TOOLS_BIN only -----------------------------------------------------------------------------------------
+# The first release candidate showed that a pinned tool must not depend on PATH: here PATH holds the system directories and go only.
+SYS_PATH="$(dirname "$(command -v go)"):/usr/bin:/bin"
+rm -rf "${S}/.cache"
+expect_ok "go-winres in TOOLS_BIN is used with a PATH that has no pinned tool" ws PATH="${SYS_PATH}" MYRIARCH_WINDOWS_STAGE=off bash "${WSH}" prepare "${VER}" true
+mkdir -p "${TEST_TMP}/only-on-path" "${TEST_TMP}/empty-tools"
+cp "${TB}/go-winres" "${TEST_TMP}/only-on-path/go-winres"
+rm -rf "${S}/.cache"
+expect_fail "go-winres only on PATH is refused" "\\[winres_missing\\] go-winres not found in TOOLS_BIN" \
+  ws PATH="${TEST_TMP}/only-on-path:${SYS_PATH}" TOOLS_BIN="${TEST_TMP}/empty-tools" MYRIARCH_WINDOWS_STAGE=off bash "${WSH}" prepare "${VER}" true
+cp "${TB}/go-winres" "${TEST_TMP}/empty-tools/go-winres"
+expect_fail "go-winres without the stamp of the pinned version is refused" "\\[winres_missing\\].*no stamp for ${GOWINRES_VERSION}" \
+  ws TOOLS_BIN="${TEST_TMP}/empty-tools" MYRIARCH_WINDOWS_STAGE=off bash "${WSH}" prepare "${VER}" true
+: > "${TEST_TMP}/empty-tools/.stamp-go-winres-v0.0.1-0123456789ab"
+expect_fail "go-winres with the stamp of another version is refused" "\\[winres_missing\\].*no stamp for ${GOWINRES_VERSION}" \
+  ws TOOLS_BIN="${TEST_TMP}/empty-tools" MYRIARCH_WINDOWS_STAGE=off bash "${WSH}" prepare "${VER}" true
+rm -rf "${S}/.cache"
 
 # ---- 5: prepare in stage off ------------------------------------------------------------------------------------------------------
 : > "${WINRES_LOG}"

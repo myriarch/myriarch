@@ -1064,10 +1064,27 @@ no_call gh '(^| )(-X DELETE)' && ok "draft: nothing to delete" || fail "draft: u
 eq "draft: three gh calls (list, create, list)" "3" "$(call_count gh '.')"
 reset_stubs
 gen list "${S}" list.1.json v9.9.9-rc.1 ""
-gen list "${S}" list.2.json v9.9.9-rc.1 "55,1,${bot},${ALLN_RC}"
-RP_START=v9.9.8-rc.1 expect_ok "draft: an rc with a start tag" dr v9.9.9-rc.1 "${TEST_TMP}/far" "${TEST_TMP}/sigsr"
+gen list "${S}" list.2.json v9.9.8-rc.1 "30,0,someone,${ALLN_RC}"
+gen list "${S}" list.3.json v9.9.9-rc.1 "55,1,${bot},${ALLN_RC}"
+RP_START=v9.9.8-rc.1 expect_ok "draft: an rc with a start tag that has a published release" dr v9.9.9-rc.1 "${TEST_TMP}/far" "${TEST_TMP}/sigsr"
 contains "draft rc: the draft id" "release-id=55" "${OUT}"
-eq "draft rc: --notes-start-tag then --prerelease" "release create v9.9.9-rc.1 --repo myriarch/myriarch --draft --verify-tag --target ${C40} --title v9.9.9-rc.1 --notes-file NOTES --generate-notes | --notes-start-tag v9.9.8-rc.1 --prerelease | 42 files in 1 directory" "$(create_view 2 | head -n 1)"
+contains "draft rc: the start tag is logged" "the generated change list starts at v9.9.8-rc.1" "${OUT}"
+eq "draft rc: --notes-start-tag then --prerelease" "release create v9.9.9-rc.1 --repo myriarch/myriarch --draft --verify-tag --target ${C40} --title v9.9.9-rc.1 --notes-file NOTES --generate-notes | --notes-start-tag v9.9.8-rc.1 --prerelease | 42 files in 1 directory" "$(create_view 3 | head -n 1)"
+eq "draft rc: the start tag is looked up after the listing of the tag" "4" "$(call_count gh '.')"
+# the start tag was never published (the attempt failed before publication) or only exists as a draft: the option is left out
+reset_stubs
+gen list "${S}" list.1.json v9.9.9-rc.1 ""
+gen list "${S}" list.2.json v9.9.8-rc.1 ""
+gen list "${S}" list.3.json v9.9.9-rc.1 "56,1,${bot},${ALLN_RC}"
+RP_START=v9.9.8-rc.1 expect_ok "draft: an rc whose start tag has no release" dr v9.9.9-rc.1 "${TEST_TMP}/far" "${TEST_TMP}/sigsr"
+contains "draft rc: the missing release of the start tag is logged" "v9.9.8-rc.1 has no published release" "${OUT}"
+eq "draft rc: no --notes-start-tag" "release create v9.9.9-rc.1 --repo myriarch/myriarch --draft --verify-tag --target ${C40} --title v9.9.9-rc.1 --notes-file NOTES --generate-notes | --prerelease | 42 files in 1 directory" "$(create_view 3 | head -n 1)"
+reset_stubs
+gen list "${S}" list.1.json v9.9.9-rc.1 ""
+gen list "${S}" list.2.json v9.9.8-rc.1 "31,1,${bot},${ALLN_RC}"
+gen list "${S}" list.3.json v9.9.9-rc.1 "57,1,${bot},${ALLN_RC}"
+RP_START=v9.9.8-rc.1 expect_ok "draft: an rc whose start tag only has a draft" dr v9.9.9-rc.1 "${TEST_TMP}/far" "${TEST_TMP}/sigsr"
+eq "draft rc: a draft of the start tag does not count" "release create v9.9.9-rc.1 --repo myriarch/myriarch --draft --verify-tag --target ${C40} --title v9.9.9-rc.1 --notes-file NOTES --generate-notes | --prerelease | 42 files in 1 directory" "$(create_view 3 | head -n 1)"
 reset_stubs
 gen list "${S}" list.1.json v9.9.9-rc.1 "7,1,${bot},;8,1,${bot},old.txt"
 gen list "${S}" list.2.json v9.9.9-rc.1 "56,1,${bot},${ALLN_RC}"
@@ -1528,5 +1545,46 @@ reset_stubs
 ALLOW_DIRTY=1 IMGN=5 expect_fail "images.sh: a test knob of the build script" "image_env" img
 expect_fail "images.sh: a version that metadata.json does not state" "version_mismatch" run_priv "${IR}/ci/release/images.sh" --release "${RELDIR}" --version 9.9.8 --out "${TEST_TMP}/imgout6"
 expect_fail "images.sh: a non-empty output" "out_not_empty" run_priv "${IR}/ci/release/images.sh" --release "${RELDIR}" --version "${ver}" --out "${TEST_TMP}/imgout1"
+
+# ---- no pinned tool by its bare name -----------------------------------------------------------------------------------------------
+# The release workflow never puts the pinned tools on PATH; goreleaser hands its sboms commands only a reduced environment. So no
+# script that the workflow or deploy/release/goreleaser.yaml runs may call a pinned tool by its bare name or look it up with have,
+# need_cmd or command -v: the tools are ${TOOLS_BIN}/<name> (the first release candidate failed because sbom.sh looked for syft on PATH).
+# Quoted text, comments and case labels are not code; command substitutions inside double quotes are.
+# One tokenizer (ci/tests/bare-tools.py) serves this scan and the run-text check of ci/tests/release-workflow-test.sh. It knows the
+# command positions (line start, after ; && || | ( $( ` {, then, do, else, if, while, until), NAME=value words and the prefixes exec,
+# env, command, time, nohup, xargs and sudo in front of a command.
+SCAN_FILES=("${ROOT}"/ci/release/*.sh "${ROOT}"/deploy/release/*.sh "${ROOT}/scripts/build-image-crane.sh")
+scan_bare() { python3 -I "${ROOT}/ci/tests/bare-tools.py" "$@"; }
+expect_ok "no release script calls a pinned tool by its bare name (${#SCAN_FILES[@]} scripts)" scan_bare "${SCAN_FILES[@]}"
+mkdir -p "${TEST_TMP}/scan"
+printf '%s\n' '#!/usr/bin/env bash' 'have syft || exit 1' > "${TEST_TMP}/scan/have.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'x=1; yq -o=json . f.yaml' > "${TEST_TMP}/scan/cmd.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'got="$(syft version | head -n 1)"' > "${TEST_TMP}/scan/subst.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'need_cmd go-winres git' > "${TEST_TMP}/scan/need.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'if cosign version; then :; fi' > "${TEST_TMP}/scan/if.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'X=1 syft version' > "${TEST_TMP}/scan/assign.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'exec gh version' > "${TEST_TMP}/scan/exec.sh"
+printf '%s\n' '#!/usr/bin/env bash' '{ kubectl get pods; }' > "${TEST_TMP}/scan/group.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'env A=b yq .' > "${TEST_TMP}/scan/env.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'xargs -n1 helm lint' 'sudo -E crane ls x' 'time command cosign version' 'nohup kind create cluster' > "${TEST_TMP}/scan/prefix.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'MYRIARCH_X=1 \' '  goreleaser release' > "${TEST_TMP}/scan/cont.sh"
+printf '%s\n' '#!/usr/bin/env bash' '"${TOOLS_BIN}/syft" version' 'die "syft not found (ci/install-tools.sh syft)"' '# syft is a comment' "printf 'gh is text\\n'" 'case "$1" in gh) : ;; esac' \
+  'cat <<EOF' 'cosign is in a here document' 'EOF' > "${TEST_TMP}/scan/clean.sh"
+expect_fail "the scan finds a have lookup" "have.sh:2: the pinned tool syft" scan_bare "${TEST_TMP}/scan/have.sh"
+expect_fail "the scan finds a command after a semicolon" "cmd.sh:2: the pinned tool yq" scan_bare "${TEST_TMP}/scan/cmd.sh"
+expect_fail "the scan finds a command substitution inside double quotes" "subst.sh:2: the pinned tool syft" scan_bare "${TEST_TMP}/scan/subst.sh"
+expect_fail "the scan finds a need_cmd lookup" "need.sh:2: the pinned tool go-winres" scan_bare "${TEST_TMP}/scan/need.sh"
+expect_fail "the scan finds a command after if" "if.sh:2: the pinned tool cosign" scan_bare "${TEST_TMP}/scan/if.sh"
+expect_fail "the scan finds a command after a variable assignment" "assign.sh:2: the pinned tool syft" scan_bare "${TEST_TMP}/scan/assign.sh"
+expect_fail "the scan finds a command after exec" "exec.sh:2: the pinned tool gh" scan_bare "${TEST_TMP}/scan/exec.sh"
+expect_fail "the scan finds a command in a group" "group.sh:2: the pinned tool kubectl" scan_bare "${TEST_TMP}/scan/group.sh"
+expect_fail "the scan finds a command after env and its assignment" "env.sh:2: the pinned tool yq" scan_bare "${TEST_TMP}/scan/env.sh"
+expect_fail "the scan finds a command after xargs with an option" "prefix.sh:2: the pinned tool helm" scan_bare "${TEST_TMP}/scan/prefix.sh"
+expect_fail "the scan finds a command after sudo with an option" "prefix.sh:3: the pinned tool crane" scan_bare "${TEST_TMP}/scan/prefix.sh"
+expect_fail "the scan finds a command after time and command" "prefix.sh:4: the pinned tool cosign" scan_bare "${TEST_TMP}/scan/prefix.sh"
+expect_fail "the scan finds a command after nohup" "prefix.sh:5: the pinned tool kind" scan_bare "${TEST_TMP}/scan/prefix.sh"
+expect_fail "the scan finds a command behind a continued line" "cont.sh:2: the pinned tool goreleaser" scan_bare "${TEST_TMP}/scan/cont.sh"
+expect_ok "the scan accepts TOOLS_BIN paths, comments, quoted text, case labels and here documents" scan_bare "${TEST_TMP}/scan/clean.sh"
 
 finish_tests "release-scripts-test"

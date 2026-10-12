@@ -34,6 +34,9 @@
 #
 # Prerequisites: Go, the built web UI (internal/webui/dist, make web-build), goreleaser, syft, go-winres and yq from
 # ci/install-tools.sh, python3, and osslsigncode (ci/install-tools.sh osslsigncode) for stage apply with signed files.
+# TOOLS_BIN (absolute path of the directory with the pinned tools) must be set: ci/build-release.sh and ci/release/rehearsal.sh set it,
+# the release workflow sets it in the step env, and the sboms entries below pass it on to their commands (goreleaser starts them with
+# a reduced environment). Without it goreleaser stops at template time with `map has no entry for key "TOOLS_BIN"`.
 version: 2
 project_name: myriarch
 
@@ -250,15 +253,19 @@ checksum:
 sboms:
   # One SPDX JSON SBOM per archive (<archive>.sbom.json) and one for the web UI (the production dependencies of its lockfile).
   # deploy/release/sbom.sh runs the pinned syft with deploy/release/syft.yaml: no network, no enrichment. goreleaser runs it in dist/.
+  # goreleaser starts an sboms command with a reduced environment (HOME, USER, TMPDIR, PATH and a few more, plus the env below), unlike
+  # the hooks, which get the whole environment. TOOLS_BIN is therefore passed explicitly: sbom.sh finds syft and yq only there.
   - id: archives
     artifacts: archive
     documents: ["{{ .ArtifactName }}.sbom.json"]
     cmd: bash
+    env: ["TOOLS_BIN={{ .Env.TOOLS_BIN }}"]
     args: ["../deploy/release/sbom.sh", "archive", "$artifact", "$document"]
   - id: webui
     artifacts: any
     documents: ["myriarch-webui_{{ .Version }}.sbom.json"]
     cmd: bash
+    env: ["TOOLS_BIN={{ .Env.TOOLS_BIN }}"]
     args: ["../deploy/release/sbom.sh", "webui", "{{ .Version }}", "$document"]
 
 snapshot:

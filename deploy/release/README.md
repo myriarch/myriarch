@@ -61,6 +61,19 @@ archive) together with the relationships that name it.
 and no `SYFT_*` variable of the caller. `-c` also stops syft from reading a `.syft.yaml` of the working directory. goreleaser
 calls the script with the working directory `dist/`.
 
+goreleaser starts an `sboms` command with a reduced environment: from its own environment it passes only variables of the
+`HOME`, `USER`, `TMPDIR` and `PATH` kind, plus `sboms[].env`. Hooks, in contrast, get the whole environment. `goreleaser.yaml`
+therefore hands `TOOLS_BIN` to both `sboms` entries (`env: ["TOOLS_BIN={{ .Env.TOOLS_BIN }}"]`), and `sbom.sh` finds syft and yq
+only in `${TOOLS_BIN}`: it stops with `[tools_bin_missing]` when the variable is not set and does not use `PATH` or the default
+directory. The release workflow keeps the pinned tools out of `PATH` on purpose (it never writes `GITHUB_PATH`), so this is the only way
+they reach the script. A direct `goreleaser release -f deploy/release/goreleaser.yaml` without `TOOLS_BIN` in the environment stops while goreleaser renders the
+template, with `map has no entry for key "TOOLS_BIN"`; that is intended (it fails closed), `ci/build-release.sh` and
+`ci/release/rehearsal.sh` set the variable. A new `sboms` entry that calls a pinned tool needs the same `env` line; `ci/tests/release-workflow-test.sh`
+checks it, together with the `TOOLS_BIN` of every workflow step that uses a pinned tool, and `ci/tests/release-scripts-test.sh` scans the
+release scripts for a pinned tool called by its bare name or looked up with `have` or `need_cmd`; both tests use one tokenizer
+(`ci/tests/bare-tools.py`), which also sees a call behind a variable assignment, `exec`, `env`, `command`, `time`, `nohup`, `xargs`,
+`sudo`, `if`, `then`, `do` or a `{ ...; }` group.
+
 The web UI SBOM is made from `web/pnpm-lock.yaml` reduced to the production dependencies of the root project
 (`ci/release/pnpm-prod-lock.py`): syft cannot drop the dev dependencies of a pnpm lockfile (`javascript.include-dev-dependencies`
 has no effect on lockfile version 9), so without the reduction the SBOM would list the test and build tools as well.
@@ -104,7 +117,7 @@ goreleaser; otherwise stage `apply` fails with `[not_reproducible]`.
 | `MYRIARCH_AUTHENTICODE_DIR` | the trust anchors, default `deploy/release/authenticode`; only snapshot builds may set it |
 | `MYRIARCH_WINDOWS_SIGNING` | stage `apply`: the configured signing mode (`off`, `signpath` or `kms`), parsed by the release workflow from `deploy/release/windows-signing.env` and set in the packaging job. Required for release builds (`[mode_missing]`); `signer.json` has to name the same provider (`[provider_mismatch]`). Snapshots may leave it unset. |
 | `WINDOWS_SIGNING` | the mode of the hook: `off` (or `signpath`, `kms`, `test`, see below); the release workflow takes it from `deploy/release/windows-signing.env` |
-| `TOOLS_BIN` | where go-winres and osslsigncode are found, default `.cache/bin` |
+| `TOOLS_BIN` | where the pinned tools are found (go-winres, osslsigncode, syft and yq here), default `.cache/bin`; `sbom.sh` has no default. go-winres is accepted only with the stamp of the pinned version next to it (`[winres_missing]`) |
 
 The unsigned and signed directories are staging areas: inside the work tree they have to be git-ignored (use `.cache/` or a path
 outside the repository), otherwise `[staging_dir]`. The state of the hooks is in `.cache/release/windows`.
@@ -187,6 +200,11 @@ binaries carry the version resources, and that every archive, bare binary, SBOM,
 
 ### Rehearsal
 
+The rehearsal reaches the pinned tools the way the release workflow does: `ci/release/rehearsal.sh` (and `ci/build-release.sh`, `make
+release-snapshot`) link goreleaser, syft, go-winres, yq and osslsigncode into a temporary directory, make it `TOOLS_BIN` and take `.cache/bin`
+off `PATH` (`isolate_tools` in `ci/lib.sh`). A script, or a goreleaser `sboms` entry, that looks for a tool on `PATH` or in the default
+directory therefore fails in the rehearsal, which the CI job `build` runs, and not only in the release.
+
 `make release-rehearsal` runs the path above in a snapshot. The signing pass uses a throwaway CA that `ci/release/authenticode-test-ca.sh`
 creates in a temporary directory outside the repository (RSA 3072, valid for seven days, no network access) and deletes on exit; the key
 is never published and never trusted anywhere else. The timestamp comes from the built-in RFC 3161 time stamping authority of
@@ -242,7 +260,8 @@ release candidate, `## [X.Y.Z] - YYYY-MM-DD` for a final release.
 * The notes carry the banners (release candidate; Windows files unsigned, with the sentence about the reviewed exception for a
   final tag), the support levels, the known limitations, the image table, the commands of
   [Verify releases](../../docs/security/verify-releases.md) with the exact tag, identity and digests, and the changelog section.
-  GitHub appends the generated list of merged pull requests.
+  GitHub appends the generated list of merged pull requests. It starts at the previous tag only when that tag has a published release
+  (`draft.sh`); a candidate that follows one that failed before publication leaves the start to GitHub.
 * The rendered text must be at most 100,000 characters and must not contain `SPDX-License-Identifier`.
 
 ## Authenticode (Windows)

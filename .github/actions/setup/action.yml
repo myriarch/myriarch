@@ -30,6 +30,18 @@ runs:
         # save its small cache and every other job would restore an incomplete one. The cache below is per job.
         cache: false
 
+    - name: Hash the list of requested tools
+      id: toolset
+      shell: bash
+      # The keys of the Go and tools caches below must change with the list: the hashed files alone do not, so a job that asks for one more tool
+      # would get an exact cache hit without that tool and actions/cache would never save a cache that has it. The list goes through
+      # the environment, not into the script text.
+      env:
+        TOOLS: ${{ inputs.tools }}
+      run: |
+        if command -v sha256sum > /dev/null 2>&1; then sum="$(printf '%s' "${TOOLS}" | sha256sum)"; else sum="$(printf '%s' "${TOOLS}" | shasum -a 256)"; fi
+        echo "hash=${sum:0:16}" >> "${GITHUB_OUTPUT}"
+
     - name: Find the Go caches
       id: gocache
       shell: bash
@@ -43,7 +55,7 @@ runs:
         path: |
           ${{ steps.gocache.outputs.mod }}
           ${{ steps.gocache.outputs.build }}
-        key: go-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', 'ci/tools/*/go.sum', 'website/go.sum') }}
+        key: go-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolset.outputs.hash }}-${{ hashFiles('go.mod', 'go.sum', 'ci/tools/*/go.sum', 'website/go.sum') }}
         restore-keys: |
           go-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-
 
@@ -81,7 +93,7 @@ runs:
           .cache/dart-sass
           .cache/hugo
           .cache/kubeconform
-        key: tools-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ci/versions.env', 'ci/install-tools.sh', 'ci/tools/**/go.mod', 'ci/tools/**/go.sum', 'ci/tools/reuse/*.txt') }}
+        key: tools-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolset.outputs.hash }}-${{ hashFiles('ci/versions.env', 'ci/install-tools.sh', 'ci/tools/**/go.mod', 'ci/tools/**/go.sum', 'ci/tools/reuse/*.txt') }}
         restore-keys: |
           tools-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-
 

@@ -119,9 +119,9 @@ numbered checks of the whole flow, including a collector version update. It need
 [Install with Helm](docs/operations/install-helm.md).
 
 With Docker Compose, [docs/getting-started/docker-compose.md](docs/getting-started/docker-compose.md) starts the server,
-PostgreSQL and 200 simulated collectors from the release images (published from v0.1.0-rc.1 on); the Compose files in
-`deploy/compose/` are meant for evaluation and development only. For a guided first session from source, with
-a fleet and a rollout policy of your own, read
+PostgreSQL and 200 simulated collectors from the release images (published with every release candidate and release); the
+Compose files in `deploy/compose/` are meant for evaluation and development only. For a guided first session from source, with a
+fleet and a rollout policy of your own, read
 [docs/getting-started/first-fleet-and-rollout.md](docs/getting-started/first-fleet-and-rollout.md).
 
 ### Connect a real collector

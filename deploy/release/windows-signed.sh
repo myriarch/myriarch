@@ -27,7 +27,8 @@
 #   MYRIARCH_WINDOWS_SIGNING        stage apply: the configured signing mode (off, signpath or kms; the release workflow parses it from
 #                                   deploy/release/windows-signing.env). Required for release builds; signer.json has to name the same
 #                                   provider ([mode_missing], [provider_mismatch]). Snapshots may leave it unset.
-#   TOOLS_BIN                       default <root>/.cache/bin (go-winres, osslsigncode)
+#   TOOLS_BIN                       default <root>/.cache/bin: go-winres (with its stamp for the pinned version) and osslsigncode are
+#                                   taken from there and from nowhere else, never from PATH
 # The unsigned and signed directories are staging areas: inside the work tree they have to be git-ignored (use .cache/ or a path
 # outside the repository).
 #
@@ -44,6 +45,21 @@ SIGNED_DIR="${MYRIARCH_WINDOWS_SIGNED_DIR:-${ROOT}/.cache/release/windows-signed
 TRUST_DIR="${MYRIARCH_AUTHENTICODE_DIR:-${ROOT}/deploy/release/authenticode}"
 VERSION_RE='^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$'
 SYSO_GLOBS=("${ROOT}"/cmd/myriarch-updater/rsrc_windows_*.syso "${ROOT}"/cmd/myrctl/rsrc_windows_*.syso)
+
+# go-winres has no version output: the pinned version is proven by the stamp that ci/install-tools.sh writes next to the binary.
+# Like osslsigncode (ci/release/authenticode.py), the tool is taken from TOOLS_BIN only, so that a go-winres on PATH of the build host
+# cannot slip in.
+GOWINRES="${TOOLS_BIN}/go-winres"
+check_go_winres() {
+  local want stamp
+  want="$(sed -n 's/^GOWINRES_VERSION=//p' "${CI_DIR}/versions.env" | head -n 1)"
+  [ -n "${want}" ] || die "[winres_missing] GOWINRES_VERSION is missing in ci/versions.env"
+  [ -x "${GOWINRES}" ] || die "[winres_missing] go-winres not found in TOOLS_BIN (${TOOLS_BIN}): ci/install-tools.sh go-winres"
+  for stamp in "${TOOLS_BIN}"/.stamp-go-winres-"${want}"-*; do
+    [ -f "${stamp}" ] && return 0
+  done
+  die "[winres_missing] go-winres in TOOLS_BIN (${TOOLS_BIN}) has no stamp for ${want}: ci/install-tools.sh go-winres"
+}
 
 check_stage_value() {
   case "${MYRIARCH_WINDOWS_STAGE-}" in
@@ -102,7 +118,8 @@ cmd_prepare() {
   local version="$1" snapshot="$2" id desc rel arch
   check_stage "${snapshot}"
   [[ "${version}" =~ ${VERSION_RE} ]] || die "[version_invalid] version '${version}' is not X.Y.Z with an optional pre-release or build suffix"
-  need_cmd go-winres git python3
+  need_cmd git python3
+  check_go_winres
   # the staging areas are checked before anything is written
   if [ "${MYRIARCH_WINDOWS_STAGE}" != off ]; then
     check_staging_dir "${UNSIGNED_DIR}"
@@ -126,7 +143,7 @@ cmd_prepare() {
       myriarch-updater) desc="Myriarch updater" ;;
       *) desc="Myriarch command line tool" ;;
     esac
-    ( cd "${STATE}/winres" && go-winres simply --arch amd64,arm64 --out "${ROOT}/cmd/${id}/rsrc" --manifest none \
+    ( cd "${STATE}/winres" && "${GOWINRES}" simply --arch amd64,arm64 --out "${ROOT}/cmd/${id}/rsrc" --manifest none \
         --product-name Myriarch --product-version "${version}" --file-version "${version}" --file-description "${desc}" \
         --original-filename "${id}.exe" --copyright "Copyright The Myriarch Authors" ) >&2 \
       || die "[winres_failed] go-winres failed for ${id}"

@@ -162,4 +162,29 @@ curl_ca_args() {
   if [ -n "${ca}" ] && [ -r "${ca}" ]; then printf '%s\n' --cacert "${ca}"; fi
 }
 
+# isolate_tools <dir> <tool>...: makes <dir> the TOOLS_BIN of the rest of the script. It holds symlinks to the given tools (and their
+# .stamp-* files) of the current TOOLS_BIN, and the former TOOLS_BIN leaves PATH. The release workflow runs the same way: pinned tools
+# in a directory of their own that is on no PATH, found only through TOOLS_BIN. A script that is tested like this cannot rely on the
+# default directory or on PATH for a pinned tool without failing here. Call it before anything else puts tools on PATH.
+isolate_tools() {
+  local dir="$1" old="${TOOLS_BIN}" t f p rest="" IFS_SAVE="${IFS}"
+  shift
+  mkdir -p "${dir}"
+  for t in "$@"; do
+    [ -x "${old}/${t}" ] || die "${t} is not in ${old} (ci/install-tools.sh ${t})"
+    ln -s "${old}/${t}" "${dir}/${t}"
+    for f in "${old}"/.stamp-"${t}"-*; do
+      [ -e "${f}" ] && ln -s "${f}" "${dir}/$(basename "${f}")"
+    done
+  done
+  IFS=:
+  for p in ${PATH}; do
+    [ "${p}" = "${old}" ] || rest="${rest:+${rest}:}${p}"
+  done
+  IFS="${IFS_SAVE}"
+  TOOLS_BIN="$(cd "${dir}" && pwd)"
+  PATH="${rest}"
+  export TOOLS_BIN PATH
+}
+
 export PATH="${TOOLS_BIN}:${PATH}"

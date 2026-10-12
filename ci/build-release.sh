@@ -28,11 +28,14 @@ case "${mode}" in
   snapshot)
     [ -f internal/webui/dist/index.html ] || die "internal/webui/dist/index.html is missing: build the web UI first (make web-build)"
     "${CI_DIR}/install-tools.sh" goreleaser syft go-winres yq
-    export PATH="${TOOLS_BIN}:${PATH}"
+    # the pinned tools only through TOOLS_BIN, as in the release workflow (isolate_tools in ci/lib.sh)
+    tools_dir="$(mktemp -d "${TMPDIR:-/tmp}/myriarch-snapshot.XXXXXX")"
+    # the trap comes right after the directory exists: a failure of isolate_tools must not leave it behind
+    trap 'rm -rf "${tools_dir}"; rm -f "${ROOT}"/cmd/myriarch-updater/rsrc_windows_*.syso "${ROOT}"/cmd/myrctl/rsrc_windows_*.syso' EXIT
+    isolate_tools "${tools_dir}/tools" goreleaser syft go-winres yq
     export MYRIARCH_WINDOWS_STAGE=off
-    trap 'rm -f "${ROOT}"/cmd/myriarch-updater/rsrc_windows_*.syso "${ROOT}"/cmd/myrctl/rsrc_windows_*.syso' EXIT
     # LOCAL TEST ONLY (snapshot): unsigned, never for releases
-    goreleaser release --snapshot --clean --skip=publish -f "${cfg}" ;;
+    "${TOOLS_BIN}/goreleaser" release --snapshot --clean --skip=publish -f "${cfg}" ;;
   release) die "ci/build-release.sh release was removed: releases are built only by the release workflow; use 'ci/build-release.sh snapshot' or 'make release-rehearsal'" ;;
   *) die "usage: ci/build-release.sh snapshot" ;;
 esac

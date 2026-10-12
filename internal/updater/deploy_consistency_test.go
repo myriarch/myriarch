@@ -714,6 +714,7 @@ func TestGoreleaserSBOMs(t *testing.T) {
 			Documents []string `yaml:"documents"`
 			Cmd       string   `yaml:"cmd"`
 			Args      []string `yaml:"args"`
+			Env       []string `yaml:"env"`
 		} `yaml:"sboms"`
 	}
 	require.NoError(t, yaml.Unmarshal(readDeploy(t, "release/goreleaser.yaml"), &g))
@@ -729,6 +730,10 @@ func TestGoreleaserSBOMs(t *testing.T) {
 	assert.Equal(t, []string{"myriarch-webui_{{ .Version }}.sbom.json"}, webui.Documents)
 	assert.Equal(t, "bash", webui.Cmd)
 	assert.Equal(t, []string{"../deploy/release/sbom.sh", "webui", "{{ .Version }}", "$document"}, webui.Args)
+	// goreleaser starts an sboms command with a reduced environment: without this line sbom.sh finds no TOOLS_BIN (the first release candidate)
+	for _, e := range g.SBOMs {
+		assert.Equal(t, []string{"TOOLS_BIN={{ .Env.TOOLS_BIN }}"}, e.Env, "sboms entry %s passes TOOLS_BIN on", e.ID)
+	}
 	assert.FileExists(t, filepath.Join(deployDir, "release/syft.yaml"))
 }
 
