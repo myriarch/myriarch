@@ -37,6 +37,11 @@
   with -Insecure, but not with -VerifySignatures skip. Optional -UpdaterSignerThumbprint: the Authenticode signature
   of the updater must be valid and come from this certificate. A pin of a thumbprint breaks at every certificate
   renewal; it fits only a private PKI with a certificate that you control.
+  Downloads that fail transiently (a timeout, a failed connection, HTTP 408, 429, 500, 502, 503 or 504) are retried with
+  pauses of 1, 2, 4, ... seconds, and no attempt starts later than 2 minutes after the first one; any other failure,
+  a 404 for example, ends the installation at once. Under PowerShell 7.5 or later (the .NET 9 runtime reports the status of the
+  proxy) behind an HTTPS_PROXY that refuses the connection, the status of the proxy decides (proxy HTTP 503 is retried, proxy HTTP
+  407 is not); PowerShell 7.4 retries a refused connection like a failed connection.
   -Insecure disables the remaining checks for lab/tests only (http/file, no bundle, ws://).
   The directories under C:\ProgramData\Myriarch are never "adopted": if an existing directory is not owned by
   SYSTEM/Administrators or is a reparse point, the installation aborts; otherwise the ACL of the whole tree is
@@ -212,6 +217,68 @@ function Assert-TransportAllowed {
   Stop-Install 'https_required' "$What must be an https:// URL (-Insecure only for lab/tests): $Url"
 }
 
+# ---- Download retry policy (the same in install-linux.sh, ci/release/smoke.sh and ci/release/smoke-windows.ps1) ----------
+# Only a transient failure is retried: a timeout, a failed connection (refused, reset, name resolution) or the HTTP status 408,
+# 429, 500, 502, 503 or 504. Everything else (404, 403, a TLS or certificate error, a refused redirect, a local write error)
+# fails at once. The pause starts at 1 s and doubles; no attempt starts later than 120 s after the first one. Under PowerShell 7.5 or
+# later (the .NET 9 runtime reports the status of the proxy) behind an HTTPS_PROXY that refuses the CONNECT, the status of the proxy
+# decides (503 is retried, 407 is not), as in the bash scripts; the message says "proxy HTTP <n>". PowerShell 7.4 (.NET 8) reports no
+# status for a refused CONNECT, so it is retried like a failed connection, with the .NET message. The code runs on Windows
+# PowerShell 5.1 as well as on PowerShell 7: it uses no parameter of Invoke-WebRequest that only 7 has.
+
+# Seconds on a monotonic clock (the retry window is measured with it).
+function Get-MonotonicSeconds {
+  return [Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency
+}
+
+# The HTTP status of a failed request, 0 without one. Windows PowerShell 5.1: WebException.Response (an HttpWebResponse);
+# PowerShell 7: HttpResponseException.Response (an HttpResponseMessage). Both have StatusCode. PowerShell 7.5 and later report a proxy
+# that refuses the CONNECT of an https request as an HttpRequestException without a response, with the status of the proxy in
+# StatusCode (7.4 leaves StatusCode empty).
+function Get-DownloadStatus {
+  param($Exception)
+  $props = $Exception.PSObject.Properties
+  if ($props['Response'] -and $Exception.Response) {
+    try { return [int]$Exception.Response.StatusCode } catch { return 0 }
+  }
+  if ($props['StatusCode'] -and $Exception.StatusCode) {
+    try { return [int]$Exception.StatusCode } catch { return 0 }
+  }
+  return 0
+}
+
+# The reason of a failed request for the log line and the final message: "proxy HTTP <n>" when a proxy refused the CONNECT of an
+# https request (HttpRequestError ProxyTunnelError), "HTTP <n>" for any other status, else the first line of the message.
+function Get-DownloadReason {
+  param($Exception)
+  $status = Get-DownloadStatus $Exception
+  if ($status -eq 0) { return ($Exception.Message -split "`r?`n")[0] }
+  if ($Exception.PSObject.Properties['HttpRequestError'] -and $Exception.HttpRequestError.ToString() -eq 'ProxyTunnelError') {
+    return "proxy HTTP $status"
+  }
+  return "HTTP $status"
+}
+
+# True when a failed request is worth another attempt. The types are compared by name: System.Net.Http is not loaded in 5.1.
+function Test-TransientDownloadError {
+  param($Exception)
+  $transient = @(408, 429, 500, 502, 503, 504)
+  $status = Get-DownloadStatus $Exception
+  if ($status -ne 0) { return ($transient -contains $status) }
+  $names = @()
+  for ($e = $Exception; $e; $e = $e.InnerException) { $names += $e.GetType().FullName }
+  if ($names -contains 'System.Security.Authentication.AuthenticationException') { return $false }
+  if ($Exception -is [System.Net.WebException]) {
+    return (@('Timeout', 'ConnectFailure', 'NameResolutionFailure', 'ProxyNameResolutionFailure', 'ConnectionClosed',
+        'ReceiveFailure', 'SendFailure', 'KeepAliveFailure', 'PipelineFailure') -contains $Exception.Status.ToString())
+  }
+  foreach ($n in @('System.Net.Http.HttpRequestException', 'System.Net.Http.HttpIOException', 'System.Net.Sockets.SocketException',
+      'System.TimeoutException', 'System.Threading.Tasks.TaskCanceledException')) {
+    if ($names -contains $n) { return $true }
+  }
+  return $false
+}
+
 function Invoke-Download {
   param([string]$Url, [string]$Destination)
   Assert-TransportAllowed -Url $Url -What 'download URL'
@@ -229,6 +296,9 @@ function Invoke-Download {
   try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
   } catch { }
+  $window = 120
+  $pause = 1
+  $start = Get-MonotonicSeconds
   $attempt = 0
   while ($true) {
     $attempt++
@@ -245,10 +315,22 @@ function Invoke-Download {
       }
       return
     } catch {
-      # a refused redirect is final (matched by its code, not by message text); everything else is retried
+      # a refused redirect is final (matched by its code, not by message text)
       if ($_.Exception.Message.Contains('[https_required]')) { throw }
-      if ($attempt -ge 3) { Stop-Install 'download_failed' "download failed: $Url ($($_.Exception.Message))" }
-      Start-Sleep -Seconds (2 * $attempt)
+      $reason = Get-DownloadReason $_.Exception
+      $noun = if ($attempt -eq 1) { 'attempt' } else { 'attempts' }
+      if (-not (Test-TransientDownloadError $_.Exception)) {
+        Stop-Install 'download_failed' "download failed: $Url ($reason; not retried, $attempt $noun)"
+      }
+      $elapsed = [int][Math]::Floor((Get-MonotonicSeconds) - $start)
+      if ($elapsed -ge $window) {
+        Stop-Install 'download_failed' "download failed: $Url ($reason; retry window of $window s used up, $attempt $noun)"
+      }
+      # the last pause ends exactly at the end of the window
+      if ($elapsed + $pause -gt $window) { $pause = $window - $elapsed }
+      Write-Log "attempt $attempt for $Url failed ($reason), next attempt in $pause s"
+      Start-Sleep -Seconds $pause
+      $pause = $pause * 2
     }
   }
 }

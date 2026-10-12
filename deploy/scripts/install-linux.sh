@@ -43,6 +43,10 @@
 # Both hash sources together are allowed (then both must match). The check of checksums.txt also applies with
 # --insecure, but not with --verify-signatures skip. --insecure disables the remaining checks for lab/tests only.
 #
+# Retries: a download that fails transiently (a timeout, a failed connection, HTTP 408, 429, 500, 502, 503 or 504) is
+# retried with pauses of 1, 2, 4, ... s; no attempt starts later than 2 minutes after the first one. Any other failure,
+# a 404 for example, ends the installation at once. Every check above stays as strict as without retries.
+#
 # ---- Error code catalog (stable interface; install-windows.ps1 uses the same codes) ----------------
 # Every fatal error prints exactly one line to stderr and exits with status 1:
 #   [myriarch-install] ERROR [<code>] <message>
@@ -73,7 +77,8 @@
 #   sigstore_verifier_outdated      cosign is older than 3.0.4 or reports no usable version
 #   privilege_required              not running as root
 #   unsupported_platform            not Linux, or unsupported CPU architecture
-#   download_failed                 a download did not succeed
+#   download_failed                 a download did not succeed (a permanent error at once, a transient one after the
+#                                   retry window of 120 s; the message gives the number of attempts)
 #   template_missing                template directory or template file not found
 #   template_placeholder            unreplaced @@PLACEHOLDER@@ left in a rendered template
 #   checksum_invalid                malformed .sha256 file or checksums.txt entry
@@ -287,6 +292,26 @@ require_https() { # url what
   esac
 }
 
+# ---- Download retry policy -------------------------------------------------------------------------
+# One policy for install-linux.sh, install-windows.ps1, ci/release/smoke.sh and ci/release/smoke-windows.ps1. Only a transient
+# failure is retried: a timeout, a failed connection (refused, reset, name resolution) or the HTTP status 408, 429, 500, 502,
+# 503 or 504. Everything else (404, 403, a TLS or certificate error, a refused redirect, a local write error) fails at once.
+# The pause starts at 1 s and doubles; no attempt starts later than DOWNLOAD_RETRY_SECONDS after the first one. The loop is
+# ours and not curl --retry: it covers refused and reset connections, it knows the number of attempts for the final message,
+# and the other three scripts can follow the same rules.
+readonly DOWNLOAD_RETRY_SECONDS=120
+
+# download_transient CURL_EXIT STATUS: succeeds when a failed curl attempt is worth another one. STATUS is the effective HTTP status
+# of the attempt: the status of the server or, when the server was not reached because an HTTPS proxy refused CONNECT, the status
+# of the proxy (000 when there was none).
+download_transient() {
+  case "$1" in
+    5 | 6 | 7 | 16 | 18 | 28 | 52 | 55 | 92) return 0 ;;
+    22 | 56) case "$2" in 408 | 429 | 500 | 502 | 503 | 504) return 0 ;; 000) [ "$1" = 56 ] && return 0 ;; esac ;;
+  esac
+  return 1
+}
+
 download() { # url dest
   local url="$1" dest="$2"
   require_https "${url}" "download URL"
@@ -294,10 +319,41 @@ download() { # url dest
   if have curl; then
     local proto=(--proto '=https' --proto-redir '=https' --tlsv1.2)
     [ "${INSECURE}" = 1 ] && proto=()
-    curl --fail --silent --show-error --location ${proto[@]+"${proto[@]}"} --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 900 -o "${dest}" "${url}" \
-      || die download_failed "download failed: ${url}"
+    local attempt=0 pause=1 start="${SECONDS}" elapsed rc out status pstatus reason noun
+    while :; do
+      attempt=$((attempt + 1))
+      noun=attempts
+      [ "${attempt}" = 1 ] && noun=attempt
+      rc=0
+      out="$(curl --fail --silent --show-error --location ${proto[@]+"${proto[@]}"} --connect-timeout 20 --max-time 900 \
+        --write-out '%{http_code} %{http_connect}' -o "${dest}" "${url}")" || rc=$?
+      [ "${rc}" = 0 ] && return 0
+      status="${out%% *}" pstatus="${out##* }"
+      status="${status:-000}" pstatus="${pstatus:-000}"
+      # An HTTPS proxy that answers CONNECT with an error leaves the status 000 (curl exit 22 or 56, depending on the curl
+      # version); the status of the proxy decides then.
+      if { [ "${rc}" = 22 ] || [ "${rc}" = 56 ]; } && [ "${status}" = 000 ] && [ "${pstatus}" != 000 ] && [ "${pstatus}" != 200 ]; then
+        status="${pstatus}"
+        reason="proxy HTTP ${status}"
+      elif [ "${rc}" = 22 ]; then
+        reason="HTTP ${status}"
+      else
+        reason="curl exit code ${rc}"
+      fi
+      download_transient "${rc}" "${status}" \
+        || die download_failed "download failed: ${url} (${reason}; not retried, ${attempt} ${noun})"
+      elapsed=$((SECONDS - start))
+      [ "${elapsed}" -lt "${DOWNLOAD_RETRY_SECONDS}" ] \
+        || die download_failed "download failed: ${url} (${reason}; retry window of ${DOWNLOAD_RETRY_SECONDS} s used up, ${attempt} ${noun})"
+      # the last pause ends exactly at the end of the window
+      [ $((elapsed + pause)) -le "${DOWNLOAD_RETRY_SECONDS}" ] || pause=$((DOWNLOAD_RETRY_SECONDS - elapsed))
+      log "attempt ${attempt} for ${url} failed (${reason}), next attempt in ${pause} s"
+      sleep "${pause}"
+      pause=$((pause * 2))
+    done
   elif [ "${INSECURE}" = 1 ] && have wget; then
-    # lab use only: wget cannot restrict redirects to https (see check_prereqs)
+    # lab use only: wget cannot restrict redirects to https (see check_prereqs); the one exception to the retry policy above,
+    # wget keeps its own three tries
     local limit=()
     have timeout && limit=(timeout 900)
     ${limit[@]+"${limit[@]}"} wget --quiet --tries=3 --timeout=20 --secure-protocol=TLSv1_2 -O "${dest}" "${url}" || die download_failed "download failed: ${url}"

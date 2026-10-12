@@ -60,6 +60,11 @@ What the script verifies, and why you may be asked for more options:
 
 - **Downloads use https only**, also after redirects. `--insecure` is for labs and tests: it allows `http://`, `file://` and
   `ws://` to the server and skipping the Sigstore check.
+- **Downloads are retried after a transient failure.** A timeout, a failed connection or HTTP 408, 429, 500, 502, 503 or 504
+  is retried with pauses of 1, 2, 4, ... seconds, and no attempt starts later than 2 minutes after the first one, so a short
+  outage of github.com does not stop the installation. Behind an `HTTPS_PROXY` the status of the proxy decides when it refuses
+  the connection (503 is retried, 407 is not). Any other error, for example a 404, stops it at once. Both end with
+  `download_failed`, and the message names the number of attempts. The checks below apply to every attempt unchanged.
 - **Collector and supervisor** are verified with their **SHA-256** file (`<asset>.sha256`) **and** the **Sigstore bundle**
   (`<asset>.sigstore.json`) before anything runs (`--verify-signatures require`, the default). The verifier is `cosign`
   3.0.4 or newer (an older one stops the script with `sigstore_verifier_outdated`), or `myriarch-updater verify-bundle`
@@ -121,6 +126,9 @@ renewed, so it fits only a private PKI. Under App Control for Business with scri
 Constrained Language Mode and `install-windows.ps1` fails; allow it by its hash. The supervisor runs as the virtual service account `NT SERVICE\otelcol-supervisor`, not as `LocalSystem`; only
 the `myriarch-updater` service runs as SYSTEM. Services, paths and troubleshooting are in
 [deploy/windows/README.md](../../deploy/windows/README.md). Collector secrets are set with `Set-ServiceEnvironment.ps1`.
+
+Downloads are retried with the same 2-minute window as on Linux. The status of a proxy that refuses the connection decides
+under PowerShell 7.5 or later; PowerShell 7.4 retries such a refusal like a failed connection.
 
 ## 4. Check the result
 

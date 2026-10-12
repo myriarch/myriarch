@@ -22,7 +22,8 @@
 
   -Mode Install  (job smoke-windows, AFTER publication)
     -Tag vX.Y.Z -Version X.Y.Z -Cosign FILE -WindowsSigning off|signpath|kms [-Commit SHA]
-    Downloads checksums.txt, its bundle, myriarch-updater_<v>_windows_amd64.zip and the bare .exe without credentials, copies
+    Downloads checksums.txt, its bundle, myriarch-updater_<v>_windows_amd64.zip and the bare .exe without credentials (a transient
+    failure is retried with pauses of 1, 2, 4, ... s for up to 120 s, any other failure ends the script at once), copies
     cosign.exe to a directory that only administrators can write, verifies checksums.txt with the identity of the tag (with -Commit
     also the commit), checks the two files with Get-FileHash against checksums.txt, expands the zip, runs Unblock-File (only after
     those checks) and runs the install-windows.ps1 of the zip in staging mode (-Root) with the keyless verification of the updater
@@ -263,24 +264,102 @@ function Get-ReleaseUrl {
   return "https://github.com/$script:Repository/releases/download/$Tag/$Name"
 }
 
-# Anonymous download over https (also after redirects), three attempts.
+# ---- Download retry policy (the same in install-windows.ps1, install-linux.sh and ci/release/smoke.sh) ----------------------
+# Only a transient failure is retried: a timeout, a failed connection (refused, reset, name resolution) or the HTTP status 408,
+# 429, 500, 502, 503 or 504. Everything else (404, 403, a TLS or certificate error, a local write error) fails at once. The pause
+# starts at 1 s and doubles; no attempt starts later than 120 s after the first one. Under PowerShell 7.5 or later (the .NET 9 runtime
+# reports the status of the proxy) behind an HTTPS_PROXY that refuses the CONNECT, the status of the proxy decides (503 is retried,
+# 407 is not); the message says "proxy HTTP <n>". PowerShell 7.4 reports no status and retries it like a failed connection. The
+# four helper functions are the same text as in deploy/scripts/install-windows.ps1 (ci/tests/download-retry-test.sh checks it).
+# Tests: ci/tests/download-retry.ps1.
+
+function Get-MonotonicSeconds {
+  return [Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency
+}
+
+function Get-DownloadStatus {
+  param($Exception)
+  $props = $Exception.PSObject.Properties
+  if ($props['Response'] -and $Exception.Response) {
+    try { return [int]$Exception.Response.StatusCode } catch { return 0 }
+  }
+  if ($props['StatusCode'] -and $Exception.StatusCode) {
+    try { return [int]$Exception.StatusCode } catch { return 0 }
+  }
+  return 0
+}
+
+# The reason of a failed request for the log line and the final message: "proxy HTTP <n>" when a proxy refused the CONNECT of an
+# https request (HttpRequestError ProxyTunnelError), "HTTP <n>" for any other status, else the first line of the message.
+function Get-DownloadReason {
+  param($Exception)
+  $status = Get-DownloadStatus $Exception
+  if ($status -eq 0) { return ($Exception.Message -split "`r?`n")[0] }
+  if ($Exception.PSObject.Properties['HttpRequestError'] -and $Exception.HttpRequestError.ToString() -eq 'ProxyTunnelError') {
+    return "proxy HTTP $status"
+  }
+  return "HTTP $status"
+}
+
+function Test-TransientDownloadError {
+  param($Exception)
+  $transient = @(408, 429, 500, 502, 503, 504)
+  $status = Get-DownloadStatus $Exception
+  if ($status -ne 0) { return ($transient -contains $status) }
+  $names = @()
+  for ($e = $Exception; $e; $e = $e.InnerException) { $names += $e.GetType().FullName }
+  if ($names -contains 'System.Security.Authentication.AuthenticationException') { return $false }
+  if ($Exception -is [System.Net.WebException]) {
+    return (@('Timeout', 'ConnectFailure', 'NameResolutionFailure', 'ProxyNameResolutionFailure', 'ConnectionClosed',
+        'ReceiveFailure', 'SendFailure', 'KeepAliveFailure', 'PipelineFailure') -contains $Exception.Status.ToString())
+  }
+  foreach ($n in @('System.Net.Http.HttpRequestException', 'System.Net.Http.HttpIOException', 'System.Net.Sockets.SocketException',
+      'System.TimeoutException', 'System.Threading.Tasks.TaskCanceledException')) {
+    if ($names -contains $n) { return $true }
+  }
+  return $false
+}
+
+# Downloads Url to Destination with the retry policy above and returns the response. A permanent error and a used-up window end
+# the script with [download_failed].
+function Invoke-DownloadWithRetry {
+  param([string]$Url, [string]$Destination)
+  $window = 120
+  $pause = 1
+  $start = Get-MonotonicSeconds
+  $attempt = 0
+  while ($true) {
+    $attempt++
+    try {
+      return (Invoke-WebRequest -Uri $Url -OutFile $Destination -PassThru -MaximumRedirection 5 -TimeoutSec 600)
+    } catch {
+      $reason = Get-DownloadReason $_.Exception
+      $noun = if ($attempt -eq 1) { 'attempt' } else { 'attempts' }
+      if (-not (Test-TransientDownloadError $_.Exception)) {
+        Stop-Smoke 'download_failed' "download of $Url failed ($reason; not retried, $attempt $noun)"
+      }
+      $elapsed = [int][Math]::Floor((Get-MonotonicSeconds) - $start)
+      if ($elapsed -ge $window) {
+        Stop-Smoke 'download_failed' "download of $Url failed ($reason; retry window of $window s used up, $attempt $noun)"
+      }
+      # the last pause ends exactly at the end of the window
+      if ($elapsed + $pause -gt $window) { $pause = $window - $elapsed }
+      Write-Log "attempt $attempt for $Url failed ($reason), next attempt in $pause s"
+      Start-Sleep -Seconds $pause
+      $pause = $pause * 2
+    }
+  }
+}
+
+# Anonymous download over https (also after redirects), with the retry policy above.
 function Get-ReleaseFile {
   param([string]$Name, [string]$Directory)
   $url = Get-ReleaseUrl $Name
   $dest = Join-Path $Directory $Name
-  for ($i = 1; $i -le 3; $i++) {
-    $failure = ''
-    try {
-      $r = Invoke-WebRequest -Uri $url -OutFile $dest -PassThru -MaximumRedirection 5 -TimeoutSec 600
-      $final = $r.BaseResponse.RequestMessage.RequestUri
-      if ($final.Scheme -ne 'https') { Stop-Smoke 'download_failed' "the download of $url ended on a non-https address" }
-      return $dest
-    } catch {
-      $failure = $_.Exception.Message
-    }
-    if ($i -eq 3) { Stop-Smoke 'download_failed' "download of $url failed: $failure" }
-    Start-Sleep -Seconds 5
-  }
+  $r = Invoke-DownloadWithRetry -Url $url -Destination $dest
+  $final = $r.BaseResponse.RequestMessage.RequestUri
+  if ($final.Scheme -ne 'https') { Stop-Smoke 'download_failed' "the download of $url ended on a non-https address" }
+  return $dest
 }
 
 # The SHA-256 that checksums.txt lists for a file; exactly one line must name it.
