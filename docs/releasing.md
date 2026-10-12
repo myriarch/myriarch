@@ -320,10 +320,11 @@ the archives, so they can follow the release:
 2. **The pages that say whether images exist or name a release:** `docs/getting-started/_index.md`,
    `docs/getting-started/docker-compose.md`, `docs/operations/install-helm.md` and `docs/security/verify-releases.md`. Check that every tag they name exists and that
    their sentences about the images are true.
-3. **The deferred observations:** after the first candidate, write the result of the two observations of
-   [First candidate](#first-candidate-what-to-observe) in this pull request and in `docs/security/model.md` (the statement on
-   re-run approvals), and remove the wording that defers them. The kind result is known from before the tag; the re-run
-   observation may need a throw-away candidate, so it can follow in a pull request of its own.
+3. **The deferred observations:** after the first candidate, write the results of the three observations of
+   [First candidate](#first-candidate-what-to-observe) in this pull request, the one on re-run approvals also in
+   `docs/security/model.md`, and remove the wording that defers them. The kind result is known from before the tag and the
+   result of the `cosign.exe` directory from the log of `smoke-windows`; the re-run observation may need a throw-away
+   candidate, so it can follow in a pull request of its own.
 
 Texts in the archives (`README.md`, `CHANGELOG.md`, the files of `deploy/`) are not touched here: they are right already, or the
 next release corrects them.
