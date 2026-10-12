@@ -7,7 +7,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	// embed the Mozilla root CA set as the fallback trust store: the updater
@@ -17,13 +16,9 @@ import (
 	// cmd/myriarchd/main.go.
 	_ "golang.org/x/crypto/x509roots/fallback"
 
-	"github.com/myriarch/myriarch/internal/brand"
 	"github.com/myriarch/myriarch/internal/updater"
 )
 
 func main() {
-	if err := updater.NewRootCommand().Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, brand.UpdaterBinary+":", err)
-		os.Exit(1)
-	}
+	os.Exit(updater.Run(os.Args[1:], os.Stdout, os.Stderr))
 }

@@ -9,22 +9,38 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/myriarch/myriarch"
+	"github.com/myriarch/myriarch/internal/brand"
+	"github.com/myriarch/myriarch/internal/version"
 )
 
+// runCLIStreams runs the command line through Run with separate stdout and stderr buffers, like the process has.
+func runCLIStreams(t *testing.T, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	var out, errOut bytes.Buffer
+	code = Run(args, &out, &errOut)
+	return out.String(), errOut.String(), code
+}
+
+// runCLI returns the stdout of the command and its error. A command that succeeds must leave stderr empty: results
+// belong on stdout (docs/development.md, "CLI output"), and cobra's Print helpers would put them on stderr.
 func runCLI(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	root := NewRootCommand()
-	var out bytes.Buffer
+	var out, errOut bytes.Buffer
 	root.SetOut(&out)
-	root.SetErr(&out)
+	root.SetErr(&errOut)
 	root.SetArgs(args)
 	err := root.Execute()
+	if err == nil {
+		assert.Empty(t, errOut.String(), "stderr of %v", args)
+	}
 	return out.String(), err
 }
 
@@ -40,6 +56,23 @@ func TestCLIHasAllCommands(t *testing.T) {
 	out, err := runCLI(t, "version")
 	require.NoError(t, err)
 	assert.Contains(t, out, "0.0.0-dev")
+}
+
+func TestRunWritesResultsToStdoutAndErrorsToStderr(t *testing.T) {
+	stdout, stderr, code := runCLIStreams(t, "version")
+	assert.Equal(t, 0, code)
+	assert.Equal(t, version.Get().String()+"\n", stdout)
+	assert.Empty(t, stderr)
+
+	stdout, stderr, code = runCLIStreams(t, "status")
+	assert.Equal(t, 0, code, stderr)
+	assert.Contains(t, stdout, ServiceName+": ")
+	assert.Empty(t, stderr)
+
+	stdout, stderr, code = runCLIStreams(t, "nosuch")
+	assert.Equal(t, 1, code)
+	assert.Empty(t, stdout)
+	assert.True(t, strings.HasPrefix(stderr, brand.UpdaterBinary+": "), stderr)
 }
 
 func TestCLILicensesPrintsTheEmbeddedTexts(t *testing.T) {

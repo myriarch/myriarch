@@ -50,7 +50,7 @@ func runVerifyBundle(cmd *cobra.Command, f verifyBundleFlags) error {
 	if err := v.Verify(sig, digest, f.version); err != nil {
 		return err
 	}
-	cmd.Printf("OK: bundle authenticates sha256:%x as a release artifact of %s\n", digest, f.version)
+	fmt.Fprintf(cmd.OutOrStdout(), "OK: bundle authenticates sha256:%x as a release artifact of %s\n", digest, f.version)
 	return nil
 }
 
@@ -78,7 +78,7 @@ func runFetchTrustedRoot(cmd *cobra.Command, out, tufCache string) error {
 		return err
 	}
 	sum := sha256.Sum256(data)
-	cmd.Printf("trusted root written to %s (%d bytes, sha256:%x)\n", out, len(data), sum)
+	fmt.Fprintf(cmd.OutOrStdout(), "trusted root written to %s (%d bytes, sha256:%x)\n", out, len(data), sum)
 	return nil
 }
 
@@ -95,26 +95,26 @@ func printHostStatus(cmd *cobra.Command, cfgPath string) error {
 		return err
 	}
 	if cur == "" {
-		cmd.Println("active collector version: none")
+		fmt.Fprintln(cmd.OutOrStdout(), "active collector version: none")
 	} else {
-		cmd.Printf("active collector version: v%s\n", cur)
+		fmt.Fprintf(cmd.OutOrStdout(), "active collector version: v%s\n", cur)
 	}
 	if vs, err := l.ListVersions(); err == nil {
 		for _, v := range vs {
-			cmd.Printf("  installed: v%s\n", v.Version)
+			fmt.Fprintf(cmd.OutOrStdout(), "  installed: v%s\n", v.Version)
 		}
 	}
 	id, err := readSupervisorInstanceID(cfg.SupervisorStatePath())
 	switch {
 	case err != nil:
-		cmd.Printf("supervisor instance uid: unreadable (%v)\n", err)
+		fmt.Fprintf(cmd.OutOrStdout(), "supervisor instance uid: unreadable (%v)\n", err)
 	case id == "":
-		cmd.Println("supervisor instance uid: not yet created")
+		fmt.Fprintln(cmd.OutOrStdout(), "supervisor instance uid: not yet created")
 	default:
-		cmd.Printf("supervisor instance uid: %s\n", id)
+		fmt.Fprintf(cmd.OutOrStdout(), "supervisor instance uid: %s\n", id)
 	}
 	if j, err := readJournal(cfg.StateDir); err == nil && j != nil {
-		cmd.Printf("UNFINISHED UPDATE: %s -> %s (phase %s); it is repaired when the updater service starts\n", j.From, j.To, j.Phase)
+		fmt.Fprintf(cmd.OutOrStdout(), "UNFINISHED UPDATE: %s -> %s (phase %s); it is repaired when the updater service starts\n", j.From, j.To, j.Phase)
 	}
 	return nil
 }
