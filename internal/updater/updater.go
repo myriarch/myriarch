@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -161,6 +162,21 @@ func absPath(p string) (string, error) {
 	return filepath.Abs(p)
 }
 
+// Run executes myriarch-updater with args (without the program name) and returns the process exit code: 0 on success, 1 on an
+// error. Output (help, the version, command results) goes to stdout, the error message to stderr. The binary's main
+// package passes os.Stdout and os.Stderr; tests pass separate buffers to check the output contract in docs/development.md.
+func Run(args []string, stdout, stderr io.Writer) int {
+	root := NewRootCommand()
+	root.SetArgs(args)
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	if err := root.Execute(); err != nil {
+		fmt.Fprintln(stderr, brand.UpdaterBinary+":", err)
+		return 1
+	}
+	return 0
+}
+
 // NewRootCommand returns the root command: run, container, install,
 // uninstall, start, stop, status, verify-bundle, fetch-trusted-root, licenses,
 // version.
@@ -229,12 +245,12 @@ func NewRootCommand() *cobra.Command {
 			if err := s.Install(); err != nil {
 				return fmt.Errorf("install service: %w", err)
 			}
-			cmd.Printf("service %s installed (config %s)\n", ServiceName, abs)
+			fmt.Fprintf(cmd.OutOrStdout(), "service %s installed (config %s)\n", ServiceName, abs)
 			if startAfter {
 				if err := s.Start(); err != nil {
 					return fmt.Errorf("start service: %w", err)
 				}
-				cmd.Printf("service %s started\n", ServiceName)
+				fmt.Fprintf(cmd.OutOrStdout(), "service %s started\n", ServiceName)
 			}
 			return nil
 		},
@@ -254,7 +270,7 @@ func NewRootCommand() *cobra.Command {
 				if err := fn(s); err != nil {
 					return err
 				}
-				cmd.Println(done)
+				fmt.Fprintln(cmd.OutOrStdout(), done)
 				return nil
 			},
 		}
@@ -271,7 +287,7 @@ func NewRootCommand() *cobra.Command {
 			if err := s.Uninstall(); err != nil {
 				return fmt.Errorf("uninstall service: %w", err)
 			}
-			cmd.Printf("service %s removed\n", ServiceName)
+			fmt.Fprintf(cmd.OutOrStdout(), "service %s removed\n", ServiceName)
 			return nil
 		},
 	}
@@ -290,15 +306,15 @@ func NewRootCommand() *cobra.Command {
 			st, err := s.Status()
 			switch {
 			case errors.Is(err, service.ErrNotInstalled):
-				cmd.Printf("%s: not installed\n", ServiceName)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s: not installed\n", ServiceName)
 			case err != nil:
-				cmd.Printf("%s: unknown (%v)\n", ServiceName, err)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s: unknown (%v)\n", ServiceName, err)
 			case st == service.StatusRunning:
-				cmd.Printf("%s: running\n", ServiceName)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s: running\n", ServiceName)
 			case st == service.StatusStopped:
-				cmd.Printf("%s: stopped\n", ServiceName)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s: stopped\n", ServiceName)
 			default:
-				cmd.Printf("%s: unknown\n", ServiceName)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s: unknown\n", ServiceName)
 			}
 			if statusCfg != "" {
 				return printHostStatus(cmd, statusCfg)
@@ -340,7 +356,7 @@ func NewRootCommand() *cobra.Command {
 		Use:   "version",
 		Short: "Print the version",
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Println(version.Get().String())
+			fmt.Fprintln(cmd.OutOrStdout(), version.Get().String())
 		},
 	})
 	return root

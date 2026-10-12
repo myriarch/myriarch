@@ -148,7 +148,7 @@ func newRootCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Println("schema version:", v)
+			fmt.Fprintln(cmd.OutOrStdout(), "schema version:", v)
 			return nil
 		},
 	}
@@ -158,7 +158,7 @@ func newRootCommand() *cobra.Command {
 		Use:   "version",
 		Short: "Print the version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(version.Get().String())
+			fmt.Fprintln(cmd.OutOrStdout(), version.Get().String())
 		},
 	})
 	return root

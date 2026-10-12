@@ -31,10 +31,14 @@ import (
 	"github.com/myriarch/myriarch/internal/config"
 	"github.com/myriarch/myriarch/internal/domain"
 	"github.com/myriarch/myriarch/internal/refdoc"
+	"github.com/myriarch/myriarch/internal/testutil/clitest"
 	"github.com/myriarch/myriarch/internal/testutil/pgtest"
 )
 
-func TestMain(m *testing.M) { os.Exit(pgtest.RunWithMigratedTemplate(m)) }
+func TestMain(m *testing.M) {
+	clitest.RunAsMain(main) // the process-level output contract (TestOutputContract) re-executes this binary
+	os.Exit(pgtest.RunWithMigratedTemplate(m))
+}
 
 func freeAddr(t *testing.T) string {
 	t.Helper()
@@ -419,33 +423,19 @@ func TestMigrateCommand(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"migrate", "--config", p})
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
 	err := cmd.Execute()
-	_ = w.Close()
-	os.Stdout = old
-	b, _ := io.ReadAll(r)
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if !strings.Contains(string(b), "schema version: 5") {
-		t.Fatalf("migrate output: %q", b)
+	if !strings.Contains(out.String(), "schema version: 5") {
+		t.Fatalf("migrate output: %q", out.String())
 	}
 }
 
 func TestVersionCommand(t *testing.T) {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-	cmd := newRootCommand()
-	cmd.SetArgs([]string{"version"})
-	err := cmd.Execute()
-	_ = w.Close()
-	os.Stdout = old
-	b, _ := io.ReadAll(r)
-	if err != nil || !strings.Contains(string(b), "0.0.0-dev") {
-		t.Fatalf("version: %v %q", err, b)
+	var stdout, stderr bytes.Buffer
+	if code := execute([]string{"version"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "0.0.0-dev") || stderr.Len() != 0 {
+		t.Fatalf("version: exit code %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
 }
 

@@ -7,7 +7,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	// embed the Mozilla root CA set as the fallback trust store (container
@@ -16,13 +15,9 @@ import (
 	// zone database: it only reports zone names as strings.)
 	_ "golang.org/x/crypto/x509roots/fallback"
 
-	"github.com/myriarch/myriarch/internal/brand"
 	"github.com/myriarch/myriarch/internal/sim"
 )
 
 func main() {
-	if err := sim.NewRootCommand().Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, brand.SimBinary+":", err)
-		os.Exit(1)
-	}
+	os.Exit(sim.Run(os.Args[1:], os.Stdout, os.Stderr))
 }

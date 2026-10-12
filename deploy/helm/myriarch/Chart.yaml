@@ -2,8 +2,8 @@ apiVersion: v2
 name: myriarch
 description: "Myriarch server (myriarchd): OpAMP fleet manager for OpenTelemetry Collectors (HA, external PostgreSQL)"
 type: application
-version: 0.1.0-rc.2
-appVersion: "0.1.0-rc.2"
+version: 0.1.0-rc.3
+appVersion: "0.1.0-rc.3"
 kubeVersion: ">=1.30.0-0"
 keywords: [opamp, opentelemetry, fleet-management]
 home: https://myriarch.dev

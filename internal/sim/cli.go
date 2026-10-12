@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"os"
 	"os/signal"
@@ -38,6 +39,21 @@ func loadCAPool(path string) (*x509.CertPool, error) {
 }
 
 func newChurnRNG(seed int64) *rand.Rand { return rand.New(rand.NewPCG(uint64(seed), 0xc4)) }
+
+// Run executes myriarch-sim with args (without the program name) and returns the process exit code: 0 on success, 1 on an
+// error. Output (help, the version, command results) goes to stdout, the error message to stderr. The binary's main
+// package passes os.Stdout and os.Stderr; tests pass separate buffers to check the output contract in docs/development.md.
+func Run(args []string, stdout, stderr io.Writer) int {
+	root := NewRootCommand()
+	root.SetArgs(args)
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	if err := root.Execute(); err != nil {
+		fmt.Fprintln(stderr, brand.SimBinary+":", err)
+		return 1
+	}
+	return 0
+}
 
 // NewRootCommand returns the root command (run, version).
 func NewRootCommand() *cobra.Command {
@@ -111,7 +127,7 @@ func NewRootCommand() *cobra.Command {
 		Use:   "version",
 		Short: "Print the version",
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Println(version.Get().String())
+			fmt.Fprintln(cmd.OutOrStdout(), version.Get().String())
 		},
 	})
 	return root
