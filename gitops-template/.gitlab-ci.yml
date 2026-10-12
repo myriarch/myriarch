@@ -30,7 +30,7 @@ workflow:
 stages: [validate, render, notify]
 
 variables:
-  MYRCTL_IMAGE: registry.example.com/myriarch/myrctl:0.1.0-rc.3
+  MYRCTL_IMAGE: registry.example.com/myriarch/myrctl:0.1.0-rc.4
   CONFIG_DIR: config
   COMPONENTS: ci/components-otelcol-contrib-0.162.0.json
 
