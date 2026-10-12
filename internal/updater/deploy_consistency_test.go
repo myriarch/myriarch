@@ -414,6 +414,7 @@ func TestVersionLdflagsUseOnePackage(t *testing.T) {
 		"deploy/release/goreleaser.yaml":         "",
 		"scripts/build-image-crane.sh":           "${VERSION_PKG}",
 		"scripts/build-collector-image-crane.sh": "${VERSION_PKG}",
+		"ci/tests/release-smoke-test.sh":         "${VERSION_PKG}", // builds the binaries that its docker double runs; derives the package from go.mod
 	}
 	for _, f := range dockerfiles {
 		uses[f] = "${VERSION_PKG}"

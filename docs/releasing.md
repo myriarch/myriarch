@@ -203,7 +203,8 @@ been observed yet.
 
 1. **Run the kind smoke test once before you tag.** `smoke-kind` runs only after publication, where a failure can only be fixed
    forward, and no CI job runs kind. On a machine with a container runtime run `make kind-probe` (the same cluster configuration
-   and chart), or `ci/release/smoke.sh kind` against an image that you built locally, and fix what it finds before the tag.
+   and chart), and fix what it finds before the tag. `ci/release/smoke.sh kind` is not a substitute: it always installs the published
+   image of the tag, which does not exist before the tag.
 2. **Observe re-run approvals.** After the first candidate went through gate 2, re-run one failed or completed job on a throw-away
    candidate if you can, and write down whether "Re-run failed jobs" asks for gate 1 or gate 2 again. The runbook and the security
    model state the safe reading (no new approval for the privileged jobs before `finalize`) until you have observed it.

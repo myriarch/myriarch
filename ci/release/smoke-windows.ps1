@@ -111,11 +111,26 @@ function Invoke-Program {
   return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $text.Trim() }
 }
 
+# The version of a program is its result, so it must be on stdout (ci/release/smoke.sh enforces the same for the images, see "CLI output"
+# in docs/development.md). stderr is read apart from it: a program that prints the version on the wrong stream fails here as well,
+# which the merged output of Invoke-Program could not detect (myriarch-updater.exe did so in v0.1.0-rc.2).
 function Assert-Version {
   param([string]$Exe, [string]$Label)
-  $r = Invoke-Program -File $Exe -Arguments @('version')
-  if ($r.ExitCode -ne 0) { Stop-Smoke 'program_failed' "$Label does not run: $($r.Output)" }
-  if ((Get-FirstWord $r.Output) -cne $Version) { Stop-Smoke 'program_version' "$Label reports '$(Get-FirstWord $r.Output)', expected $Version" }
+  $errFile = [IO.Path]::GetTempFileName()
+  try {
+    $stdout = (& $Exe version 2>$errFile | Out-String).Trim()
+    $code = $LASTEXITCODE
+    $stderr = ''
+    $raw = Get-Content -LiteralPath $errFile -Raw
+    if ($raw) { $stderr = $raw.Trim() }
+  } finally {
+    Remove-Item -LiteralPath $errFile -Force -ErrorAction SilentlyContinue
+  }
+  $firstErr = ($stderr -split "`r?`n" | Select-Object -First 1)
+  if ($code -ne 0) { Stop-Smoke 'program_failed' "$Label does not run (exit code ${code}): $stdout $stderr" }
+  if ((Get-FirstWord $stdout) -cne $Version) {
+    Stop-Smoke 'program_version' "$Label reports '$(Get-FirstWord $stdout)' on stdout, expected $Version (stderr: '$firstErr')"
+  }
   Write-Log "$Label : version $Version"
 }
 
@@ -300,6 +315,13 @@ function Invoke-Install {
     # cosign.exe in a directory that only administrators can write (the installer refuses a verifier anywhere else)
     $cosignDir = Join-Path $env:ProgramFiles 'cosign'
     New-Item -ItemType Directory -Path $cosignDir -Force | Out-Null
+    # Make the owner and the ACL what an administrator would set up, whatever the runner image or the token of the job gives a new
+    # directory (the installer's Test-AdminOnlyDirectory accepts only SYSTEM, Administrators or TrustedInstaller as owner and no other
+    # account with write access). Best effort: when icacls fails, the installer decides on the state that the directory has.
+    & icacls.exe $cosignDir /setowner '*S-1-5-32-544' | Out-Null
+    $ownerCode = $LASTEXITCODE
+    & icacls.exe $cosignDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+    if ($ownerCode -ne 0 -or $LASTEXITCODE -ne 0) { Write-Log "warning: icacls could not set the owner and the ACL of $cosignDir (exit codes $ownerCode and $LASTEXITCODE)" }
     $cosignExe = Join-Path $cosignDir 'cosign.exe'
     Copy-Item -LiteralPath $Cosign -Destination $cosignExe -Force
     $v = Invoke-Program -File $cosignExe -Arguments @('version')

@@ -10,6 +10,11 @@
 # docker (PATH) are stubs that log their arguments (one per line, a "----" line between calls) and answer from state files.
 # Nothing here talks to the network, starts a container or listens on a port. smoke-windows.ps1 gets a parse check and a test of its
 # parameter handling (needs pwsh; the Windows jobs of the release run the rest).
+#
+# One section is not a stub: the docker double of "smoke.sh image-run against the real binaries" runs the real programs of this tree
+# (built with the version of the test, about a minute of Go builds) for `docker run`, with their own stdout and stderr, and takes the
+# entrypoints and programs of the images from KINDS in scripts/lib/oci_image.py. It reproduces the failure of the v0.1.0-rc.2 image
+# check (a program that prints its version to stderr) and needs go; without go it is skipped, and in CI it is required.
 set -uo pipefail
 # shellcheck source=ci/tests/lib-test.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
@@ -197,7 +202,28 @@ exit 0'
   run)
     case "$*" in
       *"--entrypoint /bin/sh"*) [ ! -f "${STUB_STATE}/docker-has-shell" ] || exit 0; echo "exec: /bin/sh: not found" >&2; exit 127 ;;
-      *) printf "%s (abc1234, 2026-01-01T00:00:00Z, go1.26, linux/amd64)\n" "${STUB_IMAGE_VERSION}" ;;
+      *) if [ -n "${STUB_NATIVE:-}" ]; then
+           # the double of the contract test: run the program of this tree that the image would run, with its own stdout and stderr
+           shift; entry=""
+           while [ "$#" -gt 0 ]; do
+             case "$1" in
+               --rm|--read-only) shift ;;
+               --network) shift 2 ;;
+               --entrypoint) entry="$2"; shift 2 ;;
+               -*) echo "docker: the double does not know the flag $1" >&2; exit 125 ;;
+               *) break ;;
+             esac
+           done
+           ref="$1"; shift
+           repo="${ref%%@*}"; repo="${repo%:*}"
+           key="$(printf "%s" "${repo}" | tr / _)"
+           [ -n "${entry}" ] || entry="$(cat "${STUB_STATE}/native/entrypoint-${key}" 2>/dev/null)"
+           [ -n "${entry}" ] || { echo "docker: no entrypoint known for ${repo}" >&2; exit 125; }
+           grep -qxF "${entry}" "${STUB_STATE}/native/programs-${key}" || { echo "exec: ${entry}: no such file in ${repo}" >&2; exit 127; }
+           basename "${entry}" >> "${STUB_CALLS}/native-ran.txt"
+           exec "${STUB_NATIVE}/$(basename "${entry}")" "$@"
+         fi
+         printf "%s (abc1234, 2026-01-01T00:00:00Z, go1.26, linux/amd64)\n" "${STUB_IMAGE_VERSION}" ;;
     esac ;;
 esac
 exit 0'
@@ -442,6 +468,92 @@ expect_fail "image-run: an image by tag only" '\[input_invalid\]' run_smoke imag
 expect_fail "image-run: an unknown kind" 'usage:' run_smoke image-run --image "${SERVER_REPO}@${SIDX}" --kind collector --version "${VER}"
 expect_fail "image-run: a missing version" 'usage:' run_smoke image-run --image "${SERVER_REPO}@${SIDX}" --kind server
 
+# The contract with the binaries: smoke.sh reads the version of every program of an image from stdout. The docker double runs the
+# real programs of this tree (built with the version of the test) instead of printing a canned version, so a program that writes its
+# version to stderr fails here. This is the defect that stopped the v0.1.0-rc.2 image check: `myriarch-sim version` printed to stderr.
+echo "smoke.sh image-run against the real binaries of this tree"
+NATIVE="${TMP_BASE}/native"
+build_native() {
+  local b VERSION_PKG
+  # the package of the build metadata comes from the module path, like in every other build file (internal/updater/deploy_consistency_test.go)
+  VERSION_PKG="$(sed -n 's/^module //p' "${ROOT}/go.mod")/internal/version"
+  mkdir -p "${NATIVE}"
+  for b in myriarchd myrctl myriarch-sim myriarch-updater; do
+    ( cd "${ROOT}" && CGO_ENABLED=0 go build -trimpath \
+        -ldflags "-X ${VERSION_PKG}.Version=${VER} -X ${VERSION_PKG}.Commit=${COMMIT:0:7} -X ${VERSION_PKG}.BuildDate=2026-01-01T00:00:00Z" \
+        -o "${NATIVE}/${b}" "./cmd/${b}" ) || return 1
+  done
+}
+# native_images: the entrypoints and the programs of both images from KINDS in scripts/lib/oci_image.py (loaded by its path, so that
+# a changed entrypoint or a new companion changes this test), one file per repository for the docker double
+native_images() {
+  mkdir -p "${STUB_STATE}/native"
+  python3 -I - "${ROOT}/scripts/lib/oci_image.py" "${STUB_STATE}/native" "${SERVER_REPO}" "${UPDATER_REPO}" <<'PY'
+import importlib.util, os, sys
+
+spec = importlib.util.spec_from_file_location("oci_image", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+out = sys.argv[2]
+for kind, repo in (("server", sys.argv[3]), ("updater", sys.argv[4])):
+    k = mod.KINDS[kind]
+    key = repo.replace("/", "_")
+    d = os.path.dirname(k["entrypoint"])
+    with open(os.path.join(out, "entrypoint-" + key), "w") as f:
+        f.write(k["entrypoint"] + "\n")
+    with open(os.path.join(out, "programs-" + key), "w") as f:
+        f.write("".join("%s/%s\n" % (d, name) for name in [k["binary"]] + k["companions"]))
+    with open(os.path.join(out, "binaries-" + kind), "w") as f:
+        f.write("".join(sorted(name + "\n" for name in [k["binary"]] + k["companions"])))
+PY
+}
+ran_is() { [ "$(LC_ALL=C sort "${STUB_CALLS}/native-ran.txt")" = "$(cat "${STUB_STATE}/native/binaries-$1")" ]; }
+if have go && build_native >"${TMP_BASE}/native-build.log" 2>&1; then
+  new_root native-server
+  native_images
+  export STUB_NATIVE="${NATIVE}"
+  expect_ok "native: the server image by digest (myriarchd, myrctl and myriarch-sim report the version on stdout)" run_smoke image-run --image "${SERVER_REPO}@${SIDX}" --kind server --version "${VER}"
+  assert "native: smoke.sh ran exactly the programs of the server image (KINDS)" ran_is server
+  new_root native-server-tag
+  native_images
+  expect_ok "native: the server image by tag" run_smoke image-run --image "${SERVER_REPO}@${SIDX}" --kind server --version "${VER}" --pull-tag "${VER}"
+  new_root native-updater
+  native_images
+  expect_ok "native: the updater image by digest" run_smoke image-run --image "${UPDATER_REPO}@${UIDX}" --kind updater --version "${VER}"
+  assert "native: smoke.sh ran exactly the programs of the updater image (KINDS)" ran_is updater
+  new_root native-updater-tag
+  native_images
+  expect_ok "native: the updater image by tag" run_smoke image-run --image "${UPDATER_REPO}@${UIDX}" --kind updater --version "${VER}" --pull-tag "${VER}"
+
+  # negative control: the same programs, but one writes its version to stderr, as myriarch-sim and myriarch-updater did in rc.2
+  for b in myriarchd myrctl myriarch-sim myriarch-updater; do
+    new_root "native-stderr-${b}"
+    native_images
+    mkdir -p "${R}/native-bin"
+    cp "${NATIVE}"/* "${R}/native-bin/"
+    mv "${R}/native-bin/${b}" "${R}/native-bin/${b}.real"
+    printf '#!/bin/sh\nexec "$(dirname "$0")/%s.real" "$@" >&2\n' "${b}" > "${R}/native-bin/${b}"
+    chmod +x "${R}/native-bin/${b}"
+    kind=server; [ "${b}" != myriarch-updater ] || kind=updater
+    repo="${SERVER_REPO}@${SIDX}"; [ "${kind}" = server ] || repo="${UPDATER_REPO}@${UIDX}"
+    STUB_NATIVE="${R}/native-bin" expect_fail "native: ${b} with the version on stderr is refused" "\\[image_version\\] ${b}.* reports ''" run_smoke image-run --image "${repo}" --kind "${kind}" --version "${VER}"
+  done
+  new_root native-wrong-version
+  native_images
+  expect_fail "native: a binary of another version is refused" '\[image_version\]' run_smoke image-run --image "${SERVER_REPO}@${SIDX}" --kind server --version 9.9.8
+  new_root native-missing-program
+  native_images
+  : > "${STUB_STATE}/native/programs-ghcr.io_myriarch_myriarch-updater"
+  expect_fail "native: a program that the image does not hold is refused" '\[image_version\].*does not run' run_smoke image-run --image "${UPDATER_REPO}@${UIDX}" --kind updater --version "${VER}"
+  unset STUB_NATIVE
+else
+  if [ "${CI:-}" = true ]; then
+    fail "the binaries of this tree could not be built for the contract test: $(tail -n 3 "${TMP_BASE}/native-build.log" 2>/dev/null | tr '\n' ' ')"
+  else
+    echo "  note  go is not available or the build failed: the contract test against the real binaries is skipped"
+  fi
+fi
+
 # ---- linux -----------------------------------------------------------------------------------------------------------------
 echo "smoke.sh linux"
 # make_linux_release ARCH: serves checksums.txt, its bundle, the updater archive (with a stub installer) and the bare updater
@@ -665,8 +777,33 @@ if have pwsh; then
   expect_fail "smoke-windows.ps1: Install with a malformed commit" 'usage:.*Commit is not valid' winerr -Mode Install -Tag v1.0.0 -Version 1.0.0 -Cosign c -WindowsSigning off -Commit abc
   assert "smoke-windows.ps1: a usage error exits with 2" test "$(winexit -Mode Bogus)" = 2
   if pwsh -NoProfile -Command 'if ($IsWindows) { exit 0 } else { exit 1 }' >/dev/null 2>&1; then
-    echo "  note  running on Windows: the refusal on other platforms is not tested"
+    echo "  note  running on Windows: the refusal on other platforms and the test of Assert-Version are not run"
   else
+    # Assert-Version reads stdout only (the merged output of Invoke-Program accepted the version on stderr in v0.1.0-rc.2); programs are
+    # shell scripts here, the function is cut out of the script because the script itself runs on Windows only
+    PSV="${TMP_BASE}/assert-version"
+    mkdir -p "${PSV}"
+    printf '#!/bin/sh\necho "%s (abc1234, 2026-01-01T00:00:00Z, go1.26, windows/amd64)"\n' "${VER}" > "${PSV}/stdout"
+    printf '#!/bin/sh\necho "%s (abc1234, 2026-01-01T00:00:00Z, go1.26, windows/amd64)" >&2\n' "${VER}" > "${PSV}/stderr"
+    printf '#!/bin/sh\necho "boom" >&2\nexit 3\n' > "${PSV}/failing"
+    chmod +x "${PSV}/stdout" "${PSV}/stderr" "${PSV}/failing"
+    cat > "${PSV}/harness.ps1" <<'PS'
+param([string]$Script, [string]$Exe, [string]$Version)
+$ErrorActionPreference = 'Stop'
+function Write-Log { param([string]$Message) [Console]::Error.WriteLine("[log] $Message") }
+function Stop-Smoke { param([string]$Code, [string]$Message) [Console]::Error.WriteLine("[smoke-windows] ERROR [$Code] $Message"); exit 1 }
+$text = Get-Content -Raw -LiteralPath $Script
+foreach ($name in 'Get-FirstWord', 'Assert-Version') {
+  $m = [regex]::Match($text, "(?s)function $name \{.*?\r?\n\}\r?\n")
+  if (-not $m.Success) { Stop-Smoke 'harness' "function $name not found" }
+  . ([scriptblock]::Create($m.Value))
+}
+Assert-Version -Exe $Exe -Label 'program'
+PS
+    psv() { pwsh -NoProfile -NonInteractive -File "${PSV}/harness.ps1" -Script "${PS1}" -Exe "$1" -Version "${VER}" 2>&1; }
+    expect_ok "smoke-windows.ps1: Assert-Version accepts the version on stdout" psv "${PSV}/stdout"
+    expect_fail "smoke-windows.ps1: Assert-Version refuses the version on stderr" "\\[program_version\\] program reports '' on stdout" psv "${PSV}/stderr"
+    expect_fail "smoke-windows.ps1: Assert-Version refuses a failing program" '\[program_failed\].*exit code 3.*boom' psv "${PSV}/failing"
     expect_fail "smoke-windows.ps1: valid parameters on another platform are refused" '\[unsupported_platform\]' winerr -Mode Install -Tag v1.0.0 -Version 1.0.0 -Cosign c -WindowsSigning off
   fi
 else

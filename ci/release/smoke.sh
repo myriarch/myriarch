@@ -27,8 +27,9 @@
 #            Environment: TOOLS_BIN (cosign), SERVER_INDEX_DIGEST, UPDATER_INDEX_DIGEST. The commit (--commit or RELEASE_COMMIT) is
 #            optional: with it the signature is also checked against the exact identity including the commit.
 # image-run  Pulls the image (by digest, or with --pull-tag by REPO:TAG without credentials and then checks that the tag points
-#            at the digest), checks user 65532:65532 and the architecture of the host, prints the version of every binary with
-#            --network none --read-only, and proves that the image has no shell. Without --pull-tag the credentials of the host
+#            at the digest), checks user 65532:65532 and the architecture of the host, runs `version` of every binary with
+#            --network none --read-only and reads it from stdout (the output contract of the binaries, "CLI output" in
+#            docs/development.md), and proves that the image has no shell. Without --pull-tag the credentials of the host
 #            are used (the verify-images job runs before the packages are public).
 # kind       Creates a kind cluster (hack/kind/cluster.yaml, node image of hack/kind/versions.env), installs PostgreSQL and the
 #            chart of this checkout (the tag) with the default image, and checks the rollout, the non-root pods, /healthz,
@@ -452,7 +453,8 @@ host_arch() {
   esac
 }
 
-# version_of_output OUTPUT: the first word of the "version" output.
+# first_word OUTPUT: the first word of the "version" output (stdout only: a program that prints its version to stderr fails the
+# check, see "CLI output" in docs/development.md).
 first_word() { local w; read -r w _ <<< "$1" || true; printf '%s' "${w}"; }
 
 run_version() { # ref label entrypoint-or-empty
