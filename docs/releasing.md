@@ -336,8 +336,9 @@ the archives, so they can follow the release:
    result of the `cosign.exe` directory from the log of `smoke-windows`; the re-run observation may need a throw-away
    candidate, so it can follow in a pull request of its own.
 
-Texts in the archives (`README.md`, `CHANGELOG.md`, the files of `deploy/`) are not touched here: they are right already, or the
-next release corrects them.
+Texts in the archives (the files in the table of [Review the texts before every tag](#review-the-texts-before-every-tag), among
+them `README.md`, `CHANGELOG.md` and the chart) are not touched here: they are right already, or the next release corrects them.
+Other files of the repository, such as `deploy/README.md`, are not in an archive and can follow the release like the pages above.
 
 ## rc numbering and re-runs
 
