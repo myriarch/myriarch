@@ -32,12 +32,13 @@ The chart is part of the repository. Take the tag of the release you want to ins
 `ghcr.io/myriarch/myriarch:<appVersion of the tag>`:
 
 ```bash
-git clone --depth 1 --branch v0.1.0 https://github.com/myriarch/myriarch.git
+TAG=v0.1.0-rc.3      # the release you install; the newest one is on https://github.com/myriarch/myriarch/releases
+git clone --depth 1 --branch "${TAG}" https://github.com/myriarch/myriarch.git
 ```
 
 The images `ghcr.io/myriarch/myriarch` (the server) and `ghcr.io/myriarch/myriarch-updater` are published with the tags
-`X.Y.Z` and `X.Y` (`X.Y.Z-rc.N` for release candidates). There is no tag `latest`. **They exist from the first release
-on.** Pin the image by digest in production (`image.digest`, see below).
+`X.Y.Z` and `X.Y` (`X.Y.Z-rc.N` for release candidates). There is no tag `latest`. **They exist from v0.1.0-rc.3 on.** Pin
+the image by digest in production (`image.digest`, see below).
 
 ### Build the image yourself
 

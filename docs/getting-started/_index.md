@@ -8,7 +8,7 @@ These pages are the tutorials of the documentation. They teach by doing: you fol
 working system. Two paths lead to it. From source, Myriarch runs on a development machine without a container runtime
 and without external services: `myriarchd dev` starts the server with an embedded PostgreSQL, the example GitOps repository
 and well-known development logins, and `myriarch-sim` connects simulated collectors to it. With Docker Compose, one file
-starts the server, PostgreSQL and the simulator from the release images (available from v0.1.0).
+starts the server, PostgreSQL and the simulator from the release images (published from v0.1.0-rc.3 on).
 
 | Page | What you get |
 |---|---|

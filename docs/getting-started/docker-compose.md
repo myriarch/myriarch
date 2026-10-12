@@ -33,22 +33,23 @@ Go or Node.js toolchain when you use the release images.
 
 ## Start with the release images
 
-Available from v0.1.0. The images are `ghcr.io/myriarch/myriarch` (the server, `myrctl` and the simulator) with the tags
-`X.Y.Z` and `X.Y`, and `X.Y.Z-rc.N` for release candidates. There is no tag `latest`. Before the first release the images
-do not exist; use the checkout path below instead.
+The release images are published from v0.1.0-rc.3 on. The images are `ghcr.io/myriarch/myriarch` (the server, `myrctl` and
+the simulator) with the tags `X.Y.Z` and `X.Y`, and `X.Y.Z-rc.N` for release candidates. There is no tag `latest`. For a
+commit without a release, use the checkout path below.
 
 Download the Compose file of the release and start it:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/myriarch/myriarch/v0.1.0/deploy/compose/quickstart.yaml
+TAG=v0.1.0-rc.3      # the release you start; the newest one is on https://github.com/myriarch/myriarch/releases
+curl -fsSLO "https://raw.githubusercontent.com/myriarch/myriarch/${TAG}/deploy/compose/quickstart.yaml"
 docker compose -f quickstart.yaml up -d
 docker compose -f quickstart.yaml logs -f myriarchd
 ```
 
-The file is self-contained. Its default image tag is the version of the release it belongs to, so the file of every tag,
-release candidates included, starts the image of that tag (`ghcr.io/myriarch/myriarch:0.1.0` in the file of `v0.1.0`; for a
-release candidate, put its tag `v<version>` in the URL). `QUICKSTART_IMAGE` selects any other image, for example one that you
-pinned by digest (`ghcr.io/myriarch/myriarch@sha256:...`) or copied to your own registry:
+The file is self-contained. Its default image tag is the version of the release it belongs to, so the file of every release,
+release candidates included, starts the image of that release (`ghcr.io/myriarch/myriarch:0.1.0-rc.3` in the file of
+`v0.1.0-rc.3`). `QUICKSTART_IMAGE` selects any other image, for example one that you pinned by digest
+(`ghcr.io/myriarch/myriarch@sha256:...`) or copied to your own registry:
 
 ```bash
 QUICKSTART_IMAGE=ghcr.io/myriarch/myriarch@sha256:<digest> docker compose -f quickstart.yaml up -d
@@ -72,7 +73,7 @@ The containers run as the user `65532` with a read-only root file system, an emp
 creates the volume `myriarchd-data` writable for it. The image has no shell, so the services have no health check;
 `docker compose ps` shows them as running.
 
-## Start from a checkout (before the first release)
+## Start from a checkout
 
 Without a release image, build the images from the source tree. The build runs inside Docker (Node.js for the web UI, Go
 for the binaries), so no toolchain is needed on the host, but it takes several minutes the first time:
