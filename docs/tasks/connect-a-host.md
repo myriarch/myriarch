@@ -62,7 +62,8 @@ What the script verifies, and why you may be asked for more options:
   `ws://` to the server and skipping the Sigstore check.
 - **Downloads are retried after a transient failure.** A timeout, a failed connection or HTTP 408, 429, 500, 502, 503 or 504
   is retried with pauses of 1, 2, 4, ... seconds, and no attempt starts later than 2 minutes after the first one, so a short
-  outage of github.com does not stop the installation. Any other error, for example a 404, stops it at once. Both end with
+  outage of github.com does not stop the installation. Behind an `HTTPS_PROXY` the status of the proxy decides when it refuses
+  the connection (503 is retried, 407 is not). Any other error, for example a 404, stops it at once. Both end with
   `download_failed`, and the message names the number of attempts. The checks below apply to every attempt unchanged.
 - **Collector and supervisor** are verified with their **SHA-256** file (`<asset>.sha256`) **and** the **Sigstore bundle**
   (`<asset>.sigstore.json`) before anything runs (`--verify-signatures require`, the default). The verifier is `cosign`

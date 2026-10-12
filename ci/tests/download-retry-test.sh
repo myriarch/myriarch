@@ -16,6 +16,9 @@
 #  - The functions download() and fetch() are loaded from the real scripts (the installer without its last line "main", smoke.sh
 #    without everything from its "# ---- main ---" marker) into a small harness. A curl shim in front of PATH logs its arguments,
 #    sends https://github.com/ to the server, drops the https-only flags (the server speaks plain http) and runs the real curl.
+#  - Two more instances of the server play an HTTPS proxy that answers every CONNECT with 503 or 407 (the cases X1 to X4: the
+#    status of the proxy decides, because curl reports the status 000 of the server). Those cases keep the https URL and set
+#    HTTPS_PROXY; no tunnel is ever opened.
 #  - Most cases run on a fake clock: the harness replaces sleep by a function that advances $SECONDS, so the 120 s window takes no
 #    wall time. The cases L9 (the full installer) and S5 (fetch) run on the real clock.
 #
@@ -69,15 +72,27 @@ cat > "${W}/rules.json" <<RULES
   "/s5/${SMOKE_FILE}": [502, 503]
 }
 RULES
-LOG="${W}/server.log"; : > "${LOG}"
-PORT_FILE="${W}/port"
-python3 -I "${SERVER}" --rules "${W}/rules.json" --log "${LOG}" --port-file "${PORT_FILE}" --root "${ROOT_DIR}" > "${W}/server.out" 2>&1 &
-SRV_PID=$!
-stop_server() { kill "${SRV_PID}" 2>/dev/null; wait "${SRV_PID}" 2>/dev/null; cleanup_tests; }
+printf '{"/connect": 503}\n' > "${W}/rules-proxy503.json"
+printf '{"/connect": 407}\n' > "${W}/rules-proxy407.json"
+SRV_PIDS=()
+stop_server() { local p; for p in ${SRV_PIDS[@]+"${SRV_PIDS[@]}"}; do kill "${p}" 2>/dev/null; wait "${p}" 2>/dev/null; done; cleanup_tests; }
 trap stop_server EXIT
-for _ in $(seq 1 100); do [ -s "${PORT_FILE}" ] && break; sleep 0.1; done
-[ -s "${PORT_FILE}" ] || { echo "the fault server did not start: $(cat "${W}/server.out")" >&2; exit 1; }
-PORT="$(cat "${PORT_FILE}")"
+# start_server NAME RULES-FILE: starts an instance with the log ${W}/NAME.log and sets the variable PORT_OF_NAME (NAME in capitals)
+start_server() {
+  local name="$1" rules="$2" pf="${W}/$1.port" var
+  : > "${W}/$1.log"
+  python3 -I "${SERVER}" --rules "${rules}" --log "${W}/$1.log" --port-file "${pf}" --root "${ROOT_DIR}" > "${W}/$1.out" 2>&1 &
+  SRV_PIDS+=("$!")
+  for _ in $(seq 1 100); do [ -s "${pf}" ] && break; sleep 0.1; done
+  [ -s "${pf}" ] || { echo "the fault server ${name} did not start: $(cat "${W}/$1.out")" >&2; exit 1; }
+  var="PORT_OF_$(printf '%s' "${name}" | tr '[:lower:]' '[:upper:]')"
+  printf -v "${var}" '%s' "$(cat "${pf}")"
+}
+start_server server "${W}/rules.json"
+start_server proxy503 "${W}/rules-proxy503.json"
+start_server proxy407 "${W}/rules-proxy407.json"
+LOG="${W}/server.log"
+PORT="${PORT_OF_SERVER}"
 # a port that nothing listens on: bind an ephemeral port and close it again
 CLOSED_PORT="$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 
@@ -96,7 +111,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --proto | --proto-redir) shift 2 ;;
     --tlsv1.2) shift ;;
-    https://github.com/*) args+=("http://127.0.0.1:${FAULT_PORT}/${1#https://github.com/}"); shift ;;
+    https://github.com/*) if [ -n "${SHIM_KEEP_HTTPS:-}" ]; then args+=("$1"); else args+=("http://127.0.0.1:${FAULT_PORT}/${1#https://github.com/}"); fi; shift ;;
     *) args+=("$1"); shift ;;
   esac
 done
@@ -134,10 +149,15 @@ EOF2
 assert "the installer ends with exactly one line 'main' (the harness cuts it)" eq "$(grep -cx 'main' "${INSTALLER}")" 1
 assert "smoke.sh has the marker '# ---- main ---' (the harness cuts from it)" eq "$(grep -c '^# ---- main ---' "${SMOKE}")" 1
 
-# run_case VAR-PREFIX command...: runs a command with the shim in PATH, sets OUT, RC and ELAPSED
+# run_case command...: runs a command with the shim in PATH, sets OUT, RC and ELAPSED. The proxy variables of the environment are
+# removed; with PROXY_URL set the command runs behind HTTPS_PROXY=$PROXY_URL and the shim leaves the https URL alone.
 run_case() {
   : > "${W}/shim.log"
-  OUT="$(PATH="${SHIM}:${PATH}" SHIM_LOG="${W}/shim.log" FAULT_PORT="${FAULT_PORT:-${PORT}}" "$@" 2>&1)"; RC=$?
+  OUT="$(
+    unset http_proxy https_proxy all_proxy no_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY
+    if [ -n "${PROXY_URL:-}" ]; then export HTTPS_PROXY="${PROXY_URL}" SHIM_KEEP_HTTPS=1; fi
+    PATH="${SHIM}:${PATH}" SHIM_LOG="${W}/shim.log" FAULT_PORT="${FAULT_PORT:-${PORT}}" "$@" 2>&1
+  )"; RC=$?
   ELAPSED="$(printf '%s\n' "${OUT}" | sed -n 's/^elapsed=//p' | tail -n 1)"
   return 0
 }
@@ -191,12 +211,36 @@ assert "L7 every call has --proto-redir =https" eq "$(pair_calls --proto-redir =
 assert "L7 every call has --tlsv1.2" eq "$(flag_calls --tlsv1.2)" 5
 assert "L7 every call has --connect-timeout 20" eq "$(pair_calls --connect-timeout 20)" 5
 assert "L7 every call has --max-time 900" eq "$(pair_calls --max-time 900)" 5
-assert "L7 every call reads the status with --write-out" eq "$(pair_calls --write-out '%{http_code}')" 5
+assert "L7 every call reads the statuses with --write-out" eq "$(pair_calls --write-out '%{http_code} %{http_connect}')" 5
 assert "L7 no curl-internal retry option" eq "$(grep -c -E '^--retry' "${W}/shim-l1.log")" 0
 # L8: a missing local file (lab mode) is permanent
 dl 1 "file://${W}/does-not-exist" l8
 assert "L8 file:// not found: [download_failed], not retried, one attempt" has '\[download_failed\].*not retried, 1 attempt\)'
 assert "L8 no pause" between "${ELAPSED}" 0 1
+
+# X1/X2: an HTTPS proxy that refuses CONNECT. curl reports the status 000 of the server (exit 22 on curl 8.x, 56 on curl 7.x);
+# the status of the proxy decides.
+printf '\n== a proxy that refuses CONNECT ==\n'
+preqs() { grep -c -x '/connect [0-9]*' "${W}/$1.log"; }
+PROXY_URL="http://127.0.0.1:${PORT_OF_PROXY503}" dl 0 "${GH}/x1/payload.bin" x1
+assert "X1 install-linux.sh: CONNECT 503 is retried for the whole window" has '\[download_failed\].*\(proxy HTTP 503; retry window of 120 s used up, 8 attempts\)'
+assert "X1 install-linux.sh: eight CONNECT requests" eq "$(preqs proxy503)" 8
+assert "X1 install-linux.sh: the window is used up, not exceeded" between "${ELAPSED}" 120 122
+PROXY_URL="http://127.0.0.1:${PORT_OF_PROXY407}" dl 0 "${GH}/x2/payload.bin" x2
+assert "X2 install-linux.sh: CONNECT 407 is not retried" has '\[download_failed\].*\(proxy HTTP 407; not retried, 1 attempt\)'
+assert "X2 install-linux.sh: one CONNECT request" eq "$(preqs proxy407)" 1
+assert "X2 install-linux.sh: no pause" between "${ELAPSED}" 0 1
+
+# X5: the classification itself, for the exit codes of curl 7.x too (a proxy refusal is exit 56 there). "rc status" pairs.
+transient() { # script rc status: prints yes or no (only the function download_transient is loaded)
+  bash -c 'eval "$(awk "\$0 == \"download_transient() {\" { p = 1 } p { print } p && \$0 == \"}\" { exit }" "$1")"; if download_transient "$2" "$3"; then echo yes; else echo no; fi' _ "$1" "$2" "$3"
+}
+for pair in "7 000 yes" "28 000 yes" "56 000 yes" "56 503 yes" "56 407 no" "56 404 no" "22 503 yes" "22 407 no" "22 404 no" "22 000 no" "35 000 no" "60 000 no"; do
+  read -r x_rc x_status x_want <<< "${pair}"
+  for script in "${INSTALLER}" "${SMOKE}"; do
+    assert "X5 $(basename "${script}"): exit ${x_rc}, status ${x_status}: transient=${x_want}" eq "$(transient "${script}" "${x_rc}" "${x_status}")" "${x_want}"
+  done
+done
 
 # L9: the whole installer on the real clock, the failure of the release run of v0.1.0-rc.3 (four 504 on a .sha256 file in a row)
 printf '\n== install-linux.sh as a whole (real clock, about 15 s) ==\n'
@@ -234,7 +278,7 @@ assert "S4 -q is the first argument of every call" eq "$(awk 'prev == "----" || 
 assert "S4 --proto =https and --proto-redir =https in every call" eq "$(( $(spair --proto =https) + $(spair --proto-redir =https) ))" 10
 assert "S4 --tlsv1.2 and -fsSL in every call" eq "$(( $(sflag --tlsv1.2) + $(sflag -fsSL) ))" 10
 assert "S4 the existing timeouts" eq "$(( $(spair --connect-timeout 20) + $(spair --max-time 900) ))" 10
-assert "S4 the status is read with -w" eq "$(spair -w '%{http_code}')" 5
+assert "S4 the statuses are read with -w" eq "$(spair -w '%{http_code} %{http_connect}')" 5
 assert "S4 no curl-internal retry option" eq "$(grep -c -E '^--retry' "${W}/shim-s1.log")" 0
 # S5: the real sleep path (502, 503, then 200: pauses of 1 and 2 s)
 start=$SECONDS
@@ -244,6 +288,18 @@ assert "S5 real clock: 502, 503, then 200: success" eq "${RC}" 0
 assert "S5 three requests" eq "$(reqs "/s5/${SMOKE_FILE}")" 3
 assert "S5 the pauses were real (3 s)" between "${wall}" 3 10
 
+# X3/X4: the same for smoke.sh fetch()
+mkdir -p "${W}/fetch-x3" "${W}/fetch-x4"
+: > "${W}/proxy503.log"; : > "${W}/proxy407.log"
+PROXY_URL="http://127.0.0.1:${PORT_OF_PROXY503}" fe x3
+assert "X3 smoke.sh: CONNECT 503 is retried for the whole window" has '\[download_failed\].*\(proxy HTTP 503; retry window of 120 s used up, 8 attempts\)'
+assert "X3 smoke.sh: eight CONNECT requests" eq "$(preqs proxy503)" 8
+assert "X3 smoke.sh: the window is used up, not exceeded" between "${ELAPSED}" 120 122
+PROXY_URL="http://127.0.0.1:${PORT_OF_PROXY407}" fe x4
+assert "X4 smoke.sh: CONNECT 407 is not retried" has '\[download_failed\].*\(proxy HTTP 407; not retried, 1 attempt\)'
+assert "X4 smoke.sh: one CONNECT request" eq "$(preqs proxy407)" 1
+assert "X4 smoke.sh: no pause" between "${ELAPSED}" 0 1
+
 printf '\n== the four scripts follow one policy ==\n'
 WIN_INSTALLER="${ROOT}/deploy/scripts/install-windows.ps1"
 WIN_SMOKE="${ROOT}/ci/release/smoke-windows.ps1"
@@ -252,7 +308,7 @@ hash_of() { sha256_of /dev/stdin; }
 fn_text() { awk -v a="$2() {" -v b="function $2 {" '$0 == a || $0 == b { p = 1 } p { print } p && $0 == "}" { exit }' "$1"; }
 sh_set() { fn_text "$1" download_transient | grep -E '408' | tr -d ' \t'; }
 assert "P1 download_transient() is identical in install-linux.sh and smoke.sh" eq "$(fn_text "${INSTALLER}" download_transient | hash_of)" "$(fn_text "${SMOKE}" download_transient | hash_of)"
-assert "P1 download_transient() lists 408 429 500 502 503 504" eq "$(sh_set "${INSTALLER}")" '22)case"$2"in408|429|500|502|503|504)return0;;esac;;'
+assert "P1 download_transient() lists 408 429 500 502 503 504" eq "$(sh_set "${INSTALLER}")" '22|56)case"$2"in408|429|500|502|503|504)return0;;000)["$1"=56]&&return0;;esac;;'
 assert "P1 download_transient() exists" test -n "$(fn_text "${INSTALLER}" download_transient)"
 assert "P1 the window is 120 s in both bash scripts" eq "$(grep -h '^readonly DOWNLOAD_RETRY_SECONDS=' "${INSTALLER}" "${SMOKE}" | sort -u)" 'readonly DOWNLOAD_RETRY_SECONDS=120'
 assert "P1 the transient HTTP statuses of the PowerShell scripts equal those of the bash scripts" eq \

@@ -62,7 +62,9 @@ sudo ./deploy/scripts/install-linux.sh \
 * **Retries.** A download that fails transiently (a timeout, a failed connection, HTTP 408, 429, 500, 502, 503 or 504) is
   retried with pauses of 1, 2, 4, 8, 16 and 32 seconds and a last pause that ends 2 minutes after the first attempt, at most
   8 attempts; no attempt starts later than 2 minutes after the first one. Any other error (for example 404) stops the
-  installation at once. In both cases the code is `download_failed`, and the message names the number of attempts. A host name that does not resolve counts as transient, so a mistyped `--release-base-url` host shows only after
+  installation at once. In both cases the code is `download_failed`, and the message names the number of attempts. Behind an
+  `HTTPS_PROXY` the status of the proxy decides when it refuses the connection: `proxy HTTP 503` is retried,
+  `proxy HTTP 407` is not. A host name that does not resolve counts as transient, so a mistyped `--release-base-url` host shows only after
   2 minutes. The `wget` fallback (only with `--insecure`) keeps its own three tries.
 * Better pass the token with `--token-file`: `--token` shows up in the process list and the shell history.
 * Layout: `/opt/myriarch/collector/versions/<v>/otelcol-contrib`, `current` -> active version (symlink),

@@ -10,6 +10,8 @@ Binds 127.0.0.1 only (port 0 = an ephemeral port by default) and writes the port
 in order and serves the path normally afterwards; a number answers every request to the path with that status. Serving normally
 means the file <root>/<path without its first segment> with 200 (the first segment is a label of the test case), otherwise 404.
 Every request appends one line "<path> <status>" to --log. Fault answers have the body "fault <status>".
+A CONNECT request (an HTTPS client behind a proxy) is answered with the status of the rule "/connect" (a number or a list, as above;
+without a rule 501) and no tunnel is ever opened; it is logged as "/connect <status>". A 407 carries a Proxy-Authenticate header.
 The test starts the server in the background and stops it again. Standard library only.
 """
 import argparse
@@ -67,6 +69,26 @@ def main():
             self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
+
+        def do_CONNECT(self):
+            with lock:
+                n = counts.get("/connect", 0)
+                counts["/connect"] = n + 1
+            rule = rules.get("/connect")
+            if isinstance(rule, int):
+                status = rule
+            elif isinstance(rule, list) and n < len(rule):
+                status = int(rule[n])
+            else:
+                status = 501
+            with lock:
+                log.write("/connect %d\n" % status)
+            self.send_response(status)
+            if status == 407:
+                self.send_header("Proxy-Authenticate", 'Basic realm="fault"')
+            self.send_header("Content-Length", "0")
+            self.send_header("Connection", "close")
+            self.end_headers()
 
         def log_message(self, *a):
             pass

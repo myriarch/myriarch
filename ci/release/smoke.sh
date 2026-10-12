@@ -228,11 +228,13 @@ sha256_file() {
 # of v0.1.0-rc.3 and the old three retries within 7 s were over before it recovered.
 readonly DOWNLOAD_RETRY_SECONDS=120
 
-# download_transient CURL_EXIT HTTP_STATUS: succeeds when a failed curl attempt is worth another one
+# download_transient CURL_EXIT STATUS: succeeds when a failed curl attempt is worth another one. STATUS is the effective HTTP status
+# of the attempt: the status of the server or, when the server was not reached because an HTTPS proxy refused CONNECT, the status
+# of the proxy (000 when there was none).
 download_transient() {
   case "$1" in
-    5 | 6 | 7 | 16 | 18 | 28 | 52 | 55 | 56 | 92) return 0 ;;
-    22) case "$2" in 408 | 429 | 500 | 502 | 503 | 504) return 0 ;; esac ;;
+    5 | 6 | 7 | 16 | 18 | 28 | 52 | 55 | 92) return 0 ;;
+    22 | 56) case "$2" in 408 | 429 | 500 | 502 | 503 | 504) return 0 ;; 000) [ "$1" = 56 ] && return 0 ;; esac ;;
   esac
   return 1
 }
@@ -243,16 +245,27 @@ fetch() {
   local url
   url="$(release_url "${name}")"
   have curl || fail tool_missing "curl not found in PATH"
-  local attempt=0 pause=1 start="${SECONDS}" elapsed rc status reason noun
+  local attempt=0 pause=1 start="${SECONDS}" elapsed rc out status pstatus reason noun
   while :; do
     attempt=$((attempt + 1))
     noun=attempts
     [ "${attempt}" = 1 ] && noun=attempt
     rc=0
-    status="$(curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL --connect-timeout 20 --max-time 900 -w '%{http_code}' \
-      -o "${dest}/${name}" "${url}")" || rc=$?
+    out="$(curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL --connect-timeout 20 --max-time 900 \
+      -w '%{http_code} %{http_connect}' -o "${dest}/${name}" "${url}")" || rc=$?
     [ "${rc}" = 0 ] && return 0
-    if [ "${rc}" = 22 ]; then reason="HTTP ${status}"; else reason="curl exit code ${rc}"; fi
+    status="${out%% *}" pstatus="${out##* }"
+    status="${status:-000}" pstatus="${pstatus:-000}"
+    # An HTTPS proxy that answers CONNECT with an error leaves the status 000 (curl exit 22 or 56, depending on the curl
+    # version); the status of the proxy decides then.
+    if { [ "${rc}" = 22 ] || [ "${rc}" = 56 ]; } && [ "${status}" = 000 ] && [ "${pstatus}" != 000 ] && [ "${pstatus}" != 200 ]; then
+      status="${pstatus}"
+      reason="proxy HTTP ${status}"
+    elif [ "${rc}" = 22 ]; then
+      reason="HTTP ${status}"
+    else
+      reason="curl exit code ${rc}"
+    fi
     download_transient "${rc}" "${status}" || fail download_failed "download of ${url} failed (${reason}; not retried, ${attempt} ${noun})"
     elapsed=$((SECONDS - start))
     [ "${elapsed}" -lt "${DOWNLOAD_RETRY_SECONDS}" ] \
