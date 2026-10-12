@@ -7,4 +7,4 @@
 #
 # Only one of the two is set. Both empty: "No release has been published yet". scripts/check-landing.py checks the format and the chip.
 final: ""
-candidate: "v0.1.0-rc.3"
+candidate: "v0.1.0-rc.4"

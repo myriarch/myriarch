@@ -32,7 +32,7 @@ The chart is part of the repository. Take the tag of the release you want to ins
 `ghcr.io/myriarch/myriarch:<appVersion of the tag>`:
 
 ```bash
-TAG=v0.1.0-rc.3      # the release you install; the newest one is on https://github.com/myriarch/myriarch/releases
+TAG=v0.1.0-rc.4      # the release you install; the newest one is on https://github.com/myriarch/myriarch/releases
 git clone --depth 1 --branch "${TAG}" https://github.com/myriarch/myriarch.git
 ```
 

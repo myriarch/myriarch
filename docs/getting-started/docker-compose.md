@@ -40,15 +40,15 @@ commit without a release, use the checkout path below.
 Download the Compose file of the release and start it:
 
 ```bash
-TAG=v0.1.0-rc.3      # the release you start; the newest one is on https://github.com/myriarch/myriarch/releases
+TAG=v0.1.0-rc.4      # the release you start; the newest one is on https://github.com/myriarch/myriarch/releases
 curl -fsSLO "https://raw.githubusercontent.com/myriarch/myriarch/${TAG}/deploy/compose/quickstart.yaml"
 docker compose -f quickstart.yaml up -d
 docker compose -f quickstart.yaml logs -f myriarchd
 ```
 
 The file is self-contained. Its default image tag is the version of the release it belongs to, so the file of every release,
-release candidates included, starts the image of that release (`ghcr.io/myriarch/myriarch:0.1.0-rc.3` in the file of
-`v0.1.0-rc.3`). `QUICKSTART_IMAGE` selects any other image, for example one that you pinned by digest
+release candidates included, starts the image of that release (`ghcr.io/myriarch/myriarch:0.1.0-rc.4` in the file of
+`v0.1.0-rc.4`). `QUICKSTART_IMAGE` selects any other image, for example one that you pinned by digest
 (`ghcr.io/myriarch/myriarch@sha256:...`) or copied to your own registry:
 
 ```bash
