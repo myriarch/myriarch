@@ -4,7 +4,7 @@ This roadmap lists what myriarch contains in its first release, what comes next,
 
 Support levels apply to every item. In v0.1.0, container mode and Linux hosts are **beta**, Windows hosts are **experimental**, and the Helm chart is **experimental** ([ADR-0021](docs/adr/0021-publication-gates-and-v0-1-0-scope.md)).
 
-## Now: v0.1.0 (alpha)
+## Released: v0.1.0 (alpha)
 
 The scope of the first release is fixed by [ADR-0021](docs/adr/0021-publication-gates-and-v0-1-0-scope.md).
 
@@ -56,6 +56,16 @@ The scope of the first release is fixed by [ADR-0021](docs/adr/0021-publication-
 ### Documentation
 
 - Operations guides: upgrades, backup and restore, high availability, monitoring, air-gapped installation and an artifact mirror.
+
+## From alpha to beta
+
+Myriarch as a whole stays **alpha** until all of the following hold. The change to beta is recorded in a decision record that replaces the support levels of [ADR-0021](docs/adr/0021-publication-gates-and-v0-1-0-scope.md), and the README, the security policy and the release notes change with it. The support level of a single component, such as Linux hosts or container mode today, can change earlier.
+
+- **Stable interfaces.** The GitOps format moves to `myriarch.dev/v1beta1` with a documented migration from `v1alpha1`. The REST API and the configuration keys of `myriarchd` change incompatibly only in a minor version, never in a patch release, and the changelog says how to migrate.
+- **A tested upgrade path.** The upgrade from the previous minor version (Helm chart, database migrations, `myriarch-updater`) is documented and tested automatically.
+- **Operations guides.** Upgrades, backup and restore, high availability and monitoring are documented.
+- **Real hosts.** `myriarch-updater` and the installers are tested on real Linux and Windows hosts, not only in CI.
+- **Feedback from users.** Installations by people outside the maintainers have reported back, and no report of data loss is open.
 
 ## Later
 
