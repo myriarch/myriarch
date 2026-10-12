@@ -214,6 +214,16 @@ been observed yet.
    the warning `icacls could not set the owner and the ACL` or the installer stops with `directory_unsafe`, fix it forward and
    add a Windows CI step that creates an administrator-only and a user-writable directory and runs the real function on both.
 
+The first published candidate is `v0.1.0-rc.3` (`v0.1.0-rc.1` and `v0.1.0-rc.2` stopped before the publication). Its results:
+
+- **Kind:** `make kind-probe` passed before the first tag, and `smoke-kind` passed on `v0.1.0-rc.3`.
+- **Re-run approvals:** "Re-run failed jobs" after gate 2 re-ran only the failed row of `smoke-linux` (HTTP 504 errors of
+  downloads from github.com during a GitHub incident) and asked for no approval. No job of the environment `release` ran again,
+  so whether `finalize` asks for gate 2 again after an approved attempt is still open, and the safe reading stays.
+- **The directory of `cosign.exe`:** `smoke-windows` logged no `icacls` warning, and the installer accepted
+  `C:\Program Files\cosign` on the Windows runner (`Test-AdminOnlyDirectory` runs on Windows in staging mode too). The refusal
+  of a directory that unprivileged accounts can write is still tested only with test doubles.
+
 ## Release a candidate
 
 Every candidate, the first one included, goes through these steps. A candidate is a GitHub pre-release and never the latest
@@ -337,7 +347,8 @@ next release corrects them.
   Sigstore). It re-runs only the failed jobs and the jobs that depend on them. **A gate is passed once per run:** a `sign-windows`
   that already passed is not asked again, so the privileged jobs `sign-blobs`, `push-images` and `draft` run again without a new
   approval, by anyone with write access to Actions. Whether `finalize` asks again after an approved attempt is not documented
-  by GitHub in a form we could confirm: observe it on the first candidate (see [First candidate](#first-candidate-what-to-observe)).
+  by GitHub in a form we could confirm, and the first published candidate, `v0.1.0-rc.3`, did not re-run it
+  (see [First candidate](#first-candidate-what-to-observe)).
   Stale drafts of the tag are deleted and replaced, a second push of the same digest changes nothing, duplicate signatures and
   attestations are harmless, and `finalize` resumes after a run in which it had already published.
 - **The resume path of `finalize`** (an attempt above 1) accepts a release that is already published when its assets are exactly

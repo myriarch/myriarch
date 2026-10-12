@@ -497,8 +497,9 @@ guidance after each item names what to do.
   - *Two approvals.* Exactly two jobs use the environment `release` (no administrator bypass, tags `v*` only): `sign-windows`,
     before anything is signed or pushed, and `finalize`, after the draft release exists and every verification passed. A gate is
     passed once per run, not once per attempt: "Re-run failed jobs" re-runs only the failed jobs and their dependents, so
-    `sign-blobs`, `push-images` and `draft` run again without a new approval of gate 1 (whether `finalize` asks again after an
-    approved attempt is observed on the first candidate). Gate 2 is a technical boundary for `finalize` only: the job `draft`
+    `sign-blobs`, `push-images` and `draft` run again without a new approval of gate 1. Whether `finalize` asks again after an
+    approved attempt has not been observed: on the first published candidate, `v0.1.0-rc.3`, "Re-run failed jobs" after gate 2
+    re-ran only a failed smoke job and asked for no approval. Gate 2 is a technical boundary for `finalize` only: the job `draft`
     holds `contents: write` without the environment and runs before it, with the signing tool set and the reviewed scripts as its
     whole trust base.
   - *Keyless signing and provenance.* `checksums.txt` is signed with a cosign bundle (it covers the 39 other files), and the
