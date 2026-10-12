@@ -214,7 +214,7 @@ whose checksum differs from the pin, and of a binary that reports another versio
 
 PowerShell is only needed for the Windows installer tests: the `pwsh` cases in `internal/updater`,
 `ci/tests/installer-verify.ps1` and `ci/tests/download-retry.ps1`. Without it these tests are skipped and the report says so. `MYRIARCH_PWSH` points the Go
-tests at a different `pwsh` binary.
+tests at a different `pwsh` binary. `download-retry.ps1` also runs under Windows PowerShell 5.1 (on 5.1 it leaves out the cases that need PowerShell 7 types and `smoke-windows.ps1`, which requires PowerShell 7); the Windows row of `go-test-native` runs it under both.
 
 ## Gates
 
@@ -360,7 +360,7 @@ is a collapsible log group; a failed job uploads `.cache/check-local/` (the gate
 |---|---|---|
 | `go` | `go` | ubuntu-24.04 |
 | `go-test-linux` | `go-test` with `-race` against a PostgreSQL 17 service (`PGTEST_DSN`, `max_connections` 300), then the render budget test | ubuntu-24.04 and ubuntu-24.04-arm |
-| `go-test-native` | `go-test`: macOS with `-race`, the embedded PostgreSQL and the render budget test; Windows without `-race`, with `PGTEST_SKIP=1` and without the budget test (`GO_TEST_PERF=0`) | macos-latest, windows-latest |
+| `go-test-native` | `go-test`: macOS with `-race`, the embedded PostgreSQL and the render budget test; Windows without `-race`, with `PGTEST_SKIP=1` and without the budget test (`GO_TEST_PERF=0`); on Windows a step runs `ci/tests/download-retry.ps1` under Windows PowerShell 5.1 and PowerShell 7 | macos-latest, windows-latest |
 | `web` | `web` | ubuntu-24.04 |
 | `build` | `build`, `examples`, then `make release-rehearsal` (the full release matrix in stage collect, a signing pass with a throwaway test CA, stage apply, dist and reproducibility checks; nothing is published) | ubuntu-24.04 |
 | `shell-helm` | `shellcheck`, `helm` | ubuntu-24.04 |

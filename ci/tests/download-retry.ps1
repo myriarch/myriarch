@@ -9,8 +9,9 @@
 # The policy: a transient failure (a timeout, a failed connection, HTTP 408, 429, 500, 502, 503, 504) is retried with pauses of
 # 1, 2, 4, ... s, no attempt starts later than 120 s after the first one; every other failure ends the download at once; the
 # final message names the number of attempts. Most cases run on a fake clock (Get-MonotonicSeconds and Start-Sleep are replaced
-# by functions), W0 runs on the real clock. The logic runs with PowerShell 7; the classification of the exceptions of Windows
-# PowerShell 5.1 (WebException with a Status) is covered by W8 with constructed exceptions.
+# by functions), W0 runs on the real clock. The file runs under PowerShell 7 and under Windows PowerShell 5.1 (the CI job on
+# Windows runs it under both): the cases that need PowerShell 7 types (HttpResponseException, HttpRequestException) and
+# smoke-windows.ps1 itself, which requires PowerShell 7, are left out on 5.1 and the report says so.
 param(
   [Parameter(Mandatory)][string]$Installer,
   [Parameter(Mandatory)][string]$SmokeWindows,
@@ -26,7 +27,10 @@ function Check {
 }
 
 $python = Get-Command python3 -ErrorAction SilentlyContinue
+if (-not $python) { $python = Get-Command python -ErrorAction SilentlyContinue }
 if (-not $python) { Write-Host 'download-retry.ps1: python3 is not available, skipped'; exit 0 }
+$isCore = $PSVersionTable.PSEdition -eq 'Core'
+Write-Host "download-retry.ps1: PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))"
 
 New-Item -ItemType Directory -Path $Work -Force | Out-Null
 $Work = (Resolve-Path $Work).Path
@@ -49,7 +53,7 @@ $logFile = Join-Path $Work 'server.log'
 $portFile = Join-Path $Work 'port'
 Set-Content -LiteralPath $logFile -Value '' -NoNewline
 $srv = Start-Process -FilePath $python.Source -PassThru -RedirectStandardOutput (Join-Path $Work 'server.out') -RedirectStandardError (Join-Path $Work 'server.err') `
-  -ArgumentList @('-I', $Server, '--rules', $rulesFile, '--log', $logFile, '--port-file', $portFile, '--root', $served)
+  -ArgumentList @('-I', "`"$Server`"", '--rules', "`"$rulesFile`"", '--log', "`"$logFile`"", '--port-file', "`"$portFile`"", '--root', "`"$served`"")
 
 function Get-Requests { param([string]$Path) return @(Get-Content -LiteralPath $logFile | Where-Object { $_ -like "$Path *" }).Count }
 function Get-Failure { param([scriptblock]$Block) try { & $Block; return '' } catch { return $_.Exception.Message } }
@@ -137,21 +141,29 @@ try {
     foreach ($s in 'TrustFailure', 'SecureChannelFailure', 'ProtocolError') {
       Check "W8 WebException $s is permanent" (-not (Test-Transient ([System.Net.WebException]::new('x', [System.Net.WebExceptionStatus]$s))))
     }
-    $sock = [System.Net.Sockets.SocketException]::new()
-    Check 'W8 HttpRequestException(SocketException) is transient' (Test-Transient ([System.Net.Http.HttpRequestException]::new('x', $sock)))
-    Check 'W8 HttpRequestException(AuthenticationException) is permanent' (-not (Test-Transient ([System.Net.Http.HttpRequestException]::new('x', [System.Security.Authentication.AuthenticationException]::new('tls')))))
+    if ($isCore) {
+      $sock = [System.Net.Sockets.SocketException]::new()
+      Check 'W8 HttpRequestException(SocketException) is transient' (Test-Transient ([System.Net.Http.HttpRequestException]::new('x', $sock)))
+      Check 'W8 HttpRequestException(AuthenticationException) is permanent' (-not (Test-Transient ([System.Net.Http.HttpRequestException]::new('x', [System.Security.Authentication.AuthenticationException]::new('tls')))))
+    } else {
+      Write-Host '  skip  W8 HttpRequestException cases (PowerShell 7 only)'
+    }
     Check 'W8 TaskCanceledException is transient' (Test-Transient ([System.Threading.Tasks.TaskCanceledException]::new('x')))
     Check 'W8 TimeoutException is transient' (Test-Transient ([System.TimeoutException]::new('x')))
     Check 'W8 InvalidOperationException is permanent' (-not (Test-Transient ([System.InvalidOperationException]::new('x'))))
     Check 'W8 UriFormatException is permanent' (-not (Test-Transient ([System.UriFormatException]::new('x'))))
     Check 'W8 IOException is permanent' (-not (Test-Transient ([System.IO.IOException]::new('x'))))
-    foreach ($code in 408, 429, 500, 502, 503, 504) {
-      $e = [Microsoft.PowerShell.Commands.HttpResponseException]::new('x', [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]$code))
-      Check "W8 HTTP $code is transient" (Test-Transient $e)
-    }
-    foreach ($code in 400, 401, 403, 404, 501) {
-      $e = [Microsoft.PowerShell.Commands.HttpResponseException]::new('x', [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]$code))
-      Check "W8 HTTP $code is permanent" (-not (Test-Transient $e))
+    if ($isCore) {
+      foreach ($code in 408, 429, 500, 502, 503, 504) {
+        $e = [Microsoft.PowerShell.Commands.HttpResponseException]::new('x', [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]$code))
+        Check "W8 HTTP $code is transient" (Test-Transient $e)
+      }
+      foreach ($code in 400, 401, 403, 404, 501) {
+        $e = [Microsoft.PowerShell.Commands.HttpResponseException]::new('x', [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]$code))
+        Check "W8 HTTP $code is permanent" (-not (Test-Transient $e))
+      }
+    } else {
+      Write-Host '  skip  W8 HttpResponseException cases (PowerShell 7 only)'
     }
   }
 
@@ -160,42 +172,46 @@ try {
   # from its syntax tree.
   Write-Host ''
   Write-Host '== smoke-windows.ps1 Invoke-DownloadWithRetry =='
-  $tokens = $null; $errs = $null
-  $ast = [System.Management.Automation.Language.Parser]::ParseFile($SmokeWindows, [ref]$tokens, [ref]$errs)
-  $wanted = 'Invoke-DownloadWithRetry', 'Get-MonotonicSeconds', 'Get-DownloadStatus', 'Test-TransientDownloadError', 'Get-ReleaseUrl', 'Get-ReleaseFile'
-  $found = @{}
-  foreach ($fn in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
-    if ($wanted -contains $fn.Name) { $found[$fn.Name] = $fn.Extent.Text }
-  }
-  Check 'SW0 smoke-windows.ps1 defines the download functions' ($found.Count -eq $wanted.Count) "found: $($found.Keys -join ', ')"
-  if ($found.Count -eq $wanted.Count) {
-    foreach ($name in $wanted) { . ([scriptblock]::Create($found[$name])) }
-    function Stop-Smoke { param([string]$Code, [string]$Message) throw "[$Code] $Message" }
-    function Write-Log { param([string]$Message) }
-    $script:fakeNow = 0.0
-    function Get-MonotonicSeconds { return $script:fakeNow }
-    function Start-Sleep { param([int]$Seconds, [int]$Milliseconds) $script:fakeNow += $Seconds }
-    function Invoke-Sw { param([string]$Url) Get-Failure { Invoke-DownloadWithRetry -Url $Url -Destination (Join-Path $Work 'sw.bin') | Out-Null } }
-
-    $script:fakeNow = 0.0; $msg = Invoke-Sw "$base/sw1/payload.bin"
-    Check 'SW1 504 four times, then 200: success' ($msg -eq '') $msg
-    Check 'SW1 five requests' ((Get-Requests '/sw1/payload.bin') -eq 5)
-    Check 'SW1 the pauses add up to 15 s' ($script:fakeNow -eq 15) "$($script:fakeNow)"
-    $script:fakeNow = 0.0; $msg = Invoke-Sw "$base/sw2/payload.bin"
-    Check 'SW2 always 504: [download_failed] after the window, eight attempts' ($msg -match '^\[download_failed\] download of http://127\.0\.0\.1:\d+/sw2/payload\.bin failed \(.*504.*; retry window of 120 s used up, 8 attempts\)$') $msg
-    Check 'SW2 exactly eight requests' ((Get-Requests '/sw2/payload.bin') -eq 8)
-    $script:fakeNow = 0.0; $msg = Invoke-Sw "$base/sw3/missing.bin"
-    Check 'SW3 404: [download_failed], not retried, one attempt' ($msg -match '^\[download_failed\] .*not retried, 1 attempt\)$') $msg
-    Check 'SW3 exactly one request' ((Get-Requests '/sw3/missing.bin') -eq 1)
-
-    # SW4: the https check of Get-ReleaseFile stays outside the loop: a download that ended on http is final
-    $script:Repository = 'example/repo'; $Tag = 'v9.9.9'
-    function Invoke-DownloadWithRetry {
-      param([string]$Url, [string]$Destination)
-      return [pscustomobject]@{ BaseResponse = [pscustomobject]@{ RequestMessage = [pscustomobject]@{ RequestUri = [Uri]'http://mirror.example.test/x' } } }
+  if (-not $isCore) {
+    Write-Host '  skip  smoke-windows.ps1 requires PowerShell 7'
+  } else {
+    $tokens = $null; $errs = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($SmokeWindows, [ref]$tokens, [ref]$errs)
+    $wanted = 'Invoke-DownloadWithRetry', 'Get-MonotonicSeconds', 'Get-DownloadStatus', 'Test-TransientDownloadError', 'Get-ReleaseUrl', 'Get-ReleaseFile'
+    $found = @{}
+    foreach ($fn in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+      if ($wanted -contains $fn.Name) { $found[$fn.Name] = $fn.Extent.Text }
     }
-    $msg = Get-Failure { Get-ReleaseFile -Name 'checksums.txt' -Directory $Work | Out-Null }
-    Check 'SW4 a download that ended on http is refused with [download_failed]' ($msg -match '^\[download_failed\] .*non-https') $msg
+    Check 'SW0 smoke-windows.ps1 defines the download functions' ($found.Count -eq $wanted.Count) "found: $($found.Keys -join ', ')"
+    if ($found.Count -eq $wanted.Count) {
+      foreach ($name in $wanted) { . ([scriptblock]::Create($found[$name])) }
+      function Stop-Smoke { param([string]$Code, [string]$Message) throw "[$Code] $Message" }
+      function Write-Log { param([string]$Message) }
+      $script:fakeNow = 0.0
+      function Get-MonotonicSeconds { return $script:fakeNow }
+      function Start-Sleep { param([int]$Seconds, [int]$Milliseconds) $script:fakeNow += $Seconds }
+      function Invoke-Sw { param([string]$Url) Get-Failure { Invoke-DownloadWithRetry -Url $Url -Destination (Join-Path $Work 'sw.bin') | Out-Null } }
+
+      $script:fakeNow = 0.0; $msg = Invoke-Sw "$base/sw1/payload.bin"
+      Check 'SW1 504 four times, then 200: success' ($msg -eq '') $msg
+      Check 'SW1 five requests' ((Get-Requests '/sw1/payload.bin') -eq 5)
+      Check 'SW1 the pauses add up to 15 s' ($script:fakeNow -eq 15) "$($script:fakeNow)"
+      $script:fakeNow = 0.0; $msg = Invoke-Sw "$base/sw2/payload.bin"
+      Check 'SW2 always 504: [download_failed] after the window, eight attempts' ($msg -match '^\[download_failed\] download of http://127\.0\.0\.1:\d+/sw2/payload\.bin failed \(.*504.*; retry window of 120 s used up, 8 attempts\)$') $msg
+      Check 'SW2 exactly eight requests' ((Get-Requests '/sw2/payload.bin') -eq 8)
+      $script:fakeNow = 0.0; $msg = Invoke-Sw "$base/sw3/missing.bin"
+      Check 'SW3 404: [download_failed], not retried, one attempt' ($msg -match '^\[download_failed\] .*not retried, 1 attempt\)$') $msg
+      Check 'SW3 exactly one request' ((Get-Requests '/sw3/missing.bin') -eq 1)
+
+      # SW4: the https check of Get-ReleaseFile stays outside the loop: a download that ended on http is final
+      $script:Repository = 'example/repo'; $Tag = 'v9.9.9'
+      function Invoke-DownloadWithRetry {
+        param([string]$Url, [string]$Destination)
+        return [pscustomobject]@{ BaseResponse = [pscustomobject]@{ RequestMessage = [pscustomobject]@{ RequestUri = [Uri]'http://mirror.example.test/x' } } }
+      }
+      $msg = Get-Failure { Get-ReleaseFile -Name 'checksums.txt' -Directory $Work | Out-Null }
+      Check 'SW4 a download that ended on http is refused with [download_failed]' ($msg -match '^\[download_failed\] .*non-https') $msg
+    }
   }
 } finally {
   if ($srv -and -not $srv.HasExited) { Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue }

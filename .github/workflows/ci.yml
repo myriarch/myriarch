@@ -175,6 +175,21 @@ jobs:
         env:
           ONLY: go-test
         run: ci/check-local.sh
+      # The retry code of install-windows.ps1 has to run on Windows PowerShell 5.1 (the script declares #Requires -Version 5.1) and on
+      # PowerShell 7; the test uses the python of the runner image for its local fault server.
+      - name: Test the download retries under Windows PowerShell 5.1 and PowerShell 7 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $root = (Get-Location).Path
+          $failed = $false
+          foreach ($exe in 'powershell.exe', 'pwsh') {
+            & $exe -NoProfile -NonInteractive -File ci/tests/download-retry.ps1 `
+              -Installer "$root\deploy\scripts\install-windows.ps1" -SmokeWindows "$root\ci\release\smoke-windows.ps1" `
+              -Server "$root\ci\tests\http-fault-server.py" -Work "$env:RUNNER_TEMP\download-retry-$([IO.Path]::GetFileNameWithoutExtension($exe))"
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+          }
+          if ($failed) { exit 1 }
       - name: Upload the gate logs
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
