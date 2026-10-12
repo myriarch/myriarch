@@ -6,5 +6,5 @@
 #   candidate:  tag of the newest release candidate (vX.Y.Z-rc.N) while no final release exists, or ""
 #
 # Only one of the two is set. Both empty: "No release has been published yet". scripts/check-landing.py checks the format and the chip.
-final: ""
-candidate: "v0.1.0-rc.4"
+final: "v0.1.0"
+candidate: ""

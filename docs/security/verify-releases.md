@@ -44,7 +44,7 @@ verification flaws and the installers refuse them). Download `checksums.txt` and
 you want from the release page of the tag, then:
 
 ```bash
-VERSION=0.1.0-rc.4   # the release you verify, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
+VERSION=0.1.0        # the release you verify, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
 
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
@@ -53,7 +53,7 @@ cosign verify-blob \
   checksums.txt
 ```
 
-`Verified OK` means that GitHub Actions ran `release.yml` of `myriarch/myriarch` for the tag `v0.1.0-rc.4` and signed exactly this
+`Verified OK` means that GitHub Actions ran `release.yml` of `myriarch/myriarch` for the tag `v0.1.0` and signed exactly this
 `checksums.txt`. Then check the files you downloaded against it:
 
 ```bash
@@ -65,7 +65,7 @@ Every file you downloaded must say `OK`. `--ignore-missing` skips the lines of f
 `checksums.txt` at all is not part of the release. On Windows compare one file at a time:
 
 ```powershell
-$file  = 'myriarch-updater_0.1.0-rc.4_windows_amd64.exe'
+$file  = 'myriarch-updater_0.1.0_windows_amd64.exe'
 $lines = @(Get-Content checksums.txt | Where-Object { $_.EndsWith("  $file", [StringComparison]::Ordinal) })
 if ($lines.Count -ne 1) { throw "expected exactly one line for $file in checksums.txt" }
 $want = $lines[0].Split(' ')[0]
@@ -109,7 +109,7 @@ On Windows, Windows marks files from the internet (the *Mark of the Web*) and re
 execution policy. Run `Unblock-File` **only after** the checks above have passed, never to get past the prompt first:
 
 ```powershell
-Expand-Archive myriarch-updater_0.1.0-rc.4_windows_amd64.zip -DestinationPath C:\Temp\myriarch
+Expand-Archive myriarch-updater_0.1.0_windows_amd64.zip -DestinationPath C:\Temp\myriarch
 Unblock-File C:\Temp\myriarch\deploy\scripts\install-windows.ps1
 ```
 
@@ -144,7 +144,7 @@ images, [crane](https://github.com/google/go-containerregistry/blob/main/cmd/cra
 tag once:
 
 ```bash
-VERSION=0.1.0-rc.4   # the release you verify, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
+VERSION=0.1.0        # the release you verify, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
 TAG="v${VERSION}"
 ```
 
