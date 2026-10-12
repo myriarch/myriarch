@@ -116,8 +116,8 @@ blueprint) go into `/etc/myriarch/myriarch.env`. Then restart with `systemctl re
 ```
 
 The trust model is the same as on Linux: `-VerifySignatures`, `-Verifier`, `-Insecure`, `-UpdaterChecksumsUrl` with
-`-UpdaterVersion` and `-UpdaterBundleUrl`, or `-UpdaterSha256` for a host without a verifier. Downloads are retried with the same 2-minute window as on Linux.
-`cosign.exe` must be 3.0.4 or newer and is only taken from a directory that only administrators can write; a verifier passed with `-Verifier` must be in such a
+`-UpdaterVersion` and `-UpdaterBundleUrl`, or `-UpdaterSha256` for a host without a verifier. `cosign.exe` must be 3.0.4 or
+newer and is only taken from a directory that only administrators can write; a verifier passed with `-Verifier` must be in such a
 directory too (`directory_unsafe` otherwise). `-SigningKey` and
 `-UpdaterChecksumsSigUrl` were removed. Extract the release archive and run `Unblock-File` on the script **only after** you
 verified the archive ([Verify releases](../security/verify-releases.md)). In addition `-UpdaterSignerThumbprint` requires the
@@ -126,6 +126,9 @@ renewed, so it fits only a private PKI. Under App Control for Business with scri
 Constrained Language Mode and `install-windows.ps1` fails; allow it by its hash. The supervisor runs as the virtual service account `NT SERVICE\otelcol-supervisor`, not as `LocalSystem`; only
 the `myriarch-updater` service runs as SYSTEM. Services, paths and troubleshooting are in
 [deploy/windows/README.md](../../deploy/windows/README.md). Collector secrets are set with `Set-ServiceEnvironment.ps1`.
+
+Downloads are retried with the same 2-minute window as on Linux. The status of a proxy that refuses the connection decides
+under PowerShell 7.5 or later; PowerShell 7.4 retries such a refusal like a failed connection.
 
 ## 4. Check the result
 

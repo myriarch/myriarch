@@ -93,9 +93,10 @@ The supervisor runs as the virtual service account `NT SERVICE\otelcol-superviso
 `myriarch-updater` runs as SYSTEM. Directories under `C:\ProgramData\Myriarch` are never taken over (foreign owner or
 reparse point => abort); the ACL is reset and verified. Sigstore verification, the https requirement and the hash source
 for the updater (`-UpdaterSha256` or `-UpdaterChecksumsUrl` with its keyless bundle; `-UpdaterVersion`,
-`-UpdaterBundleUrl`) and the retry window for downloads work as on Linux (`-VerifySignatures`, `-Verifier`, `-Insecure`); optionally
-`-UpdaterSignerThumbprint` (the Authenticode signature of the updater must be valid and issued by this certificate);
-better pass the token with `-TokenFile`.
+`-UpdaterBundleUrl`) and the retry window for downloads work as on Linux (`-VerifySignatures`, `-Verifier`, `-Insecure`);
+the rule for a proxy that refuses the connection needs PowerShell 7.5 or later (7.4 retries such a refusal like a failed
+connection). Optionally `-UpdaterSignerThumbprint` (the Authenticode signature of the updater must be valid and issued by
+this certificate); better pass the token with `-TokenFile`.
 
 ### Important for golden images and cloned VMs
 

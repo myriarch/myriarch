@@ -11,7 +11,9 @@
 # final message names the number of attempts. Most cases run on a fake clock (Get-MonotonicSeconds and Start-Sleep are replaced
 # by functions), W0 runs on the real clock. The file runs under PowerShell 7 and under Windows PowerShell 5.1 (the CI job on
 # Windows runs it under both): the cases that need PowerShell 7 types (HttpResponseException, HttpRequestException) and
-# smoke-windows.ps1 itself, which requires PowerShell 7, are left out on 5.1 and the report says so.
+# smoke-windows.ps1 itself, which requires PowerShell 7, are left out on 5.1 and the report says so. The cases behind a proxy
+# that refuses CONNECT (HTTPS_PROXY, ci/tests/download-retry-proxy-case.ps1) run under PowerShell 7 only: Windows PowerShell 5.1
+# takes its proxy from the system settings, not from HTTPS_PROXY.
 param(
   [Parameter(Mandatory)][string]$Installer,
   [Parameter(Mandatory)][string]$SmokeWindows,
@@ -55,8 +57,27 @@ Set-Content -LiteralPath $logFile -Value '' -NoNewline
 $srv = Start-Process -FilePath $python.Source -PassThru -RedirectStandardOutput (Join-Path $Work 'server.out') -RedirectStandardError (Join-Path $Work 'server.err') `
   -ArgumentList @('-I', "`"$Server`"", '--rules', "`"$rulesFile`"", '--log', "`"$logFile`"", '--port-file', "`"$portFile`"", '--root', "`"$served`"")
 
-function Get-Requests { param([string]$Path) return @(Get-Content -LiteralPath $logFile | Where-Object { $_ -like "$Path *" }).Count }
+function Get-Requests { param([string]$Path, [string]$Log = $logFile) return @(Get-Content -LiteralPath $Log | Where-Object { $_ -like "$Path *" }).Count }
 function Get-Failure { param([scriptblock]$Block) try { & $Block; return '' } catch { return $_.Exception.Message } }
+
+# a second and third instance of the fault server, one per proxy rule: Start-FaultServer NAME STATUS returns the process, the port
+# and the log of an instance that answers every CONNECT with STATUS
+$proxyServers = @()
+$savedEnv = $null
+function Start-FaultServer {
+  param([string]$Name, [int]$ConnectStatus)
+  $rulesPath = Join-Path $Work "rules-$Name.json"
+  $log = Join-Path $Work "$Name.log"
+  $portPath = Join-Path $Work "$Name.port"
+  Set-Content -LiteralPath $rulesPath -Value (@{ '/connect' = $ConnectStatus } | ConvertTo-Json -Compress) -NoNewline
+  Set-Content -LiteralPath $log -Value '' -NoNewline
+  $p = Start-Process -FilePath $python.Source -PassThru -RedirectStandardOutput (Join-Path $Work "$Name.out") -RedirectStandardError (Join-Path $Work "$Name.err") `
+    -ArgumentList @('-I', "`"$Server`"", '--rules', "`"$rulesPath`"", '--log', "`"$log`"", '--port-file', "`"$portPath`"", '--root', "`"$served`"")
+  $script:proxyServers += $p
+  for ($i = 0; $i -lt 100 -and -not (Test-Path -LiteralPath $portPath); $i++) { [System.Threading.Thread]::Sleep(100) }
+  if (-not (Test-Path -LiteralPath $portPath)) { throw "the fault server $Name did not start: $(Get-Content -LiteralPath (Join-Path $Work "$Name.err") -Raw)" }
+  return [pscustomobject]@{ Port = [int](Get-Content -LiteralPath $portPath -Raw).Trim(); Log = $log }
+}
 
 try {
   for ($i = 0; $i -lt 100 -and -not (Test-Path -LiteralPath $portFile); $i++) { Start-Sleep -Milliseconds 100 }
@@ -165,6 +186,41 @@ try {
     } else {
       Write-Host '  skip  W8 HttpResponseException cases (PowerShell 7 only)'
     }
+    # a proxy that refuses CONNECT: PowerShell 7.5 and later (.NET 9) report an HttpRequestException without a response, with
+    # StatusCode and HttpRequestError ProxyTunnelError; 7.4 (.NET 8) sets the error but no StatusCode. The constructor with the
+    # error and the status exists from .NET 8 on, so the synthetic exceptions below run there too.
+    if ($isCore) {
+      $proxyError = { param([int]$Code) try { [System.Net.Http.HttpRequestException]::new([System.Net.Http.HttpRequestError]::ProxyTunnelError, 'tunnel', $null, [System.Net.HttpStatusCode]$Code) } catch { $null } }
+      $e407 = & $proxyError 407
+      if (-not $e407) {
+        Write-Host '  skip  W8 proxy tunnel cases (HttpRequestError needs .NET 8)'
+      } else {
+        $e503 = & $proxyError 503
+        Check 'W8 proxy CONNECT 407 (ProxyTunnelError) is permanent' (-not (Test-Transient $e407))
+        Check 'W8 proxy CONNECT 503 (ProxyTunnelError) is transient' (Test-Transient $e503)
+        Check 'W8 the status of a proxy refusal is read from StatusCode' ((Get-DownloadStatus $e407) -eq 407 -and (Get-DownloadStatus $e503) -eq 503)
+        if (-not (Get-Command Get-DownloadReason -ErrorAction SilentlyContinue)) {
+          Check 'W8 Get-DownloadReason exists' $false
+        } else {
+          Check 'W8 reason of a proxy refusal: proxy HTTP 407' ((Get-DownloadReason $e407) -eq 'proxy HTTP 407') (Get-DownloadReason $e407)
+          Check 'W8 reason of a proxy refusal: proxy HTTP 503' ((Get-DownloadReason $e503) -eq 'proxy HTTP 503') (Get-DownloadReason $e503)
+          $plain = [System.Net.Http.HttpRequestException]::new('plain', $null, [System.Net.HttpStatusCode]404)
+          Check 'W8 reason of a status without a proxy error: HTTP 404' ((Get-DownloadReason $plain) -eq 'HTTP 404') (Get-DownloadReason $plain)
+          $resp = [Microsoft.PowerShell.Commands.HttpResponseException]::new('x', [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]503))
+          Check 'W8 reason of a response: HTTP 503' ((Get-DownloadReason $resp) -eq 'HTTP 503') (Get-DownloadReason $resp)
+          Check 'W8 reason without a status: the first line of the message' ((Get-DownloadReason ([System.TimeoutException]::new("first`nsecond"))) -eq 'first')
+        }
+        # the shape of .NET 8: ProxyTunnelError without a status; no status is known, so it is transient with the message as reason
+        $e8 = try { [System.Net.Http.HttpRequestException]::new([System.Net.Http.HttpRequestError]::ProxyTunnelError, "tunnel`nsecond", $null, $null) } catch { $null }
+        if ($e8) {
+          Check 'W8 proxy tunnel error without a status (.NET 8) is transient' (Test-Transient $e8)
+          Check 'W8 proxy tunnel error without a status (.NET 8) has no status' ((Get-DownloadStatus $e8) -eq 0)
+          if (Get-Command Get-DownloadReason -ErrorAction SilentlyContinue) {
+            Check 'W8 proxy tunnel error without a status (.NET 8): the message is the reason' ((Get-DownloadReason $e8) -eq 'tunnel') (Get-DownloadReason $e8)
+          }
+        }
+      }
+    }
   }
 
   # ---- smoke-windows.ps1: Invoke-DownloadWithRetry ---------------------------------------------------------------------
@@ -213,8 +269,66 @@ try {
       Check 'SW4 a download that ended on http is refused with [download_failed]' ($msg -match '^\[download_failed\] .*non-https') $msg
     }
   }
+
+  # ---- behind a proxy that refuses CONNECT ----------------------------------------------------------------------------------
+  # The bash scripts and PowerShell 7.5 or later (.NET 9) classify a refused CONNECT by the status of the proxy (cases X1 to X4 of
+  # download-retry-test.sh); PowerShell 7.4 (.NET 8) reports no status for it and retries it like a failed connection.
+  # Each case runs in a process of its own (download-retry-proxy-case.ps1) because PowerShell 7 reads HTTPS_PROXY once per process.
+  Write-Host ''
+  Write-Host '== a proxy that refuses CONNECT =='
+  if (-not $isCore) {
+    Write-Host '  skip  proxy cases (PowerShell 7 only: Windows PowerShell 5.1 takes the proxy from the system settings, not from HTTPS_PROXY)'
+  } elseif ([Environment]::Version.Major -lt 9) {
+    Write-Host '  skip  proxy cases (the runtime reports the proxy status from .NET 9 / PowerShell 7.5 on)'
+  } else {
+    $pwshExe = [Environment]::ProcessPath
+    $caseScript = Join-Path $PSScriptRoot 'download-retry-proxy-case.ps1'
+    $proxy503 = Start-FaultServer 'proxy503' 503
+    $proxy407 = Start-FaultServer 'proxy407' 407
+    $envNames = 'HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy'
+    $savedEnv = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
+    foreach ($n in $envNames) { $savedEnv[$n] = [Environment]::GetEnvironmentVariable($n) }
+    function Invoke-ProxyCase {
+      param([string]$Mode, [string]$ScriptPath, $ProxyServer)
+      $url = 'https://example.invalid/payload.bin'
+      try {
+        foreach ($n in 'HTTPS_PROXY', 'https_proxy') { [Environment]::SetEnvironmentVariable($n, "http://127.0.0.1:$($ProxyServer.Port)") }
+        foreach ($n in 'NO_PROXY', 'no_proxy') { [Environment]::SetEnvironmentVariable($n, $null) }
+        $out = & $pwshExe -NoProfile -NonInteractive -File $caseScript -Mode $Mode -Script $ScriptPath -Url $url -Work $Work 2>&1
+      } finally {
+        foreach ($n in $envNames) { [Environment]::SetEnvironmentVariable($n, $savedEnv[$n]) }
+      }
+      $line = @($out | ForEach-Object { "$_" } | Where-Object { $_ -like 'RESULT *' }) | Select-Object -Last 1
+      if (-not $line) { return [pscustomobject]@{ Message = "no result: $($out -join ' / ')"; Seconds = -1 } }
+      $r = $line.Substring(7) | ConvertFrom-Json
+      return [pscustomobject]@{ Message = [string]$r.message; Seconds = [double]$r.seconds }
+    }
+    $cases = @(
+      @{ Id = 'X1'; Name = 'install-windows.ps1'; Mode = 'install'; Path = $Installer; Prefix = '^\[download_failed\] download failed: https://example\.invalid/payload\.bin \('; Status = 503; Server = $proxy503 },
+      @{ Id = 'X2'; Name = 'install-windows.ps1'; Mode = 'install'; Path = $Installer; Prefix = '^\[download_failed\] download failed: https://example\.invalid/payload\.bin \('; Status = 407; Server = $proxy407 },
+      @{ Id = 'X3'; Name = 'smoke-windows.ps1'; Mode = 'smoke'; Path = $SmokeWindows; Prefix = '^\[download_failed\] download of https://example\.invalid/payload\.bin failed \('; Status = 503; Server = $proxy503 },
+      @{ Id = 'X4'; Name = 'smoke-windows.ps1'; Mode = 'smoke'; Path = $SmokeWindows; Prefix = '^\[download_failed\] download of https://example\.invalid/payload\.bin failed \('; Status = 407; Server = $proxy407 }
+    )
+    foreach ($c in $cases) {
+      $before = Get-Requests '/connect' $c.Server.Log
+      $r = Invoke-ProxyCase $c.Mode $c.Path $c.Server
+      $count = (Get-Requests '/connect' $c.Server.Log) - $before
+      $prefix = $c.Prefix
+      if ($c.Status -eq 503) {
+        Check "$($c.Id) $($c.Name): CONNECT 503 is retried for the whole window" ($r.Message -match ($prefix + 'proxy HTTP 503; retry window of 120 s used up, 8 attempts\)$')) $r.Message
+        Check "$($c.Id) $($c.Name): eight CONNECT requests" ($count -eq 8) "$count"
+        Check "$($c.Id) $($c.Name): the window is used up, not exceeded" ($r.Seconds -ge 120 -and $r.Seconds -le 122) "$($r.Seconds)"
+      } else {
+        Check "$($c.Id) $($c.Name): CONNECT 407 is not retried" ($r.Message -match ($prefix + 'proxy HTTP 407; not retried, 1 attempt\)$')) $r.Message
+        Check "$($c.Id) $($c.Name): one CONNECT request" ($count -eq 1) "$count"
+        Check "$($c.Id) $($c.Name): no pause" ($r.Seconds -eq 0) "$($r.Seconds)"
+      }
+    }
+  }
 } finally {
   if ($srv -and -not $srv.HasExited) { Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue }
+  foreach ($p in $proxyServers) { if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } }
+  if ($savedEnv) { foreach ($n in $savedEnv.Keys) { [Environment]::SetEnvironmentVariable($n, $savedEnv[$n]) } }
 }
 
 Write-Host ''

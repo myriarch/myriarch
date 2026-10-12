@@ -39,7 +39,9 @@
   renewal; it fits only a private PKI with a certificate that you control.
   Downloads that fail transiently (a timeout, a failed connection, HTTP 408, 429, 500, 502, 503 or 504) are retried with
   pauses of 1, 2, 4, ... seconds, and no attempt starts later than 2 minutes after the first one; any other failure,
-  a 404 for example, ends the installation at once.
+  a 404 for example, ends the installation at once. Under PowerShell 7.5 or later (the .NET 9 runtime reports the status of the
+  proxy) behind an HTTPS_PROXY that refuses the connection, the status of the proxy decides (proxy HTTP 503 is retried, proxy HTTP
+  407 is not); PowerShell 7.4 retries a refused connection like a failed connection.
   -Insecure disables the remaining checks for lab/tests only (http/file, no bundle, ws://).
   The directories under C:\ProgramData\Myriarch are never "adopted": if an existing directory is not owned by
   SYSTEM/Administrators or is a reparse point, the installation aborts; otherwise the ACL of the whole tree is
@@ -218,22 +220,43 @@ function Assert-TransportAllowed {
 # ---- Download retry policy (the same in install-linux.sh, ci/release/smoke.sh and ci/release/smoke-windows.ps1) ----------
 # Only a transient failure is retried: a timeout, a failed connection (refused, reset, name resolution) or the HTTP status 408,
 # 429, 500, 502, 503 or 504. Everything else (404, 403, a TLS or certificate error, a refused redirect, a local write error)
-# fails at once. The pause starts at 1 s and doubles; no attempt starts later than 120 s after the first one. The code runs on
-# Windows PowerShell 5.1 as well as on PowerShell 7: it uses no parameter of Invoke-WebRequest that only 7 has.
+# fails at once. The pause starts at 1 s and doubles; no attempt starts later than 120 s after the first one. Under PowerShell 7.5 or
+# later (the .NET 9 runtime reports the status of the proxy) behind an HTTPS_PROXY that refuses the CONNECT, the status of the proxy
+# decides (503 is retried, 407 is not), as in the bash scripts; the message says "proxy HTTP <n>". PowerShell 7.4 (.NET 8) reports no
+# status for a refused CONNECT, so it is retried like a failed connection, with the .NET message. The code runs on Windows
+# PowerShell 5.1 as well as on PowerShell 7: it uses no parameter of Invoke-WebRequest that only 7 has.
 
 # Seconds on a monotonic clock (the retry window is measured with it).
 function Get-MonotonicSeconds {
   return [Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency
 }
 
-# The HTTP status of a failed request, 0 without a response. Windows PowerShell 5.1: WebException.Response (an HttpWebResponse);
-# PowerShell 7: HttpResponseException.Response (an HttpResponseMessage). Both have StatusCode.
+# The HTTP status of a failed request, 0 without one. Windows PowerShell 5.1: WebException.Response (an HttpWebResponse);
+# PowerShell 7: HttpResponseException.Response (an HttpResponseMessage). Both have StatusCode. PowerShell 7.5 and later report a proxy
+# that refuses the CONNECT of an https request as an HttpRequestException without a response, with the status of the proxy in
+# StatusCode (7.4 leaves StatusCode empty).
 function Get-DownloadStatus {
   param($Exception)
-  if (-not $Exception.PSObject.Properties['Response']) { return 0 }
-  $response = $Exception.Response
-  if (-not $response) { return 0 }
-  try { return [int]$response.StatusCode } catch { return 0 }
+  $props = $Exception.PSObject.Properties
+  if ($props['Response'] -and $Exception.Response) {
+    try { return [int]$Exception.Response.StatusCode } catch { return 0 }
+  }
+  if ($props['StatusCode'] -and $Exception.StatusCode) {
+    try { return [int]$Exception.StatusCode } catch { return 0 }
+  }
+  return 0
+}
+
+# The reason of a failed request for the log line and the final message: "proxy HTTP <n>" when a proxy refused the CONNECT of an
+# https request (HttpRequestError ProxyTunnelError), "HTTP <n>" for any other status, else the first line of the message.
+function Get-DownloadReason {
+  param($Exception)
+  $status = Get-DownloadStatus $Exception
+  if ($status -eq 0) { return ($Exception.Message -split "`r?`n")[0] }
+  if ($Exception.PSObject.Properties['HttpRequestError'] -and $Exception.HttpRequestError.ToString() -eq 'ProxyTunnelError') {
+    return "proxy HTTP $status"
+  }
+  return "HTTP $status"
 }
 
 # True when a failed request is worth another attempt. The types are compared by name: System.Net.Http is not loaded in 5.1.
@@ -294,8 +317,7 @@ function Invoke-Download {
     } catch {
       # a refused redirect is final (matched by its code, not by message text)
       if ($_.Exception.Message.Contains('[https_required]')) { throw }
-      $status = Get-DownloadStatus $_.Exception
-      $reason = if ($status -ne 0) { "HTTP $status" } else { ($_.Exception.Message -split "`r?`n")[0] }
+      $reason = Get-DownloadReason $_.Exception
       $noun = if ($attempt -eq 1) { 'attempt' } else { 'attempts' }
       if (-not (Test-TransientDownloadError $_.Exception)) {
         Stop-Install 'download_failed' "download failed: $Url ($reason; not retried, $attempt $noun)"

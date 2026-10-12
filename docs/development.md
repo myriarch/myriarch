@@ -213,8 +213,13 @@ that the syft and zizmor pins are SHA-256 values. `ci/tests/tool-downloads-test.
 whose checksum differs from the pin, and of a binary that reports another version.
 
 PowerShell is only needed for the Windows installer tests: the `pwsh` cases in `internal/updater`,
-`ci/tests/installer-verify.ps1` and `ci/tests/download-retry.ps1`. Without it these tests are skipped and the report says so. `MYRIARCH_PWSH` points the Go
-tests at a different `pwsh` binary. `download-retry.ps1` also runs under Windows PowerShell 5.1 (on 5.1 it leaves out the cases that need PowerShell 7 types and `smoke-windows.ps1`, which requires PowerShell 7); the Windows row of `go-test-native` runs it under both.
+`ci/tests/installer-verify.ps1` and `ci/tests/download-retry.ps1`. Without it these tests are skipped and the report says
+so. `MYRIARCH_PWSH` points the Go tests at a different `pwsh` binary. `download-retry.ps1` also runs under Windows PowerShell
+5.1 (on 5.1 it leaves out the cases that need PowerShell 7 types and `smoke-windows.ps1`, which requires PowerShell 7); the
+Windows row of `go-test-native` runs it under both. The cases behind a proxy that refuses CONNECT start two more fault-server
+instances and run each download in its own `pwsh` process (`ci/tests/download-retry-proxy-case.ps1`), because PowerShell 7
+reads `HTTPS_PROXY` once per process; they run under PowerShell 7.5 or later only, because the runtime reports the status of
+the proxy from .NET 9 on.
 
 ## Gates
 

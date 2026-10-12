@@ -319,7 +319,7 @@ done
 for f in "${INSTALLER}" "${SMOKE}" "${WIN_INSTALLER}" "${WIN_SMOKE}"; do
   assert "P3 $(basename "${f}") is ASCII only" eq "$(LC_ALL=C grep -c '[^[:print:][:space:]]' "${f}")" 0
 done
-for fn in Get-MonotonicSeconds Get-DownloadStatus Test-TransientDownloadError; do
+for fn in Get-MonotonicSeconds Get-DownloadStatus Get-DownloadReason Test-TransientDownloadError; do
   assert "P2 ${fn} is text-identical in install-windows.ps1 and smoke-windows.ps1" eq "$(fn_text "${WIN_INSTALLER}" "${fn}" | hash_of)" "$(fn_text "${WIN_SMOKE}" "${fn}" | hash_of)"
   assert "P2 ${fn} exists" test -n "$(fn_text "${WIN_INSTALLER}" "${fn}")"
 done

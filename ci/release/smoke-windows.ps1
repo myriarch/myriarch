@@ -267,8 +267,11 @@ function Get-ReleaseUrl {
 # ---- Download retry policy (the same in install-windows.ps1, install-linux.sh and ci/release/smoke.sh) ----------------------
 # Only a transient failure is retried: a timeout, a failed connection (refused, reset, name resolution) or the HTTP status 408,
 # 429, 500, 502, 503 or 504. Everything else (404, 403, a TLS or certificate error, a local write error) fails at once. The pause
-# starts at 1 s and doubles; no attempt starts later than 120 s after the first one. The three helper functions are the same text as
-# in deploy/scripts/install-windows.ps1 (ci/tests/download-retry-test.sh checks it). Tests: ci/tests/download-retry.ps1.
+# starts at 1 s and doubles; no attempt starts later than 120 s after the first one. Under PowerShell 7.5 or later (the .NET 9 runtime
+# reports the status of the proxy) behind an HTTPS_PROXY that refuses the CONNECT, the status of the proxy decides (503 is retried,
+# 407 is not); the message says "proxy HTTP <n>". PowerShell 7.4 reports no status and retries it like a failed connection. The
+# four helper functions are the same text as in deploy/scripts/install-windows.ps1 (ci/tests/download-retry-test.sh checks it).
+# Tests: ci/tests/download-retry.ps1.
 
 function Get-MonotonicSeconds {
   return [Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency
@@ -276,10 +279,26 @@ function Get-MonotonicSeconds {
 
 function Get-DownloadStatus {
   param($Exception)
-  if (-not $Exception.PSObject.Properties['Response']) { return 0 }
-  $response = $Exception.Response
-  if (-not $response) { return 0 }
-  try { return [int]$response.StatusCode } catch { return 0 }
+  $props = $Exception.PSObject.Properties
+  if ($props['Response'] -and $Exception.Response) {
+    try { return [int]$Exception.Response.StatusCode } catch { return 0 }
+  }
+  if ($props['StatusCode'] -and $Exception.StatusCode) {
+    try { return [int]$Exception.StatusCode } catch { return 0 }
+  }
+  return 0
+}
+
+# The reason of a failed request for the log line and the final message: "proxy HTTP <n>" when a proxy refused the CONNECT of an
+# https request (HttpRequestError ProxyTunnelError), "HTTP <n>" for any other status, else the first line of the message.
+function Get-DownloadReason {
+  param($Exception)
+  $status = Get-DownloadStatus $Exception
+  if ($status -eq 0) { return ($Exception.Message -split "`r?`n")[0] }
+  if ($Exception.PSObject.Properties['HttpRequestError'] -and $Exception.HttpRequestError.ToString() -eq 'ProxyTunnelError') {
+    return "proxy HTTP $status"
+  }
+  return "HTTP $status"
 }
 
 function Test-TransientDownloadError {
@@ -314,8 +333,7 @@ function Invoke-DownloadWithRetry {
     try {
       return (Invoke-WebRequest -Uri $Url -OutFile $Destination -PassThru -MaximumRedirection 5 -TimeoutSec 600)
     } catch {
-      $status = Get-DownloadStatus $_.Exception
-      $reason = if ($status -ne 0) { "HTTP $status" } else { ($_.Exception.Message -split "`r?`n")[0] }
+      $reason = Get-DownloadReason $_.Exception
       $noun = if ($attempt -eq 1) { 'attempt' } else { 'attempts' }
       if (-not (Test-TransientDownloadError $_.Exception)) {
         Stop-Smoke 'download_failed' "download of $Url failed ($reason; not retried, $attempt $noun)"
