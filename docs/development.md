@@ -212,8 +212,8 @@ be raised. `make vulncheck` itself does not scan `ci/tools`. `ci/check.sh` verif
 that the syft and zizmor pins are SHA-256 values. `ci/tests/tool-downloads-test.sh` covers the refusal of a syft or zizmor archive
 whose checksum differs from the pin, and of a binary that reports another version.
 
-PowerShell is only needed for the Windows installer tests: the `pwsh` cases in `internal/updater` and
-`ci/tests/installer-verify.ps1`. Without it these tests are skipped and the report says so. `MYRIARCH_PWSH` points the Go
+PowerShell is only needed for the Windows installer tests: the `pwsh` cases in `internal/updater`,
+`ci/tests/installer-verify.ps1` and `ci/tests/download-retry.ps1`. Without it these tests are skipped and the report says so. `MYRIARCH_PWSH` points the Go
 tests at a different `pwsh` binary.
 
 ## Gates
@@ -535,6 +535,7 @@ bash ci/tests/run-all.sh static             # includes the three release tests b
 bash ci/tests/release-scripts-test.sh       # the scripts of ci/release with stubs for cosign, gh and crane; the real cosign checks a fixture
 bash ci/tests/release-smoke-test.sh         # the smoke tests (ci/release/smoke.sh) against test doubles; the image checks also run the real binaries of this tree
 bash ci/tests/release-workflow-test.sh      # the shape of release.yml: jobs, needs, permissions, environments, artifacts
+bash ci/tests/download-retry-test.sh        # the retry policy of the installer downloads against a local HTTP fault server (python3)
 make release-rehearsal                      # the path of a release in a snapshot, including the staging of the 40 files
 ```
 

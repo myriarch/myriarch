@@ -146,7 +146,7 @@ is at the top of that script.
 | `sigstore_verifier_outdated` | `cosign.exe` is older than 3.0.4 or reports no usable version |
 | `privilege_required` | not running as Administrator |
 | `unsupported_platform` | unsupported CPU architecture, or the supervisor on Windows ARM64 (install with `-Arch amd64`) |
-| `download_failed` | a download did not succeed (after retries) |
+| `download_failed` | a download did not succeed: a permanent error (for example HTTP 404) at once, a transient one (timeout, failed connection, HTTP 408, 429, 500, 502, 503, 504) after the retry window of 2 minutes; the message names the number of attempts |
 | `template_missing` | template directory or template file not found |
 | `template_placeholder` | unreplaced `@@PLACEHOLDER@@` left in a rendered template |
 | `checksum_invalid` | malformed `.sha256` file |

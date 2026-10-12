@@ -29,10 +29,12 @@
 #   installers         installer-verify.sh (bundle verification in install-linux.sh/.ps1), install-tools-test.sh (stamps of
 #                      ci/install-tools.sh), verify-testenv-test.sh, release-guard-test.sh (tag-on-release-branch guard of ci/lib.sh,
 #                      snapshot mode of ci/build-release.sh), windows-hook-test.sh (Windows stages, signing hook and acceptance
-#                      check of the release build)
+#                      check of the release build), download-retry-test.sh (retry policy of the downloads of install-linux.sh
+#                      against a local HTTP fault server; needs curl and python3)
 #   enterprise-mirror  contrib/enterprise-mirror/tests: sign-blob-test.sh, publish-mirror-test.sh, verify-release-test.sh,
 #                      ca-env-test.sh
-#   pwsh               installer-verify.ps1 (only with pwsh in PATH)
+#   pwsh               installer-verify.ps1, download-retry.ps1 (retry policy of install-windows.ps1 against a
+#                      local HTTP fault server; skipped without python3); only with pwsh in PATH
 # Without arguments: static installers enterprise-mirror (pwsh only when pwsh is available).
 # Required tools (cosign, helm, crane, zizmor): ci/install-tools.sh cosign helm crane zizmor; the tests report it when they are missing.
 set -uo pipefail
@@ -46,11 +48,14 @@ mirror_tests="${ROOT}/contrib/enterprise-mirror/tests"
 for g in "${groups[@]}"; do
   case "${g}" in
     static)            run "${CI_DIR}/check.sh"; run "${CI_DIR}/tests/check-language-test.sh"; run "${CI_DIR}/tests/check-docs-test.sh"; run "${CI_DIR}/tests/image-crane-test.sh"; run "${CI_DIR}/tests/helm-messages-test.sh"; run "${CI_DIR}/tests/license-headers-test.sh"; run "${CI_DIR}/tests/third-party-notices-test.sh"; run "${CI_DIR}/tests/vulncheck-test.sh"; run "${CI_DIR}/tests/secrets-scan-test.sh"; run "${CI_DIR}/tests/dockerignore-test.sh"; run "${CI_DIR}/tests/website-test.sh"; run "${CI_DIR}/tests/check-workflows-test.sh"; run "${CI_DIR}/tests/lint-workflows-test.sh"; run "${CI_DIR}/tests/versions-test.sh"; run "${CI_DIR}/tests/e2e-real-download-test.sh"; run "${CI_DIR}/tests/tool-downloads-test.sh"; run "${CI_DIR}/tests/release-sbom-test.sh"; run "${CI_DIR}/tests/release-scripts-test.sh"; run "${CI_DIR}/tests/release-smoke-test.sh"; run "${CI_DIR}/tests/release-workflow-test.sh" ;;
-    installers)        run "${CI_DIR}/tests/installer-verify.sh"; run "${CI_DIR}/tests/install-tools-test.sh"; run "${CI_DIR}/tests/verify-testenv-test.sh"; run "${CI_DIR}/tests/release-guard-test.sh"; run "${CI_DIR}/tests/windows-hook-test.sh" ;;
+    installers)        run "${CI_DIR}/tests/installer-verify.sh"; run "${CI_DIR}/tests/install-tools-test.sh"; run "${CI_DIR}/tests/verify-testenv-test.sh"; run "${CI_DIR}/tests/release-guard-test.sh"; run "${CI_DIR}/tests/windows-hook-test.sh"; run "${CI_DIR}/tests/download-retry-test.sh" ;;
     enterprise-mirror) run "${mirror_tests}/sign-blob-test.sh"; run "${mirror_tests}/publish-mirror-test.sh"; run "${mirror_tests}/verify-release-test.sh"; run "${mirror_tests}/ca-env-test.sh" ;;
     pwsh)              work="$(mktemp -d)"
                        run pwsh -NoProfile -NonInteractive -File "${CI_DIR}/tests/installer-verify.ps1" \
                          -Installer "${ROOT}/deploy/scripts/install-windows.ps1" -Templates "${ROOT}/deploy" -Work "${work}/win"
+                       run pwsh -NoProfile -NonInteractive -File "${CI_DIR}/tests/download-retry.ps1" \
+                         -Installer "${ROOT}/deploy/scripts/install-windows.ps1" \
+                         -Server "${CI_DIR}/tests/http-fault-server.py" -Work "${work}/retry"
                        rm -rf "${work}" ;;
     *) echo "unknown group: ${g}" >&2; rc=1 ;;
   esac

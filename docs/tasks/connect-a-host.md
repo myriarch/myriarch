@@ -60,6 +60,10 @@ What the script verifies, and why you may be asked for more options:
 
 - **Downloads use https only**, also after redirects. `--insecure` is for labs and tests: it allows `http://`, `file://` and
   `ws://` to the server and skipping the Sigstore check.
+- **Downloads are retried after a transient failure.** A timeout, a failed connection or HTTP 408, 429, 500, 502, 503 or 504
+  is retried with pauses of 1, 2, 4, ... seconds, and no attempt starts later than 2 minutes after the first one, so a short
+  outage of github.com does not stop the installation. Any other error, for example a 404, stops it at once. Both end with
+  `download_failed`, and the message names the number of attempts. The checks below apply to every attempt unchanged.
 - **Collector and supervisor** are verified with their **SHA-256** file (`<asset>.sha256`) **and** the **Sigstore bundle**
   (`<asset>.sigstore.json`) before anything runs (`--verify-signatures require`, the default). The verifier is `cosign`
   3.0.4 or newer (an older one stops the script with `sigstore_verifier_outdated`), or `myriarch-updater verify-bundle`
@@ -111,8 +115,8 @@ blueprint) go into `/etc/myriarch/myriarch.env`. Then restart with `systemctl re
 ```
 
 The trust model is the same as on Linux: `-VerifySignatures`, `-Verifier`, `-Insecure`, `-UpdaterChecksumsUrl` with
-`-UpdaterVersion` and `-UpdaterBundleUrl`, or `-UpdaterSha256` for a host without a verifier. `cosign.exe` must be 3.0.4 or
-newer and is only taken from a directory that only administrators can write; a verifier passed with `-Verifier` must be in such a
+`-UpdaterVersion` and `-UpdaterBundleUrl`, or `-UpdaterSha256` for a host without a verifier. Downloads are retried with the same 2-minute window as on Linux.
+`cosign.exe` must be 3.0.4 or newer and is only taken from a directory that only administrators can write; a verifier passed with `-Verifier` must be in such a
 directory too (`directory_unsafe` otherwise). `-SigningKey` and
 `-UpdaterChecksumsSigUrl` were removed. Extract the release archive and run `Unblock-File` on the script **only after** you
 verified the archive ([Verify releases](../security/verify-releases.md)). In addition `-UpdaterSignerThumbprint` requires the
