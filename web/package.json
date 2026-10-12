@@ -2,7 +2,7 @@
   "name": "myriarch-web",
   "private": true,
   "license": "Apache-2.0",
-  "version": "0.1.0-rc.2",
+  "version": "0.1.0-rc.3",
   "type": "module",
   "description": "myriarch web UI (React + TypeScript + Vite)",
   "packageManager": "pnpm@10.34.5",
