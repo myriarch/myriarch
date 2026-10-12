@@ -479,7 +479,8 @@ MR="${TEST_TMP}/metaroot"
 mkdir -p "${MR}/ci/release" "${MR}/deploy/release"
 cp "${REL}/common.sh" "${REL}/meta.sh" "${REL}/identity.env" "${MR}/ci/release/"
 cp "${ROOT}/ci/versions.env" "${MR}/ci/"
-cp "${ROOT}/deploy/release/windows-signing.env" "${MR}/deploy/release/"
+# a fixed signing file (mode off, no exception): the exception that a final release sets in the committed file must not change the outputs below
+printf 'WINDOWS_SIGNING=off\nWINDOWS_UNSIGNED_FINAL_TAG=\n' > "${MR}/deploy/release/windows-signing.env"
 (
   cd "${MR}" && git init -q -b main . && git config user.email t@example.com && git config user.name t && git add -A \
     && git -c commit.gpgsign=false commit -q -m init && for t in v0.1.0-rc.1 v0.1.0-rc.2 v0.1.0 v0.1.1-rc.1 v0.2.0 v0.10.0 vnext notatag; do git tag "$t"; done
@@ -550,6 +551,12 @@ printf 'WINDOWS_SIGNING=off\n' > "${MR}/deploy/release/windows-signing.env"
 expect_fail "signing_env: the exception line must exist" "signing_env" meta_run v0.1.0
 printf 'WINDOWS_SIGNING=kms\nWINDOWS_UNSIGNED_FINAL_TAG=v0.1.0\n' > "${MR}/deploy/release/windows-signing.env"
 eq "signing values are passed through" "kms v0.1.0" "$(meta_key v0.1.0 windows-signing) $(meta_key v0.1.0 windows-unsigned-final-tag)"
+cp "${TEST_TMP}/signing.env.orig" "${MR}/deploy/release/windows-signing.env"
+# the committed signing file parses, and meta.sh passes its two values through, whether or not it names an exception
+cp "${ROOT}/deploy/release/windows-signing.env" "${MR}/deploy/release/windows-signing.env"
+eq "the committed signing file is passed through" \
+  "$(sed -n 's/^WINDOWS_SIGNING=//p' "${ROOT}/deploy/release/windows-signing.env") $(sed -n 's/^WINDOWS_UNSIGNED_FINAL_TAG=//p' "${ROOT}/deploy/release/windows-signing.env")" \
+  "$(meta_key v0.1.0 windows-signing) $(meta_key v0.1.0 windows-unsigned-final-tag)"
 cp "${TEST_TMP}/signing.env.orig" "${MR}/deploy/release/windows-signing.env"
 
 # ==== 3. artifact.sh ===================================================================================================================
