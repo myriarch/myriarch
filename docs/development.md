@@ -216,6 +216,12 @@ PowerShell is only needed for the Windows installer tests: the `pwsh` cases in `
 `ci/tests/installer-verify.ps1`. Without it these tests are skipped and the report says so. `MYRIARCH_PWSH` points the Go
 tests at a different `pwsh` binary.
 
+The real-cosign cases of `ci/tests/installer-verify.sh` and `ci/tests/installer-verify.ps1` need cosign 3.0.4 or newer in `PATH`
+(`make tools TOOLS=cosign` puts the pinned one into `.cache/bin`); they are skipped locally without it and required when
+`CI=true`. They run offline against the committed trusted root and fixtures of `internal/updater/testdata/sigstore`: the upstream
+collector bundles, and the keyless bundle of `checksums.txt` of the release `v0.1.0-rc.3` (`myriarch_0.1.0-rc.3_checksums.txt` and
+its `.sigstore.json`, byte-identical to the release assets), which the installers must accept for 0.1.0-rc.3 only.
+
 ## Gates
 
 Before you open a pull request, run the checks that CI runs (see [Continuous integration](#continuous-integration)). The quick version for a code change:

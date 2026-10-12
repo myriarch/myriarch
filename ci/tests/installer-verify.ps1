@@ -4,10 +4,11 @@
 # Test of the verification of the keyless release bundle (updater) and of the upstream bundles (collector, supervisor) in
 # deploy/scripts/install-windows.ps1 (staging mode, -Root, file:// URLs). Called by ci/tests/installer-verify.sh when pwsh
 # is available. The verifier is the stub ci/tests/stub-verifier.sh (identity regexp against the certificate identity of
-# the bundle, digest of the signed file, version of cosign); with cosign in PATH the real cosign is run offline against the
-# committed upstream fixtures. The logic is exercised with the .NET Core path of PowerShell 7; the Windows-only parts
-# (ACLs, services, Authenticode) only run on a Windows host. Failures are asserted on the stable error codes of the
-# installer ("[<code>]"), never on message prose.
+# the bundle, digest of the signed file, version of cosign); with cosign in PATH the real cosign is additionally run
+# offline against the committed upstream fixtures and the keyless bundle of checksums.txt of v0.1.0-rc.3
+# (internal/updater/testdata/sigstore/myriarch_0.1.0-rc.3_*); these cases are required when CI=true. The logic is exercised with
+# the .NET Core path of PowerShell 7; the Windows-only parts (ACLs, services, Authenticode) only run on a Windows host.
+# Failures are asserted on the stable error codes of the installer ("[<code>]"), never on message prose.
 param(
   [Parameter(Mandatory)][string]$Installer,
   [Parameter(Mandatory)][string]$Templates,
@@ -240,6 +241,62 @@ if (Get-Command cosign -ErrorAction SilentlyContinue) {
     --certificate-identity-regexp '^https://github\.com/open-telemetry/opentelemetry-collector-releases/\.github/workflows/base-release\.yaml@refs/tags/v0\.162\.0$' `
     --certificate-oidc-issuer https://token.actions.githubusercontent.com "$fix/$fixBlob" 2>&1 | Out-String
   Expect-True 'positive control: cosign verifies the upstream bundle with the upstream identity' ($LASTEXITCODE -eq 0) $out
+
+  # The keyless bundle of the release v0.1.0-rc.3 (genuine, committed byte for byte; see installer-verify.sh): the stub passes the
+  # verify-blob call for checksums.txt to the real cosign, the LICENSE of the repository stands in for the updater (it is the LICENSE
+  # asset listed in that checksums.txt, never run here), and an unreachable proxy with an empty TUF cache keeps cosign offline.
+  Write-Host 'install-windows.ps1: real cosign against the keyless bundle of the release v0.1.0-rc.3 (offline)'
+  $rcVersion = '0.1.0-rc.3'
+  $rcSums = "$fix/myriarch_${rcVersion}_checksums.txt"
+  $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+  $rcDir = "$Work/rc-release"; New-Item -ItemType Directory -Path $rcDir, "$Work/rc-tuf" -Force | Out-Null
+  Copy-Item $rcSums "$rcDir/checksums.txt"; Copy-Item "$rcSums.sigstore.json" "$rcDir/checksums.txt.sigstore.json"; Copy-Item "$repoRoot/LICENSE" "$rcDir/LICENSE"
+  Expect-True 'fixture: checksums.txt and its bundle are the assets of v0.1.0-rc.3 (GitHub''s SHA-256 digests)' `
+    ((Get-Hex $rcSums) -eq '12d7c8ed1c017712c216dd8f5b6711a2396d70aca87261956323f825864f0ee8' -and (Get-Hex "$rcSums.sigstore.json") -eq '9370ec37e83f8d18bd0cf3de0eafea0b6418c90355c28cf81167ad37d3e390d9')
+  $licenseLine = @([IO.File]::ReadAllLines($rcSums) | Where-Object { $_ -cmatch '^[0-9a-f]{64}  LICENSE$' })
+  Expect-True 'fixture: the LICENSE of the repository is the LICENSE asset of v0.1.0-rc.3' ($licenseLine.Count -eq 1 -and $licenseLine[0].Substring(0, 64) -eq (Get-Hex "$repoRoot/LICENSE"))
+  $env:STUB_REAL_COSIGN = $cosignPath
+  $savedEnv = @{}
+  foreach ($k in @('HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy', 'NO_PROXY', 'no_proxy', 'TUF_ROOT')) { $savedEnv[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $null) }
+  $env:HTTPS_PROXY = 'http://127.0.0.1:9'; $env:HTTP_PROXY = 'http://127.0.0.1:9'; $env:TUF_ROOT = "$Work/rc-tuf"
+  try {
+    function Get-RcArgs { param([string]$Version, [string]$Dir)
+      return @('-UpdaterChecksumsUrl', (Uri-Of "$Dir/checksums.txt"), '-UpdaterVersion', $Version, '-TrustedRoot', "$fix/trusted_root.json") }
+    $rcId = '^https://github\.com/myriarch/myriarch/\.github/workflows/release\.yml@refs/tags/v0\.1\.0-rc\.3$'
+    Reset-Log
+    $r = Run-Install (Get-RcArgs $rcVersion $rcDir) -UpdaterFile "$rcDir/LICENSE"
+    Expect-Ok 'installer: the genuine bundle authenticates checksums.txt of v0.1.0-rc.3' $r
+    $installed = "$($r.Root)/ProgramFiles/Myriarch/updater/myriarch-updater.exe"
+    Expect-True '  ... the installed updater is the file that checksums.txt lists' ((Test-Path $installed) -and (Get-Hex $installed) -eq (Get-Hex "$repoRoot/LICENSE"))
+    $real = @((Get-Log) -split "`n" | Where-Object { $_.StartsWith('REAL verify-blob') })
+    Expect-True '  ... checksums.txt was verified by the real cosign with the identity of 0.1.0-rc.3' `
+      ($real.Count -eq 1 -and $real[0].Contains("--certificate-identity-regexp $rcId --certificate-oidc-issuer https://token.actions.githubusercontent.com --trusted-root $fix/trusted_root.json ")) (Get-Log)
+    foreach ($v in @('0.1.0-rc.2', '0.1.0')) {
+      $r = Run-Install (Get-RcArgs $v $rcDir) -UpdaterFile "$rcDir/LICENSE"
+      Expect-Fail "installer: the bundle of v0.1.0-rc.3 is refused for -UpdaterVersion $v" '\[sigstore_verification_failed\].*checksums\.txt' $r
+      Expect-True '  ... and nothing was installed' (Test-NothingInstalled $r)
+    }
+    # tampered: the line of LICENSE points to another file, which the mirror serves under that name
+    $evil = "$Work/rc-tampered"; New-Item -ItemType Directory -Path $evil -Force | Out-Null
+    Set-Content -LiteralPath "$evil/LICENSE" -Value 'MZ-not-the-release' -NoNewline
+    $evilHash = Get-Hex "$evil/LICENSE"
+    $lines = foreach ($l in [IO.File]::ReadAllLines($rcSums)) { if ($l -cmatch '^[0-9a-f]{64}  LICENSE$') { "$evilHash  LICENSE" } else { $l } }
+    [IO.File]::WriteAllText("$evil/checksums.txt", (($lines -join "`n") + "`n"))
+    Copy-Item "$rcSums.sigstore.json" "$evil/checksums.txt.sigstore.json"
+    $r = Run-Install (Get-RcArgs $rcVersion $evil) -UpdaterFile "$evil/LICENSE"
+    Expect-Fail 'installer: a checksums.txt with a changed line is refused by the genuine bundle' '\[sigstore_verification_failed\].*checksums\.txt' $r
+    Expect-True '  ... and nothing was installed' (Test-NothingInstalled $r)
+    # a file that differs from its line in the verified checksums.txt
+    $changed = "$Work/rc-changed"; New-Item -ItemType Directory -Path $changed -Force | Out-Null
+    Copy-Item "$rcDir/*" $changed; Add-Content -LiteralPath "$changed/LICENSE" -Value 'x' -NoNewline
+    Expect-Fail 'installer: a file that differs from its line in the verified checksums.txt is refused' '\[checksum_mismatch\]' (Run-Install (Get-RcArgs $rcVersion $rcDir) -UpdaterFile "$changed/LICENSE")
+  } finally {
+    Remove-Item Env:STUB_REAL_COSIGN -ErrorAction SilentlyContinue
+    foreach ($k in $savedEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $savedEnv[$k]) }
+  }
+}
+elseif ($env:CI -eq 'true') {
+  $fail++; Write-Host '  FAIL  the real-cosign cases are required in CI: cosign is not in PATH (ci/install-tools.sh cosign)'
 }
 
 # Helper functions (identity pattern, verifier order, re-hash after the copy, registry ACL), in a child process

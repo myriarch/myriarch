@@ -7,8 +7,10 @@
 # deploy/scripts/install-linux.sh and, when pwsh is available, install-windows.ps1, in staging mode (--root) against a
 # fake release with file:// URLs. Needs only bash, tar, gzip, awk. The verifier is a stub that emulates what matters
 # (identity regexp against the certificate identity of the bundle, digest of the signed file, version of cosign); with
-# cosign in PATH the real cosign is additionally run offline against the committed upstream fixtures. Failures are
-# asserted on the stable error codes of the installer ("[<code>]"), never on message prose.
+# cosign in PATH the real cosign is additionally run offline against the committed upstream fixtures and the keyless
+# bundle of checksums.txt of v0.1.0-rc.3 (internal/updater/testdata/sigstore/myriarch_0.1.0-rc.3_*); these cases are
+# required when CI=true. Failures are asserted on the stable error codes of the installer ("[<code>]"), never on message
+# prose.
 #
 #   ci/tests/installer-verify.sh          exit 0 = all cases as expected
 set -uo pipefail
@@ -446,8 +448,78 @@ if have cosign; then
   expect_fail "real cosign: also for the version of the fixture (the workflow and repository differ)" '\[sigstore_verification_failed\]' t_real_foreign_version
   t_real_version() { cosign version 2>&1 | grep -Eq '^GitVersion:[[:space:]]+v[0-9]+\.[0-9]+\.[0-9]+'; }
   expect_ok "the cosign of this host reports a version that the installer can read" t_real_version
+
+  # ---- The keyless bundle of the release v0.1.0-rc.3 (genuine, committed byte for byte) --------------------------------------
+  # myriarch_0.1.0-rc.3_checksums.txt and .sigstore.json are the assets checksums.txt and checksums.txt.sigstore.json of the
+  # published release v0.1.0-rc.3. The LICENSE of this repository is the LICENSE asset that this checksums.txt lists (asserted
+  # below), so it stands in for the updater binary: the installer takes its hash from the verified checksums.txt and installs
+  # exactly that file. It is never run (the verifier is cosign, staging mode starts nothing). The stub passes the verify-blob
+  # call for checksums.txt to the real cosign (STUB_REAL_COSIGN) and accepts the fake collector and supervisor of the mirror.
+  # Every real-cosign call runs with an unreachable proxy and an empty TUF cache: an online lookup fails instead of passing.
+  echo "install-linux.sh: real cosign against the keyless bundle of the release v0.1.0-rc.3 (offline)"
+  RC_VERSION="0.1.0-rc.3"
+  RC_ID='^https://github\.com/myriarch/myriarch/\.github/workflows/release\.yml@refs/tags/v0\.1\.0-rc\.3$'
+  RC_SUMS="${FIX}/myriarch_${RC_VERSION}_checksums.txt"
+  RC="${W}/rc-release"; mkdir -p "${RC}" "${W}/rc-tuf"
+  cp "${RC_SUMS}" "${RC}/checksums.txt"; cp "${RC_SUMS}.sigstore.json" "${RC}/checksums.txt.sigstore.json"; cp "${ROOT}/LICENSE" "${RC}/LICENSE"
+  offline() { HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 https_proxy='' http_proxy='' NO_PROXY='' no_proxy='' TUF_ROOT="${W}/rc-tuf" "$@"; }
+  # the identity that the installer builds for a version, with the repository of the installer
+  rc_identity() { bash -c 'eval "$(sed -n -e "/^readonly RELEASE_REPOSITORY=/p" -e "/^cert_identity_release()/,/^}/p" "$1")"; cert_identity_release "$2"' _ "${INSTALLER}" "$1"; }
+
+  t_rc_fixture() { [ "$(sha256_of "${RC_SUMS}")" = 12d7c8ed1c017712c216dd8f5b6711a2396d70aca87261956323f825864f0ee8 ] \
+    && [ "$(sha256_of "${RC_SUMS}.sigstore.json")" = 9370ec37e83f8d18bd0cf3de0eafea0b6418c90355c28cf81167ad37d3e390d9 ]; }
+  expect_ok "fixture: checksums.txt and its bundle are the assets of v0.1.0-rc.3 (GitHub's SHA-256 digests)" t_rc_fixture
+  t_rc_identity_built() { [ "$(rc_identity "${RC_VERSION}")" = "${RC_ID}" ]; }
+  expect_ok "the installer builds the identity of 0.1.0-rc.3" t_rc_identity_built
+  t_rc_license() { [ "$(sha256_of "${ROOT}/LICENSE")" = "$(awk '$2 == "LICENSE" { print $1 }' "${RC_SUMS}")" ]; }
+  expect_ok "fixture: the LICENSE of the repository is the LICENSE asset of v0.1.0-rc.3" t_rc_license
+
+  rc_cosign() { # version
+    offline cosign verify-blob --bundle "${RC_SUMS}.sigstore.json" --trusted-root "${FIX}/trusted_root.json" \
+      --certificate-identity-regexp "$(rc_identity "$1")" --certificate-oidc-issuer "${ISSUER}" "${RC_SUMS}"; }
+  expect_ok "real cosign: the bundle verifies with the installer's identity of 0.1.0-rc.3" rc_cosign "${RC_VERSION}"
+  expect_fail "real cosign: the same bundle is refused with the identity of 0.1.0-rc.2" 'expected SAN value' rc_cosign 0.1.0-rc.2
+  expect_fail "real cosign: the same bundle is refused with the identity of 0.1.0" 'expected SAN value' rc_cosign 0.1.0
+
+  rc_install() { # root version checksums-dir extra-args...
+    local root="$1" ver="$2" dir="$3"; shift 3
+    offline env STUB_REAL_COSIGN="$(command -v cosign)" bash "${INSTALLER}" --root "${root}" --arch amd64 --templates-dir "${TEMPLATES}" \
+      --insecure --verify-signatures require --trusted-root "${FIX}/trusted_root.json" --release-base-url "file://${MIRROR}" "${base_args[@]}" \
+      --updater-url "file://${dir}/LICENSE" --updater-version "${ver}" --updater-checksums-url "file://${dir}/checksums.txt" \
+      --verifier "${STUBS}/cosign" "$@"; }
+  t_rc_valid() { local r; r="$(fresh)"; : > "${STUB_LOG}"
+    rc_install "${r}" "${RC_VERSION}" "${RC}" || return 1
+    cmp -s "${ROOT}/LICENSE" "${r}/opt/myriarch/updater/myriarch-updater" || { echo "the installed file is not the one that checksums.txt lists"; return 1; }
+    local call; call="$(grep '^REAL verify-blob' "${STUB_LOG}")"
+    case "${call}" in *"--certificate-identity-regexp ${RC_ID} --certificate-oidc-issuer ${ISSUER} --trusted-root ${FIX}/trusted_root.json "*/checksums.txt) ;;
+      *) echo "checksums.txt was not verified by the real cosign with the identity of ${RC_VERSION}: ${call}"; return 1 ;; esac; }
+  expect_ok "installer: the genuine bundle authenticates checksums.txt of v0.1.0-rc.3 and the file it lists is installed" t_rc_valid
+
+  for v in 0.1.0-rc.2 0.1.0; do
+    RC_ROOT="$(fresh)"
+    t_rc_other_version() { rc_install "${RC_ROOT}" "${v}" "${RC}"; }
+    expect_fail "installer: the bundle of v0.1.0-rc.3 is refused for --updater-version ${v}" '\[sigstore_verification_failed\].*checksums\.txt' t_rc_other_version
+    if no_install "${RC_ROOT}"; then ok "  ... and nothing was installed"; else fail "something was installed with the bundle of another version"; fi
+  done
+
+  # tampered: the line of LICENSE points to another file, which the mirror serves under that name
+  EVIL="${W}/rc-tampered"; mkdir -p "${EVIL}"
+  printf '#!/bin/sh\necho not the release\n' > "${EVIL}/LICENSE"
+  awk -v h="$(sha256_of "${EVIL}/LICENSE")" '$2 == "LICENSE" { $1 = h } { print $1 "  " $2 }' "${RC_SUMS}" > "${EVIL}/checksums.txt"
+  cp "${RC_SUMS}.sigstore.json" "${EVIL}/checksums.txt.sigstore.json"
+  t_rc_tampered_copy() { [ "$(diff "${RC_SUMS}" "${EVIL}/checksums.txt" | grep -c '^[<>]')" = 2 ] && grep -q "  LICENSE\$" "${EVIL}/checksums.txt"; }
+  expect_ok "the tampered copy differs from the genuine checksums.txt only in the line of LICENSE" t_rc_tampered_copy
+  EVIL_ROOT="$(fresh)"
+  t_rc_tampered() { rc_install "${EVIL_ROOT}" "${RC_VERSION}" "${EVIL}"; }
+  expect_fail "installer: a checksums.txt with a changed line is refused by the genuine bundle" '\[sigstore_verification_failed\].*checksums\.txt' t_rc_tampered
+  if no_install "${EVIL_ROOT}"; then ok "  ... and nothing was installed"; else fail "something was installed after a tampered checksums.txt"; fi
+
+  t_rc_changed_file() { local d="${W}/rc-changed"; mkdir -p "${d}"; cp "${RC}"/* "${d}/"; printf 'x' >> "${d}/LICENSE"
+    rc_install "$(fresh)" "${RC_VERSION}" "${d}"; }
+  expect_fail "installer: a file that differs from its line in the verified checksums.txt is refused" '\[checksum_mismatch\]' t_rc_changed_file
 else
   echo "(cosign not in PATH: the real-cosign cases are skipped; ci/install-tools.sh cosign)"
+  [ "${CI:-}" != true ] || fail "the real-cosign cases are required in CI: cosign is not in PATH (ci/install-tools.sh cosign)"
 fi
 
 # ---- Windows (PowerShell) ---------------------------------------------------------------------------
