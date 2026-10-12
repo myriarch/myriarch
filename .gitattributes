@@ -1,0 +1,8 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Tests check the SHA-256 of these files byte for byte. A checkout with core.autocrlf=true must not rewrite their line
+# endings: the keyless release bundle of v0.1.0-rc.3 and the LICENSE that stands in for the updater binary in the
+# installer tests.
+internal/updater/testdata/sigstore/** -text
+LICENSE -text

@@ -8,7 +8,18 @@
 #   - for checksums.txt the identity regexp that the installer passes must match $STUB_SAN (the certificate identity of the
 #     bundle), the issuer must be GitHub's, a verify-bundle call must carry --version and $STUB_SAN must end with that tag,
 #     and the file must hash to $STUB_GOOD_SHA, so that a changed file fails like a real signature check;
-#   - any other file (collector, supervisor) always passes.
+#   - any other file (collector, supervisor) always passes;
+#   - with $STUB_REAL_COSIGN (the path of a real cosign), "version" and the verify-blob call for checksums.txt go to that cosign
+#     unchanged (a genuine release bundle is verified for real), and the call is logged as REAL instead of CALL.
+if [ -n "${STUB_REAL_COSIGN:-}" ]; then
+  last=""; for a in "$@"; do last="${a}"; done
+  case "$1:$(basename "${last:-none}")" in
+    version:*) exec "${STUB_REAL_COSIGN}" "$@" ;;
+    verify-blob:checksums.txt)
+      { printf 'REAL'; for a in "$@"; do printf ' %s' "$a"; done; printf '\n'; } >> "${STUB_LOG}"
+      exec "${STUB_REAL_COSIGN}" "$@" ;;
+  esac
+fi
 if [ "$1" = version ]; then printf 'GitVersion:    %s\n' "${STUB_COSIGN_VERSION:-v3.1.3}"; exit 0; fi
 { printf 'CALL'; for a in "$@"; do printf ' %s' "$a"; done; printf '\n'; } >> "${STUB_LOG}"
 mode="$1"; shift

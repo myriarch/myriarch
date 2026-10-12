@@ -337,8 +337,8 @@ them, and whoever distributes them takes on the obligations of what they contain
 ## Verification status
 
 Covered by tests (without a container runtime and without a Windows host): configuration keys, install scripts in staging
-mode (bash; PowerShell in `pwsh`) including the verification of the keyless release bundle (`ci/tests/installer-verify.sh`),
-`helm lint`/`helm template` and schema validation of the rendered manifests (kubeconform), `goreleaser check` and a snapshot
+mode (bash; PowerShell in `pwsh`) including the verification of the keyless release bundle (`ci/tests/installer-verify.sh`; with
+the real cosign also against the genuine bundle of `v0.1.0-rc.3`), `helm lint`/`helm template` and schema validation of the rendered manifests (kubeconform), `goreleaser check` and a snapshot
 build of the matrix, mirror upload and signing scripts against throw-away servers (`bash ci/tests/run-all.sh`). **Not**
 covered by automated tests: Docker image builds from the Dockerfiles, service creation/registry/ACLs on Windows, systemd integration on a real host, applying the
 manifests to a cluster. The release images are covered up to the registry: the build from release archives (contract, determinism,
