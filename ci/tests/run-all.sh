@@ -29,11 +29,11 @@
 #   installers         installer-verify.sh (bundle verification in install-linux.sh/.ps1), install-tools-test.sh (stamps of
 #                      ci/install-tools.sh), verify-testenv-test.sh, release-guard-test.sh (tag-on-release-branch guard of ci/lib.sh,
 #                      snapshot mode of ci/build-release.sh), windows-hook-test.sh (Windows stages, signing hook and acceptance
-#                      check of the release build), download-retry-test.sh (retry policy of the downloads of install-linux.sh
-#                      against a local HTTP fault server; needs curl and python3)
+#                      check of the release build), download-retry-test.sh (retry policy of the downloads of install-linux.sh and
+#                      ci/release/smoke.sh against a local HTTP fault server; needs curl and python3)
 #   enterprise-mirror  contrib/enterprise-mirror/tests: sign-blob-test.sh, publish-mirror-test.sh, verify-release-test.sh,
 #                      ca-env-test.sh
-#   pwsh               installer-verify.ps1, download-retry.ps1 (retry policy of install-windows.ps1 against a
+#   pwsh               installer-verify.ps1, download-retry.ps1 (retry policy of install-windows.ps1 and smoke-windows.ps1 against a
 #                      local HTTP fault server; skipped without python3); only with pwsh in PATH
 # Without arguments: static installers enterprise-mirror (pwsh only when pwsh is available).
 # Required tools (cosign, helm, crane, zizmor): ci/install-tools.sh cosign helm crane zizmor; the tests report it when they are missing.
@@ -54,7 +54,7 @@ for g in "${groups[@]}"; do
                        run pwsh -NoProfile -NonInteractive -File "${CI_DIR}/tests/installer-verify.ps1" \
                          -Installer "${ROOT}/deploy/scripts/install-windows.ps1" -Templates "${ROOT}/deploy" -Work "${work}/win"
                        run pwsh -NoProfile -NonInteractive -File "${CI_DIR}/tests/download-retry.ps1" \
-                         -Installer "${ROOT}/deploy/scripts/install-windows.ps1" \
+                         -Installer "${ROOT}/deploy/scripts/install-windows.ps1" -SmokeWindows "${ROOT}/ci/release/smoke-windows.ps1" \
                          -Server "${CI_DIR}/tests/http-fault-server.py" -Work "${work}/retry"
                        rm -rf "${work}" ;;
     *) echo "unknown group: ${g}" >&2; rc=1 ;;

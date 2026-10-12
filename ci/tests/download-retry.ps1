@@ -1,9 +1,10 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Tests the retry policy of the downloads in deploy/scripts/install-windows.ps1 (Invoke-Download) against a local HTTP server that answers scripted faults
+# Tests the retry policy of the downloads in deploy/scripts/install-windows.ps1 (Invoke-Download) and
+# ci/release/smoke-windows.ps1 (Invoke-DownloadWithRetry) against a local HTTP server that answers scripted faults
 # (ci/tests/http-fault-server.py, 127.0.0.1, ephemeral port, started and stopped here). Counterpart of
-# ci/tests/download-retry-test.sh, which tests install-linux.sh; run-all.sh calls this file in the group pwsh.
+# ci/tests/download-retry-test.sh, which tests the two bash scripts; run-all.sh calls this file in the group pwsh.
 #
 # The policy: a transient failure (a timeout, a failed connection, HTTP 408, 429, 500, 502, 503, 504) is retried with pauses of
 # 1, 2, 4, ... s, no attempt starts later than 120 s after the first one; every other failure ends the download at once; the
@@ -12,6 +13,7 @@
 # PowerShell 5.1 (WebException with a Status) is covered by W8 with constructed exceptions.
 param(
   [Parameter(Mandatory)][string]$Installer,
+  [Parameter(Mandatory)][string]$SmokeWindows,
   [Parameter(Mandatory)][string]$Server,
   [Parameter(Mandatory)][string]$Work
 )
@@ -38,6 +40,8 @@ $rules = [ordered]@{
   '/w2/payload.bin' = @(408, 429, 500, 502, 503)
   '/w3/payload.bin' = 504
   '/w5/payload.bin' = 403
+  '/sw1/payload.bin' = @(504, 504, 504, 504)
+  '/sw2/payload.bin' = 504
 }
 $rulesFile = Join-Path $Work 'rules.json'
 Set-Content -LiteralPath $rulesFile -Value ($rules | ConvertTo-Json -Compress) -NoNewline
@@ -149,6 +153,49 @@ try {
       $e = [Microsoft.PowerShell.Commands.HttpResponseException]::new('x', [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]$code))
       Check "W8 HTTP $code is permanent" (-not (Test-Transient $e))
     }
+  }
+
+  # ---- smoke-windows.ps1: Invoke-DownloadWithRetry ---------------------------------------------------------------------
+  # The script cannot be dot-sourced (it ends on a non-Windows host before it defines anything), so the functions are taken
+  # from its syntax tree.
+  Write-Host ''
+  Write-Host '== smoke-windows.ps1 Invoke-DownloadWithRetry =='
+  $tokens = $null; $errs = $null
+  $ast = [System.Management.Automation.Language.Parser]::ParseFile($SmokeWindows, [ref]$tokens, [ref]$errs)
+  $wanted = 'Invoke-DownloadWithRetry', 'Get-MonotonicSeconds', 'Get-DownloadStatus', 'Test-TransientDownloadError', 'Get-ReleaseUrl', 'Get-ReleaseFile'
+  $found = @{}
+  foreach ($fn in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+    if ($wanted -contains $fn.Name) { $found[$fn.Name] = $fn.Extent.Text }
+  }
+  Check 'SW0 smoke-windows.ps1 defines the download functions' ($found.Count -eq $wanted.Count) "found: $($found.Keys -join ', ')"
+  if ($found.Count -eq $wanted.Count) {
+    foreach ($name in $wanted) { . ([scriptblock]::Create($found[$name])) }
+    function Stop-Smoke { param([string]$Code, [string]$Message) throw "[$Code] $Message" }
+    function Write-Log { param([string]$Message) }
+    $script:fakeNow = 0.0
+    function Get-MonotonicSeconds { return $script:fakeNow }
+    function Start-Sleep { param([int]$Seconds, [int]$Milliseconds) $script:fakeNow += $Seconds }
+    function Invoke-Sw { param([string]$Url) Get-Failure { Invoke-DownloadWithRetry -Url $Url -Destination (Join-Path $Work 'sw.bin') | Out-Null } }
+
+    $script:fakeNow = 0.0; $msg = Invoke-Sw "$base/sw1/payload.bin"
+    Check 'SW1 504 four times, then 200: success' ($msg -eq '') $msg
+    Check 'SW1 five requests' ((Get-Requests '/sw1/payload.bin') -eq 5)
+    Check 'SW1 the pauses add up to 15 s' ($script:fakeNow -eq 15) "$($script:fakeNow)"
+    $script:fakeNow = 0.0; $msg = Invoke-Sw "$base/sw2/payload.bin"
+    Check 'SW2 always 504: [download_failed] after the window, eight attempts' ($msg -match '^\[download_failed\] download of http://127\.0\.0\.1:\d+/sw2/payload\.bin failed \(.*504.*; retry window of 120 s used up, 8 attempts\)$') $msg
+    Check 'SW2 exactly eight requests' ((Get-Requests '/sw2/payload.bin') -eq 8)
+    $script:fakeNow = 0.0; $msg = Invoke-Sw "$base/sw3/missing.bin"
+    Check 'SW3 404: [download_failed], not retried, one attempt' ($msg -match '^\[download_failed\] .*not retried, 1 attempt\)$') $msg
+    Check 'SW3 exactly one request' ((Get-Requests '/sw3/missing.bin') -eq 1)
+
+    # SW4: the https check of Get-ReleaseFile stays outside the loop: a download that ended on http is final
+    $script:Repository = 'example/repo'; $Tag = 'v9.9.9'
+    function Invoke-DownloadWithRetry {
+      param([string]$Url, [string]$Destination)
+      return [pscustomobject]@{ BaseResponse = [pscustomobject]@{ RequestMessage = [pscustomobject]@{ RequestUri = [Uri]'http://mirror.example.test/x' } } }
+    }
+    $msg = Get-Failure { Get-ReleaseFile -Name 'checksums.txt' -Directory $Work | Out-Null }
+    Check 'SW4 a download that ended on http is refused with [download_failed]' ($msg -match '^\[download_failed\] .*non-https') $msg
   }
 } finally {
   if ($srv -and -not $srv.HasExited) { Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue }

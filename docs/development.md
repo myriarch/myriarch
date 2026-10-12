@@ -535,7 +535,7 @@ bash ci/tests/run-all.sh static             # includes the three release tests b
 bash ci/tests/release-scripts-test.sh       # the scripts of ci/release with stubs for cosign, gh and crane; the real cosign checks a fixture
 bash ci/tests/release-smoke-test.sh         # the smoke tests (ci/release/smoke.sh) against test doubles; the image checks also run the real binaries of this tree
 bash ci/tests/release-workflow-test.sh      # the shape of release.yml: jobs, needs, permissions, environments, artifacts
-bash ci/tests/download-retry-test.sh        # the retry policy of the installer downloads against a local HTTP fault server (python3)
+bash ci/tests/download-retry-test.sh        # the retry policy of the installer and smoke downloads against a local HTTP fault server (python3)
 make release-rehearsal                      # the path of a release in a snapshot, including the staging of the 40 files
 ```
 

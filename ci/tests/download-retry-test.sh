@@ -3,20 +3,21 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Tests the retry policy of the downloads in deploy/scripts/install-linux.sh against a local HTTP server
+# Tests the retry policy of the downloads in deploy/scripts/install-linux.sh and ci/release/smoke.sh against a local HTTP server
 # that answers scripted faults (ci/tests/http-fault-server.py, 127.0.0.1, ephemeral port, started and stopped here). The
-# PowerShell half (install-windows.ps1) is ci/tests/download-retry.ps1; run-all.sh calls it in
+# PowerShell half (install-windows.ps1, ci/release/smoke-windows.ps1) is ci/tests/download-retry.ps1; run-all.sh calls it in
 # the group pwsh.
 #
-# The policy (the same in the installers): a transient failure (a timeout, a failed connection, HTTP 408, 429, 500, 502, 503,
+# The policy (the same in all four scripts): a transient failure (a timeout, a failed connection, HTTP 408, 429, 500, 502, 503,
 # 504) is retried with pauses of 1, 2, 4, ... s, no attempt starts later than 120 s after the first one; every other failure (a
 # 404 for example) ends the download at once; the final message names the number of attempts.
 #
 # How the tests reach the server and keep the runtime small:
-#  - The function download() is loaded from the real installer (without its last line "main") into a small harness. A curl shim in front of PATH logs its arguments,
+#  - The functions download() and fetch() are loaded from the real scripts (the installer without its last line "main", smoke.sh
+#    without everything from its "# ---- main ---" marker) into a small harness. A curl shim in front of PATH logs its arguments,
 #    sends https://github.com/ to the server, drops the https-only flags (the server speaks plain http) and runs the real curl.
 #  - Most cases run on a fake clock: the harness replaces sleep by a function that advances $SECONDS, so the 120 s window takes no
-#    wall time. The case L9 (the full installer) runs on the real clock.
+#    wall time. The cases L9 (the full installer) and S5 (fetch) run on the real clock.
 #
 #   ci/tests/download-retry-test.sh          exit 0 = all cases as expected
 set -uo pipefail
@@ -26,6 +27,7 @@ cd "${ROOT}" || exit 1
 need_cmd curl python3 tar gzip awk sed
 
 INSTALLER="${ROOT}/deploy/scripts/install-linux.sh"
+SMOKE="${ROOT}/ci/release/smoke.sh"
 SERVER="${CI_DIR}/tests/http-fault-server.py"
 W="$(cd "${TEST_TMP}" && pwd)"
 REAL_CURL="$(command -v curl)"
@@ -51,6 +53,7 @@ for f in "${M}/v0.161.0/otelcol-contrib_0.161.0_linux_amd64.tar.gz" "${M}/cmd/op
   sha256_of "${f}" | tr -d '\n' > "${f}.sha256"
 done
 L9_SHA="/l9/v0.161.0/otelcol-contrib_0.161.0_linux_amd64.tar.gz.sha256"
+SMOKE_FILE="myriarch/releases/download/v9.9.9/payload.bin"
 
 cat > "${W}/rules.json" <<RULES
 {
@@ -59,7 +62,11 @@ cat > "${W}/rules.json" <<RULES
   "/l3/payload.bin": 504,
   "/l5a/payload.bin": 403,
   "/l5b/payload.bin": 501,
-  "/l9/v0.161.0/otelcol-contrib_0.161.0_linux_amd64.tar.gz.sha256": [504, 504, 504, 504]
+  "/l9/v0.161.0/otelcol-contrib_0.161.0_linux_amd64.tar.gz.sha256": [504, 504, 504, 504],
+  "/s1/${SMOKE_FILE}": [504, 504, 504, 504],
+  "/s2/${SMOKE_FILE}": 504,
+  "/s3/${SMOKE_FILE}": 404,
+  "/s5/${SMOKE_FILE}": [502, 503]
 }
 RULES
 LOG="${W}/server.log"; : > "${LOG}"
@@ -110,8 +117,22 @@ if [ -n "${fake}" ]; then sleep() { SECONDS=$((SECONDS + $1)); }; fi
 trap 'echo "elapsed=${SECONDS}"' EXIT
 download "${url}" "${dest}"
 EOF2
+cat > "${W}/harness-smoke.sh" <<'EOF2'
+#!/usr/bin/env bash
+# usage: harness-smoke.sh SMOKE CASE NAME DEST [fake]: runs fetch() of smoke.sh for https://github.com/<CASE>/myriarch/...
+smoke="$1" case_label="$2" name="$3" dest="$4" fake="${5:-}"
+set --
+eval "$(sed -e '/^# ---- main ---/,$d' "${smoke}")"
+ID_REPO="${case_label}/myriarch"
+TAG=v9.9.9
+declare -F fetch >/dev/null || { echo "fetch() is not defined" >&2; exit 3; }
+if [ -n "${fake}" ]; then sleep() { SECONDS=$((SECONDS + $1)); }; fi
+trap 'echo "elapsed=${SECONDS}"' EXIT
+fetch "${name}" "${dest}"
+EOF2
 
 assert "the installer ends with exactly one line 'main' (the harness cuts it)" eq "$(grep -cx 'main' "${INSTALLER}")" 1
+assert "smoke.sh has the marker '# ---- main ---' (the harness cuts from it)" eq "$(grep -c '^# ---- main ---' "${SMOKE}")" 1
 
 # run_case VAR-PREFIX command...: runs a command with the shim in PATH, sets OUT, RC and ELAPSED
 run_case() {
@@ -121,6 +142,8 @@ run_case() {
   return 0
 }
 dl()  { run_case bash "${W}/harness-install.sh" "${INSTALLER}" "$1" "$2" "${W}/out-$3.bin" "${4-fake}"; } # insecure url label [fake|'']
+fe()  { run_case bash "${W}/harness-smoke.sh" "${SMOKE}" "$1" payload.bin "${W}/fetch-$1" "${2-fake}"; } # case [fake|'']
+mkdir -p "${W}/fetch-s1" "${W}/fetch-s2" "${W}/fetch-s3" "${W}/fetch-s4" "${W}/fetch-s5"
 has() { printf '%s' "${OUT}" | grep -Eq -- "$1"; }
 GH=https://github.com
 
@@ -187,26 +210,70 @@ assert "L9 the collector is installed" test -e "${root9}/opt/myriarch/collector/
 assert "L9 four retries are logged" eq "$(printf '%s\n' "${OUT9}" | grep -c 'next attempt in')" 4
 assert "L9 the server saw four 504 and one 200" eq "$(statuses "${L9_SHA}")" "504 504 504 504 200 "
 
-printf '\n== install-linux.sh and install-windows.ps1 follow one policy ==\n'
+printf '\n== ci/release/smoke.sh fetch() ==\n'
+# S1: four 504, then 200
+fe s1
+assert "S1 504 four times, then 200: success" eq "${RC}" 0
+assert "S1 five requests" eq "$(reqs "/s1/${SMOKE_FILE}")" 5
+assert "S1 the file arrived intact" cmp -s "${ROOT_DIR}/payload.bin" "${W}/fetch-s1/payload.bin"
+cp "${W}/shim.log" "${W}/shim-s1.log"
+# S2: always 504
+fe s2
+assert "S2 always 504: [download_failed] with the status, the window and the attempts" has "\[download_failed\] download of https://github\.com/s2/myriarch/releases/download/v9\.9\.9/payload\.bin failed \(HTTP 504; retry window of 120 s used up, 8 attempts\)"
+assert "S2 exactly eight requests" eq "$(reqs "/s2/${SMOKE_FILE}")" 8
+assert "S2 the window is used up, not exceeded" between "${ELAPSED}" 120 122
+# S3: 404 ends at once
+fe s3
+assert "S3 404: [download_failed], not retried, one attempt" has '\[download_failed\].*\(HTTP 404; not retried, 1 attempt\)'
+assert "S3 one request" eq "$(reqs "/s3/${SMOKE_FILE}")" 1
+# S4: the flags of every call
+sflag() { awk -v f="$1" '$0 == f { n++ } END { print n + 0 }' "${W}/shim-s1.log"; }
+spair() { awk -v f="$1" -v v="$2" '$0 == f { getline x; if (x == v) n++ } END { print n + 0 }' "${W}/shim-s1.log"; }
+assert "S4 five curl calls for five attempts" eq "$(grep -c -x -- '----' "${W}/shim-s1.log")" 5
+assert "S4 -q is the first argument of every call" eq "$(awk 'prev == "----" || NR == 1 { if ($0 == "-q") n++ } { prev = $0 } END { print n + 0 }' "${W}/shim-s1.log")" 5
+assert "S4 --proto =https and --proto-redir =https in every call" eq "$(( $(spair --proto =https) + $(spair --proto-redir =https) ))" 10
+assert "S4 --tlsv1.2 and -fsSL in every call" eq "$(( $(sflag --tlsv1.2) + $(sflag -fsSL) ))" 10
+assert "S4 the existing timeouts" eq "$(( $(spair --connect-timeout 20) + $(spair --max-time 900) ))" 10
+assert "S4 the status is read with -w" eq "$(spair -w '%{http_code}')" 5
+assert "S4 no curl-internal retry option" eq "$(grep -c -E '^--retry' "${W}/shim-s1.log")" 0
+# S5: the real sleep path (502, 503, then 200: pauses of 1 and 2 s)
+start=$SECONDS
+fe s5 ""
+wall=$((SECONDS - start))
+assert "S5 real clock: 502, 503, then 200: success" eq "${RC}" 0
+assert "S5 three requests" eq "$(reqs "/s5/${SMOKE_FILE}")" 3
+assert "S5 the pauses were real (3 s)" between "${wall}" 3 10
+
+printf '\n== the four scripts follow one policy ==\n'
 WIN_INSTALLER="${ROOT}/deploy/scripts/install-windows.ps1"
+WIN_SMOKE="${ROOT}/ci/release/smoke-windows.ps1"
 hash_of() { sha256_of /dev/stdin; }
 # fn_text FILE NAME: a function from 'name() {' (shell) or 'function Name {' (PowerShell) to the next line that is only '}'
 fn_text() { awk -v a="$2() {" -v b="function $2 {" '$0 == a || $0 == b { p = 1 } p { print } p && $0 == "}" { exit }' "$1"; }
 sh_set() { fn_text "$1" download_transient | grep -E '408' | tr -d ' \t'; }
+assert "P1 download_transient() is identical in install-linux.sh and smoke.sh" eq "$(fn_text "${INSTALLER}" download_transient | hash_of)" "$(fn_text "${SMOKE}" download_transient | hash_of)"
 assert "P1 download_transient() lists 408 429 500 502 503 504" eq "$(sh_set "${INSTALLER}")" '22)case"$2"in408|429|500|502|503|504)return0;;esac;;'
 assert "P1 download_transient() exists" test -n "$(fn_text "${INSTALLER}" download_transient)"
-assert "P1 the window is 120 s in install-linux.sh" eq "$(grep -h '^readonly DOWNLOAD_RETRY_SECONDS=' "${INSTALLER}")" 'readonly DOWNLOAD_RETRY_SECONDS=120'
-assert "P1 the transient HTTP statuses of install-windows.ps1 are those of install-linux.sh" eq \
+assert "P1 the window is 120 s in both bash scripts" eq "$(grep -h '^readonly DOWNLOAD_RETRY_SECONDS=' "${INSTALLER}" "${SMOKE}" | sort -u)" 'readonly DOWNLOAD_RETRY_SECONDS=120'
+assert "P1 the transient HTTP statuses of the PowerShell scripts equal those of the bash scripts" eq \
   "$(fn_text "${WIN_INSTALLER}" Test-TransientDownloadError | grep -E -o '408[0-9, ]*' | head -n 1 | tr -d ' ')" "408,429,500,502,503,504"
-assert "P1 the window is 120 s in install-windows.ps1" eq "$(grep -c -E '^  \$window = 120$' "${WIN_INSTALLER}")" 1
-for f in "${INSTALLER}" "${WIN_INSTALLER}"; do
+for f in "${WIN_INSTALLER}" "${WIN_SMOKE}"; do
+  assert "P1 the window is 120 s in $(basename "${f}")" eq "$(grep -c -E '^  \$window = 120$' "${f}")" 1
+done
+for f in "${INSTALLER}" "${SMOKE}" "${WIN_INSTALLER}" "${WIN_SMOKE}"; do
   assert "P3 $(basename "${f}") is ASCII only" eq "$(LC_ALL=C grep -c '[^[:print:][:space:]]' "${f}")" 0
+done
+for fn in Get-MonotonicSeconds Get-DownloadStatus Test-TransientDownloadError; do
+  assert "P2 ${fn} is text-identical in install-windows.ps1 and smoke-windows.ps1" eq "$(fn_text "${WIN_INSTALLER}" "${fn}" | hash_of)" "$(fn_text "${WIN_SMOKE}" "${fn}" | hash_of)"
+  assert "P2 ${fn} exists" test -n "$(fn_text "${WIN_INSTALLER}" "${fn}")"
 done
 # the code of install-windows.ps1 has to run on Windows PowerShell 5.1: nothing that only PowerShell 7 knows
 ps7only='\?\?|\?\.|-SkipHttpErrorCheck|-MaximumRetryCount|-RetryIntervalSec|-StatusCodeVariable|-ConnectionTimeoutSeconds|-OperationTimeoutSeconds|-AllowInsecureRedirect|\[System\.Net\.Http\.'
 win_dl="$(awk '/^# ---- Download retry policy/ { p = 1 } /^# Certificate identity/ { p = 0 } p' "${WIN_INSTALLER}")"
 assert "P3 the download code of install-windows.ps1 uses no PowerShell 7 construct" eq "$(printf '%s\n' "${win_dl}" | grep -c -E -- "${ps7only}")" 0
 assert "P3 the download code of install-windows.ps1 is not empty" test -n "${win_dl}"
-assert "P4 no curl --retry option (outside comments) in install-linux.sh" eq "$(grep -v '^[[:space:]]*#' "${INSTALLER}" | grep -c -E -- '--retry')" 0
+for f in "${INSTALLER}" "${SMOKE}"; do
+  assert "P4 no curl --retry option (outside comments) in $(basename "${f}")" eq "$(grep -v '^[[:space:]]*#' "${f}" | grep -c -E -- '--retry')" 0
+done
 
 finish_tests "download-retry-test.sh"

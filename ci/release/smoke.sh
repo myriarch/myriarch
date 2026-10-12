@@ -39,8 +39,14 @@
 # Environment (all subcommands)
 #   TOOLS_BIN          directory with cosign, crane, gh (and kind, kubectl, helm); default .cache/bin. The tools are never looked up
 #                      in PATH, and their versions must be the pins of ci/versions.env (checked once).
-#   SMOKE_RETRIES      attempts of a check that talks to a service, default 3
+#   SMOKE_RETRIES      attempts of a check that talks to a service (gh, cosign, crane, docker), default 3
 #   SMOKE_RETRY_DELAY  seconds between attempts, default 10
+#                      The downloads of release files have their own retry policy: a transient failure (a timeout, a failed
+#                      connection, HTTP 408, 429, 500, 502, 503, 504) is retried with pauses of 1, 2, 4, ... s for up to 120 s;
+#                      any other failure (a 404 for example) fails at once. SMOKE_RETRIES and SMOKE_RETRY_DELAY do not apply.
+#                      Not covered by that policy: the service checks above (docker pull from ghcr.io, crane, cosign, gh) retry
+#                      SMOKE_RETRIES times 10 s apart, a window of 20 s, and ci/install-tools.sh downloads kind, kubectl and helm
+#                      for the kind test once, without a retry. An outage that lasts longer fails those steps; re-run the job.
 #   SMOKE_WAIT_SECONDS how long the kind test waits for /healthz and /readyz, default 90
 #
 # Errors: one line "[smoke] ERROR [<code>] <message>" on stderr, exit 1. Usage errors "[smoke] usage: ...", exit 2. Info lines
@@ -213,13 +219,50 @@ sha256_file() {
   fi
 }
 
-# fetch NAME DESTDIR: anonymous https download of one release file of $TAG.
+# ---- Download retry policy ---------------------------------------------------------------------------------------------
+# The same policy as deploy/scripts/install-linux.sh, install-windows.ps1 and ci/release/smoke-windows.ps1 (tests:
+# ci/tests/download-retry-test.sh, download-retry.ps1). Only a transient failure is retried: a timeout, a failed connection
+# (refused, reset, name resolution) or the HTTP status 408, 429, 500, 502, 503 or 504. Everything else (404, 403, a TLS or
+# certificate error, a refused redirect, a local write error) fails at once. The pause starts at 1 s and doubles; no attempt
+# starts later than DOWNLOAD_RETRY_SECONDS after the first one. GitHub answered 504 for several seconds during the release run
+# of v0.1.0-rc.3 and the old three retries within 7 s were over before it recovered.
+readonly DOWNLOAD_RETRY_SECONDS=120
+
+# download_transient CURL_EXIT HTTP_STATUS: succeeds when a failed curl attempt is worth another one
+download_transient() {
+  case "$1" in
+    5 | 6 | 7 | 16 | 18 | 28 | 52 | 55 | 56 | 92) return 0 ;;
+    22) case "$2" in 408 | 429 | 500 | 502 | 503 | 504) return 0 ;; esac ;;
+  esac
+  return 1
+}
+
+# fetch NAME DESTDIR: anonymous https download of one release file of $TAG, with the retry policy above.
 fetch() {
   local name="$1" dest="$2"
-  local url="https://github.com/${ID_REPO}/releases/download/${TAG}/${name}"
+  local url
+  url="$(release_url "${name}")"
   have curl || fail tool_missing "curl not found in PATH"
-  curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL --retry 3 --connect-timeout 20 --max-time 900 \
-    -o "${dest}/${name}" "${url}" || fail download_failed "download of ${url} failed"
+  local attempt=0 pause=1 start="${SECONDS}" elapsed rc status reason noun
+  while :; do
+    attempt=$((attempt + 1))
+    noun=attempts
+    [ "${attempt}" = 1 ] && noun=attempt
+    rc=0
+    status="$(curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL --connect-timeout 20 --max-time 900 -w '%{http_code}' \
+      -o "${dest}/${name}" "${url}")" || rc=$?
+    [ "${rc}" = 0 ] && return 0
+    if [ "${rc}" = 22 ]; then reason="HTTP ${status}"; else reason="curl exit code ${rc}"; fi
+    download_transient "${rc}" "${status}" || fail download_failed "download of ${url} failed (${reason}; not retried, ${attempt} ${noun})"
+    elapsed=$((SECONDS - start))
+    [ "${elapsed}" -lt "${DOWNLOAD_RETRY_SECONDS}" ] \
+      || fail download_failed "download of ${url} failed (${reason}; retry window of ${DOWNLOAD_RETRY_SECONDS} s used up, ${attempt} ${noun})"
+    # the last pause ends exactly at the end of the window
+    [ $((elapsed + pause)) -le "${DOWNLOAD_RETRY_SECONDS}" ] || pause=$((DOWNLOAD_RETRY_SECONDS - elapsed))
+    log "attempt ${attempt} for ${url} failed (${reason}), next attempt in ${pause} s"
+    sleep "${pause}"
+    pause=$((pause * 2))
+  done
 }
 release_url() { printf 'https://github.com/%s/releases/download/%s/%s' "${ID_REPO}" "${TAG}" "$1"; }
 
