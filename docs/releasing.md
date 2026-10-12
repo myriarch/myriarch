@@ -214,6 +214,16 @@ been observed yet.
    the warning `icacls could not set the owner and the ACL` or the installer stops with `directory_unsafe`, fix it forward and
    add a Windows CI step that creates an administrator-only and a user-writable directory and runs the real function on both.
 
+The first published candidate is `v0.1.0-rc.3` (`v0.1.0-rc.1` and `v0.1.0-rc.2` stopped before the publication). Its results:
+
+- **Kind:** `make kind-probe` passed before the first tag, and `smoke-kind` passed on `v0.1.0-rc.3`.
+- **Re-run approvals:** "Re-run failed jobs" after gate 2 re-ran only the failed row of `smoke-linux` (HTTP 504 errors of
+  downloads from github.com during a GitHub incident) and asked for no approval. No job of the environment `release` ran again,
+  so whether `finalize` asks for gate 2 again after an approved attempt is still open, and the safe reading stays.
+- **The directory of `cosign.exe`:** `smoke-windows` logged no `icacls` warning, and the installer accepted
+  `C:\Program Files\cosign` on the Windows runner (`Test-AdminOnlyDirectory` runs on Windows in staging mode too). The refusal
+  of a directory that unprivileged accounts can write is still tested only with test doubles.
+
 ## Release a candidate
 
 Every candidate, the first one included, goes through these steps. A candidate is a GitHub pre-release and never the latest
@@ -320,13 +330,15 @@ the archives, so they can follow the release:
 2. **The pages that say whether images exist or name a release:** `docs/getting-started/_index.md`,
    `docs/getting-started/docker-compose.md`, `docs/operations/install-helm.md` and `docs/security/verify-releases.md`. Check that every tag they name exists and that
    their sentences about the images are true.
-3. **The deferred observations:** after the first candidate, write the result of the two observations of
-   [First candidate](#first-candidate-what-to-observe) in this pull request and in `docs/security/model.md` (the statement on
-   re-run approvals), and remove the wording that defers them. The kind result is known from before the tag; the re-run
-   observation may need a throw-away candidate, so it can follow in a pull request of its own.
+3. **The deferred observations:** after the first candidate, write the results of the three observations of
+   [First candidate](#first-candidate-what-to-observe) in this pull request, the one on re-run approvals also in
+   `docs/security/model.md`, and remove the wording that defers them. The kind result is known from before the tag and the
+   result of the `cosign.exe` directory from the log of `smoke-windows`; the re-run observation may need a throw-away
+   candidate, so it can follow in a pull request of its own.
 
-Texts in the archives (`README.md`, `CHANGELOG.md`, the files of `deploy/`) are not touched here: they are right already, or the
-next release corrects them.
+Texts in the archives (the files in the table of [Review the texts before every tag](#review-the-texts-before-every-tag), among
+them `README.md`, `CHANGELOG.md` and the chart) are not touched here: they are right already, or the next release corrects them.
+Other files of the repository, such as `deploy/README.md`, are not in an archive and can follow the release like the pages above.
 
 ## rc numbering and re-runs
 
@@ -336,7 +348,8 @@ next release corrects them.
   Sigstore). It re-runs only the failed jobs and the jobs that depend on them. **A gate is passed once per run:** a `sign-windows`
   that already passed is not asked again, so the privileged jobs `sign-blobs`, `push-images` and `draft` run again without a new
   approval, by anyone with write access to Actions. Whether `finalize` asks again after an approved attempt is not documented
-  by GitHub in a form we could confirm: observe it on the first candidate (see [First candidate](#first-candidate-what-to-observe)).
+  by GitHub in a form we could confirm, and the first published candidate, `v0.1.0-rc.3`, did not re-run it
+  (see [First candidate](#first-candidate-what-to-observe)).
   Stale drafts of the tag are deleted and replaced, a second push of the same digest changes nothing, duplicate signatures and
   attestations are harmless, and `finalize` resumes after a run in which it had already published.
 - **The resume path of `finalize`** (an attempt above 1) accepts a release that is already published when its assets are exactly
