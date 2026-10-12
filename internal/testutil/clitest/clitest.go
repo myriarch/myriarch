@@ -5,7 +5,7 @@
 // contract of the command line (data and the version on stdout, errors on stderr, the exit code) with the real
 // os.Stdout and os.Stderr. A test through a cobra command with SetOut cannot see a command that writes to the wrong
 // stream: cobra's Print helpers write to stderr unless SetOut was called, which is how
-// `myriarch-sim version` reported nothing on stdout in the first release candidate.
+// `myriarch-sim version` reported nothing on stdout in the image check of v0.1.0-rc.2.
 //
 // Use it in a package main test:
 //
@@ -32,7 +32,7 @@ import (
 )
 
 // markerEnv tells the re-executed test binary to run main instead of the tests.
-const markerEnv = "MYRIARCH_TEST_MAIN"
+const markerEnv = "CLITEST_RUN_MAIN"
 
 // RunAsMain runs mainFn and exits when the test binary was started by Exec; otherwise it returns at once. Call it first
 // in TestMain, before anything that needs a database or a flag.
