@@ -6,8 +6,9 @@
 
     python3 -I website/scripts/check-overrides.py [website/public]
 
-Some files of website/layouts replace a file of the Docsy theme with a modified copy. website/overrides.txt lists every such
-file with the SHA-256 of the upstream file that the copy was made from, one per line:
+Some files of website/layouts and website/assets replace a file of the Docsy theme with a modified copy (Hugo's union file system
+lets the file of the project win). website/overrides.txt lists every such file with the SHA-256 of the upstream file that the copy
+was made from, one per line:
 
     <path inside the theme> <sha256 of the upstream file>      (for example: layouts/_partials/head.html 3f9a...)
 
@@ -16,9 +17,13 @@ The check fails when
   - an upstream file changed (the pinned digest differs: Docsy was updated; compare the override with the new upstream file,
     port the changes and update the digest),
   - a listed override is missing from website/, or the upstream file is gone,
-  - a file of website/layouts exists at the same path in the theme but is not listed (an unpinned override),
+  - a file of website/layouts or website/assets exists at the same path in the theme but is not listed (an unpinned override),
   - the path list of the REUSE.toml annotation that adds the Docsy copyright (aggregate) differs from the list of overrides.txt
     (a new override would silently miss the attribution of Docsy).
+
+One exception: the three project style files of the theme (PROJECT_HOOKS) are placeholders that Docsy asks every project to
+replace. The project's file is its own, not a modified copy, so it needs neither a pin nor the Docsy attribution; the check
+fails only when Docsy puts content into such a placeholder, because the project's file would then hide it.
 
 Docsy is located through `hugo config mounts` (a stream of JSON objects, one per module), which needs hugo on PATH and the module
 cache of the build (HUGO_CACHEDIR). The argument (the built site) is accepted for the common calling convention of the checks and
@@ -35,6 +40,17 @@ import sys
 
 THEME_MODULE = "github.com/docsy/docsy/theme"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+# The directories of website/ whose files shadow the file of the theme at the same path.
+OVERRIDE_DIRS = ("layouts", "assets")
+
+# The style files that Docsy documents as the place for the styles of a project (https://www.docsy.dev/docs/content/lookandfeel/#project-style-files).
+# The theme ships each of them as a placeholder that holds only a comment and says "Projects can override this file".
+PROJECT_HOOKS = frozenset({
+    "assets/scss/_variables_project.scss",
+    "assets/scss/_variables_project_after_bs.scss",
+    "assets/scss/_styles_project.scss",
+})
 
 
 def website_dir():
@@ -95,6 +111,13 @@ def locate_theme(site):
     return theme
 
 
+def has_code(text):
+    """True when a style file holds more than comments and white space (the placeholders of the theme hold only a comment)."""
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    text = re.sub(r"//[^\n]*", "", text)
+    return bool(text.strip())
+
+
 def list_files(base):
     out = []
     for root, dirs, files in os.walk(base):
@@ -150,12 +173,21 @@ def check(site, theme):
         got = sha256_file(upstream)
         if got != want:
             findings.append("%s: the upstream file changed (pinned %s, now %s); compare the override and update the digest" % (path, want[:12], got[:12]))
-    layouts = os.path.join(site, "layouts")
-    if os.path.isdir(layouts):
-        for rel in list_files(layouts):
-            path = "layouts/" + rel
-            if os.path.isfile(os.path.join(theme, path)) and path not in entries:
-                findings.append("%s: replaces a Docsy file but is not listed in overrides.txt" % path)
+    for base in OVERRIDE_DIRS:
+        root = os.path.join(site, base)
+        if not os.path.isdir(root):
+            continue
+        for rel in list_files(root):
+            path = base + "/" + rel
+            upstream = os.path.join(theme, path)
+            if path in entries or not os.path.isfile(upstream):
+                continue
+            if path in PROJECT_HOOKS:
+                with open(upstream, "r", encoding="utf-8") as fh:
+                    if has_code(fh.read()):
+                        findings.append("%s: the upstream file is no longer an empty placeholder for the styles of a project; pin it in overrides.txt and port its content" % path)
+                continue
+            findings.append("%s: replaces a Docsy file but is not listed in overrides.txt" % path)
     findings.extend(check_reuse(site, entries))
     return len(entries), findings
 

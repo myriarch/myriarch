@@ -1,6 +1,7 @@
-# Files of website/layouts that replace a file of the Docsy theme (ADR-0031), each with the SHA-256 of the upstream file at Docsy v0.18.0
-# that the copy was made from. website/scripts/check-overrides.py fails when the upstream file changes (a Docsy update) or when a file
-# of website/layouts shadows a theme file without being listed here. After porting the upstream changes into the override, update
+# Files of website/layouts and website/assets that replace a file of the Docsy theme (ADR-0031), each with the SHA-256 of the upstream
+# file at Docsy v0.18.0 that the copy was made from. website/scripts/check-overrides.py fails when the upstream file changes (a Docsy
+# update) or when a file of website/layouts or website/assets shadows a theme file without being listed here (the three project style
+# files that the theme ships as empty placeholders are the exception). After porting the upstream changes into the override, update
 # the digest: sha256sum <docsy module dir>/<path>. Format: <path inside the theme> <sha256>
 layouts/404.html 1152ca510ae40ca8faffe274eb7babb8a4717fa21fe29e37dbe8508686abc1c9
 layouts/_partials/favicons.html 8fe3a18b17de295cc624ebb450f1c4c255ffa0796343389f2069754b34d04b57

@@ -111,11 +111,15 @@ Hugo takes it for a shortcode.
 
 ## Overrides of Docsy files
 
-Files in `layouts/` with the same path as a file of the theme replace it. They are few and each starts with a comment that names the
-upstream file: `head.html` (self-hosted lunr, brand colors, the CSP first), `favicons.html`, `page-meta-links.html` (edit links from
-the repository path), `scripts/plugins/mermaid.html` (self-hosted Mermaid), `footer/copyright.html` and `404.html`.
-`overrides.txt` pins the SHA-256 of the upstream file of each. `REUSE.toml` (annotation n) adds "Copyright The Docsy Authors" (Apache-2.0)
-to the project header of each of these files, so that the derivation is machine-readable; add a new override there as well (`scripts/check-overrides.py` fails when the two lists differ). To update Docsy:
+Files in `layouts/` and `assets/` with the same path as a file of the theme replace it. They are few and each starts with a comment that
+names the upstream file: `head.html` (self-hosted lunr, brand colors, the CSP first), `favicons.html`, `page-meta-links.html` (edit links
+from the repository path), `scripts/plugins/mermaid.html` (self-hosted Mermaid), `footer/copyright.html` and `404.html`.
+`overrides.txt` pins the SHA-256 of the upstream file of each. `REUSE.toml` (annotation n) adds "Copyright The Docsy Authors"
+(Apache-2.0) to the project header of each of these files, so that the derivation is machine-readable; add a new override there as well
+(`scripts/check-overrides.py` fails when the two lists differ, and when a file of `layouts/` or `assets/` shadows a theme file without a
+pin). The three project style files (`assets/scss/_variables_project.scss`, `_variables_project_after_bs.scss` and `_styles_project.scss`)
+are no overrides: Docsy ships them as empty placeholders and asks every project to replace them, so they need neither a pin nor the
+attribution; the check fails only when a Docsy update puts content into one of them. To update Docsy:
 
 1. Change the version in `go.mod`, run `cd website && hugo mod get github.com/docsy/docsy/theme@<version>` (updates `go.sum`) and
    `hugo mod verify`; the module path changed once already (0.18).
@@ -197,7 +201,7 @@ paragraph as the reason.
 | `check-third-party.py` | a script, style, font, image, frame, worker or import from another host in the built pages, styles and scripts |
 | `check-local-paths.py` | the repository root, `/Users/...` or `/home/...` in the built site |
 | `check-repo-links.py` | a link into the GitHub repository (blob, tree, edit) whose path does not exist in the working tree |
-| `check-overrides.py` | a changed upstream file, a missing or an unlisted override |
+| `check-overrides.py` | a changed upstream file, a missing or an unlisted override (a file of `layouts/` or `assets/` that shadows a theme file) |
 | `check-indexing.py` | a preview that can be indexed (no `Disallow: /`, a sitemap line, a page without `noindex`) or a production site that hides itself; the mode comes from `WEBSITE_ENV` |
 | `check-placeholders.py` | a placeholder whose page now exists, or a malformed placeholder |
 | `check-api-spec.py` | a missing API reference page, a download that is not exactly one fingerprinted copy of `api/openapi.yaml`, a page that loads a script of an API viewer, or a number of operation sections that differs from the contract |

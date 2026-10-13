@@ -1088,7 +1088,8 @@ image that cannot be resolved fails the build, because an image from another hos
 
 Some pages of the theme are replaced by modified copies in `website/layouts` (the offline search script, the favicons, the
 "edit this page" links, Mermaid, the footer, the 404 page). `website/overrides.txt` pins the SHA-256 of the upstream file
-of each one; after a Docsy update `website/scripts/check-overrides.py` shows which upstream file changed.
+of each one; after a Docsy update `website/scripts/check-overrides.py` shows which upstream file changed, and it fails when a
+file of `website/layouts` or `website/assets` shadows a theme file without a pin.
 
 ### Adding a page and placeholders
 
