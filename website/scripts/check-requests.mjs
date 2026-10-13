@@ -141,7 +141,11 @@ async function checkPage(browser, base, path, scheme, findings) {
     for (const query of ["approveRolloutWave", "rollouts:operate"]) {
       await page.evaluate("(() => { const i = document.querySelector('.td-search__input'); i.focus(); i.value = ''; i.dispatchEvent(new Event('change', {bubbles: true})); })()");
       await waitFor(page, "document.querySelectorAll('.td-offline-search-results a').length === 0", 3000);
-      await page.evaluate(`(() => { const i = document.querySelector('.td-search__input'); i.value = ${JSON.stringify(query)}; i.dispatchEvent(new Event('change', {bubbles: true})); })()`);
+      await page.call((q) => {
+        const i = document.querySelector(".td-search__input");
+        i.value = q;
+        i.dispatchEvent(new Event("change", { bubbles: true }));
+      }, query);
       const found = await waitFor(
         page,
         "[...document.querySelectorAll('.td-offline-search-results a')].some((a) => new URL(a.href).pathname.startsWith('/docs/reference/api/'))",
@@ -161,9 +165,10 @@ const SEARCH_BOX = "document.querySelector('.td-search__input')";
 
 /** A click of the mouse in the middle of an element (real input events, so that pointerdown, focus and the like come in the order of a visitor's click). */
 async function clickElement(page, selector) {
-  const { x, y } = JSON.parse(
-    await page.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 }); })()`),
-  );
+  const { x, y } = await page.call((sel) => {
+    const r = document.querySelector(sel).getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }, selector);
   await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
   await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
   await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
@@ -171,7 +176,12 @@ async function clickElement(page, selector) {
 
 /** What Enter does in the search box: the value is set and a change event fires (like a visitor who typed the query and pressed Enter). */
 const submitQuery = (page, query) =>
-  page.evaluate(`(() => { const i = ${SEARCH_BOX}; i.focus(); i.value = ${JSON.stringify(query)}; i.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  page.call((q) => {
+    const i = document.querySelector(".td-search__input");
+    i.focus();
+    i.value = q;
+    i.dispatchEvent(new Event("change", { bubbles: true }));
+  }, query);
 
 /**
  * The search index loads on the first use of a search box (assets/js/offline-search.js): every way to begin (focus, pointerdown, input, a real
@@ -227,8 +237,7 @@ async function checkSearchLoad(browser, base, findings) {
 }
 
 /** The hint in the popover of a query that waited for an index which could not be loaded (assets/js/offline-search.js). */
-const LOAD_FAILED_HINT = "The search index could not be loaded";
-const HINT_SHOWN = `(document.querySelector('.td-offline-search-results')?.textContent ?? '').includes(${JSON.stringify(LOAD_FAILED_HINT)})`;
+const HINT_SHOWN = "(document.querySelector('.td-offline-search-results')?.textContent ?? '').includes('The search index could not be loaded')";
 const RESULTS_SHOWN = "document.querySelectorAll('.td-offline-search-results a').length > 0";
 
 /**

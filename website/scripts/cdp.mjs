@@ -17,6 +17,7 @@
 //   await page.goto("http://127.0.0.1:1313/");
 //   await page.waitForIdle();                             // no request in flight for a moment
 //   await page.evaluate("document.title");                // runs in the page, returns the value; addInitScript runs before the page
+//   await page.call((s) => document.querySelector(s)?.id, "#main"); // calls a function in the page; the arguments are passed as values
 //   const png = await page.screenshot({ fullPage: true }); // a Buffer
 //   await browser.close();
 //
@@ -258,6 +259,23 @@ class Page {
   async evaluate(expression) {
     const { result, exceptionDetails } = await this.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
     if (exceptionDetails) throw new Error(`evaluation failed: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`);
+    return result.value;
+  }
+
+  /**
+   * Calls a function in the page with the given arguments and returns its value (promises are awaited). The arguments travel as values of
+   * the protocol, never as source text, so no code is built from data (use this instead of evaluate when a value goes into the page).
+   */
+  async call(fn, ...args) {
+    const { result: global } = await this.send("Runtime.evaluate", { expression: "globalThis" });
+    const { result, exceptionDetails } = await this.send("Runtime.callFunctionOn", {
+      objectId: global.objectId,
+      functionDeclaration: fn.toString(),
+      arguments: args.map((value) => ({ value })),
+      returnByValue: true,
+      awaitPromise: true,
+    });
+    if (exceptionDetails) throw new Error(`call failed: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`);
     return result.value;
   }
 
