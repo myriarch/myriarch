@@ -5,7 +5,9 @@
 //   - a request to an origin other than the one that serves the site (scripts, styles, fonts, images, XHR, workers, frames),
 //   - a Content Security Policy violation or another console error (the CSP of the production build must not break the page),
 //   - a page that does not answer 200 (404.html must answer, from a static server, with the 404 status),
-//   - a broken feature of the theme: the search must find results, a page with a Mermaid diagram must render its SVG, the static API reference must render its tables and its operations must be found by the site search.
+//   - a broken feature of the theme: the search must find results, a page with a Mermaid diagram must render its SVG, the static API reference must render its tables and its operations must be found by the site search,
+//   - the search index (a file of the site, 1 MB of JSON that takes a long task to turn into the lunr index) requested while a page loads: it loads on the first use of a search box
+//     (website/assets/js/offline-search.js), once however often the box is used, and a query that is submitted before it has arrived is rendered when it has.
 //
 //   node website/scripts/check-requests.mjs [--base http://127.0.0.1:1313] [--pages website/scripts/request-pages.txt] [--page /path ...]
 //
@@ -60,6 +62,15 @@ export function isForeign(url, origin) {
   return u.origin !== origin;
 }
 
+/** True for the request of the search index: Docsy writes it as offline-search-index.json and fingerprints it in production (offline-search-index.<hash>.json), at the root of the site or below the path of its base URL. */
+export function isSearchIndex(url) {
+  try {
+    return /\/offline-search-index(\.[0-9a-f]+)?\.json$/.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
 async function waitFor(page, expression, timeoutMs = 10000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -74,9 +85,11 @@ async function checkPage(browser, base, path, scheme, findings) {
   const label = `${path} (${scheme})`;
   const page = await browser.newPage();
   let requests = 0;
+  let indexRequests = 0;
   page.onRequest((r) => {
     requests++;
     if (isForeign(r.url, origin)) findings.push(`${label}: request to another origin: ${r.url}`);
+    if (isSearchIndex(r.url)) indexRequests++;
   });
   page.onConsole((m) => {
     // The favicon of a 404 response and the like are not errors of the site; a CSP violation or a script error is.
@@ -93,6 +106,10 @@ async function checkPage(browser, base, path, scheme, findings) {
   if (status !== wantStatus && !(path === "/404.html" && status === 200)) findings.push(`${label}: status ${status}, expected ${wantStatus}`);
   const theme = await page.evaluate("document.documentElement.getAttribute('data-bs-theme')");
   if (theme !== scheme) findings.push(`${label}: the page uses the theme ${theme}, expected ${scheme}`);
+
+  // The search index is the largest file of a page load and turning it into the lunr index is a long task (about 0.5 s on a phone), which
+  // costs Total Blocking Time: it loads on the first use of a search box, never while the page loads (assets/js/offline-search.js).
+  if (indexRequests > 0) findings.push(`${label}: the page requests the search index while it loads (${indexRequests} requests); it must load on the first use of a search box`);
 
   // Search: type a query, the index (a file of the site) is loaded and results appear.
   if (path === "/docs/") {
@@ -132,7 +149,79 @@ async function checkPage(browser, base, path, scheme, findings) {
     }
     await page.waitForIdle();
   }
+  // However often the search was used on this page, the index was requested once (the first query was the first use of the box).
+  if (path === "/docs/" && indexRequests !== 1) findings.push(`${label}: using the search requested the search index ${indexRequests} times, expected once`);
   return requests;
+}
+
+/** The search box of the navigation bar (the first one; the 404 page and the sidebar of narrow screens have more). */
+const SEARCH_BOX = "document.querySelector('.td-search__input')";
+
+/** A click of the mouse in the middle of an element (real input events, so that pointerdown, focus and the like come in the order of a visitor's click). */
+async function clickElement(page, selector) {
+  const { x, y } = JSON.parse(
+    await page.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 }); })()`),
+  );
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+  await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+  await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+}
+
+/** What Enter does in the search box: the value is set and a change event fires (like a visitor who typed the query and pressed Enter). */
+const submitQuery = (page, query) =>
+  page.evaluate(`(() => { const i = ${SEARCH_BOX}; i.focus(); i.value = ${JSON.stringify(query)}; i.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+
+/**
+ * The search index loads on the first use of a search box (assets/js/offline-search.js): every way to begin (focus, pointerdown, input, a real
+ * click) starts exactly one request, further use requests nothing more, and the search finds results. The last scenario submits the query
+ * in the same moment as the first focus, before the index has arrived: the query must be rendered when it has.
+ */
+async function checkSearchLoad(browser, base, findings) {
+  const scenarios = [
+    { name: "focus", start: (page) => page.evaluate(`${SEARCH_BOX}.focus()`), query: (page) => submitQuery(page, "rollout") },
+    {
+      name: "pointerdown",
+      start: (page) => page.evaluate(`${SEARCH_BOX}.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`),
+      query: (page) => submitQuery(page, "rollout"),
+    },
+    {
+      name: "input",
+      start: (page) => page.evaluate(`(() => { const i = ${SEARCH_BOX}; i.value = 'r'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`),
+      query: (page) => submitQuery(page, "rollout"),
+    },
+    {
+      name: "click and typing",
+      start: (page) => clickElement(page, ".td-search__input"),
+      query: async (page) => {
+        await page.send("Input.insertText", { text: "rollout" });
+        await pressKey(page, "Enter");
+      },
+    },
+    { name: "query before the index has arrived", start: (page) => submitQuery(page, "rollout"), query: async () => {} },
+  ];
+  for (const { name, start, query } of scenarios) {
+    const label = `/ (search, ${name})`;
+    const page = await browser.newPage();
+    let indexRequests = 0;
+    page.onRequest((r) => {
+      if (isSearchIndex(r.url)) indexRequests++;
+    });
+    await page.setViewport(1280, 900);
+    await page.setColorScheme("light");
+    await page.goto(base + "/");
+    await page.waitForIdle();
+    if (indexRequests !== 0) findings.push(`${label}: ${indexRequests} requests for the search index while the page loaded, expected none`);
+    await start(page);
+    await page.waitForIdle();
+    if (indexRequests !== 1) findings.push(`${label}: the first use of the search box requested the search index ${indexRequests} times, expected once`);
+    await query(page);
+    const found = await waitFor(page, "document.querySelectorAll('.td-offline-search-results a').length > 0");
+    if (!found) findings.push(`${label}: the search for "rollout" found nothing`);
+    // Every other way to use the box, again: the index is not requested a second time.
+    await page.evaluate(`(() => { const i = ${SEARCH_BOX}; i.blur(); i.focus(); i.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await page.waitForIdle();
+    if (indexRequests !== 1) findings.push(`${label}: the search index was requested ${indexRequests} times, expected once`);
+  }
 }
 
 /** The parts of the mark and their computed transforms in one expression (JSON). */
@@ -598,6 +687,7 @@ async function main() {
         loads++;
       }
     }
+    await checkSearchLoad(browser, opts.base, findings);
     await checkMotion(browser, opts.base, findings);
   } catch (e) {
     console.error(`check-requests: ${e.message}`);

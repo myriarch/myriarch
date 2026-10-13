@@ -1135,7 +1135,8 @@ Two checks need a browser and are not part of the gate:
 ```bash
 make website-preview &                      # production build on 127.0.0.1:1313
 node website/scripts/check-requests.mjs     # every page of request-pages.txt in light and dark: only same-origin requests,
-                                            # no CSP violation or console error, the search finds results, diagrams render
+                                            # no CSP violation or console error, the search finds results, diagrams render,
+                                            # the search index is requested by the first use of a search box, not by a page load
 ```
 
 and Lighthouse (version 13, needs Node.js 22.19 or newer, therefore not in the lockfile):

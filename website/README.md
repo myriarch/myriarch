@@ -128,6 +128,8 @@ visitors never search. `assets/js/offline-search.js` is therefore an override of
 - One difference is deliberate: when the index was ready, the theme's script dispatched a change event on every box, which also removed the
   focus from the box. That was harmless when the index was ready long before the first query; now it arrives while the visitor types the first
   query, so the override renders only the queries that were submitted in the meantime and leaves the focus alone.
+- `scripts/check-requests.mjs` fails when a page of `request-pages.txt` requests the index while it loads, and when the search requests it
+  other than once (see [Checks](#checks)).
 
 ## Overrides of Docsy files
 
@@ -233,7 +235,9 @@ A new check is a file `scripts/check-<name>.py` that takes the built site as its
 
 - `node website/scripts/check-requests.mjs` (needs `make website-preview` running, Node.js 22 and Chrome; the pages are in
   `scripts/request-pages.txt`) loads every page in light and dark and fails on a request to another origin, a CSP violation or a
-  console error, a search that finds nothing for an operation or a heading, a diagram that does not render, an API page without its
+  console error, a page that requests the search index while it loads, a search that requests it other than once (focus, pointerdown,
+  input, or a click and typing in a box: each must start exactly one request, and a query that is submitted at once must be rendered
+  when the index arrives), a search that finds nothing for an operation or a heading, a diagram that does not render, an API page without its
   tables, and the mark on the landing page (about a minute, in light and dark): its rollout must play and end on identity transforms,
   the unchanged mark must be held for 6 to 8.5 s, the dots must retract and a second cycle must start; the mark is its own pause control
   (no visible button: `role="button"`, `tabindex="0"`, a name, `aria-pressed`, a pointer cursor): a click, or Enter or Space on the

@@ -51,6 +51,17 @@ if have node; then
     ];
     for (const [url, want] of cases) if (isForeign(url, origin) !== want) { console.error("isForeign", url, "expected", want); process.exit(1); }
   '
+  expect_ok "check-requests.mjs: isSearchIndex" node --input-type=module -e '
+    import { isSearchIndex } from "./website/scripts/check-requests.mjs";
+    const site = "http://127.0.0.1:1313";
+    const cases = [
+      [site + "/offline-search-index.c3c61a8a8ffa9a8faf2b10123a55ba3b.json", true], [site + "/offline-search-index.json", true],
+      [site + "/offline-search-index.c3c61a8a8ffa9a8faf2b10123a55ba3b.json?v=1", true], [site + "/base/offline-search-index.json", true],
+      [site + "/offline-search-index.json.map", false], [site + "/xoffline-search-index.json", false], [site + "/search-index.json", false],
+      [site + "/docs/", false], [site + "/js/main.min.0d1312a7.js", false], ["not a url", false],
+    ];
+    for (const [url, want] of cases) if (isSearchIndex(url) !== want) { console.error("isSearchIndex", url, "expected", want); process.exit(1); }
+  '
 else
   echo "  skip  node not found: the Node scripts are not tested"
 fi
