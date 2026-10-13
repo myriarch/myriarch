@@ -240,6 +240,65 @@ class OverridesTest(TempCase):
         _, findings = self.mod.check(site, theme)
         self.assertEqual(findings, ["layouts/_partials/footer.html: replaces a Docsy file but is not listed in overrides.txt"])
 
+    def test_pinned_asset_override_passes(self):
+        # a script of website/assets that shadows a theme file is pinned like a layout; a file without a counterpart in the theme is free
+        site, theme = self.make({"assets/js/offline-search.js": "old\n"},
+                                {"assets/js/offline-search.js": "mine\n", "assets/js/landing-mark.js": "x\n", "assets/images/a.png": "x"},
+                                {"assets/js/offline-search.js": "old\n"})
+        self.assertEqual(self.mod.check(site, theme), (1, []))
+
+    def test_unlisted_asset_shadowing_a_theme_file_is_reported(self):
+        site, theme = self.make({"assets/js/offline-search.js": "old\n", "assets/scss/td/_nav.scss": "u\n"},
+                                {"assets/js/offline-search.js": "mine\n", "assets/scss/td/_nav.scss": "mine\n", "assets/js/landing-mark.js": "x\n"}, {})
+        _, findings = self.mod.check(site, theme)
+        self.assertEqual(sorted(findings), [
+            "assets/js/offline-search.js: replaces a Docsy file but is not listed in overrides.txt",
+            "assets/scss/td/_nav.scss: replaces a Docsy file but is not listed in overrides.txt",
+        ])
+
+    def test_changed_upstream_asset_and_missing_asset_override_are_reported(self):
+        site, theme = self.make({"assets/js/offline-search.js": "old\n"}, {"assets/js/offline-search.js": "mine\n"},
+                                {"assets/js/offline-search.js": "old\n"})
+        write(os.path.join(theme, "assets/js/offline-search.js"), "new\n")
+        _, findings = self.mod.check(site, theme)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("assets/js/offline-search.js: the upstream file changed", findings[0])
+        os.remove(os.path.join(site, "assets/js/offline-search.js"))
+        _, findings = self.mod.check(site, theme)
+        self.assertIn("assets/js/offline-search.js: listed in overrides.txt but missing in website/", findings)
+
+    def test_project_style_files_replace_placeholders_without_a_pin(self):
+        placeholder = "/*\nProjects can override this file. For details, see:\nhttps://www.docsy.dev/docs/content/lookandfeel/#project-style-files\n*/\n"
+        hooks = sorted(self.mod.PROJECT_HOOKS)
+        self.assertEqual(len(hooks), 3)
+        site, theme = self.make({rel: placeholder for rel in hooks}, {rel: "$brand: #fff;\n" for rel in hooks}, {})
+        self.assertEqual(self.mod.check(site, theme), (0, []))
+        # a Docsy update puts rules into a placeholder: the file of the project would hide them
+        write(os.path.join(theme, hooks[0]), placeholder + "body { margin: 0; }\n")
+        _, findings = self.mod.check(site, theme)
+        self.assertEqual(len(findings), 1)
+        self.assertTrue(findings[0].startswith(hooks[0] + ": the upstream file is no longer an empty placeholder"), findings)
+        # another file of the theme's scss directory is no exception
+        shutil.rmtree(site)
+        shutil.rmtree(theme)
+        site, theme = self.make({"assets/scss/_styles_project_other.scss": placeholder}, {"assets/scss/_styles_project_other.scss": "a {}\n"}, {})
+        _, findings = self.mod.check(site, theme)
+        self.assertEqual(findings, ["assets/scss/_styles_project_other.scss: replaces a Docsy file but is not listed in overrides.txt"])
+
+    def test_has_code(self):
+        for text in ("", "\n", "/* c */", "/*\nmulti\nline https://example.test/x\n*/\n", "// line\n", "/* a */ // b\n"):
+            self.assertFalse(self.mod.has_code(text), repr(text))
+        for text in ("a { b: c }", "/* c */ a {}", "$x: 1; // c", "@import 'x';"):
+            self.assertTrue(self.mod.has_code(text), repr(text))
+
+    def test_the_real_project_style_files_are_not_pinned(self):
+        # the three hooks exist in the project and are no entries of overrides.txt (a pin would also demand the Docsy attribution)
+        with open(os.path.join(WEBSITE, "overrides.txt"), encoding="utf-8") as fh:
+            entries, _ = self.mod.parse_overrides(fh.read())
+        for rel in self.mod.PROJECT_HOOKS:
+            self.assertTrue(os.path.isfile(os.path.join(WEBSITE, rel)), rel)
+            self.assertNotIn(rel, entries)
+
     def test_parse_overrides(self):
         good = "a" * 64
         entries, errors = self.mod.parse_overrides("# c\n\nlayouts/a.html %s\nlayouts/a.html %s\nbad line\nlayouts/b.html XYZ\n" % (good, good))

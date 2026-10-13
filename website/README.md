@@ -40,7 +40,8 @@ data/third_party.yaml       the notices of /legal/third-party/
 data/release.yaml           the release status (latest final release or newest candidate): the one value behind the status chip of the landing page; set by hand after a publication (docs/releasing.md)
 layouts/                    render hooks (_markup), partials (repo/*, csp.html), shortcodes, overrides of Docsy files, 404.html, robots.txt
 assets/scss/                brand tokens (_variables_project.scss) and project styles
-assets/js/                  landing-mark.js: the loop of the mark on the landing page and its click-to-pause behaviour (the site's own script; the rest comes with the theme)
+assets/js/                  landing-mark.js: the loop of the mark on the landing page and its click-to-pause behaviour (the site's own script; the rest comes with the theme);
+                            offline-search.js: the override of the search script of the theme, the index loads on first use (see Search)
 static/                     site.webmanifest
 scripts/                    the checks (check-*.py), their tests (test_checks.py, testdata/), the browser checks (*.mjs), the preview server (preview-server.py)
 overrides.txt               SHA-256 of the upstream file behind every override of a Docsy file
@@ -109,13 +110,49 @@ Hugo takes it for a shortcode.
   that the page is planned for that release. When `docs/operations/upgrade.md`
   exists, the placeholder has to go in the same change (`scripts/check-placeholders.py`).
 
+## Search
+
+Search runs in the browser: Docsy's offline search with lunr (`offlineSearch: true` in `params.yaml`). Hugo writes the index as a
+fingerprinted file of the site (`/offline-search-index.<hash>.json`, about 1.2 MB of JSON and 375 KB compressed for about 150 pages), and a
+script turns it into a lunr index in the browser. That is one long task (about 0.1 s on a laptop, about 0.5 s with the throttling of
+Lighthouse's mobile profile). The script of the theme did it at `DOMContentLoaded` of every page: it was the only long task of the landing
+page and cost 440 to 490 ms of Total Blocking Time (PageSpeed Insights, October 2026: performance 72 on mobile and 80 on desktop), although most
+visitors never search. `assets/js/offline-search.js` is therefore an override of the theme's script that changes how the index is loaded and
+what happens when that fails:
+
+- The first focus, pointerdown or input event on any search box fetches the index and builds the lunr index. All boxes of a page share one
+  promise, so this happens once, however often and in whichever box the visitor searches. A page that nobody searches in never requests the
+  file, and Lighthouse, which does not search, does not either.
+- A query that is typed and submitted (Enter, or the box loses the focus) before the index has arrived is rendered as soon as it has. The
+  rendering, the popover, the submit handling and the maximum number of results (`offlineSearchMaxResults`) are the code of the theme.
+- A failed load is not final. The theme made one attempt per page view, at the page load, and logged a failure. The first use of a box can
+  come much later, and then two failures are likely: the network is down for a moment, or the tab was opened before a deployment and still
+  names the fingerprinted index file of the old build (`offline-search-index.<hash>.json`), which the host no longer serves (it answers
+  every path without a file with the 404 page). The script logs "Could not load the search index" and forgets the attempt: the next query
+  that is submitted (Enter, or the box loses the focus with a changed value) requests the index again, one request per query. A query that
+  was waiting for the failed load gets the hint "The search index could not be loaded. Reload the page to search." in its popover. A tab
+  from before a deployment cannot load the index until the page is reloaded; the hint says so.
+- The focus stays in the box, which is a deliberate difference, too: when the index was ready, the theme's script dispatched a change
+  event on every box, which also removed the focus from the box. That was harmless when the index was ready long before the first query;
+  now it arrives while the visitor types the first query, so the override renders only the queries that were submitted in the meantime and
+  leaves the focus alone.
+- `scripts/check-requests.mjs` fails when a page of `request-pages.txt` requests the index while it loads, when the search requests it other
+  than once, and when the search does not recover from a failed load: it answers the index request with a network error or with the 404 page
+  (through the Fetch domain of the DevTools protocol, not by the server) and expects the retry with the next query, the hint for a query that
+  waited for the failed load, and one console error per failed load (see [Checks](#checks)).
+
 ## Overrides of Docsy files
 
-Files in `layouts/` with the same path as a file of the theme replace it. They are few and each starts with a comment that names the
-upstream file: `head.html` (self-hosted lunr, brand colors, the CSP first), `favicons.html`, `page-meta-links.html` (edit links from
-the repository path), `scripts/plugins/mermaid.html` (self-hosted Mermaid), `footer/copyright.html` and `404.html`.
-`overrides.txt` pins the SHA-256 of the upstream file of each. `REUSE.toml` (annotation n) adds "Copyright The Docsy Authors" (Apache-2.0)
-to the project header of each of these files, so that the derivation is machine-readable; add a new override there as well (`scripts/check-overrides.py` fails when the two lists differ). To update Docsy:
+Files in `layouts/` and `assets/` with the same path as a file of the theme replace it. They are few and each starts with a comment that
+names the upstream file: `head.html` (self-hosted lunr, brand colors, the CSP first), `favicons.html`, `page-meta-links.html` (edit links
+from the repository path), `scripts/plugins/mermaid.html` (self-hosted Mermaid), `footer/copyright.html`, `404.html` and
+`assets/js/offline-search.js` (the search index loads on first use, see [Search](#search); the changed parts are marked "Changed from
+upstream"). `overrides.txt` pins the SHA-256 of the upstream file of each. `REUSE.toml` (annotation n) adds "Copyright The Docsy Authors"
+(Apache-2.0) to the project header of each of these files, so that the derivation is machine-readable; add a new override there as well
+(`scripts/check-overrides.py` fails when the two lists differ, and when a file of `layouts/` or `assets/` shadows a theme file without a
+pin). The three project style files (`assets/scss/_variables_project.scss`, `_variables_project_after_bs.scss` and `_styles_project.scss`)
+are no overrides: Docsy ships them as empty placeholders and asks every project to replace them, so they need neither a pin nor the
+attribution; the check fails only when a Docsy update puts content into one of them. To update Docsy:
 
 1. Change the version in `go.mod`, run `cd website && hugo mod get github.com/docsy/docsy/theme@<version>` (updates `go.sum`) and
    `hugo mod verify`; the module path changed once already (0.18).
@@ -197,7 +234,7 @@ paragraph as the reason.
 | `check-third-party.py` | a script, style, font, image, frame, worker or import from another host in the built pages, styles and scripts |
 | `check-local-paths.py` | the repository root, `/Users/...` or `/home/...` in the built site |
 | `check-repo-links.py` | a link into the GitHub repository (blob, tree, edit) whose path does not exist in the working tree |
-| `check-overrides.py` | a changed upstream file, a missing or an unlisted override |
+| `check-overrides.py` | a changed upstream file, a missing or an unlisted override (a file of `layouts/` or `assets/` that shadows a theme file) |
 | `check-indexing.py` | a preview that can be indexed (no `Disallow: /`, a sitemap line, a page without `noindex`) or a production site that hides itself; the mode comes from `WEBSITE_ENV` |
 | `check-placeholders.py` | a placeholder whose page now exists, or a malformed placeholder |
 | `check-api-spec.py` | a missing API reference page, a download that is not exactly one fingerprinted copy of `api/openapi.yaml`, a page that loads a script of an API viewer, or a number of operation sections that differs from the contract |
@@ -207,8 +244,12 @@ paragraph as the reason.
 A new check is a file `scripts/check-<name>.py` that takes the built site as its argument; the runner finds it. Outside the gate:
 
 - `node website/scripts/check-requests.mjs` (needs `make website-preview` running, Node.js 22 and Chrome; the pages are in
-  `scripts/request-pages.txt`) loads every page in light and dark and fails on a request to another origin, a CSP violation or a
-  console error, a search that finds nothing for an operation or a heading, a diagram that does not render, an API page without its
+  `scripts/request-pages.txt`) loads every page in light and dark and fails on a request to another origin, a CSP violation or a console
+  error, a page that requests the search index while it loads, a search that requests it other than once (focus, pointerdown, input, or
+  a click and typing in a box: each must start exactly one request, and a query that is submitted at once must be rendered when the
+  index arrives), a search that does not recover from an index that cannot be loaded (the check answers the request with a network error
+  or with the 404 page: the next query must request the index again and find results, and a query that waited for the failed load must
+  get a hint), a search that finds nothing for an operation or a heading, a diagram that does not render, an API page without its
   tables, and the mark on the landing page (about a minute, in light and dark): its rollout must play and end on identity transforms,
   the unchanged mark must be held for 6 to 8.5 s, the dots must retract and a second cycle must start; the mark is its own pause control
   (no visible button: `role="button"`, `tabindex="0"`, a name, `aria-pressed`, a pointer cursor): a click, or Enter or Space on the

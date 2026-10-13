@@ -231,11 +231,13 @@ precedence = "override"
 SPDX-FileCopyrightText = "Copyright The Myriarch Authors"
 SPDX-License-Identifier = "CC-BY-4.0"
 
-# n) Overrides of Docsy files (ADR-0031): these files of website/layouts are modified copies of Docsy v0.18.0 files (Apache-2.0;
-# website/overrides.txt pins the upstream digests). They keep the header of the project and, through precedence = "aggregate", the
-# upstream copyright is added to it, so that the derivation is machine-readable. No file of Docsy is copied without a change.
+# n) Overrides of Docsy files (ADR-0031): these files of website/layouts and website/assets are modified copies of Docsy v0.18.0
+# files (Apache-2.0; website/overrides.txt pins the upstream digests). They keep the header of the project and, through
+# precedence = "aggregate", the upstream copyright is added to it, so that the derivation is machine-readable. No file of Docsy is
+# copied without a change.
 [[annotations]]
 path = [
+  "website/assets/js/offline-search.js",
   "website/layouts/404.html",
   "website/layouts/_partials/favicons.html",
   "website/layouts/_partials/head.html",

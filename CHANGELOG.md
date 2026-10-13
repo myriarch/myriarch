@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Changed
+
+- **Website.** The search index loads when a visitor first uses a search box, not on every page load. Docsy's script fetched the index (about 1.2 MB of JSON, 375 KB compressed) and built the lunr index at `DOMContentLoaded`; that one long task, about 0.5 s on a phone, was the whole Total Blocking Time of the landing page (440 to 490 ms, performance 72 on mobile and 80 on desktop in PageSpeed Insights). A page now requests the index when a search box first receives the focus, a pointer press or an input, once for all boxes on the page, and renders a query that is submitted before the index has arrived as soon as it has; the results are the same. A load that fails (the network is down for a moment, or the tab was opened before a deployment and names an index file that the host no longer serves) is logged and tried again with the next query, and a query that waited for it gets a hint in its popover that asks for a reload. In a Lighthouse lab run with the throttling applied to the browser, the Total Blocking Time of the landing page on the mobile profile falls from about 400 ms to 0 ms and the performance score rises from 89 to 98. The script is an override of `assets/js/offline-search.js` of Docsy 0.18.0, pinned in `website/overrides.txt`; `check-overrides.py` now also covers the files of `website/assets` that replace a theme file, and `check-requests.mjs` fails when a page requests the index while it loads, when the search requests it other than once or when it does not recover from an index that fails to load.
+
 ## [0.1.0] - 2026-10-13
 
 First final release. The release candidates `v0.1.0-rc.3` and `v0.1.0-rc.4` were published before it as GitHub pre-releases. The sections below describe what the project ships; the history before publication is in the Git log.

@@ -9,7 +9,7 @@
   version: 0.18.0
   license: Apache-2.0
   url: https://github.com/docsy/docsy
-  use: Hugo theme module (layouts, styles and scripts of the documentation pages; some partials are overridden, see website/overrides.txt)
+  use: Hugo theme module (layouts, styles and scripts of the documentation pages; some partials and the search script are overridden, see website/overrides.txt)
   source: go.mod
   license_file: /licenses/docsy/LICENSE.txt
 - name: Bootstrap
