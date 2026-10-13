@@ -13,6 +13,7 @@
 //   await page.setViewport(1280, 800);
 //   await page.setColorScheme("dark");                    // "light" | "dark"
 //   await page.setReducedMotion(true);                    // prefers-reduced-motion: reduce (false: no-preference)
+//   await page.interceptRequests("*search-index*", ({ n }) => (n === 1 ? "fail" : "continue")); // answers matching requests itself
 //   await page.goto("http://127.0.0.1:1313/");
 //   await page.waitForIdle();                             // no request in flight for a moment
 //   await page.evaluate("document.title");                // runs in the page, returns the value; addInitScript runs before the page
@@ -90,6 +91,7 @@ class Page {
     this.sessionId = sessionId;
     this.requestHandlers = [];
     this.consoleHandlers = [];
+    this.pausedHandlers = [];
     this.inflight = new Set();
     this.lastActivity = Date.now();
     this.loadWaiters = [];
@@ -159,6 +161,10 @@ class Page {
       case "Page.loadEventFired":
         for (const resolve of this.loadWaiters.splice(0)) resolve();
         break;
+      case "Fetch.requestPaused":
+        // Only the requests that interceptRequests asked for are paused, and only in the session of the page.
+        for (const handler of this.pausedHandlers) handler(message.params);
+        break;
       default:
         break;
     }
@@ -172,6 +178,36 @@ class Page {
   /** Calls handler({level, text, source}) for console errors, uncaught exceptions and browser log entries (for example CSP violations). */
   onConsole(handler) {
     this.consoleHandlers.push(handler);
+  }
+
+  /**
+   * Answers the requests of the page whose URL matches `pattern` (a glob of the Fetch domain, for example "*offline-search-index*")
+   * itself instead of leaving them to the network; every other request is untouched. Requests of workers and frames are not
+   * covered. Call it once, before page.goto. decide({url, method, n}) returns, or resolves to, one of
+   *   "continue"                       the request goes to the network as usual,
+   *   "fail"                           a network error, as if the connection were down,
+   *   {status, body, contentType}      a response that is made up here, for example {status: 404, body: "Not found"}.
+   * n counts the matching requests from 1. A request waits until decide has answered, so decide can also delay it.
+   */
+  async interceptRequests(pattern, decide) {
+    let n = 0;
+    this.pausedHandlers.push(async ({ requestId, request }) => {
+      n++;
+      const answer = await decide({ url: request.url, method: request.method, n });
+      let reply;
+      if (answer === "continue") {
+        reply = ["Fetch.continueRequest", { requestId }];
+      } else if (answer === "fail") {
+        reply = ["Fetch.failRequest", { requestId, errorReason: "InternetDisconnected" }];
+      } else {
+        const headers = [{ name: "Content-Type", value: answer.contentType ?? "text/plain" }];
+        const body = Buffer.from(answer.body ?? "").toString("base64");
+        reply = ["Fetch.fulfillRequest", { requestId, responseCode: answer.status, responseHeaders: headers, body }];
+      }
+      // The page may have been closed while the request was waiting.
+      await this.send(...reply).catch(() => {});
+    });
+    await this.send("Fetch.enable", { patterns: [{ urlPattern: pattern, requestStage: "Request" }] });
   }
 
   async setViewport(width, height, { deviceScaleFactor = 1, mobile = false } = {}) {

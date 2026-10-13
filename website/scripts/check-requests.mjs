@@ -7,7 +7,9 @@
 //   - a page that does not answer 200 (404.html must answer, from a static server, with the 404 status),
 //   - a broken feature of the theme: the search must find results, a page with a Mermaid diagram must render its SVG, the static API reference must render its tables and its operations must be found by the site search,
 //   - the search index (a file of the site, 1 MB of JSON that takes a long task to turn into the lunr index) requested while a page loads: it loads on the first use of a search box
-//     (website/assets/js/offline-search.js), once however often the box is used, and a query that is submitted before it has arrived is rendered when it has.
+//     (website/assets/js/offline-search.js), once however often the box is used, and a query that is submitted before it has arrived is rendered when it has,
+//   - a search that does not recover from an index that cannot be loaded (a network error, the 404 of a tab from before a deployment, both answered by the check itself):
+//     the next query must request the index again and find results, and a query that waited for the failed load must get a hint instead of results.
 //
 //   node website/scripts/check-requests.mjs [--base http://127.0.0.1:1313] [--pages website/scripts/request-pages.txt] [--page /path ...]
 //
@@ -221,6 +223,115 @@ async function checkSearchLoad(browser, base, findings) {
     await page.evaluate(`(() => { const i = ${SEARCH_BOX}; i.blur(); i.focus(); i.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
     await page.waitForIdle();
     if (indexRequests !== 1) findings.push(`${label}: the search index was requested ${indexRequests} times, expected once`);
+  }
+}
+
+/** The hint in the popover of a query that waited for an index which could not be loaded (assets/js/offline-search.js). */
+const LOAD_FAILED_HINT = "The search index could not be loaded";
+const HINT_SHOWN = `(document.querySelector('.td-offline-search-results')?.textContent ?? '').includes(${JSON.stringify(LOAD_FAILED_HINT)})`;
+const RESULTS_SHOWN = "document.querySelectorAll('.td-offline-search-results a').length > 0";
+
+/**
+ * A search index that cannot be loaded. The first use of a box can come long after the page load, so the network may be down for a
+ * moment, or the tab may have been opened before a deployment and names an index file that the host no longer serves (it answers
+ * with its 404 page). Neither may break the search for the rest of the page view: the script logs the failure, the next submitted
+ * query requests the index again (one request per query) and a query that waited for the failed load gets a hint in its popover
+ * instead of results. The requests for the index are answered by this check (Fetch domain), not by the server.
+ */
+async function checkSearchLoadFailure(browser, base, findings) {
+  const notFound = { status: 404, contentType: "text/html", body: "<h1>Page not found</h1>" };
+
+  /** The landing page, whose index requests are answered by decide (see Page.interceptRequests); counts them and keeps the console errors. */
+  async function open(label, decide) {
+    const page = await browser.newPage();
+    const seen = { requests: 0, errors: [] };
+    page.onRequest((r) => {
+      if (isSearchIndex(r.url)) seen.requests++;
+    });
+    page.onConsole((m) => {
+      if (m.level === "error") seen.errors.push(m.text);
+    });
+    await page.interceptRequests("*offline-search-index*", decide);
+    await page.setViewport(1280, 900);
+    await page.setColorScheme("light");
+    await page.goto(base + "/");
+    await page.waitForIdle();
+    if (seen.requests !== 0) findings.push(`${label}: ${seen.requests} requests for the search index while the page loaded, expected none`);
+    return { page, seen };
+  }
+
+  /** The console holds one error of the script per failed load and the note of the browser about the failed request, nothing else. */
+  function checkConsole(label, seen, failedLoads) {
+    const logged = seen.errors.filter((t) => t.startsWith("Could not load the search index")).length;
+    if (logged !== failedLoads) findings.push(`${label}: ${logged} failed loads were logged, expected ${failedLoads}`);
+    for (const t of seen.errors) {
+      if (!t.startsWith("Could not load the search index") && !t.startsWith("Failed to load resource")) {
+        findings.push(`${label}: console error: ${t.split("\n")[0].slice(0, 200)}`);
+      }
+    }
+  }
+
+  /** Counts the requests for the index after the page has settled; one finding for a wrong number. */
+  async function expectRequests(label, page, seen, want, what) {
+    await page.waitForIdle();
+    if (seen.requests !== want) findings.push(`${label}: ${what}: ${seen.requests} requests for the search index, expected ${want}`);
+  }
+
+  // The network is down for the first request only (the one that the first use of the box starts). The query that follows loads the
+  // index again and finds results; no hint is shown, because the index is there.
+  {
+    const label = "/ (search, the first request fails)";
+    const { page, seen } = await open(label, ({ n }) => (n === 1 ? "fail" : "continue"));
+    await clickElement(page, ".td-search__input");
+    await expectRequests(label, page, seen, 1, "the first use of the search box");
+    await page.send("Input.insertText", { text: "rollout" });
+    await pressKey(page, "Enter");
+    if (!(await waitFor(page, RESULTS_SHOWN))) findings.push(`${label}: the search for "rollout" found nothing after the first request had failed`);
+    await expectRequests(label, page, seen, 2, "the failed request and the retry with the query");
+    if (await page.evaluate(HINT_SHOWN)) findings.push(`${label}: the hint is shown although the retry loaded the index`);
+    checkConsole(label, seen, 1);
+  }
+
+  // The host answers every request with 404 (a tab from before a deployment): each submitted query asks again and gets the hint, no
+  // results; once the host serves the file, the next query finds results without a reload.
+  {
+    const label = "/ (search, the host answers 404)";
+    let served = false;
+    const { page, seen } = await open(label, () => (served ? "continue" : notFound));
+    await clickElement(page, ".td-search__input");
+    await expectRequests(label, page, seen, 1, "the first use of the search box");
+    await page.send("Input.insertText", { text: "rollout" });
+    await pressKey(page, "Enter");
+    await expectRequests(label, page, seen, 2, "the first query");
+    if (!(await waitFor(page, HINT_SHOWN))) findings.push(`${label}: the query got no hint that the index could not be loaded`);
+    if (await page.evaluate(RESULTS_SHOWN)) findings.push(`${label}: results are shown although the index could not be loaded`);
+    await submitQuery(page, "helm");
+    await expectRequests(label, page, seen, 3, "the second query");
+    if (!(await waitFor(page, HINT_SHOWN))) findings.push(`${label}: the second query got no hint that the index could not be loaded`);
+    served = true;
+    await submitQuery(page, "rollout");
+    if (!(await waitFor(page, RESULTS_SHOWN))) findings.push(`${label}: the search for "rollout" found nothing after the host served the index`);
+    await expectRequests(label, page, seen, 4, "the query after the host served the index");
+    if (await page.evaluate(HINT_SHOWN)) findings.push(`${label}: the hint is still shown next to the results`);
+    checkConsole(label, seen, 3);
+  }
+
+  // A query is submitted while the first request is under way and the request fails: the query waited for it, so it gets the hint
+  // without a second request, and the next query loads again.
+  {
+    const label = "/ (search, a query waits for a request that fails)";
+    const { page, seen } = await open(label, async ({ n }) => {
+      if (n !== 1) return "continue";
+      await sleep(400);
+      return notFound;
+    });
+    await submitQuery(page, "rollout");
+    if (!(await waitFor(page, HINT_SHOWN))) findings.push(`${label}: the query that waited for the failed request got no hint`);
+    await expectRequests(label, page, seen, 1, "the query that waited for the request under way");
+    await submitQuery(page, "helm");
+    if (!(await waitFor(page, RESULTS_SHOWN))) findings.push(`${label}: the search for "helm" found nothing after the failed request`);
+    await expectRequests(label, page, seen, 2, "the failed request and the retry with the next query");
+    checkConsole(label, seen, 1);
   }
 }
 
@@ -688,6 +799,7 @@ async function main() {
       }
     }
     await checkSearchLoad(browser, opts.base, findings);
+    await checkSearchLoadFailure(browser, opts.base, findings);
     await checkMotion(browser, opts.base, findings);
   } catch (e) {
     console.error(`check-requests: ${e.message}`);
