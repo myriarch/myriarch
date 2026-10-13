@@ -117,17 +117,25 @@ fingerprinted file of the site (`/offline-search-index.<hash>.json`, about 1.2 M
 script turns it into a lunr index in the browser. That is one long task (about 0.1 s on a laptop, about 0.5 s with the throttling of
 Lighthouse's mobile profile). The script of the theme did it at `DOMContentLoaded` of every page: it was the only long task of the landing
 page and cost 440 to 490 ms of Total Blocking Time (PageSpeed Insights, October 2026: performance 72 on mobile and 80 on desktop), although most
-visitors never search. `assets/js/offline-search.js` is therefore an override of the theme's script that changes only the loading:
+visitors never search. `assets/js/offline-search.js` is therefore an override of the theme's script that changes how the index is loaded and
+what happens when that fails:
 
 - The first focus, pointerdown or input event on any search box fetches the index and builds the lunr index. All boxes of a page share one
   promise, so this happens once, however often and in whichever box the visitor searches. A page that nobody searches in never requests the
-  file, and Lighthouse, which does not search, does not either. A failed load is logged ("Could not load the search index") and not retried,
-  as before.
+  file, and Lighthouse, which does not search, does not either.
 - A query that is typed and submitted (Enter, or the box loses the focus) before the index has arrived is rendered as soon as it has. The
   rendering, the popover, the submit handling and the maximum number of results (`offlineSearchMaxResults`) are the code of the theme.
-- One difference is deliberate: when the index was ready, the theme's script dispatched a change event on every box, which also removed the
-  focus from the box. That was harmless when the index was ready long before the first query; now it arrives while the visitor types the first
-  query, so the override renders only the queries that were submitted in the meantime and leaves the focus alone.
+- A failed load is not final. The theme made one attempt per page view, at the page load, and logged a failure. The first use of a box can
+  come much later, and then two failures are likely: the network is down for a moment, or the tab was opened before a deployment and still
+  names the fingerprinted index file of the old build (`offline-search-index.<hash>.json`), which the host no longer serves (it answers
+  every path without a file with the 404 page). The script logs "Could not load the search index" and forgets the attempt: the next query
+  that is submitted (Enter, or the box loses the focus with a changed value) requests the index again, one request per query. A query that
+  was waiting for the failed load gets the hint "The search index could not be loaded. Reload the page to search." in its popover. A tab
+  from before a deployment cannot load the index until the page is reloaded; the hint says so.
+- The focus stays in the box, which is a deliberate difference, too: when the index was ready, the theme's script dispatched a change
+  event on every box, which also removed the focus from the box. That was harmless when the index was ready long before the first query;
+  now it arrives while the visitor types the first query, so the override renders only the queries that were submitted in the meantime and
+  leaves the focus alone.
 - `scripts/check-requests.mjs` fails when a page of `request-pages.txt` requests the index while it loads, and when the search requests it
   other than once (see [Checks](#checks)).
 

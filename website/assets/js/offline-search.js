@@ -5,6 +5,8 @@
 // Change against the upstream file: the search index is fetched, and the lunr index built, on the first use of a search box
 // instead of on every page load. The build of the index is one long task (about 0.5 s on a phone) and the only one of the
 // landing page, so it cost Total Blocking Time and a part of the performance score on pages where most visitors never search.
+// The first use can come long after the page load, so a failed load is not final either: the next query tries again, and a query
+// that waited for the failed load gets a hint in its popover (see loadIndex).
 // The changed parts are marked "Changed from upstream"; the search itself (rendering, popover, submit handling, maximum number
 // of results) is the upstream code.
 // Re-check this file against the upstream one whenever Docsy is updated (website/scripts/check-overrides.py).
@@ -38,7 +40,8 @@
       input.addEventListener('change', () => {
         // Changed from upstream: the index may not be there yet when the first
         // query comes in. A query that is typed or submitted while it loads is
-        // rendered as soon as the index is ready (see loadIndex).
+        // rendered as soon as the index is ready (see loadIndex). After a failed
+        // load this is also the retry: loadIndex has forgotten the attempt.
         if (idx === null && input.value !== '') {
           pendingInputs.add(input);
           loadIndex();
@@ -73,7 +76,18 @@
     // Changed from upstream: the index is requested and built on the first use
     // of a search box, not when the page has loaded. All search boxes share one
     // promise, so the index is fetched and built once, however often they are
-    // used. A failed load is not retried, as before (one attempt per page).
+    // used.
+    //
+    // A failed load is not final. Upstream made one attempt per page view and
+    // only logged a failure, which was enough when the attempt came with the
+    // page load. The first use can come much later, and then two failures are
+    // likely: the network is down for a moment, or the tab was opened before a
+    // deployment and still names the fingerprinted index file of the old build,
+    // which the host no longer serves (it answers with its 404 page). So the
+    // failure is logged and the attempt is forgotten: the next submitted query
+    // (a change event) loads again, one request per query, and a query that was
+    // waiting for the failed load gets a hint in its popover. A tab from before
+    // a deployment keeps failing until the page is reloaded; the hint says so.
     let indexPromise = null;
     const pendingInputs = new Set(); // Search boxes with a query that waits for the index
 
@@ -116,16 +130,21 @@
         })
         .catch((error) => {
           console.error('Could not load the search index:', error);
+          // Forget the attempt, so that the next query tries again.
+          indexPromise = null;
         });
 
       // Changed from upstream: upstream dispatched a change event on every
       // search box here, which also blurred the box. A box that is in use
       // while the index arrives must keep its focus, so only the queries that
       // were submitted in the meantime are rendered, and without a blur (the
-      // box was blurred when the query was submitted). This is a separate step
-      // so that an error of render is not reported as a failed index load.
+      // box was blurred when the query was submitted). After a failed load
+      // (idx is still null) they get the hint instead of results. This is a
+      // separate step so that an error of render is not reported as a failed
+      // index load.
       indexPromise.then(() => {
-        pendingInputs.forEach((input) => render(input));
+        const loadFailed = idx === null;
+        pendingInputs.forEach((input) => render(input, loadFailed));
         pendingInputs.clear();
       });
 
@@ -151,7 +170,9 @@
       });
     });
 
-    const render = (targetInput) => {
+    // Changed from upstream: loadFailed is true for a query that waited for an
+    // index that could not be loaded; it gets a hint instead of results.
+    const render = (targetInput, loadFailed = false) => {
       //
       // Dispose existing popover
       //
@@ -167,7 +188,9 @@
       // Search
       //
 
-      if (idx === null) {
+      // Changed from upstream: while the index is still loading nothing is
+      // shown, as before; after a failed load the hint is.
+      if (idx === null && !loadFailed) {
         return;
       }
 
@@ -184,25 +207,28 @@
         10,
       );
 
-      const results = idx
-        .query((q) => {
-          const tokens = lunr.tokenizer(searchQuery.toLowerCase());
-          tokens.forEach((token) => {
-            const queryString = token.toString();
-            q.term(queryString, {
-              boost: 100,
-            });
-            q.term(queryString, {
-              wildcard:
-                lunr.Query.wildcard.LEADING | lunr.Query.wildcard.TRAILING,
-              boost: 10,
-            });
-            q.term(queryString, {
-              editDistance: 2,
-            });
-          });
-        })
-        .slice(0, Number.isNaN(maxResults) ? undefined : maxResults);
+      // Changed from upstream: without an index there is nothing to query.
+      const results = loadFailed
+        ? []
+        : idx
+            .query((q) => {
+              const tokens = lunr.tokenizer(searchQuery.toLowerCase());
+              tokens.forEach((token) => {
+                const queryString = token.toString();
+                q.term(queryString, {
+                  boost: 100,
+                });
+                q.term(queryString, {
+                  wildcard:
+                    lunr.Query.wildcard.LEADING | lunr.Query.wildcard.TRAILING,
+                  boost: 10,
+                });
+                q.term(queryString, {
+                  editDistance: 2,
+                });
+              });
+            })
+            .slice(0, Number.isNaN(maxResults) ? undefined : maxResults);
 
       //
       // Make result html
@@ -239,7 +265,15 @@
       });
       html.append(searchResultBody);
 
-      if (results.length === 0) {
+      if (loadFailed) {
+        // Changed from upstream: a failed load is not a query without results.
+        // Reloading fixes both causes (see loadIndex); a changed query that is
+        // submitted meanwhile tries again, too.
+        const loadFailedHint = document.createElement('p');
+        loadFailedHint.textContent =
+          'The search index could not be loaded. Reload the page to search.';
+        searchResultBody.append(loadFailedHint);
+      } else if (results.length === 0) {
         const noResults = document.createElement('p');
         noResults.textContent = `No results found for query "${searchQuery}"`;
         searchResultBody.append(noResults);
