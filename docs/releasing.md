@@ -302,8 +302,8 @@ read as part of the release as well.
    the last tag: commands, flags, defaults, version numbers, platforms, support levels and what is signed. A sentence that claims
    more than the release delivers (a signed Windows file, a signed macOS binary, an OCI chart) is wrong, whatever the plan says.
 2. **Files in the archives describe the process.** Every sentence must be true when the archive is created and still true after
-   publication, until the next version. Write "v0.1.0 is published first as release candidates", not "no release has been
-   published yet", "available from v0.1.0" or "will be published". Search the files of the table:
+   publication, until the next version. Write "release candidates are published as GitHub pre-releases", not "no release has
+   been published yet", "available from v0.1.0" or "will be published". Search the files of the table:
 
    ```bash
    grep -rniE "no release|not (yet )?published|first release|available from|planned for|will be (published|released)|/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?/|--branch v[0-9]" \
