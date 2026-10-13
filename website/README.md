@@ -40,7 +40,8 @@ data/third_party.yaml       the notices of /legal/third-party/
 data/release.yaml           the release status (latest final release or newest candidate): the one value behind the status chip of the landing page; set by hand after a publication (docs/releasing.md)
 layouts/                    render hooks (_markup), partials (repo/*, csp.html), shortcodes, overrides of Docsy files, 404.html, robots.txt
 assets/scss/                brand tokens (_variables_project.scss) and project styles
-assets/js/                  landing-mark.js: the loop of the mark on the landing page and its click-to-pause behaviour (the site's own script; the rest comes with the theme)
+assets/js/                  landing-mark.js: the loop of the mark on the landing page and its click-to-pause behaviour (the site's own script; the rest comes with the theme);
+                            offline-search.js: the override of the search script of the theme, the index loads on first use (see Search)
 static/                     site.webmanifest
 scripts/                    the checks (check-*.py), their tests (test_checks.py, testdata/), the browser checks (*.mjs), the preview server (preview-server.py)
 overrides.txt               SHA-256 of the upstream file behind every override of a Docsy file
@@ -109,12 +110,32 @@ Hugo takes it for a shortcode.
   that the page is planned for that release. When `docs/operations/upgrade.md`
   exists, the placeholder has to go in the same change (`scripts/check-placeholders.py`).
 
+## Search
+
+Search runs in the browser: Docsy's offline search with lunr (`offlineSearch: true` in `params.yaml`). Hugo writes the index as a
+fingerprinted file of the site (`/offline-search-index.<hash>.json`, about 1.2 MB of JSON and 375 KB compressed for about 150 pages), and a
+script turns it into a lunr index in the browser. That is one long task (about 0.1 s on a laptop, about 0.5 s with the throttling of
+Lighthouse's mobile profile). The script of the theme did it at `DOMContentLoaded` of every page: it was the only long task of the landing
+page and cost 440 to 490 ms of Total Blocking Time (PageSpeed Insights, October 2026: performance 72 on mobile and 80 on desktop), although most
+visitors never search. `assets/js/offline-search.js` is therefore an override of the theme's script that changes only the loading:
+
+- The first focus, pointerdown or input event on any search box fetches the index and builds the lunr index. All boxes of a page share one
+  promise, so this happens once, however often and in whichever box the visitor searches. A page that nobody searches in never requests the
+  file, and Lighthouse, which does not search, does not either. A failed load is logged ("Could not load the search index") and not retried,
+  as before.
+- A query that is typed and submitted (Enter, or the box loses the focus) before the index has arrived is rendered as soon as it has. The
+  rendering, the popover, the submit handling and the maximum number of results (`offlineSearchMaxResults`) are the code of the theme.
+- One difference is deliberate: when the index was ready, the theme's script dispatched a change event on every box, which also removed the
+  focus from the box. That was harmless when the index was ready long before the first query; now it arrives while the visitor types the first
+  query, so the override renders only the queries that were submitted in the meantime and leaves the focus alone.
+
 ## Overrides of Docsy files
 
 Files in `layouts/` and `assets/` with the same path as a file of the theme replace it. They are few and each starts with a comment that
 names the upstream file: `head.html` (self-hosted lunr, brand colors, the CSP first), `favicons.html`, `page-meta-links.html` (edit links
-from the repository path), `scripts/plugins/mermaid.html` (self-hosted Mermaid), `footer/copyright.html` and `404.html`.
-`overrides.txt` pins the SHA-256 of the upstream file of each. `REUSE.toml` (annotation n) adds "Copyright The Docsy Authors"
+from the repository path), `scripts/plugins/mermaid.html` (self-hosted Mermaid), `footer/copyright.html`, `404.html` and
+`assets/js/offline-search.js` (the search index loads on first use, see [Search](#search); the changed parts are marked "Changed from
+upstream"). `overrides.txt` pins the SHA-256 of the upstream file of each. `REUSE.toml` (annotation n) adds "Copyright The Docsy Authors"
 (Apache-2.0) to the project header of each of these files, so that the derivation is machine-readable; add a new override there as well
 (`scripts/check-overrides.py` fails when the two lists differ, and when a file of `layouts/` or `assets/` shadows a theme file without a
 pin). The three project style files (`assets/scss/_variables_project.scss`, `_variables_project_after_bs.scss` and `_styles_project.scss`)

@@ -3,6 +3,7 @@
 # update) or when a file of website/layouts or website/assets shadows a theme file without being listed here (the three project style
 # files that the theme ships as empty placeholders are the exception). After porting the upstream changes into the override, update
 # the digest: sha256sum <docsy module dir>/<path>. Format: <path inside the theme> <sha256>
+assets/js/offline-search.js c2d9250187ba6fd05a93be3549e1daea6ef5b626b7f4c3f49f2606e16b20dde5
 layouts/404.html 1152ca510ae40ca8faffe274eb7babb8a4717fa21fe29e37dbe8508686abc1c9
 layouts/_partials/favicons.html 8fe3a18b17de295cc624ebb450f1c4c255ffa0796343389f2069754b34d04b57
 layouts/_partials/footer/copyright.html 6ae800993632a418e440688421ab3c29f572ac02bb5fd367c6b98cae39c653b3

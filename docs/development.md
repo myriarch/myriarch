@@ -1086,10 +1086,12 @@ in a Markdown file that the site renders: Hugo takes it for a shortcode, also in
 allowed in `website/content`; a link to a page that does not exist fails the build. Images must be resources of the site: an
 image that cannot be resolved fails the build, because an image from another host would be a third-party request.
 
-Some pages of the theme are replaced by modified copies in `website/layouts` (the offline search script, the favicons, the
-"edit this page" links, Mermaid, the footer, the 404 page). `website/overrides.txt` pins the SHA-256 of the upstream file
-of each one; after a Docsy update `website/scripts/check-overrides.py` shows which upstream file changed, and it fails when a
-file of `website/layouts` or `website/assets` shadows a theme file without a pin.
+Some files of the theme are replaced by modified copies in `website/layouts` and `website/assets` (the head with the
+self-hosted search script, the favicons, the "edit this page" links, Mermaid, the footer, the 404 page, and
+`assets/js/offline-search.js`, which loads the search index on the first use of a search box instead of on every page load).
+`website/overrides.txt` pins the SHA-256 of the upstream file of each one; after a Docsy update
+`website/scripts/check-overrides.py` shows which upstream file changed, and it fails when a file of `website/layouts` or
+`website/assets` shadows a theme file without a pin.
 
 ### Adding a page and placeholders
 
@@ -1145,9 +1147,17 @@ python3 -I website/scripts/lighthouse-scores.py --min 90 /tmp/lh-home.json
 ```
 
 The server behind `make website-preview` (`website/scripts/preview-server.py`) behaves like a static host: directory index files,
-`/404.html` with the 404 status and gzip for text files. Without compression the search index (about 0.7 MB of JSON) and the style
-sheet (about 0.4 MB) would cost about 30 points of the performance score. Stop the preview server afterwards. Add pages to
-`website/scripts/request-pages.txt` when you add a page with its own scripts.
+`/404.html` with the 404 status and gzip for text files. Without compression the style sheet (about 0.4 MB) and, once the search
+is used, the search index (about 1.2 MB of JSON) would be several times larger on the wire than for a visitor. The search index
+is not part of the page load (`website/README.md`, "Search"), so a Lighthouse run does not request it. Stop the preview server
+afterwards. Add pages to `website/scripts/request-pages.txt` when you add a page with its own scripts.
+
+One caveat for Lighthouse against this server: it answers in about a millisecond, and the simulated throttling of the default mode
+then puts a long task of a script before the first paint, where Total Blocking Time does not count it. The script that loaded the
+search index on every page scored 96 on mobile with a Total Blocking Time of 0 ms here (the task ended at 1.8 s, the first paint
+came at 2.1 s), although PageSpeed Insights measured 440 to 490 ms on the live site. With `--throttling-method=devtools` (the browser
+applies the throttling) the same task shows as about 400 ms (score 89), and so it does in the default mode behind a proxy that
+delays every response by 60 ms. Check such a change with one of the two, not only with the default run.
 
 The REST API reference is made of static pages without scripts of their own; the data types page is long (about 150 types), which is
 why it is a separate page. `check-requests.mjs` checks that a tag page renders its tables and that the site search finds the operations (`approveRolloutWave`)
