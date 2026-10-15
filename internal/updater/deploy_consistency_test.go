@@ -623,6 +623,11 @@ func TestUpdaterUnitIsSandboxed(t *testing.T) {
 	// the preflight drops to the supervisor's account: that needs setuid/setgid
 	assert.Contains(t, unit, "CAP_SETUID")
 	assert.Contains(t, unit, "CAP_SETGID")
+	// ... and it fails under NoNewPrivileges ("setuid: operation not permitted"): with it, every update of a Linux host stopped in
+	// the preflight (found by the host end-to-end test; the template of "myriarch-updater install" must not set it either)
+	for name, u := range map[string]string{"deploy/systemd/myriarch-updater.service": unit, "systemdUnitTemplate": systemdUnitTemplate} {
+		assert.NotRegexp(t, `(?m)^\s*NoNewPrivileges\s*=\s*(true|yes|1|on)\s*$`, u, "%s: NoNewPrivileges blocks the preflight", name)
+	}
 	// ... and ending that child at the timeout needs CAP_KILL (it runs under another uid)
 	assert.Contains(t, unit, "CAP_KILL")
 	assert.NotContains(t, unit, "CAP_SYS_ADMIN")
