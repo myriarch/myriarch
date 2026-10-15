@@ -585,7 +585,7 @@ update it. An advisory that does not apply goes to `allow-ghsas` with its GHSA I
 the check that knows which vulnerable symbols the code calls. The configuration comes from the checkout of the pull request, so a
 change of the lists or of an exception is a change of policy and is reviewed as one. `pkg:npm/elkjs` (EPL-2.0, a dependency of
 Mermaid) has no exception on purpose: whether the website owes a notice for it is still to be decided (ADR-0038, decision 5). A change
-fails the review when it adds `elkjs` or changes its resolved version (Mermaid 12.1.0 resolves 0.9.3 today); a Mermaid update that
+fails the review when it adds `elkjs` or changes its resolved version (Mermaid 12.2.0 resolves 0.9.3 today); a Mermaid update that
 keeps the version passes. When the job fails because GitHub cannot return the comparison (a merge group that is not processed yet, for
 example), nothing runs it again: re-run the job, and queue the pull request again when its merge group failed.
 
