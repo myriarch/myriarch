@@ -600,6 +600,123 @@ he_diag() {
   fi
 }
 
+# he_probe_preflight_sandbox: the updater could not start the preflight of a new collector as the account of the supervisor (its
+# journal says "operation not permitted"). Starts the installed collector the same way, in transient units with the sandbox of
+# myriarch-updater.service: with all of its settings, without any, and without each one of them in turn. Each start runs twice: from
+# Python (setgroups, setgid, setuid, exec) and from a small Go program that starts it like internal/updater/exec_unix.go
+# (os/exec with a Credential and Setpgid), and once more as root from Go. The table shows which setting refuses which start; it goes
+# to diag/preflight-sandbox.txt and to the log. The probe files live in /usr/local/libexec while it runs (ProtectHome and PrivateTmp
+# hide the work directory from the units) and are removed afterwards.
+he_probe_preflight_sandbox() {
+  local out="${HE_DIR}/diag/preflight-sandbox.txt" unit=/etc/systemd/system/myriarch-updater.service account bin stage line i j label
+  local dir="${HE_WORK}/preflight-probe" lib=/usr/local/libexec/he-preflight-probe target
+  local -a props=() args=() targets=()
+  mkdir -p "${dir}" "${HE_DIR}/diag"
+  : > "${out}"
+  account="$(he_sudo systemctl show -p User --value otelcol-supervisor.service 2>/dev/null)"
+  bin="$(readlink -f /opt/myriarch/collector/current 2>/dev/null)/otelcol-contrib"
+  if [ -z "${account}" ] || [ ! -x "${bin}" ]; then echo "nothing to probe (account '${account}', binary ${bin})" >> "${out}"; return 0; fi
+  while IFS= read -r line; do props+=("${line}"); done < <(sed -n '/^\[Service\]/,/^\[Install\]/p' "${unit}" \
+    | grep -E '^(NoNewPrivileges|PrivateTmp|ProtectHome|ProtectSystem|ReadWritePaths|StateDirectory|ProtectKernelTunables|ProtectKernelModules|ProtectKernelLogs|ProtectControlGroups|ProtectClock|ProtectHostname|PrivateDevices|RestrictAddressFamilies|RestrictNamespaces|RestrictSUIDSGID|LockPersonality|SystemCallArchitectures|CapabilityBoundingSet|LimitNOFILE)=')
+  cat > "${dir}/probe.py" <<'PY'
+import os, pwd, sys
+path, account = sys.argv[1], sys.argv[2]
+pw = pwd.getpwnam(account)
+r, w = os.pipe()
+pid = os.fork()
+if pid == 0:
+    os.close(r)
+    step = "setgroups"
+    try:
+        os.setgroups([])
+        step = "setgid"; os.setgid(pw.pw_gid)
+        step = "setuid"; os.setuid(pw.pw_uid)
+        step = "chdir"; os.chdir("/")
+        step = "execve"
+        nul = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(nul, 1); os.dup2(nul, 2)
+        os.execv(path, [path, "--version"])
+    except OSError as e:
+        os.write(w, ("%s: %s" % (step, e.strerror)).encode())
+        os._exit(97)
+os.close(w)
+msg = os.read(r, 512).decode()
+_, status = os.waitpid(pid, 0)
+print(msg or "ok (exit %d)" % os.waitstatus_to_exitcode(status))
+PY
+  cat > "${dir}/main.go" <<'GO'
+// Starts PATH --version as ACCOUNT the way internal/updater/exec_unix.go starts the preflight, or as root with "root".
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"os/user"
+	"strconv"
+	"syscall"
+)
+
+func main() {
+	path, account := os.Args[1], os.Args[2]
+	cmd := exec.Command(path, "--version")
+	cmd.Dir = "/"
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if account != "root" {
+		u, err := user.Lookup(account)
+		if err != nil {
+			fmt.Println("lookup:", err)
+			return
+		}
+		uid, _ := strconv.ParseUint(u.Uid, 10, 32)
+		gid, _ := strconv.ParseUint(u.Gid, 10, 32)
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + u.HomeDir, "USER=" + u.Username}
+		cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid)}
+	}
+	if err := cmd.Run(); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("ok")
+}
+GO
+  if ! go build -o "${dir}/probe" "${dir}/main.go" > "${dir}/build.log" 2>&1; then
+    echo "the Go probe does not build: $(tail -n 1 "${dir}/build.log")" >> "${out}"
+    return 0
+  fi
+  he_sudo install -d -m 0755 "${lib}" && he_sudo install -m 0755 "${dir}/probe" "${dir}/probe.py" "${lib}/" || return 0
+  # the installed binary, and a copy in a staging directory as the updater makes one (versions/<v>.tmp-<suffix>, 0755)
+  stage=/opt/myriarch/collector/versions/probe.tmp-he
+  he_sudo install -d -m 0755 "${stage}" && he_sudo install -m 0755 "${bin}" "${stage}/otelcol-contrib" && targets+=("${stage}/otelcol-contrib")
+  targets=("${bin}" "${targets[@]}")
+  {
+    echo "account ${account}; settings of ${unit}:"
+    printf '  %s\n' "${props[@]}"
+  } >> "${out}"
+  for target in "${targets[@]}"; do
+    echo "target ${target}" >> "${out}"
+    for ((i = -2; i < ${#props[@]}; i++)); do
+      args=()
+      if [ "${i}" = -2 ]; then label="no setting"
+      else
+        if [ "${i}" = -1 ]; then label="all settings"; else label="all but ${props[i]%%=*}"; fi
+        for ((j = 0; j < ${#props[@]}; j++)); do
+          [ "${j}" = "${i}" ] && continue
+          args+=(-p "${props[j]}")
+        done
+      fi
+      printf '  %-40s python: %-28s go as %s: %-36s go as root: %s\n' "${label}" \
+        "$(he_sudo systemd-run --quiet --wait --pipe --collect -p User=root "${args[@]}" /usr/bin/python3 -I "${lib}/probe.py" "${target}" "${account}" 2>&1 | tail -n 1)" \
+        "${account}" \
+        "$(he_sudo systemd-run --quiet --wait --pipe --collect -p User=root "${args[@]}" "${lib}/probe" "${target}" "${account}" 2>&1 | tail -n 1)" \
+        "$(he_sudo systemd-run --quiet --wait --pipe --collect -p User=root "${args[@]}" "${lib}/probe" "${target}" root 2>&1 | tail -n 1)" >> "${out}"
+    done
+  done
+  he_sudo rm -rf "${lib}" "${stage}" || true
+  he_log "preflight sandbox probe (${out}):"
+  sed 's/^/    /' "${out}" >&2
+}
+
 # ------------------------------------------------------------------------------------------------------ artifacts ---
 # What leaves the runner is an allow-list, assembled here and scrubbed: the workflow uploads HE_UP and nothing else. These files
 # are never in the list, so that they cannot be uploaded by accident: the token file, the cookie jar, the keys of the CA, the

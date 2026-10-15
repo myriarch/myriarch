@@ -195,6 +195,11 @@ scenario_manual() {
     he_fail "the updater ended the attempt" "no rolled_back or failed status within 200 s"
   fi
   he_fault_stop
+  # A preflight that the system refused to start ("operation not permitted") is no failure of the collector: find out which sandbox
+  # setting of the updater unit refuses it while the installation is still in place (the uninstall at the end removes it).
+  if he_sudo journalctl -u myriarch-updater.service --no-pager -n 400 2>/dev/null | grep -q 'operation not permitted'; then
+    he_probe_preflight_sandbox
+  fi
   he_wait_for 60 he_agent_is "${col}" .agent.version "${v_old}"
   he_wait_for 30 sh -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' http://localhost:13133/)\" = 200 ]"
   # The checks below read what the server derived from the last reports of the updater and the collector, and the API returns the
