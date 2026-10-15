@@ -40,8 +40,9 @@ Fails when
     the sitemap and the pages differ (every URL of the sitemap is the URL of a page, and every page has its entry; a build with a relative
     base URL has no absolute sitemap and is not compared).
 
-The output names the file and the problem, never page content. Exit status 0 = clean, 1 = findings, 2 = usage or environment error.
-Python 3.9 compatible, standard library only.
+The output names the file and the problem and quotes the offending value (a title, a link, a property of the structured data, a setting of
+the configuration): the site is public, and the value makes the finding actionable. Exit status 0 = clean, 1 = findings, 2 = usage or
+environment error. Python 3.9 compatible, standard library only.
 """
 
 import importlib.util

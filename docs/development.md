@@ -1451,7 +1451,8 @@ notice in `website/data/third_party.yaml` and a published license text under `/l
 GEO"); and the unit tests of those checks
 (`python3 -I -m unittest discover -s website/scripts -p 'test_*.py'`, also part of `make ci-test` as `ci/tests/website-test.sh`).
 Add a check by adding `website/scripts/check-<name>.py`; the runner picks it up. A check receives the built site as its argument
-and prints paths and counts only.
+and prints paths and counts only; the findings of `check-seo.py` also quote the offending value (a title, a link, a JSON-LD
+property), because the site is public and the value makes the finding actionable.
 
 Two checks need a browser and are not part of the gate:
 
