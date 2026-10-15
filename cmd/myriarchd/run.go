@@ -177,14 +177,15 @@ func run(ctx context.Context, cfg config.Config, opts runOptions) error {
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
 	}
-	if cfg.Database.MigrateOnStart {
-		v, err := postgres.Migrate(ctx, pool, logger)
-		if err != nil {
-			pool.Close()
-			return err
-		}
-		logger.Info("database schema ready", "version", v)
+	// The schema must be one this binary can run on: pending migrations are applied (database.migrateOnStart) or
+	// refused, an incompatible schema is refused before anything else touches the database, and a newer but
+	// compatible schema is a warning (docs/design/opamp-server.md, "Start, migrations and schema compatibility").
+	schema, err := postgres.PrepareSchema(ctx, pool, cfg.Database.MigrateOnStart, logger)
+	if err != nil {
+		pool.Close()
+		return err
 	}
+	logger.Info("database schema ready", "version", schema.Version, "compatibilityLevel", schema.Level, "schemaLevel", schema.Supported)
 	db := postgres.New(pool, logger)
 	var st store.Store = db
 	warnPoliciesUsingServerTimezone(ctx, st, cfg.Rollouts.DefaultTimezone, logger)
