@@ -106,8 +106,8 @@ function Set-Content {
   Microsoft.PowerShell.Management\Set-Content -LiteralPath $LiteralPath -Value $Value -NoNewline:$NoNewline
 }
 function Invoke-WebRequest {
-  param($Uri, $Headers, $OutFile, [switch]$UseBasicParsing)
-  Log ('iwr ' + $Uri + ' basic=' + $UseBasicParsing.IsPresent)
+  param($Uri, $Headers, $OutFile, $MaximumRedirection, [switch]$UseBasicParsing)
+  Log ('iwr ' + $Uri + ' basic=' + $UseBasicParsing.IsPresent + ' redirects=' + $MaximumRedirection)
   Add-Content -LiteralPath ($Log + '.auth') -Value $Headers.Authorization
   if ($env:MOCK_IWR_FAIL -eq '1') { throw 'The remote server returned an error: (401) Unauthorized.' }
   Copy-Item -LiteralPath $env:PS_FIXTURE -Destination $OutFile
@@ -292,7 +292,7 @@ func TestPowerShellCommandInstallsTheHost(t *testing.T) {
 			work := strings.Fields(r.called("icacls ")[0])[1]
 			assert.True(t, strings.HasPrefix(work, filepath.Join(e.programs, brand.InstallSetupDir+"-")), work)
 			assert.Equal(t, "icacls "+work+" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F", r.called("icacls ")[0])
-			assert.Equal(t, []string{"iwr https://fleet.example.com/api/v1/install/bundles/" + windowsName() + " basic=True"}, r.called("iwr "))
+			assert.Equal(t, []string{"iwr https://fleet.example.com/api/v1/install/bundles/" + windowsName() + " basic=True redirects=0"}, r.called("iwr "))
 			assert.Equal(t, "Bearer "+testToken+"\n", e.file(".auth"), "the token travels in a header")
 
 			// the installer is started for one process with RemoteSigned, never with Bypass, and with the token file
@@ -488,7 +488,7 @@ func TestPowerShellCommandOfTheLabVariant(t *testing.T) {
 	cmd := e.command(site(func(r *CommandsRequest) { r.Variant = VariantLab }), testToken, func(d *Deps, s *stubBundles) { d.DevMode, d.PublicURL = true, "http://localhost:8080" })
 	r := e.run(cmd, true)
 	require.Equal(t, 0, r.code, r.out)
-	assert.Equal(t, []string{"iwr http://localhost:8080/api/v1/install/bundles/" + windowsName() + " basic=True"}, r.called("iwr "))
+	assert.Equal(t, []string{"iwr http://localhost:8080/api/v1/install/bundles/" + windowsName() + " basic=True redirects=0"}, r.called("iwr "))
 	ps := r.called("powershell ")
 	require.Len(t, ps, 1)
 	assert.True(t, strings.HasSuffix(ps[0], " | -Insecure"), ps[0])

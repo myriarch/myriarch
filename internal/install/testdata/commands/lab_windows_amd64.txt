@@ -33,12 +33,12 @@
     $zip = Join-Path $d $File
     Write-Host "[myriarch-install] downloading the installer bundle $File from $Server"
     try {
-      Invoke-WebRequest -UseBasicParsing -Uri "$Server/api/v1/install/bundles/$File" -Headers @{ Authorization = "Bearer $Token" } -OutFile $zip
+      Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$Server/api/v1/install/bundles/$File" -Headers @{ Authorization = "Bearer $Token" } -OutFile $zip
     } catch {
       throw "[myriarch-install] ERROR [download_failed] the installer bundle could not be downloaded from $Server ($($_.Exception.Message))"
     }
     if ((Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash -ne $Sha256) {
-      throw '[myriarch-install] ERROR [checksum_mismatch] the installer bundle does not have the SHA-256 given in the command; nothing was unpacked'
+      throw '[myriarch-install] ERROR [checksum_mismatch] the installer bundle does not have the SHA-256 given in the command (a changed bundle, or the answer of another address); nothing was unpacked'
     }
     Write-Host '[myriarch-install] the SHA-256 of the installer bundle is the one in the command; unpacking it'
     Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $d 'package')

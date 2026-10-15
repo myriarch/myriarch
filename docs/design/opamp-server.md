@@ -1094,7 +1094,8 @@ the constant script followed by the values in a hashtable. It uses cmdlets and n
    and would stop the unsigned installer later, so the command says so first (`execution_policy_blocked`); then it checks the token as above;
 2. makes a directory below `%ProgramData%` with a name that cannot be guessed, replaces its DACL with `icacls.exe /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F`
    (SYSTEM and the administrators) **before the first download** (`acl_failed`), stops if anything is in it (`directory_unsafe`), and removes it in a `finally`;
-3. writes the token to a file in it with `Set-Content` (variant `token_inline`) and downloads the bundle with `Invoke-WebRequest -Headers` (`download_failed`);
+3. writes the token to a file in it with `Set-Content` (variant `token_inline`) and downloads the bundle with `Invoke-WebRequest -Headers`, without following a redirect
+   (`download_failed`); .NET has to negotiate TLS 1.2, which Windows 10 and Windows Server 2019 and newer do by default;
 4. checks the SHA-256 with `Get-FileHash` before it unpacks (`checksum_mismatch`), unpacks with `Expand-Archive`, runs `Unblock-File` on the verified script and starts it
    as `powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File install-windows.ps1 -Server ... -TokenFile ...`: the policy is set for that process only, never
    `Bypass`, never for the machine or the user (`installer_failed` with the exit code when it fails).
@@ -1102,7 +1103,7 @@ the constant script followed by the values in a hashtable. It uses cmdlets and n
 The codes are those of the installers ([Connect a host](../tasks/connect-a-host.md)); `execution_policy_blocked` and `installer_failed` are new and belong to the command.
 
 **What the command cannot hide.** Under `token_inline` the token is text of the command, and what records typed text keeps it: the clipboard, the history of a shell, the
-history file of PSReadLine, PowerShell transcription and script block logging (event 4104), the recording of a terminal session. A token that such a record kept counts as
+I/O log of `sudo` (`log_input`), the history file of PSReadLine, PowerShell transcription and script block logging (event 4104), the recording of a terminal session. A token that such a record kept counts as
 leaked. The variant `token_file` keeps the token out of the command, and fits production, automation and every host that records its input. The first installation
 trusts the server that displayed the command (trust on first use): the pinned hash shows that the host received the bundle that the server vouched for after it verified
 `checksums.txt`, not that the server is honest. The manual path of [Connect a host](../tasks/connect-a-host.md) stays for sites that cannot accept this.

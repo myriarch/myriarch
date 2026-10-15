@@ -35,7 +35,7 @@ printf "header = \042Authorization: Bearer %s\042\n" "$tok" |
   die download_failed "the installer bundle could not be downloaded from $srv (check the address, the certificate of the server and the enrollment token)"
 printf "%s  %s\n" "$sum" "$file" >"$d/SHA256SUMS"
 (cd "$d" && sha256sum -c SHA256SUMS >/dev/null 2>&1) ||
-  die checksum_mismatch "the installer bundle does not have the SHA-256 given in the command; nothing was unpacked"
+  die checksum_mismatch "the installer bundle does not have the SHA-256 given in the command (a changed bundle, or the answer of another address or a redirect); nothing was unpacked"
 printf "[myriarch-install] the SHA-256 of the installer bundle is the one in the command; unpacking it\n"
 tar -xzf "$d/$file" -C "$d" || die archive_invalid "the installer bundle could not be unpacked"
 bash "$d/deploy/scripts/install-linux.sh" --server "$srv" --token-file "$tf" ${ca:+--ca-file "$ca"} "$@" </dev/null

@@ -575,7 +575,7 @@ printf "header = \042Authorization: Bearer %s\042\n" "$tok" |
   die download_failed "the installer bundle could not be downloaded from $srv (check the address, the certificate of the server and the enrollment token)"
 printf "%s  %s\n" "$sum" "$file" >"$d/SHA256SUMS"
 (cd "$d" && sha256sum -c SHA256SUMS >/dev/null 2>&1) ||
-  die checksum_mismatch "the installer bundle does not have the SHA-256 given in the command; nothing was unpacked"
+  die checksum_mismatch "the installer bundle does not have the SHA-256 given in the command (a changed bundle, or the answer of another address or a redirect); nothing was unpacked"
 printf "[{{LOG}}] the SHA-256 of the installer bundle is the one in the command; unpacking it\n"
 tar -xzf "$d/$file" -C "$d" || die archive_invalid "the installer bundle could not be unpacked"
 bash "$d/deploy/scripts/install-linux.sh" --server "$srv" --token-file "$tf" ${ca:+--ca-file "$ca"} "$@" </dev/null
@@ -622,12 +622,12 @@ try {
   $zip = Join-Path $d $File
   Write-Host "[{{LOG}}] downloading the installer bundle $File from $Server"
   try {
-    Invoke-WebRequest -UseBasicParsing -Uri "$Server{{BUNDLES_PATH}}$File" -Headers @{ Authorization = "Bearer $Token" } -OutFile $zip
+    Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -Uri "$Server{{BUNDLES_PATH}}$File" -Headers @{ Authorization = "Bearer $Token" } -OutFile $zip
   } catch {
     throw "[{{LOG}}] ERROR [download_failed] the installer bundle could not be downloaded from $Server ($($_.Exception.Message))"
   }
   if ((Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash -ne $Sha256) {
-    throw '[{{LOG}}] ERROR [checksum_mismatch] the installer bundle does not have the SHA-256 given in the command; nothing was unpacked'
+    throw '[{{LOG}}] ERROR [checksum_mismatch] the installer bundle does not have the SHA-256 given in the command (a changed bundle, or the answer of another address); nothing was unpacked'
   }
   Write-Host '[{{LOG}}] the SHA-256 of the installer bundle is the one in the command; unpacking it'
   Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $d 'package')
