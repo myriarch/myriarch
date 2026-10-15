@@ -7,7 +7,8 @@
 # module-level findings and allowlisted findings do not. The same script writes the reports for GitHub code scanning with --sarif DIR
 # (never a gate, accepted findings left out, every result with a location and a fingerprint), and ci/vulncheck-binaries.sh scans the
 # binaries of a published release only after the keyless verification of its checksums.txt and the SHA-256 of every archive; its test
-# runs the real script and ci/release/verify-blob.sh with doubles of curl, cosign and govulncheck and a release made on the fly.
+# runs the real script and ci/release/verify-blob.sh with doubles of curl, cosign and govulncheck and a release made on the fly. The shape
+# of .github/workflows/vulncheck.yml is pinned as well: the only write scope is security-events in the job upload, which runs no script.
 # shellcheck source=ci/tests/lib-test.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
 need_cmd python3
@@ -122,6 +123,116 @@ expect_fail "sarif: a malformed allowlist is refused" "expected 'ID \\| review" 
 printf '# empty\n' > "${ALLOW}"
 expect_fail "sarif: --sarif needs a directory" 'usage: ci/vulncheck.sh' env GOVULNCHECK="${SARIF_STUB}" "${CI_DIR}/vulncheck.sh" --sarif
 expect_fail "sarif: an unknown option is refused" 'usage: ci/vulncheck.sh' env GOVULNCHECK="${SARIF_STUB}" "${CI_DIR}/vulncheck.sh" --json x
+
+# ---- .github/workflows/vulncheck.yml ---------------------------------------------------------------------------------------------
+# The control is that the one job with a write scope runs no code of the repository, that the workflow never runs for a pull request, and
+# that the upload takes only what the other jobs of the run made. The workflow policy check (R3) only asks that a write scope is listed
+# in ci/workflow-permissions.txt.
+VULN_WF="${ROOT}/.github/workflows/vulncheck.yml"
+WF_CHECK="${TEST_TMP}/workflow-shape.py"
+cat > "${WF_CHECK}" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+errors = []
+at = text.index("\njobs:\n")
+head, body = text[:at], text[at:]
+
+on = re.search(r"^on:\n((?:  .*\n|\n)+)", head, re.M)
+triggers = set(re.findall(r"^  ([a-z_]+):", on.group(1), re.M)) if on else set()
+if triggers != {"push", "schedule", "workflow_dispatch"}:
+    errors.append("the triggers are %s, not push, schedule and workflow_dispatch (a pull request must not run it)" % sorted(triggers))
+if not re.search(r"^permissions:\n  contents: read\n", head, re.M):
+    errors.append("the workflow must have the top-level permissions contents: read")
+
+jobs, name = {}, None
+for line in body.split("\n")[2:]:
+    m = re.match(r"^  ([a-z][a-z0-9-]*):$", line)
+    if m:
+        name = m.group(1)
+        jobs[name] = []
+    elif name is not None:
+        jobs[name].append(line)
+if sorted(jobs) != ["binaries", "source", "upload"]:
+    errors.append("the jobs are %s, not binaries, source and upload" % sorted(jobs))
+
+
+def scripts(lines):
+    """The text of every run: key of a job (inline or as a block)."""
+    out, i = [], 0
+    while i < len(lines):
+        m = re.match(r"^(\s*)(?:- )?run:\s*(.*)$", lines[i])
+        if not m:
+            i += 1
+            continue
+        indent, rest = len(m.group(1)), m.group(2)
+        text_ = [rest]
+        if rest[:1] in "|>":
+            i += 1
+            while i < len(lines) and (not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) > indent + 1):
+                text_.append(lines[i])
+                i += 1
+        else:
+            i += 1
+        out.append("\n".join(text_))
+    return out
+
+
+for job, lines in jobs.items():
+    block = "\n".join(lines)
+    scopes = re.findall(r"^\s+([a-z-]+): write\b", block, re.M)
+    if job == "upload":
+        if scopes != ["security-events"]:
+            errors.append("the job upload must hold security-events: write and no other write scope, it holds %s" % scopes)
+        if scripts(lines):
+            errors.append("the job upload must run no script")
+        used = set(re.findall(r"uses: ([A-Za-z0-9_./-]+)@", block))
+        if not used <= {"actions/checkout", "actions/download-artifact", "github/codeql-action/upload-sarif"}:
+            errors.append("the job upload uses %s" % sorted(used))
+        categories = sorted(re.findall(r"category: (\S+)", block))
+        if categories != ["govulncheck/binaries", "govulncheck/source-devpg", "govulncheck/source-release"]:
+            errors.append("the categories of the uploads are %s" % categories)
+        if "persist-credentials: false" not in block:
+            errors.append("the checkout of the job upload must not persist credentials")
+    elif scopes or re.search(r"^    permissions:", block, re.M):
+        errors.append("the job %s must keep the read-only token of the workflow (it asks for %s)" % (job, scopes or "a permissions key"))
+    for script in scripts(lines):
+        if "${{" in script:
+            errors.append("the job %s puts an expression into a script (pass it through env:)" % job)
+if errors:
+    print("\n".join(errors), file=sys.stderr)
+    sys.exit(1)
+print("ok")
+PY
+wf_check() { python3 -I "${WF_CHECK}" "$1"; }
+wf_mutate() { # name old new: a copy of the workflow with the one occurrence of OLD replaced by NEW
+  python3 -I -c '
+import sys
+src, out, old, new = sys.argv[1:5]
+text = open(src, encoding="utf-8").read()
+if text.count(old) != 1:
+    sys.exit("mutate: %r occurs %d times" % (old, text.count(old)))
+open(out, "w", encoding="utf-8").write(text.replace(old, new))
+' "${VULN_WF}" "${TEST_TMP}/wf-$1.yml" "$2" "$3" || fail "test setup: could not change the workflow ($1)"
+}
+expect_ok "workflow: vulncheck.yml has the reviewed shape" wf_check "${VULN_WF}"
+wf_mutate pull-request $'  workflow_dispatch:\n' $'  pull_request:\n  workflow_dispatch:\n'
+expect_fail "workflow: a pull request trigger is refused" 'a pull request must not run it' wf_check "${TEST_TMP}/wf-pull-request.yml"
+wf_mutate source-write $'    name: source\n' $'    name: source\n    permissions:\n      security-events: write # test\n'
+expect_fail "workflow: a write scope in a scan job is refused" 'the job source must keep the read-only token' wf_check "${TEST_TMP}/wf-source-write.yml"
+wf_mutate binaries-write $'    name: binaries\n' $'    name: binaries\n    permissions:\n      contents: write # test\n'
+expect_fail "workflow: another write scope in a scan job is refused" 'the job binaries must keep the read-only token' wf_check "${TEST_TMP}/wf-binaries-write.yml"
+wf_mutate upload-contents $'      contents: read # check out' $'      contents: write # check out'
+expect_fail "workflow: a second write scope in the upload job is refused" 'the job upload must hold security-events: write and no other write scope' wf_check "${TEST_TMP}/wf-upload-contents.yml"
+wf_mutate upload-run $'      - name: Download the reports of the source scan\n' $'      - name: Build something\n        run: make build\n      - name: Download the reports of the source scan\n'
+expect_fail "workflow: a script in the upload job is refused" 'the job upload must run no script' wf_check "${TEST_TMP}/wf-upload-run.yml"
+wf_mutate upload-action $'      - name: Download the reports of the source scan\n' $'      - name: Another action\n        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0\n      - name: Download the reports of the source scan\n'
+expect_fail "workflow: another action in the upload job is refused" 'the job upload uses' wf_check "${TEST_TMP}/wf-upload-action.yml"
+wf_mutate category 'category: govulncheck/binaries' 'category: binaries'
+expect_fail "workflow: the categories of the uploads are fixed" 'the categories of the uploads' wf_check "${TEST_TMP}/wf-category.yml"
+wf_mutate expression 'run: ci/vulncheck.sh --sarif "${RUNNER_TEMP}/sarif"' 'run: ci/vulncheck.sh --sarif "${{ github.workspace }}/sarif"'
+expect_fail "workflow: an expression in a script is refused" 'puts an expression into a script' wf_check "${TEST_TMP}/wf-expression.yml"
 
 # ---- ci/vulncheck-binaries.sh ----------------------------------------------------------------------------------------------------
 # The release is made on the fly: archives with a program inside, a checksums.txt that lists them (and files that must not be fetched), and
