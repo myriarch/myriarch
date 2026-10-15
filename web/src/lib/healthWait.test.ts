@@ -10,6 +10,7 @@ import {
   healthWaitEnd,
   healthWaitMs,
   healthWaitOf,
+  isEvaluated,
   latestVerifiedAt,
   parseGoDuration,
   remainingMs,
@@ -192,6 +193,8 @@ describe('healthWaitOf', () => {
       ['superseded', false],
     ];
     for (const [status, evaluated] of states) {
+      // the helper that the mock engine shares with the countdown, and what the countdown reads
+      expect(isEvaluated(status), status).toBe(evaluated);
       expect(healthWaitOf(rollout(status))?.evaluated, status).toBe(evaluated);
     }
   });

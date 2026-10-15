@@ -944,7 +944,9 @@ is out of date. Run `make docs-gen` as well: the REST API reference (`docs/refer
 completed) and a GitOps status with a warning. Actions change the state in memory, and a timer simulates live events
 (heartbeats, health changes, rollout progress). The running rollout, the version rollout of the data center fleet, has
 five targets in the health wait: the rollout page counts down their remaining time, and the mock finishes them when the
-`healthWait` of the policy snapshot, two minutes, is over.
+`healthWait` of the policy snapshot, two minutes, is over. Like the engine, it does so also while you pause the rollout
+(or while it waits for an approval), but then it starts nothing new and moves on to no further wave; a target that is in
+progress waits for the resume.
 
 - Sign-in: the user name `admin`, `operator` or `viewer` (any password) selects the role, so you can check permissions.
   The mock starts signed in as `admin`.

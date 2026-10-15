@@ -52,7 +52,7 @@ import type {
   WaveStatus,
 } from '@/api/types';
 import { compareVersions } from '@/lib/format';
-import { DEFAULT_HEALTH_WAIT_MS, formatWait, healthWaitMs } from '@/lib/healthWait';
+import { DEFAULT_HEALTH_WAIT_MS, formatWait, healthWaitMs, isEvaluated } from '@/lib/healthWait';
 import { CONFIG_SYNC_STATES } from '@/api/enums';
 import { generateAgents, generateEvents, summarize, type MockAgentEntry } from './agents';
 import { describeFrame, inFrame } from './frame';
@@ -1369,23 +1369,27 @@ export class MockDb {
       this.emit('agent.updated', summarize(off, this.latestVersion()));
       this.emit('stats.changed', {});
     }
-    // Progress the running rollout: pending -> in_progress -> succeeded (agent version changes).
+    // Progress the rollouts: pending -> in_progress -> succeeded (agent version changes).
     this.syncSimulations();
     for (const mr of this.rollouts) {
-      if (mr.rollout.status !== 'running' || mr.simPlan) continue;
-      // The engine's rule: a target in the health wait succeeds once the wait of the policy
-      // snapshot is over (verifiedAt + healthWait).
-      const waitMs = healthWaitMs(mr.rollout.policy.healthWait) ?? DEFAULT_HEALTH_WAIT_MS;
-      for (const t of mr.targets) {
-        if (
-          t.status === 'verifying' &&
-          t.verifiedAt &&
-          this.now() - Date.parse(t.verifiedAt) >= waitMs
-        )
-          this.succeedTarget(mr, t);
+      // A simulated update is driven by syncSimulations.
+      if (mr.simPlan) continue;
+      // Like the engine, which evaluates its in-flight targets before it looks at the status of the
+      // rollout, the targets in the health wait finish in every status that the engine evaluates, so
+      // also while the rollout is paused or waits for an approval. The countdown of the rollout page
+      // keeps counting then, and the wait has to end.
+      const finished = isEvaluated(mr.rollout.status) ? this.finishHealthWaits(mr) : 0;
+      if (mr.rollout.status !== 'running') {
+        // Only a running rollout starts targets and moves on to the next wave.
+        if (finished > 0) {
+          this.recount(mr);
+          this.emit('rollout.updated', this.rolloutSummary(mr.rollout));
+        }
+        continue;
       }
       const inProg = mr.targets.filter((t) => t.status === 'in_progress');
-      // The simplification of this demo: a target in progress succeeds without a health wait of its own.
+      // The simplification of this demo: a target in progress succeeds without a health wait of its
+      // own, and only while the rollout runs.
       if (inProg.length > 0 && this.rng.chance(0.8)) this.succeedTarget(mr, this.rng.pick(inProg));
       const runningWaves = new Set(
         mr.rollout.waves.filter((w) => w.status === 'running').map((w) => w.index),
@@ -1405,6 +1409,24 @@ export class MockDb {
       this.emit('rollout.updated', this.rolloutSummary(mr.rollout));
     }
     if (this.tickCount % 8 === 0) this.emit('stats.changed', {});
+  }
+
+  /**
+   * The rule of the engine for the targets in the health wait: a target succeeds once the wait of
+   * the policy snapshot is over (verifiedAt + healthWait). Returns how many targets it finished;
+   * the caller counts them again and tells the page.
+   */
+  private finishHealthWaits(mr: MockRollout): number {
+    const waitMs = healthWaitMs(mr.rollout.policy.healthWait) ?? DEFAULT_HEALTH_WAIT_MS;
+    const now = this.now();
+    let finished = 0;
+    for (const t of mr.targets) {
+      if (t.status === 'verifying' && t.verifiedAt && now - Date.parse(t.verifiedAt) >= waitMs) {
+        this.succeedTarget(mr, t);
+        finished++;
+      }
+    }
+    return finished;
   }
 
   /** A target reaches its final state: the agent runs the target version, with the live events. */

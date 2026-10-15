@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from 'vitest';
+import type { RolloutStatus } from '@/api/types';
 import { getDb } from './db';
 import { renderMock } from './render';
 
@@ -131,4 +132,109 @@ describe('mock database', () => {
     expect(bad.status).toBe(400);
     expect((await get('?sort=-activity')).status).toBe(400);
   });
+});
+
+/** The version rollout of the data center fleet: policy "standard" (healthWait 2m), five targets in the health wait. */
+const DC_ROLLOUT = '5b0c1a3e-7d2f-4c88-9a41-0e6d3f2a7b11';
+const STANDARD_WAIT_MS = 120_000;
+
+describe('mock engine: the health wait', () => {
+  /**
+   * The data center rollout in `status` (the way the pause action of the mock puts it there), its
+   * five targets in the health wait, the instants their waits end (ascending) and a clock that the
+   * test sets.
+   */
+  function dataCenter(status: RolloutStatus) {
+    const db = getDb();
+    const mr = db.findRollout(DC_ROLLOUT)!;
+    if (mr.rollout.status !== status) db.setRolloutStatus(mr, status, 'test');
+    const verifying = mr.targets.filter((t) => t.status === 'verifying');
+    expect(verifying).toHaveLength(5);
+    const ends = verifying
+      .map((t) => Date.parse(t.verifiedAt!) + STANDARD_WAIT_MS)
+      .sort((a, b) => a - b);
+    let now = ends[0]! - 1000;
+    db.now = () => now;
+    return {
+      db,
+      mr,
+      verifying,
+      ends,
+      setClock: (ms: number) => {
+        now = ms;
+      },
+      succeeded: () => verifying.filter((t) => t.status === 'succeeded').length,
+    };
+  }
+
+  // The engine evaluates the targets of a rollout that is running, paused or waiting for an
+  // approval (evalInFlight runs before the status switch in internal/rollout/tick.go).
+  it.each(['running', 'paused', 'waiting_approval'] as const)(
+    'finishes a target when its wait is over while the rollout is %s',
+    (status) => {
+      const { db, mr, verifying, ends, setClock, succeeded } = dataCenter(status);
+      const events: string[] = [];
+      db.subscribe((type) => events.push(type));
+
+      // one millisecond before the first wait ends, every target still waits
+      setClock(ends[0]! - 1);
+      db.tick();
+      expect(succeeded()).toBe(0);
+      expect(verifying.every((t) => t.status === 'verifying')).toBe(true);
+
+      // a target is done at the instant its own wait ends, and not before: three of five
+      setClock(ends[2]!);
+      db.tick();
+      expect(succeeded()).toBe(3);
+      expect(events).toContain('rollout.updated');
+
+      setClock(ends[4]!);
+      db.tick();
+      expect(succeeded()).toBe(5);
+      for (const t of verifying) {
+        expect(t.finishedAt).toBeDefined();
+        expect(Date.parse(t.finishedAt!)).toBeGreaterThanOrEqual(
+          Date.parse(t.verifiedAt!) + STANDARD_WAIT_MS,
+        );
+      }
+      // the counts that the page and the live events show follow the targets
+      expect(mr.rollout.counts.succeeded).toBe(
+        mr.targets.filter((t) => t.status === 'succeeded').length,
+      );
+    },
+  );
+
+  // A paused rollout starts nothing new and moves no wave on, but it finishes what is in flight.
+  it.each(['paused', 'waiting_approval'] as const)(
+    'starts and advances nothing else while the rollout is %s',
+    (status) => {
+      const { db, mr, verifying, ends, setClock, succeeded } = dataCenter(status);
+      const others = () => mr.targets.filter((t) => !verifying.includes(t)).map((t) => t.status);
+      const waves = () => mr.rollout.waves.map((w) => w.status);
+      const [othersBefore, wavesBefore] = [others(), waves()];
+      expect(othersBefore).toContain('in_progress');
+      expect(othersBefore).toContain('pending');
+
+      setClock(ends[4]!);
+      for (let i = 0; i < 20; i++) db.tick();
+
+      expect(succeeded()).toBe(5);
+      expect(mr.rollout.status).toBe(status);
+      expect(others()).toEqual(othersBefore);
+      expect(waves()).toEqual(wavesBefore);
+    },
+  );
+
+  // The engine does not evaluate the targets of these rollouts: they stay as they are until an
+  // operator decides (docs/concepts/rollouts.md, "Health wait").
+  it.each(['failed', 'rolling_back', 'aborted'] as const)(
+    'leaves the targets in the health wait of a %s rollout alone',
+    (status) => {
+      const { db, verifying, ends, setClock, succeeded } = dataCenter(status);
+      setClock(ends[4]! + 60 * 60 * 1000);
+      for (let i = 0; i < 5; i++) db.tick();
+      expect(succeeded()).toBe(0);
+      expect(verifying.every((t) => t.status === 'verifying')).toBe(true);
+    },
+  );
 });

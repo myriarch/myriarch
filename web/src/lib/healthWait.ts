@@ -100,6 +100,13 @@ export function formatWait(ms: number): string {
  */
 const EVALUATED: readonly RolloutStatus[] = ['running', 'paused', 'waiting_approval'];
 
+/**
+ * Whether the engine evaluates the targets of a rollout in this status. The countdown shows an end
+ * only then, and the mock engine of `pnpm dev:mock` finishes the targets in the health wait only then,
+ * so that the display and the mock keep to the same rule.
+ */
+export const isEvaluated = (status: RolloutStatus): boolean => EVALUATED.includes(status);
+
 /** What the countdown needs to know about a rollout. */
 export interface HealthWait {
   /** Name of the policy of the rollout: the link target of the source line. */
@@ -131,7 +138,7 @@ export function healthWaitOf(
     waitText: formatWait(waitMs),
     path: r.policy.source.path,
     commit: shortCommit(r.policy.source.commit),
-    evaluated: EVALUATED.includes(r.status),
+    evaluated: isEvaluated(r.status),
   };
 }
 
