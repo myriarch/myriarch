@@ -52,7 +52,9 @@ the web UI with combined permissive licenses.
    `ci.yml` is part of `ci-ok`. For a pull request and for a merge group it runs `actions/dependency-review-action`, pinned to a commit
    like every action, with the configuration `.github/dependency-review-config.yml`, `fail-on-severity: high` and `fail-on-scopes:
    runtime`. It fails when a dependency that the change adds or updates carries a license outside the list or a known vulnerability of
-   high or critical severity in the runtime scope. For every other event (a push to `main`, the nightly run, a manual run) a step says
+   high or critical severity in the runtime scope. The review checks what the dependency graph of GitHub reports for the change with
+   the scope runtime; which ecosystems (Go, npm, Python, GitHub Actions) that covers follows the dependency graph and is to be
+   confirmed by the first runs. For every other event (a push to `main`, the nightly run, a manual run) a step says
    that there is nothing to compare, so the job succeeds instead of being skipped, because a skipped job fails `ci-ok`. A license that
    only the list `review` allows passes the pull request and, for a Go package that a release build links, fails the release license
    check until someone decides about it: the decision to widen the list `release` is a new decision record; a single package gets an
@@ -75,8 +77,10 @@ the web UI with combined permissive licenses.
    of the pull request, like every other file of the pipeline.
 5. **`elkjs` is not excepted.** The npm package `elkjs` (EPL-2.0, a weak copyleft license) is a dependency of Mermaid, and the Mermaid
    chunks that the website serves include the ELK layout. The notices page of the website (`website/data/third_party.yaml`) lists Mermaid
-   only. Whether the website owes a notice for `elkjs` is a question for the maintainer, not for a pipeline exception, so the first
-   pull request that updates Mermaid will fail the review until it is answered.
+   only. Whether the website owes a notice for `elkjs` is a question for the maintainer, not for a pipeline exception. The review fails
+   when a change adds `elkjs` or changes its resolved version (Mermaid 12.1.0 resolves `elkjs` 0.9.3 today); a Mermaid update that keeps
+   that version passes. So the first Mermaid update that moves `elkjs` to another version fails the review until the question is
+   answered.
 6. **The binding list covers Go packages; the npm packages of the web UI bundle get the review only.** `ci/check-release-licenses.sh`
    runs `go-licenses`, which reads Go packages. The npm packages that the web UI bundle carries into `myriarchd` are checked for their
    license by the dependency review of the pull request alone, against all entries of the file, and the generator of
@@ -90,8 +94,10 @@ the web UI with combined permissive licenses.
 
 ### Positive
 
-- A new dependency of any ecosystem (Go, npm, Python, GitHub Actions) is checked against the license policy in the pull request that
-  adds it, with the advisories of the GitHub Advisory Database, and not at the release.
+- The review checks what the dependency graph of GitHub reports for the change with the scope runtime; which ecosystems (Go, npm,
+  Python, GitHub Actions) that covers follows the dependency graph and is to be confirmed by the first runs. What it sees is checked
+  against the license policy and the advisories of the GitHub Advisory Database in the pull request that makes the change, and not at
+  the release.
 - The two lists cannot drift: one file, one test. The release check is as strict as before.
 - The check uses a GitHub-owned action with the read-only token; no secret, no write scope, no new third party.
 - The exception list documents the license landscape of the tool trees and the reason that each package is acceptable.
@@ -106,8 +112,13 @@ the web UI with combined permissive licenses.
 - The list of exceptions is long at the start (80 packages), and the dependency graph does not say which npm packages it counts as
   development tools; entries for development-only trees may turn out to be unnecessary, and a Dependabot pull request that touches a
   package without an entry fails until one is added. The first runs show which.
+- The review sees only what the dependency graph reports with the scope runtime. Whether the graph reports the Go modules, the npm
+  packages, the Python packages and the GitHub Actions of a change that way has not been observed: a dependency that it reports with
+  another scope, or does not report, is not checked. The first pull requests that change a Go, npm or Python manifest or a workflow
+  show it.
 - The action reads the dependency graph of GitHub. When GitHub cannot return the data for a revision range (a merge group that is not
-  processed yet, for example), the job fails with a message and runs again.
+  processed yet, for example), the comparison is unavailable and the job fails with a message. Nothing runs it again: someone re-runs
+  the job, and a failing merge group removes the pull request from the merge queue, so the pull request has to be queued again.
 - `elkjs` stays an open item (decision 5).
 - The binding list does not reach the npm packages of the web UI bundle: a license of the list `review` in the bundle passes both
   checks, and `tslib` (0BSD) ships in `myriarchd` today (decision 6).

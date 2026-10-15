@@ -487,7 +487,9 @@ guidance after each item names what to do.
   ([ADR-0038](../adr/0038-dependency-license-policy.md)), compares the dependency graph of a pull request or merge group with its
   base and fails when a dependency that the change adds or updates, in the runtime scope, carries a license outside the CNCF
   allowlist and Apache-2.0 (`ci/license-allowlist.txt`, `.github/dependency-review-config.yml`) or has a known advisory of high or
-  critical severity. Controls: a GitHub-owned action pinned to a commit, the read-only token of the workflow (no `permissions` key,
+  critical severity. The review checks what the dependency graph of GitHub reports for the change with the scope runtime; which
+  ecosystems (Go, npm, Python, GitHub Actions) that covers follows the dependency graph and is to be confirmed by the first runs.
+  Controls: a GitHub-owned action pinned to a commit, the read-only token of the workflow (no `permissions` key,
   no secret, no comment in the pull request), no request to a third party (the OpenSSF Scorecard lookup of the action is off) and a
   license expression that is not valid SPDX fails. The job never counts as skipped: on a pull request or merge group its steps run
   (a skipped job fails `ci-ok`, so a pull request cannot pass without the review), and on every other event a step says that
@@ -503,7 +505,8 @@ guidance after each item names what to do.
   or updates, not at the whole tree; an exception names a package and covers all its later versions; the configuration is read from
   the checkout of the pull request, so a pull request that changes the policy and a dependency together depends on the review of the
   policy change (the maintainer owns every file in `.github/CODEOWNERS`); and `pkg:npm/elkjs` (EPL-2.0, a dependency of Mermaid that
-  the website serves) has no exception until the question of its notice is decided.
+  the website serves) has no exception until the question of its notice is decided, so a change that adds it or changes its resolved
+  version fails the review.
 - **Static analysis in CI: CodeQL, Scorecard and zizmor.** Three controls look at the code and the pipeline, none replaces review:
   - *CodeQL* (`.github/workflows/codeql.yml`) analyses the Go code (built for Linux with and without the `embedui` and `devpg`
     build tags, for Windows with and without them and for macOS, so that the Windows-only code of the updater, which runs as

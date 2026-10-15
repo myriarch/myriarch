@@ -531,17 +531,19 @@ both, so a rule does not depend on how a file is named:
 
 The job `dependency-review` checks, in every pull request and merge group, the dependencies that the change adds or updates
 ([ADR-0038](adr/0038-dependency-license-policy.md)). The dependency graph of GitHub compares the manifests and lockfiles of the pull
-request with those of its base (the Go modules of the product and of `ci/tools`, the lockfiles of `web/`, `website/` and the brand
-generator, the Python requirements and the workflows), and `actions/dependency-review-action` fails the job when a dependency in the
-runtime scope
+request with those of its base, and `actions/dependency-review-action` fails the job when a dependency in the runtime scope
 
 - carries a license that is not in the `allow-licenses` of `.github/dependency-review-config.yml`, or
 - has a known advisory of high or critical severity in the GitHub Advisory Database.
 
-The thresholds (`fail-on-severity: high`, `fail-on-scopes: runtime`) are inputs of the job in `ci.yml`; the configuration holds what
-is allowed. A dependency without license information is only listed in the job summary, and a license expression that is not valid
-SPDX fails the job. The log and the job summary name the manifest, the package, the version and the license or the advisory. The check
-needs the dependency graph of the repository and runs only in CI; `ci/tests/license-allowlist-test.sh` runs everywhere.
+The review checks what the dependency graph of GitHub reports for the change with the scope runtime; which ecosystems (Go, npm,
+Python, GitHub Actions) that covers follows the dependency graph and is to be confirmed by the first runs. The repository has the Go
+modules of the product and of `ci/tools`, the lockfiles of `web/`, `website/` and the brand generator, the Python requirements of the
+tools and the workflows. The thresholds (`fail-on-severity: high`, `fail-on-scopes: runtime`) are inputs of the job in `ci.yml`; the
+configuration holds what is allowed. A dependency without license information is only listed in the job summary, and a license
+expression that is not valid SPDX fails the job. The log and the job summary name the manifest, the package, the version and the
+license or the advisory. The check needs the dependency graph of the repository and runs only in CI;
+`ci/tests/license-allowlist-test.sh` runs everywhere.
 
 **The lists.** `ci/license-allowlist.txt` is the source of both: the entries of the list `release` are the allowlist of the release
 builds (`ci/check-release-licenses.sh`, [License check of the release builds](#license-check-of-the-release-builds)), and all entries
@@ -561,7 +563,10 @@ version of a package URL, so an exception also covers the later versions of its 
 you update it. An advisory that does not apply goes to `allow-ghsas` with its GHSA ID and a reason; `govulncheck` (gate `vulncheck`) is
 the check that knows which vulnerable symbols the code calls. The configuration comes from the checkout of the pull request, so a
 change of the lists or of an exception is a change of policy and is reviewed as one. `pkg:npm/elkjs` (EPL-2.0, a dependency of
-Mermaid) has no exception on purpose: whether the website owes a notice for it is still to be decided (ADR-0038, decision 5).
+Mermaid) has no exception on purpose: whether the website owes a notice for it is still to be decided (ADR-0038, decision 5). A change
+fails the review when it adds `elkjs` or changes its resolved version (Mermaid 12.1.0 resolves 0.9.3 today); a Mermaid update that
+keeps the version passes. When the job fails because GitHub cannot return the comparison (a merge group that is not processed yet, for
+example), nothing runs it again: re-run the job, and queue the pull request again when its merge group failed.
 
 ### Vulnerability reports in code scanning
 

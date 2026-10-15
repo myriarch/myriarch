@@ -3,7 +3,9 @@
 #
 # The job compares the dependencies of a pull request (or of a merge group) with those of its base and fails when a dependency that
 # the change adds or updates carries a license outside allow-licenses or a known vulnerability of high or critical severity, in the
-# runtime scope. The thresholds (fail-on-severity, fail-on-scopes) are set in the workflow; this file holds what is allowed.
+# runtime scope. The review checks what the dependency graph of GitHub reports for the change with the scope runtime; which ecosystems
+# (Go, npm, Python, GitHub Actions) that covers follows the dependency graph and is to be confirmed by the first runs. The thresholds
+# (fail-on-severity, fail-on-scopes) are set in the workflow; this file holds what is allowed.
 #
 # A dependency whose license the dependency graph of GitHub does not know is only listed in the job summary. The check looks at the
 # dependencies a change adds or updates, not at the whole tree, and it is a tripwire: the binding license check of a release is
@@ -45,7 +47,8 @@ allow-ghsas: []
 # outside the list fails the check; adding it here needs a reason and a review like a change of policy (ADR-0038).
 #
 # Not listed on purpose: pkg:npm/elkjs (EPL-2.0, weak copyleft), a dependency of Mermaid, whose chunks the website serves. Whether the
-# website needs a notice for it has to be decided before an exception is recorded.
+# website needs a notice for it has to be decided before an exception is recorded. A change that adds it or changes its resolved version
+# fails the check (Mermaid 12.1.0 resolves 0.9.3 today); a Mermaid update that keeps the version passes.
 allow-dependencies-licenses:
   # github.com/cyphar/filepath-securejoin (BSD-3-Clause AND MPL-2.0), linked through go-git: the module has two licenses. The release builds
   # link only the packages under BSD-3-Clause (LICENSE.BSD); the exception with this scope in ci/license-overrides.txt makes the release
