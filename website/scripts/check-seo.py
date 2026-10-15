@@ -22,8 +22,9 @@ Fails when
     script element), is not an object of schema.org with a known type, has a property that the type does not define (the Schema Markup
     Validator would report it) or a value that differs from the configuration,
   - the structured data of a page is not the expected set: the home page has exactly one WebSite and one SoftwareSourceCode (the version is
-    the latest release of data/release.yaml, without the leading v); a page with a visible breadcrumb has exactly one BreadcrumbList whose
-    items are the home page and the items of the visible breadcrumb with the same names and URLs; every other page has no JSON-LD,
+    the latest release of data/release.yaml, without the leading v); a page with a visible breadcrumb has exactly one BreadcrumbList that
+    equals it: the home page, then the items of the visible breadcrumb with the same names and URLs (a breadcrumb that Docsy hides with the
+    class td-breadcrumbs--single, a trail of one item, is not visible: such a page has no list); every other page has no JSON-LD,
   - the title of the home page differs from params.seo.homeTitle, which must say more than the bare site title in at most 70 characters,
     or either is spelled against ADR-0015,
   - llms.txt is missing, has not the shape of the llms.txt format (one heading with the site title, a summary in a block quote, no HTML),
@@ -249,7 +250,8 @@ class PageParser(HTMLParser):
         self.ld = []
         self.images = []
         self.h1 = 0
-        self.crumbs = None  # [(text, href or "")] of the breadcrumb navigation, None when the page has none
+        self.crumbs = None  # [(text, href or "")] of the visible breadcrumb navigation, None when the page has none
+        self.crumbs_hidden = False  # the page has a breadcrumb navigation that Docsy hides (td-breadcrumbs--single, a trail of one item)
         self.content_links = []  # the hrefs of the links in div.td-content
         self._head = False
         self._title = None
@@ -286,8 +288,11 @@ class PageParser(HTMLParser):
         elif tag == "h1":
             self.h1 += 1
         elif tag == "nav" and a.get("aria-label", "").strip().lower() == "breadcrumb":
-            self._nav = 1
-            self.crumbs = []
+            if "td-breadcrumbs--single" in classes:
+                self.crumbs_hidden = True  # the style sheet of the theme hides it, so the page shows no breadcrumb
+            else:
+                self._nav = 1
+                self.crumbs = []
         elif self._nav and tag == "li" and "td-breadcrumbs__item" in classes:
             self._close_item()
             self._item = {"text": [], "href": ""}
@@ -548,7 +553,10 @@ def check_json_ld(rel, parsed, cfg, canonical, is_home):
     else:
         want = []
     if kinds != want and not any(o.startswith("%s: JSON-LD has the type" % rel) for o in out):
-        out.append("%s: JSON-LD has the types %s, expected %s" % (rel, kinds or "none", want or "none"))
+        note = ""
+        if parsed.crumbs_hidden and "BreadcrumbList" in kinds:
+            note = " (Docsy hides the breadcrumb of this page: td-breadcrumbs--single)"
+        out.append("%s: JSON-LD has the types %s, expected %s%s" % (rel, kinds or "none", want or "none", note))
     for kind, data in nodes:
         if kind == "SoftwareSourceCode" and is_home:
             out.extend(check_software(rel, data, cfg))

@@ -102,15 +102,22 @@ def breadcrumbs(*items, **changes):
 DOCS_TRAIL = (("Home", "/"), ("Documentation", "/docs/"), ("Concepts", "/docs/concepts/"), ("Git as the source of truth", "/docs/concepts/gitops/"))
 
 
-def nav(*items):
-    """The visible breadcrumb as Docsy draws it: items are (text, href), the last one has no link."""
+def nav(*items, single=False):
+    """The breadcrumb as Docsy draws it: items are (text, href), the last one has no link. single=True is the class that Docsy sets on a
+    trail of one item (the pages at the first level), which its style sheet hides."""
     li = []
     for text, href in items:
         if href:
             li.append('<li class=td-breadcrumbs__item><a href="%s">%s</a></li>' % (href, text))
         else:
             li.append("<li class=td-breadcrumbs__item aria-current=page>%s</li>" % text)
-    return '<nav aria-label=breadcrumb class=td-breadcrumbs><ol class=td-breadcrumbs__list>%s</ol></nav>' % "".join(li)
+    classes = "td-breadcrumbs td-breadcrumbs--single" if single else "td-breadcrumbs"
+    return '<nav aria-label=breadcrumb class="%s"><ol class=td-breadcrumbs__list>%s</ol></nav>' % (classes, "".join(li))
+
+
+def docs_index(canonical=ORIGIN + "/docs/"):
+    """/docs/ as the build writes it: a trail of one item, which Docsy hides, and therefore no BreadcrumbList."""
+    return page("Documentation | myriarch", canonical, body=nav(("Documentation", ""), single=True))
 
 
 def page(title="A page | myriarch", canonical=None, ld=(), body="", description=DESCRIPTION, robots="index, follow", describedby="/llms.txt",
@@ -178,8 +185,7 @@ class SeoCase(unittest.TestCase):
         """A site that passes the check."""
         self.files = {
             "index.html": page(HOME_TITLE, ORIGIN + "/", [software(), website()]),
-            "docs/index.html": page("Documentation | myriarch", ORIGIN + "/docs/", [breadcrumbs(*DOCS_TRAIL[:2])],
-                                    body=nav(("Documentation", ""))),
+            "docs/index.html": docs_index(),
             "docs/concepts/gitops/index.html": page(
                 "Git as the source of truth | myriarch", ORIGIN + "/docs/concepts/gitops/", [breadcrumbs(*DOCS_TRAIL)],
                 body=nav(("Documentation", "/docs/"), ("Concepts", "/docs/concepts/"), ("Git as the source of truth", ""))),
@@ -274,7 +280,7 @@ class CleanSiteTest(SeoCase):
 
 class CanonicalTest(SeoCase):
     def test_a_missing_canonical_link_fails(self):
-        self.files["docs/index.html"] = page("Documentation | myriarch", None, [breadcrumbs(*DOCS_TRAIL[:2])], body=nav(("Documentation", "")))
+        self.files["docs/index.html"] = docs_index(None)
         self.assert_finding("docs/index.html: has 0 canonical links, expected exactly one")
 
     def test_two_canonical_links_fail(self):
@@ -285,7 +291,7 @@ class CanonicalTest(SeoCase):
     def test_a_canonical_link_must_be_absolute_and_on_the_production_origin(self):
         for href in ("/docs/", "http://example.test/docs/", "https://other.test/docs/", "https://example.test/docs/?x=1", "https://example.test/docs/#a",
                      "https://example.test/docs", "https://example.test/", "https://example.test/Docs/"):
-            self.files["docs/index.html"] = page("Documentation | myriarch", href, [breadcrumbs(*DOCS_TRAIL[:2])], body=nav(("Documentation", "")))
+            self.files["docs/index.html"] = docs_index(href)
             self.assert_finding("docs/index.html: the canonical link is %r, expected 'https://example.test/docs/'" % href)
 
     def test_the_canonical_link_of_a_page_names_the_page_itself(self):
@@ -486,10 +492,21 @@ class StructuredDataTest(SeoCase):
         self.page_with(rel, breadcrumbs(*DOCS_TRAIL, itemListElement=[]), body=nav(*trail))
         self.assert_finding("JSON-LD BreadcrumbList lacks itemListElement")
 
-    def test_a_first_level_page_has_a_trail_of_two(self):
-        self.assert_clean()  # docs/index.html: the visible breadcrumb has one item, the list adds the home page
-        self.files["docs/index.html"] = page("Documentation | myriarch", ORIGIN + "/docs/", [breadcrumbs(*DOCS_TRAIL[1:2])], body=nav(("Documentation", "")))
-        self.assert_finding("docs/index.html: JSON-LD BreadcrumbList has 1 items, the visible breadcrumb has 2 (with the home page)")
+    def test_a_first_level_page_has_no_breadcrumb_list(self):
+        # Docsy hides a trail of one item (td-breadcrumbs--single) with its style sheet: the page shows no breadcrumb, so a list would
+        # equal nothing
+        rel = "docs/index.html"
+        self.assert_clean()  # docs/index.html: the hidden breadcrumb and no JSON-LD
+        for trail in (DOCS_TRAIL[:2], DOCS_TRAIL[1:2]):
+            self.files[rel] = page("Documentation | myriarch", ORIGIN + "/docs/", [breadcrumbs(*trail)], body=nav(("Documentation", ""), single=True))
+            self.assert_finding("%s: JSON-LD has the types ['BreadcrumbList'], expected none "
+                                "(Docsy hides the breadcrumb of this page: td-breadcrumbs--single)" % rel)
+
+    def test_the_class_of_the_navigation_decides_whether_the_breadcrumb_is_visible(self):
+        # the same page without the class would show its breadcrumb, so it would need the list
+        rel = "docs/index.html"
+        self.files[rel] = page("Documentation | myriarch", ORIGIN + "/docs/", body=nav(("Documentation", "")))
+        self.assert_finding("%s: JSON-LD has the types none, expected ['BreadcrumbList']" % rel)
 
 
 class HomeTitleTest(SeoCase):

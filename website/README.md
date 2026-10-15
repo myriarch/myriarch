@@ -173,9 +173,10 @@ are identifiers and always lower case.
   exists. It is the property `version`: `softwareVersion` is defined for `SoftwareApplication`, not for `SoftwareSourceCode`. The home page
   does not use `SoftwareApplication` on purpose, because Google's Rich Results Test reports errors for it without ratings, and ratings are
   never made up. The `WebSite` has no `SearchAction`: the search runs in the browser and has no URL that takes a query.
-- **A page with a visible breadcrumb** (the documentation layout: `/docs/`, `/project/` and `/legal/`) has one `BreadcrumbList`: the home
-  page, then the items of the visible breadcrumb with their absolute URLs, the current page included. The home page is added because a
-  page at the first level shows only one item.
+- **A page with a visible breadcrumb** (the documentation layout below `/docs/`, `/project/` and `/legal/`) has one `BreadcrumbList` that
+  equals it: the home page, which Docsy's trail leaves out, then the items of the visible breadcrumb with their absolute URLs, the current
+  page included. Docsy hides a trail of one item (the class `td-breadcrumbs--single`), as on `/docs/`, `/project/` and `/legal/` themselves;
+  such a page shows no breadcrumb and has no `BreadcrumbList`, and `check-seo.py` expects none for a navigation with that class.
 - **Every other page** has no structured data.
 
 The facts are in `config/_default/params.yaml` (the block `seo`: license, languages, keywords; and `description`, `repo.url`, `copyright`)
@@ -224,7 +225,8 @@ The steps of the maintainer. None of them needs a file in the repository.
    user-declared canonical must be the page itself.
 2. **Bing Webmaster Tools.** Import the site from Search Console (*Import your sites from Google Search Console*); the sitemap comes with it.
 3. **Structured data.** Test `https://myriarch.dev/` with the [Schema Markup Validator](https://validator.schema.org/): `WebSite` and
-   `SoftwareSourceCode` without errors. Test one page of the documentation with the
+   `SoftwareSourceCode` without errors. Test a page of the documentation below the first level, for example
+   `https://myriarch.dev/docs/concepts/gitops/`, with the
    [Rich Results Test](https://search.google.com/test/rich-results): the `BreadcrumbList` is valid. `SoftwareSourceCode` is not a rich
    result type of Google, and the test reports errors for `SoftwareApplication` without ratings, which is why the home page uses the
    first.

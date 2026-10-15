@@ -8,7 +8,8 @@ SPDX-License-Identifier: Apache-2.0
     - the canonical link, on every page but the 404 page (an error page has no original). It names the fixed production origin, also in a
       preview;
     - structured data (JSON-LD): SoftwareSourceCode and WebSite on the home page, and a BreadcrumbList on every page that shows a breadcrumb
-      (the pages of the documentation layout: /docs/, /project/ and /legal/).
+      (the pages of the documentation layout below /docs/, /project/ and /legal/; Docsy hides the breadcrumb of a trail of one item, so
+      these three pages themselves have no list).
   Call: partial "seo/head.html" .
 */ -}}
 {{ if ne .Kind "404" -}}
