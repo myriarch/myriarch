@@ -542,6 +542,24 @@ guidance after each item names what to do.
     gate (`--strict-collection`) instead of being skipped with a warning. It reads the files of the repository, so it does not
     see settings of the organization or the repository (allowed actions, environments, rulesets), secrets, or what a pinned
     action does at run time.
+- **Known vulnerabilities in CI: govulncheck as a gate and in code scanning.** The gate `vulncheck` (job `compliance` of `ci.yml`,
+  `ci/vulncheck.sh`) fails when the code calls a vulnerable symbol that `ci/vulncheck-allowlist.txt` does not accept (ID, review date,
+  reason). `.github/workflows/vulncheck.yml` (pushes to `main`, a daily run and manual runs, never a pull request) reports the same
+  analysis to code scanning as SARIF, in the categories `govulncheck/source-release`, `govulncheck/source-devpg` and
+  `govulncheck/binaries`, and blocks nothing. Controls: the one job that holds `security-events: write` (`upload`, the only line of the
+  workflow in `ci/workflow-permissions.txt`) runs no code of the repository: it checks out without credentials, downloads the reports
+  that the two scan jobs of the same run made and uploads them; the scan jobs hold `contents: read`; the workflow has no secret. The scan
+  of the released binaries (`ci/vulncheck-binaries.sh`) starts only after the keyless signature of `checksums.txt` was verified with the
+  identity of `release.yml` at the tag of the version (`ci/release/verify-blob.sh`, mode bound) and after the SHA-256 of every archive
+  matched that signed list; it reads out only the member that is named like the program, as a regular file within a size limit, never
+  runs a downloaded program, takes the tag only in the form of a release tag and fails closed on a download that fails, a signature that
+  does not verify, an archive that does not match, a missing or irregular member and a failing tool (`ci/tests/vulncheck-test.sh`
+  covers each). Reports leave out the findings that the allowlist accepts. Limits: govulncheck knows the Go vulnerability database, not
+  other ecosystems (the dependency review and Dependabot cover the advisories of npm, pip and the actions); the binary mode lists the
+  vulnerable symbols that a binary contains and cannot tell whether the program reaches them, so it reports more than the source
+  analysis; the results about binaries are anchored at `go.mod` because a binary has no file or line; the binaries are the archives of
+  the latest stable release unless a manual run names another; and a run that cannot reach GitHub or the vulnerability database fails
+  visibly and leaves the earlier alerts as they are.
 - **Rules for the release workflow (R13).** `ci/check-workflows.py` requires of
   `.github/workflows/release.yml`: a trigger for pushed `v*` tags only, no caches and no local actions, the literal environment
   `release`, a `guard` job that every other job needs, no Node.js, Go, pnpm, npm, goreleaser, make or similar build tool

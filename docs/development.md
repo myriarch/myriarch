@@ -258,7 +258,7 @@ make docs-check                                   # when you touched documentati
 | `docs` | `make docs-check`: generated CLI reference up to date, links, front matter |
 | `website` | `ci/website.sh check`: the production build of the website with `--panicOnWarning`, `hugo mod verify`, lychee over the built pages (offline, with fragments), markdownlint, the site front matter, the checks of `website/scripts` and their unit tests (see [Website](#website)). The first run needs network access for the Go proxy, the npm registry and the tool downloads |
 | `licenses` | the SPDX header check (`scripts/license-headers.py --check`), `ci/reuse-lint.sh` (`reuse lint`) and the drift check of `THIRD_PARTY_NOTICES` (`scripts/gen-third-party-notices.sh --check`) |
-| `vulncheck` | `ci/vulncheck.sh`: `govulncheck` over the release and the `devpg` build; a vulnerability that the code calls fails the gate unless `ci/vulncheck-allowlist.txt` accepts it (ID, review date, reason). Module-level findings are listed. It reads the vulnerability database over the network: offline use `SKIP=vulncheck` |
+| `vulncheck` | `ci/vulncheck.sh`: `govulncheck` over the release and the `devpg` build; a vulnerability that the code calls fails the gate unless `ci/vulncheck-allowlist.txt` accepts it (ID, review date, reason). Module-level findings are listed. It reads the vulnerability database over the network: offline use `SKIP=vulncheck`. `ci/vulncheck.sh --sarif DIR` writes the reports for code scanning instead and never fails on a finding ([Vulnerability reports in code scanning](#vulnerability-reports-in-code-scanning)) |
 | `secrets` | `ci/secrets-scan.sh`: `gitleaks` (configuration `.gitleaks.toml`, default rules plus allowlists limited to one file and one rule) over an export of `HEAD`, findings redacted. `SECRETS_SCAN_WORKTREE=1 ci/secrets-scan.sh` scans the work tree instead. Before publication scan the history once: `gitleaks git --redact -c .gitleaks.toml` |
 | `e2e` | `scripts/e2e.sh` |
 
@@ -490,6 +490,12 @@ both, so a rule does not depend on how a file is named:
   the same pin of `github/codeql-action` (rule R2). A new language, build tag or operating system goes into the matrix and into
   the build step, and the first run has to show that the extractor saw the new files; a new build tag in `ci/check-local.sh`
   goes into the build step as well.
+- **govulncheck reports to code scanning from a job that runs no code** (`.github/workflows/vulncheck.yml`). The jobs `source` and
+  `binaries` hold `contents: read`, run govulncheck and keep the SARIF reports as artifacts of the run; only the job `upload` holds
+  `security-events: write` (the one line of the workflow in `ci/workflow-permissions.txt`), and its steps are a checkout without
+  credentials, the download of those artifacts and `github/codeql-action/upload-sarif` at the pin of rule R2. The workflow does not
+  run for pull requests and has no secret. The scan of the released binaries starts only after the keyless verification of the
+  release files ([Vulnerability reports in code scanning](#vulnerability-reports-in-code-scanning)).
 - **A read-only token**: `permissions: contents: read` at the top of every workflow. A job-level write scope needs a line in
   `ci/workflow-permissions.txt` (`<workflow file> <job> <scope>`) and a review of the job.
 - **The dependency review has no privilege of its own.** The job `dependency-review` of `ci.yml` uses `actions/dependency-review-action`,
@@ -549,6 +555,48 @@ you update it. An advisory that does not apply goes to `allow-ghsas` with its GH
 the check that knows which vulnerable symbols the code calls. The configuration comes from the checkout of the pull request, so a
 change of the lists or of an exception is a change of policy and is reviewed as one. `pkg:npm/elkjs` (EPL-2.0, a dependency of
 Mermaid) has no exception on purpose: whether the website owes a notice for it is still to be decided (ADR-0038, decision 5).
+
+### Vulnerability reports in code scanning
+
+`.github/workflows/vulncheck.yml` reports the results of `govulncheck` to the code scanning alerts of the repository (Security tab,
+tool govulncheck) as SARIF, on every push to `main`, every day at 05:23 UTC (an advisory can appear without a change of the code) and
+by hand. It does not run for pull requests and it blocks nothing: the check that blocks is the gate `vulncheck` in the job `compliance`
+of `ci.yml`. Three categories hold the reports:
+
+| Category | Job | What it looks at |
+|---|---|---|
+| `govulncheck/source-release` | `source` | the code of `main`, built like a release (`ci/vulncheck.sh --sarif DIR`) |
+| `govulncheck/source-devpg` | `source` | the code of `main` with the build tag `devpg` (`ci/vulncheck.sh --sarif DIR`) |
+| `govulncheck/binaries` | `binaries` | the programs of the latest stable release (`ci/vulncheck-binaries.sh`) |
+
+The job `upload` is the only one with a write scope. It uploads each report with its category, so a vulnerability that a later run no
+longer finds is closed by that run. A report that is accepted in `ci/vulncheck-allowlist.txt` (the file of the gate, with ID, review
+date and reason) is left out of every report, so code scanning shows what the project has not decided about. A manual run can name
+another release (`release_tag`, for example `v0.2.0-rc.1`); an empty value means the latest stable release, which
+`https://github.com/<repository>/releases/latest` leads to. The first run on `main` has to show that GitHub accepted the three
+reports: the step `upload-sarif` waits for the processing and fails when code scanning refuses a file.
+
+**The scan of the released binaries** checks before it scans, and every step fails closed (`ci/vulncheck-binaries.sh`, codes in
+brackets): it downloads `checksums.txt` and its keyless bundle without credentials; `ci/release/verify-blob.sh` checks the bundle against
+the frozen identity of `release.yml` at the tag of the version, issued by GitHub Actions (`signature_invalid`); only then it downloads
+every archive of `myriarchd`, `myriarch-updater`, `myrctl` and `myriarch-sim` that the signed list names for the version and compares
+each with its SHA-256 (`checksum_mismatch`); only then it reads the one member that is named like the program out of each archive, as a
+regular file within a size limit, and nothing else (`archive_invalid`), and scans it with `govulncheck -mode binary`. The programs
+are not run. Run it yourself with the pinned tools (it needs network access and downloads the 16 archives of v0.1.0, 120 MB):
+
+```bash
+ci/install-tools.sh cosign govulncheck
+ci/vulncheck-binaries.sh --out .cache/vulncheck                   # the latest stable release; --tag v0.1.0 names another one
+ci/vulncheck.sh --sarif .cache/vulncheck                          # the source reports
+```
+
+**What the reports do not say.** The binary mode lists the vulnerable symbols that a binary contains and cannot tell whether the
+program reaches them, so it reports more than the source analysis: a vulnerability that the source analysis rules out but that a
+binary still links is reported until the allowlist accepts its ID, and the same entry covers the source reports. The reports of the
+binaries describe the release, not a branch: code scanning has no file and line for them, so each result is anchored at `go.mod` and
+names the affected binaries in its message. The release binaries are built with `-s -w` and scan without a problem: govulncheck reads
+the build information and the function table that the Go runtime keeps, not the symbol table that `-s` removes. A run that cannot
+reach GitHub or the vulnerability database fails in the Actions list and leaves the earlier alerts as they are.
 
 ### Add a deployment secret
 
