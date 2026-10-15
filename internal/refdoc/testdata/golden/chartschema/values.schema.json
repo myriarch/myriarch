@@ -83,7 +83,7 @@
                   "type": "object",
                   "description": "`secrets` are named secrets with their allowed hosts.",
                   "additionalProperties": {
-                    "type": ["object", "null"],
+                    "type": "object",
                     "additionalProperties": false,
                     "properties": {
                       "allowedHosts": {
@@ -135,14 +135,14 @@
               "type": "object",
               "description": "`labels` is a map of strings.",
               "additionalProperties": {
-                "type": ["string", "null"]
+                "type": "string"
               }
             },
             "routes": {
               "type": "object",
               "description": "`routes` maps names to lists of hosts.",
               "additionalProperties": {
-                "type": ["array", "null"],
+                "type": "array",
                 "items": {
                   "type": "string"
                 }

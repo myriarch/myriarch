@@ -701,7 +701,7 @@
               "type": "object",
               "description": "`secrets` is the registry of named secrets. An Executor object may use a registry name as secretEnv/tokenEnv/secretFile/tokenFile value; the secret is then only sent to the listed hosts.",
               "additionalProperties": {
-                "type": ["object", "null"],
+                "type": "object",
                 "additionalProperties": false,
                 "properties": {
                   "env": {
@@ -726,7 +726,7 @@
               "type": "object",
               "description": "`secretEnvHosts` binds environment variables that are referenced by their prefixed name (secretEnv/tokenEnv) to the only destinations they may be sent to (host, host:port or `*.example.com`). In production an unbound prefixed variable is refused.",
               "additionalProperties": {
-                "type": ["array", "null"],
+                "type": "array",
                 "items": {
                   "type": "string"
                 }
@@ -736,7 +736,7 @@
               "type": "object",
               "description": "`secretFileHosts` does for files below `executors.secretDir` (secretFile/tokenFile) what `executors.secretEnvHosts` does for environment variables: it binds them, keyed by the relative file name, to the only destinations they may be sent to.",
               "additionalProperties": {
-                "type": ["array", "null"],
+                "type": "array",
                 "items": {
                   "type": "string"
                 }

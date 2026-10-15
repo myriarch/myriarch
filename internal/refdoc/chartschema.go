@@ -413,10 +413,10 @@ func (g *chartSchemaGen) typeNode(t reflect.Type, path string) (*jsonObject, err
 		if err != nil {
 			return nil, err
 		}
-		// An entry of a map may be null: a values file switches off an entry of an earlier values file that way, and Helm keeps the
-		// null for a key that values.yaml does not define. The other keywords of the entry apply to its own type only.
-		kind, _ := vals.get("type")
-		vals.set("type", []any{kind, "null"})
+		// An entry of a map is not nullable. Helm keeps a null for a key that values.yaml does not define, as it does for a map
+		// entry, and the chart renders it into the configuration file, where the server refuses it when it starts. A null is no way
+		// to switch off an entry of an earlier values file here: the entry is left out of the values. (The maps of the chart itself,
+		// annotations and labels, are written by hand in the source, and they do take a null.)
 		n.set("type", "object")
 		n.set("additionalProperties", vals)
 	default:

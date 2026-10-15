@@ -155,8 +155,11 @@ printf 'image:\n  tagg: 0.2.0\n' > "${TEST_TMP}/typo.yaml"
 expect_fail "(60) a values file with an unknown key" "at '/image'" render -f "${TEST_TMP}/typo.yaml"
 expect_fail "(61) the validation can be switched off, the guards stay (an unknown key is then ignored)" 'image.digest: must have' render_guard --set image.tagg=0.2.0 --set image.digest=bogus
 
-# what the schema accepts
+# what the schema accepts, and the null that it does not
 expect_ok "(62) null switches off an entry of a map" render --set-json 'podAnnotations={"legacy":null}'
+# Helm keeps a null for a key that values.yaml does not define, the chart renders it into myriarchd.yaml, and the server refuses it at its start
+expect_schema "(62b) null is no value for an entry of a map of the configuration" /config/executors/secretEnvHosts/MYRIARCH_EXEC_A --set-json 'config.executors.secretEnvHosts={"MYRIARCH_EXEC_A":null}'
+expect_schema "(62c) null is no value for an executor secret" /config/executors/secrets/awx --set-json 'config.executors.secrets={"awx":null}'
 expect_ok "(63) null removes a value that the chart defines" render --set config.server.metricsListenAddr=null
 expect_ok "(64) a parent chart may pass a null registry" render --set-json 'global={"imageRegistry":null,"other":{"a":1}}'
 expect_ok "(65) quantities as numbers and strings" render --set resources.requests.cpu=1 --set resources.requests.memory=536870912 --set resources.limits.memory=1Gi

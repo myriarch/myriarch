@@ -419,13 +419,10 @@ func expectedConfigNode(t reflect.Type, path string, excluded map[string]bool, o
 // schemaConfigKeys lists the settings of the config block of the schema in the same form.
 func schemaConfigKeys(t *testing.T, node map[string]any, path string, out map[string]string) {
 	t.Helper()
-	ty := node["type"]
-	if list, ok := ty.([]any); ok { // an entry of a map: the type and null
-		require.Len(t, list, 2, path)
-		require.Equal(t, "null", list[1], path)
-		ty = list[0]
-	}
-	kind, _ := ty.(string)
+	// every setting has one type: an entry of a map is not nullable either (a null would be rendered into the configuration file,
+	// which the server refuses when it starts)
+	kind, isString := node["type"].(string)
+	require.True(t, isString, "%s: the type of a setting is a single type name, got %v", path, node["type"])
 	if path != "" {
 		if _, isDuration := node["pattern"]; isDuration && kind == "string" {
 			out[path] = "duration"
@@ -581,7 +578,6 @@ func TestChartSchemaAcceptsValidValues(t *testing.T) {
 		"service monitor":         `serviceMonitor: {enabled: true, interval: 1m30s, labels: {release: prometheus}}`,
 		"openshift route":         `openshift: {enabled: true, route: {host: fleet.example.com, timeout: 1h, tls: {insecureEdgeTerminationPolicy: Allow}}}`,
 		"config sections":         `config: {server: {shutdownTimeout: 1m, trustedProxies: [10.0.0.0/8]}, opamp: {maxMessageSize: 1048576, connectRateLimit: 2.5}, executors: {secrets: {awx: {env: X, allowedHosts: [awx.example.com]}}, secretEnvHosts: {A: [h.example.com]}}, notifications: {channels: [{name: ops, type: slack, urlFile: /f, events: ["rollout.*"]}]}}`,
-		"config map entry null":   `config: {executors: {secretEnvHosts: {MYRIARCH_EXEC_OLD: null}}}`,
 	}
 	for name, text := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -644,6 +640,11 @@ func TestChartSchemaRefusesInvalidValues(t *testing.T) {
 		{"port zero", `service: {metricsPort: 0}`, `/service/metricsPort: 0 is below 1`},
 		{"null without a default", `config: {opamp: {maxMessageSize: null}}`, `/config/opamp/maxMessageSize: is null, want integer`},
 		{"null in a list entry", `enrollmentTokens: [{name: a, existingSecret: null}]`, `/enrollmentTokens/0/existingSecret: is null, want string`},
+		// Helm keeps a null for a key that values.yaml does not define, the chart renders it into myriarchd.yaml, and the server
+		// refuses it when it starts: no entry of a map of the configuration may be null (the maps of the chart itself may)
+		{"null in a list map of the configuration", `config: {executors: {secretEnvHosts: {MYRIARCH_EXEC_OLD: null}}}`, `/config/executors/secretEnvHosts/MYRIARCH_EXEC_OLD: is null, want array`},
+		{"null in the file hosts of the configuration", `config: {executors: {secretFileHosts: {old.token: null}}}`, `/config/executors/secretFileHosts/old.token: is null, want array`},
+		{"null for an executor secret", `config: {executors: {secrets: {awx: null}}}`, `/config/executors/secrets/awx: is null, want object`},
 
 		// durations
 		{"duration as an integer", `config: {server: {shutdownTimeout: 30}}`, `/config/server/shutdownTimeout: is integer, want string`},

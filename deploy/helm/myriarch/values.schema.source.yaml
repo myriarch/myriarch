@@ -17,8 +17,10 @@
 #    chart reads them from Secrets, and a reference to a Secret never has the form of an enrollment token.
 #  - Defaults are in values.yaml only.
 #  - null is not a value. Helm removes a null for a key that values.yaml defines before it validates, and the schema refuses the
-#    rest. The exception are the entries of the string maps (annotations, labels and selectors), which the examples switch off with
-#    null, and global.imageRegistry, which a parent chart may pass as null.
+#    rest. The exceptions are the entries of the string maps of the chart itself (annotations, labels and selectors), which the
+#    examples switch off with null, and global.imageRegistry, which a parent chart may pass as null. The entries of the maps in the
+#    block config are no exception: Helm keeps such a null, the chart renders it into myriarchd.yaml, and the server refuses it
+#    when it starts.
 $schema: https://json-schema.org/draft/2020-12/schema
 title: Values of the myriarch chart
 description: >-
