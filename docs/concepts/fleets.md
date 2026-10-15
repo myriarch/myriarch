@@ -96,7 +96,8 @@ configures a Bridge only when you say so.
 - **Keeping a Bridge out of a fleet.** Select on what a collector reports and a Bridge does not: `os.type`, `site.type`
   and the other `site.*` attributes. Or give the Bridge its own enrollment token and select on its `labels.*`.
 
-The field is listed in the [schema reference](../reference/gitops-schema.md#fleet).
+The field is listed in the [schema reference](../reference/gitops-schema.md#fleet). The decisions behind these rules are in
+[ADR-0037](../adr/0037-opamp-bridge-agents-until-the-operator-integration.md).
 
 ## When does the offered configuration change?
 

@@ -1,6 +1,6 @@
 # 0026. Collector version updates on Kubernetes
 
-- Status: Accepted
+- Status: Accepted, refined by [ADR-0037](0037-opamp-bridge-agents-until-the-operator-integration.md)
 - Date: 2026-10-08
 - Related: [ADR-0015](0015-project-name-and-naming-scheme.md), [ADR-0024](0024-container-registry-and-image-set.md), [ADR-0003](0003-gitops-as-source-of-truth.md), [ADR-0006](0006-version-updates-via-exchangeable-executors.md), [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md), [ADR-0013](0013-target-version-from-the-ui-within-the-git-frame.md), [ADR-0014](0014-binary-updates-in-the-pod-via-container-mode.md)
 
