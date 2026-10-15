@@ -13,13 +13,23 @@ The script is part of the zip archive `myriarch-updater_<version>_windows_<arch>
 renders. It reads them from the directory above its own (`deploy\`), so run it from the unpacked archive; a script that was
 copied out of the archive stops with `template_missing`.
 
-1. Download the archive, `checksums.txt` and `checksums.txt.sigstore.json` of the release and verify them, as
-   [Verify releases](../../docs/security/verify-releases.md) describes. Unpack the archive into a folder that only
-   administrators can write, for example `C:\Program Files\myriarch-setup\package`. The folders `C:\Temp`, a user profile
-   and a download folder are not such folders: an unprivileged process could replace a file between the check and the run.
-2. Write the enrollment token into a file in a folder of the same kind and delete the file after the run. Open an elevated Windows
-   PowerShell in the unpacked archive, remove the Mark of the Web from the script **only after** the checks of step 1 passed, and
-   start the script in a new PowerShell process with the execution policy for that process only:
+1. Create a folder that only SYSTEM and the administrators can read and write, and download the archive,
+   `checksums.txt` and `checksums.txt.sigstore.json` of the release into it. Verify them as
+   [Verify releases](../../docs/security/verify-releases.md) describes, then unpack the archive into its subfolder `package`.
+   The download, the checks (which end at the first failure) and the unpack are in step 2 of
+   [Connect a host](../../docs/tasks/connect-a-host.md#2-download-and-verify-the-installer). The folder gets a DACL of its own.
+   Without it, every local user can read what you put into a new folder below `C:\Program Files`, the token included, and
+   unprivileged accounts can write `C:\Temp`, a user profile and a download folder and replace a checked file before the run.
+
+   ```powershell
+   New-Item -ItemType Directory -Path 'C:\Program Files\myriarch-setup' -Force | Out-Null
+   icacls.exe 'C:\Program Files\myriarch-setup' /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F'
+   if ($LASTEXITCODE -ne 0) { throw 'icacls could not restrict the setup folder' }
+   ```
+
+2. Write the enrollment token into a file in that folder (it inherits the DACL) and delete the file after the run. Open an
+   elevated Windows PowerShell in the unpacked archive, remove the Mark of the Web from the script **only after** the checks of
+   step 1 passed, and start the script in a new PowerShell process with the execution policy for that process only:
 
    ```powershell
    Unblock-File .\deploy\scripts\install-windows.ps1
@@ -30,7 +40,8 @@ copied out of the archive stops with `template_missing`.
    ```
 
 The inputs that the installer needs are `-OpampEndpoint`, `-TokenFile` (or `-Token`), `-SiteType`, `-SiteId`, `-CollectorVersion`
-(without it the installer stops with `option_missing`) and a Sigstore verifier: `-Verifier`, or `-WithUpdater` with
+(without it the installer stops with `option_missing`) and a Sigstore verifier: `-Verifier` (`cosign.exe` 3.0.4 or newer, or the
+`myriarch-updater.exe` of the verified archive, in a folder that only administrators can write), or `-WithUpdater` with
 `-UpdaterSha256` (without one: `sigstore_verifier_missing`). [Connect a host](../../docs/tasks/connect-a-host.md) lists every
 input and the commands for the download and the verification.
 
@@ -148,9 +159,10 @@ already installed `myriarch-updater.exe`, or `cosign.exe` from `PATH` if its dir
 administrators. A `cosign.exe` must be version 3.0.4 or newer; an older one stops the installation with
 `sigstore_verifier_outdated`. The updater that is being installed is never used for this, because its hash comes from the
 file that the verifier has to check. A re-run of the installer therefore verifies a new release with the updater that is
-already installed. A host with neither a verifier nor an installed updater verifies `checksums.txt` on an admin host (see
-[Verify releases](../../docs/security/verify-releases.md)) and passes `-UpdaterSha256`; the updater that was checked by
-that hash then also verifies the collector and supervisor bundles.
+already installed. A host with neither a verifier nor an installed updater passes the `myriarch-updater.exe` of the verified
+archive as `-Verifier` (the file in the root of the unpacked zip, not the updater that is being installed), or verifies
+`checksums.txt` on an admin host (see [Verify releases](../../docs/security/verify-releases.md)) and passes `-UpdaterSha256`;
+the updater that was checked by that hash then also verifies the collector and supervisor bundles.
 
 Example (mirror `myriarch-releases` with anonymous read access from the site network):
 
@@ -169,7 +181,8 @@ replacement. For a mirror that re-signs with its own key, see
 [`../../contrib/enterprise-mirror/README.md`](../../contrib/enterprise-mirror/README.md).
 
 Typical errors are `sigstore_verification_failed` (modified `checksums.txt`, another release tag, another workflow or
-repository, or a bundle that does not belong to the file), `sigstore_verifier_missing` and `sigstore_verifier_outdated`,
+repository, a bundle that does not belong to the file, or a host that cannot reach the Sigstore TUF repository
+`tuf-repo-cdn.sigstore.dev` and got no `-TrustedRoot`), `sigstore_verifier_missing` and `sigstore_verifier_outdated`,
 `checksum_entry_count` with 0 lines (`-UpdaterUrl` does not match the release) and `checksum_conflict` (`-UpdaterSha256`
 differs from the verified checksum). The internal CA of a mirror must be in the Windows certificate store (`-CaFile` only
 applies to the connection to myriarchd).

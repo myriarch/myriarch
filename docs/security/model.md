@@ -377,11 +377,24 @@ guidance after each item names what to do.
   checks and `Unblock-File` ran on the script. It never uses `Bypass` and never changes the policy of the machine or of the
   user. A policy that Group Policy sets (`MachinePolicy`, `UserPolicy`) takes precedence over the parameter, and the installer
   does not work around it: `Restricted` and `AllSigned` stop the unsigned installer, and App Control for Business runs it in
-  Constrained Language Mode, where it fails. Download, check and unpack in a folder that only administrators can write
-  ([Connect a host](../tasks/connect-a-host.md#2-download-and-verify-the-installer)); in a folder that the account can write,
-  an unprivileged process of the same account can replace a checked file before the elevated installer runs it.
+  Constrained Language Mode, where it fails. Download, check and unpack in a folder that only administrators can read and
+  write, and keep the token file there ([Connect a host](../tasks/connect-a-host.md#2-download-and-verify-the-installer) creates
+  it with a DACL of its own for SYSTEM and the administrators). "Only administrators can write" protects the integrity of the
+  checked files but not the token: a new folder below `C:\Program Files` can be read by every local user until its DACL is
+  replaced. In a folder that the account can write, an unprivileged process of the same account can replace a checked file
+  before the elevated installer runs it.
+- **Directory and verifier of the Linux installer.** The script and its templates run as root. Download, check and unpack the
+  archive in a directory that root owns and no other account can write, such as one below `/root`, in a root shell
+  ([Connect a host](../tasks/connect-a-host.md#2-download-and-verify-the-installer)), and keep the token file there (mode
+  `0600`). Pass a verifier that only root can replace: `--verifier /usr/local/bin/cosign`, or the `myriarch-updater` of the
+  verified archive in that directory. In a directory or with a `cosign` that the invoking account can write, a process of that
+  account can replace a checked file before root runs it. The Linux installer does not check the location of the verifier, so
+  this control rests on the steps of the guide and not on the installer.
 - **Trusted root on hosts.** A host with a stale `trusted_root.json` cannot verify new bundles until the file is
-  refreshed ([Host-side checks of the updater](#host-side-checks-of-the-updater)).
+  refreshed ([Host-side checks of the updater](#host-side-checks-of-the-updater)). Without a local file the verifier of the
+  installers fetches the trusted root through TUF, so the host needs https access to the public Sigstore repository during the
+  installation; without the access and without `--trusted-root` (`-TrustedRoot`) the installer stops with
+  `sigstore_verification_failed`.
 
 ### Server, Git and outbound connections
 

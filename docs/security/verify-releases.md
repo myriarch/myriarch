@@ -94,10 +94,11 @@ trusted root now and then: Sigstore rotates its keys.
 
 The release archives of `myriarch-updater` (`.tar.gz` for Linux, `.zip` for Windows) also contain the installation scripts
 `install-linux.sh` and `install-windows.ps1`. A script that runs as root or Administrator is only as trustworthy as its
-download, so check the archive **before** you extract and run anything from it:
+download, so check the archive **before** you extract and run anything from it. On Linux do it in a directory that root owns and
+no other account can write, such as one below `/root`, so that nobody can replace a file between the check and the run:
 
 ```bash
-# on the host, or on an admin host and copy the archive over
+# in a root shell on the host, or on an admin host (then copy the archive over and repeat the sha256sum check on the host)
 cosign verify-blob --bundle checksums.txt.sigstore.json \
   --certificate-identity "https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/v${VERSION}" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
