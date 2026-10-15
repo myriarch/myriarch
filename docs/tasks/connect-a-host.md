@@ -40,10 +40,20 @@ result](#6-check-the-result).
 **Which collector version?** The installer does not ask the server, so you name the version. Install the **target version
 of the fleet** that the host should join: the page *Fleets* shows it (column *Target version*). It comes from
 `spec.collector.version` in the fleet file of your GitOps repository, unless an operator chose another version in the UI
-within the frame that Git sets ([Fleets](../concepts/fleets.md#the-effective-target)). If you install another version, the host
-runs it until a version rollout of its fleet changes it: the planner counts a member whose version differs from the target as
-out of date ([Rollouts](../concepts/rollouts.md#when-do-rollouts-arise)). The installer downloads `otelcol-contrib` and the
-supervisor of that version from the upstream releases (a 404 means that no such release exists).
+within the frame that Git sets ([Fleets](../concepts/fleets.md#the-effective-target)). Two cases need another answer:
+
+- The column shows "–" for a fleet without a target version, and "–" with the badge *on hold* for a fleet on hold. No version
+  rollout will change the version of its hosts, so install the version that the other hosts of the fleet run (page *Agents*,
+  filter *Fleet*, column *Version*), or, for the first host, the version that you want it to keep.
+- While a version rollout of the fleet is *Pending*, *Running* or *Waiting for approval*, the column already shows the new
+  version, and a host that you install with it skips the waves and approvals of the rollout. Install the version that the fleet
+  ran before the rollout instead (the page *Rollouts* shows it as `<from> → <to>`): the rollout then adds the host to its last
+  wave ([Rollouts](../concepts/rollouts.md#when-do-rollouts-arise)).
+
+If you install a version other than the target, the host runs it until a version rollout of its fleet changes it: the planner
+counts a member whose version differs from the target as out of date
+([Rollouts](../concepts/rollouts.md#when-do-rollouts-arise)). The installer downloads `otelcol-contrib` and the supervisor of
+that version from the upstream releases (a 404 means that no such release exists).
 
 The site options become attributes of the host (`site.type`, `site.id`, `site.name`, `site.country`, `site.region`,
 `site.timezone`, and `deployment.environment.name` from `--environment`, default `prod`). The selectors of your fleets match
