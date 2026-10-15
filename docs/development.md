@@ -571,8 +571,8 @@ of `ci.yml`. Three categories hold the reports:
 | `govulncheck/binaries` | `binaries` | the programs of the latest stable release (`ci/vulncheck-binaries.sh`) |
 
 The job `upload` is the only one with a write scope. It uploads each report with its category, so a vulnerability that a later run no
-longer finds is closed by that run. A report that is accepted in `ci/vulncheck-allowlist.txt` (the file of the gate, with ID, review
-date and reason) is left out of every report, so code scanning shows what the project has not decided about. A manual run can name
+longer finds is closed by that run. A finding that `ci/vulncheck-allowlist.txt` accepts (the file of the gate, with ID, review date
+and reason) is left out of every report, so code scanning shows what the project has not decided about. A manual run can name
 another release (`release_tag`, for example `v0.2.0-rc.1`); an empty value means the latest stable release, which
 `https://github.com/<repository>/releases/latest` leads to. The first run on `main` has to show that GitHub accepted the three
 reports: the step `upload-sarif` waits for the processing and fails when code scanning refuses a file.

@@ -13,9 +13,9 @@ dependencies. The check behind both is `ci/check-release-licenses.sh`: it runs `
 a linked Go package carries a license outside an allowlist of six (Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MIT, Zlib), unless
 `ci/license-overrides.txt` records an exception that someone checked by reading the license file.
 
-That check is binding, but it sees only Go packages that a release build links, and it runs on the commit as a whole. A pull request that
-adds an npm package of the web UI, a Python tool or a Go tool module under a license that the CNCF would not admit passes it, and the
-problem is found by a reader of the lockfile diff or at the release. The CNCF publishes the licenses that a project may use for
+That check is binding and runs for every pull request in the gate `go`, but it sees only the Go packages that a release build links. A
+pull request that adds an npm package of the web UI, a Python tool or a Go tool module under a license that the CNCF would not admit
+passes it, and the problem is found by a reader of the lockfile diff or at the release. The CNCF publishes the licenses that a project may use for
 third-party components without a review by its Governing Board (the CNCF Allowlist License Policy, adopted on 2018-05-01); a
 dependency outside that list is a problem for a project on the path to a foundation, and it is cheaper to notice it in the pull request.
 
@@ -28,10 +28,10 @@ license check, and ignores the version in such a package URL.
 The numbers that decide how long the exception list is were read from the dependency graph of the repository on 2026-10-15: 2,253
 entries (1,223 Go modules of the product and of the 15 CI tool modules, 1,003 npm packages of the web UI, the website and the brand
 generator, 15 Python packages, 11 GitHub Actions and the repository itself). 81 packages carry a license expression that the CNCF
-allowlist and Apache-2.0 do not cover, and 18 have no license information. Of the 81, four are Go modules that the product links (or its
-development build), 23 are Go modules of the CI tools, 4 are Python packages of tools, and 50 are npm packages: the trees of the
-development tools of the web UI and of the website, the brand generator, and packages of the website and the web UI with combined
-permissive licenses.
+allowlist and Apache-2.0 do not cover, and 18 have no license information. Of the 81, four are Go modules of the product (three linked
+into the release builds, one into the development build), 23 are Go modules of the CI tools, 4 are Python packages of tools, and 50 are
+npm packages: the trees of the development tools of the web UI and of the website, the brand generator, and packages of the website and
+the web UI with combined permissive licenses.
 
 ## Decision
 
@@ -63,7 +63,8 @@ permissive licenses.
    explain, the Go and Python modules of the CI tools (MPL-2.0 libraries of HashiCorp and Let's Encrypt, modules with several licenses in
    their test data or fonts, the REUSE checker), the development tool trees of the web UI and the website, the brand generator and the
    packages with combined permissive licenses. The action ignores the version of a package URL, so an exception also covers later
-   versions of the package; whoever updates a package of the list looks at its license. Packages of the CI tools never reach a release.
+   versions of the package; whoever updates a package of the list looks at its license. The Go and Python modules of the CI tools are no
+   part of any release artifact.
    A change of the lists, or of an exception, is a change of policy and is reviewed as one; the configuration is read from the checkout
    of the pull request, like every other file of the pipeline.
 5. **`elkjs` is not excepted.** The npm package `elkjs` (EPL-2.0, a weak copyleft license) is a dependency of Mermaid, and the Mermaid
@@ -91,21 +92,23 @@ permissive licenses.
 - The list of exceptions is long at the start (80 packages), and the dependency graph does not say which npm packages it counts as
   development tools; entries for development-only trees may turn out to be unnecessary, and a Dependabot pull request that touches a
   package without an entry fails until one is added. The first runs show which.
-- The action needs the dependency graph of the repository, and a merge group has to be known to it; the job fails with a message
-  when GitHub cannot return the data.
+- The action reads the dependency graph of GitHub. When GitHub cannot return the data for a revision range (a merge group that is not
+  processed yet, for example), the job fails with a message and runs again.
 - `elkjs` stays an open item (decision 5).
 
 ## Alternatives considered
 
 - **Only the release license check**: binding, but Go-only and late. The feedback for an npm or Python dependency arrives after the merge.
 - **A deny list (`deny-licenses`)**: a license that nobody thought of passes. The option is also deprecated in the action.
-- **The binding release list as the allowlist of the review**: it would reject the tools and the documentation data (BlueOak,
-  PostgreSQL-style licenses, CC0 data) with every update, and nobody would read the failures.
-- **Third-party license scanners as actions** (FOSSA, `license_finder`, Trivy): not allowed by rule R1 of `ci/check-workflows.py`, and each
+- **The release list as the allowlist of the review**: it would also trip on licenses that the CNCF admits and that the tool trees
+  contain (Python-2.0 of `argparse`, 0BSD, MIT-0). That makes the tripwire noisier without protecting a release, because the release
+  check already holds that line.
+- **Third-party license scanners as actions** (FOSSA or Trivy, for example): not allowed by rule R1 of `ci/check-workflows.py`, and each
   would add a supply-chain dependency with the token in reach.
-- **The configuration from the base branch** (`owner/repo/path@ref`): the pull request could not change the policy and the review
-  together, but the action then asks the API for the file, which needs a token for the call and counts against a rate limit, and every
-  other policy file of the pipeline (workflows, allowlists, scripts) is read from the checkout of the pull request as well.
+- **The configuration from the base branch** (`owner/repo/path@ref`): a pull request could then not loosen the policy that checks it.
+  The action would fetch the file through the API, which counts against a rate limit, and the other policy files of the pipeline
+  (workflows, allowlists, scripts) come from the checkout of the pull request as well, so reading this one from the base would protect
+  little.
 - **`fail-on-scopes: runtime, development`**: reports every license and advisory in the lockfiles of the development tools, which is noise
   that a project of this size cannot clear.
 - **Generating the YAML configuration from the source file**: the action needs the file in the checkout, so it would have to be committed and
