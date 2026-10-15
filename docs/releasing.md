@@ -203,9 +203,11 @@ the pull request of [After every publication](#after-every-publication), or in a
 been observed yet.
 
 1. **Run the kind smoke test once before you tag.** `smoke-kind` runs only after publication, where a failure can only be fixed
-   forward, and no CI job runs kind. On a machine with a container runtime run `make kind-probe` (the same cluster configuration
-   and chart), and fix what it finds before the tag. `ci/release/smoke.sh kind` is not a substitute: it always installs the published
-   image of the tag, which does not exist before the tag.
+   forward, and no job of `ci.yml` or of the release workflow runs the probe before the tag (`e2e-kind.yml` runs `make kind-probe`
+   every night, outside `ci-ok`, and it is no gate of the release). Run `make kind-probe` on a machine with a container runtime (the
+   same cluster configuration and chart) or read the last green run of `e2e-kind.yml` on the commit, and fix what it finds before the
+   tag. `ci/release/smoke.sh kind` is not a substitute: it always installs the published image of the tag, which does not exist before
+   the tag.
 2. **Observe re-run approvals.** After the first candidate went through gate 2, re-run one failed or completed job on a throw-away
    candidate if you can, and write down whether "Re-run failed jobs" asks for gate 1 or gate 2 again. The runbook and the security
    model state the safe reading (no new approval for the privileged jobs before `finalize`) until you have observed it.
