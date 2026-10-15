@@ -35,7 +35,7 @@ The Go packages under `internal/` fall into these groups:
 | Domain model and interfaces | `domain`, `store`, `eventbus`, `leader`, `control`, `executor`, `notify`, `authz`, `api`, `audit`, `config` |
 | Server surfaces | `opamp`, `authn`, `httpserver`, `coreapi`, `fleetapi`, `live`, `metrics`, `webui` (the embedded UI, build tag `embedui`) |
 | Persistence and high availability | `store/postgres`, `eventbus/pgbus`, `leader/pglock`, `housekeeping` (retention jobs on the leader) |
-| GitOps, rendering and rollouts | `gitops`, `blueprint`, `assignment`, `rollout`, `executor/*`, `release`, `artifact`, `myrctl` |
+| GitOps, rendering and rollouts | `gitops`, `blueprint`, `assignment`, `rollout`, `executor/*`, `release`, `artifact`, `install` (the plan for a host installed from the server), `myrctl` |
 | Host agent and simulator | `updater`, `sim` |
 | Cross-cutting helpers | `brand` (all product identifiers), `configload`, `netguard`, `secretfile`, `version`, `lru`, `actorname` |
 | Test support | `testutil` (embedded PostgreSQL helper), `testdata` |
