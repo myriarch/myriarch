@@ -123,7 +123,7 @@ installer_failing() { # tool... - the scripted failures of ${failures}; no pause
       "${repo}/ci/install-tools.sh" "$@" )
 }
 fresh_tools() { rm -rf "${tools:?}"; mkdir -p "${tools}"; : > "${calls}"; }
-TIMEOUT_ERR='go: example.test/dependency@v1.0.0: Get "https://proxy.golang.org/example.test/dependency/@v/v1.0.0.mod": dial tcp 142.250.1.1:443: i/o timeout'
+TIMEOUT_ERR='go: example.test/dependency@v1.0.0: Get "https://proxy.golang.org/example.test/dependency/@v/v1.0.0.mod": dial tcp 203.0.113.10:443: i/o timeout'
 
 fresh_tools; printf '%s\nok\n' "${TIMEOUT_ERR}" > "${failures}"
 expect_ok "a go build that fails once with a timeout is tried again" installer_failing helm
@@ -134,7 +134,7 @@ expect_stamps helm ".stamp-helm-${HELM_VERSION}-$(digest helm)"
 
 fresh_tools
 printf '%s\n%s\n%s\nok\n' "${TIMEOUT_ERR}" 'go: reading https://proxy.golang.org/example.test/dependency/@v/v1.0.0.info: 503 Service Unavailable' \
-  'read tcp 10.0.0.2:5555->142.250.1.1:443: read: connection reset by peer' > "${failures}"
+  'read tcp 192.0.2.2:5555->203.0.113.10:443: read: connection reset by peer' > "${failures}"
 expect_ok "three network errors in a row and then a success is the limit" installer_failing helm
 expect_calls 4 "... four go builds"
 
