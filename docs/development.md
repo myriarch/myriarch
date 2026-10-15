@@ -104,10 +104,13 @@ workflow has to run it, `ci/check-release-licenses.sh` and `scripts/gen-third-pa
 
 `ci/check-release-licenses.sh` runs `go-licenses` (pinned in `ci/versions.env`, installed with
 `ci/install-tools.sh go-licenses`) over the release builds of all four commands for linux, windows and darwin, without the
-`devpg` tag. It fails when a linked package has a license outside the allowlist (Apache-2.0, BSD-2-Clause, BSD-3-Clause,
-ISC, MIT, Zlib). `make check-local` runs it as part of the `go` gate. Documented exceptions live in
-`ci/license-overrides.txt`, which the notices generator reads too (see
-[Licenses, headers and third-party notices](#licenses-headers-and-third-party-notices)). The entries are:
+`devpg` tag. It fails when a linked package has a license outside the allowlist: the entries of the list `release` in
+`ci/license-allowlist.txt` (Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MIT, Zlib). The same file lists the rest of the CNCF
+allowlist under `review`, which only the [dependency review](#dependency-review) of a pull request allows; widening the list `release`
+is a decision record ([ADR-0038](adr/0038-dependency-license-policy.md)). `make check-local` runs the check as part of the `go` gate.
+Documented exceptions live in `ci/license-overrides.txt`, which the notices generator reads too (see
+[Licenses, headers and third-party notices](#licenses-headers-and-third-party-notices)); the license that an entry declares must be on
+the list `release`. The entries are:
 
 - `github.com/in-toto/attestation`, `github.com/in-toto/in-toto-golang` and
   `github.com/cyberphone/json-canonicalization`: `go-licenses` cannot classify their `LICENSE` files; all three contain the
@@ -380,6 +383,7 @@ is a collapsible log group; a failed job uploads `.cache/check-local/` (the gate
 | `docs` | `language`, `docs` | ubuntu-24.04 |
 | `website` | `website` (build and checks, never a deployment) | ubuntu-24.04 |
 | `compliance` | `licenses`, `vulncheck`, `secrets`; on pull requests also the commits of the pull request (`SECRETS_SCAN_RANGE=<base>..<head> ci/secrets-scan.sh`), because a secret that one commit adds and a later one removes stays in the history | ubuntu-24.04 |
+| `dependency-review` | on pull requests and merge groups, `actions/dependency-review-action`: the licenses and known vulnerabilities of the dependencies that the change adds or updates ([Dependency review](#dependency-review)); on every other event a step that says there is nothing to compare, and the job succeeds | ubuntu-24.04 |
 | `scripts` | `make ci-test` (the script tests under `ci/` and `contrib/`; not a `check-local` gate) | ubuntu-24.04 |
 | `e2e` | `e2e` gate: `scripts/e2e.sh` with the real supervisor and the UI smoke test (`e2e.yml`, mode `smoke`) | ubuntu-24.04 |
 | `ci-ok` | succeeds only when every job above succeeded | ubuntu-24.04 |
@@ -488,6 +492,12 @@ both, so a rule does not depend on how a file is named:
   goes into the build step as well.
 - **A read-only token**: `permissions: contents: read` at the top of every workflow. A job-level write scope needs a line in
   `ci/workflow-permissions.txt` (`<workflow file> <job> <scope>`) and a review of the job.
+- **The dependency review has no privilege of its own.** The job `dependency-review` of `ci.yml` uses `actions/dependency-review-action`,
+  a GitHub-owned action pinned like every other, with the read-only token of the workflow: no `permissions` key, no secret, no
+  comment in the pull request (`comment-summary-in-pr: never`), and no request to a third party (`show-openssf-scorecard: false`; the
+  action would send the repositories and names of the added packages to api.securityscorecards.dev and api.deps.dev). It succeeds
+  on every event other than `pull_request` and `merge_group` through a step that says so, because a skipped job fails `ci-ok`.
+  `ci/tests/license-allowlist-test.sh` pins these inputs and checks that `ci-ok` waits for every job of `ci.yml`.
 - **No `pull_request_target` and no `workflow_run`**, `persist-credentials: false` on every checkout, a timeout on
   every job, and no `github.event.*`, `github.head_ref` or `inputs.*` expression inside a `run:` block (pass it through `env:`).
 - **Secrets only for listed deployment jobs.** A `${{ secrets.NAME }}` expression passes the check only when all three hold:
@@ -506,6 +516,39 @@ both, so a rule does not depend on how a file is named:
 - **Artifacts** of a failed run are an allow-list of log files. Artifacts of a public repository can be downloaded by any signed-in
   user, so they never contain tokens, cookies or database files.
 - First-time contributors' pull requests wait for a maintainer to approve the workflow run.
+
+### Dependency review
+
+The job `dependency-review` checks, in every pull request and merge group, the dependencies that the change adds or updates
+([ADR-0038](adr/0038-dependency-license-policy.md)). The dependency graph of GitHub compares the manifests and lockfiles of the pull
+request with those of its base (the Go modules of the product and of `ci/tools`, the lockfiles of `web/`, `website/` and the brand
+generator, the Python requirements and the workflows), and `actions/dependency-review-action` fails the job when a dependency in the
+runtime scope
+
+- carries a license that is not in the `allow-licenses` of `.github/dependency-review-config.yml`, or
+- has a known advisory of high or critical severity in the GitHub Advisory Database.
+
+The thresholds (`fail-on-severity: high`, `fail-on-scopes: runtime`) are inputs of the job in `ci.yml`; the configuration holds what
+is allowed. A dependency without license information is only listed in the job summary, and a license expression that is not valid
+SPDX fails the job. The log and the job summary name the manifest, the package, the version and the license or the advisory. The check
+needs the dependency graph of the repository and runs only in CI; `ci/tests/license-allowlist-test.sh` runs everywhere.
+
+**The lists.** `ci/license-allowlist.txt` is the source of both: the entries of the list `release` are the allowlist of the release
+builds (`ci/check-release-licenses.sh`, [License check of the release builds](#license-check-of-the-release-builds)), and all entries
+together, the CNCF allowlist and Apache-2.0, are the `allow-licenses` of the review. The review is a tripwire, and the release check
+stays binding: a license that only the list `review` allows passes the pull request and fails the release check as soon as a release
+build links it. The test `ci/tests/license-allowlist-test.sh` fails when the configuration and the file differ, so change both. A
+change of the list `release` is a decision record.
+
+**When the review fails.** Do not add the dependency, or take the license to the maintainer, when the package really carries a license
+outside the list. When the dependency graph reports a license wrongly or as a combination (a documentation license next to the code
+license, test data, a font), add the package URL without a version to `allow-dependencies-licenses`, in a group under a comment that
+gives the reason: the test refuses an entry with a version, a repeated entry and a group without a reason. The action ignores the
+version of a package URL, so an exception also covers the later versions of its package; look at the license of such a package when
+you update it. An advisory that does not apply goes to `allow-ghsas` with its GHSA ID and a reason; `govulncheck` (gate `vulncheck`) is
+the check that knows which vulnerable symbols the code calls. The configuration comes from the checkout of the pull request, so a
+change of the lists or of an exception is a change of policy and is reviewed as one. `pkg:npm/elkjs` (EPL-2.0, a dependency of
+Mermaid) has no exception on purpose: whether the website owes a notice for it is still to be decided (ADR-0038, decision 5).
 
 ### Add a deployment secret
 
@@ -589,6 +632,11 @@ of them need a follow-up commit on the same branch:
 | pip: `/assets/brand/source` | `brand-python` | Compare the output of the brand generator (below) |
 | npm: `/assets/brand/source` | `brand-node` | Compare the output of the brand generator (below) |
 | Go: `/ci/tools/*`, the CI tools | none | Security updates only (below) |
+
+**Dependency review.** A Dependabot pull request goes through the [dependency review](#dependency-review) like any other change. It
+fails when it adds or updates a package with a license outside `ci/license-allowlist.txt`, which happens mostly in the tool trees
+(`ci/tools`, `web/` and `website/` development dependencies, the brand generator). Add an exception with its reason to
+`.github/dependency-review-config.yml` as a follow-up commit, or decide against the update.
 
 **Sign-off.** DCO is a required check next to `ci-ok`. The DCO app (DCO-2) passes the commits that a bot authored without a
 sign-off, so a Dependabot pull request is green as Dependabot made it. Leave its commits alone: `git rebase --signoff` and a force

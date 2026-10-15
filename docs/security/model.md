@@ -483,6 +483,24 @@ guidance after each item names what to do.
   and `security-events: write`; a compromised release could request tokens for the identity of that workflow or change
   code-scanning alerts. That identity (`scorecard.yml` on `refs/heads/main`) is not the release identity and is never
   accepted where the release identity is required. The pin is changed only by a reviewed update.
+- **Dependency review of pull requests.** The job `dependency-review` of `.github/workflows/ci.yml`, a member of `ci-ok`
+  ([ADR-0038](../adr/0038-dependency-license-policy.md)), compares the dependency graph of a pull request or merge group with its
+  base and fails when a dependency that the change adds or updates, in the runtime scope, carries a license outside the CNCF
+  allowlist and Apache-2.0 (`ci/license-allowlist.txt`, `.github/dependency-review-config.yml`) or has a known advisory of high or
+  critical severity. Controls: a GitHub-owned action pinned to a commit, the read-only token of the workflow (no `permissions` key,
+  no secret, no comment in the pull request), no request to a third party (the OpenSSF Scorecard lookup of the action is off) and a
+  license expression that is not valid SPDX fails. The job never counts as skipped: on a pull request or merge group its steps run
+  (a skipped job fails `ci-ok`, so a pull request cannot pass without the review), and on every other event a step says that
+  there is nothing to compare. `ci/tests/license-allowlist-test.sh` pins the inputs, the place in `ci-ok` and the
+  equality of the configuration with the license file, and refuses an exception with a version or without a reason. The binding
+  license check of the release builds (`ci/check-release-licenses.sh`) allows fewer licenses (the list `release` of the same file)
+  and is as strict as before: a license that only the pull request check allows fails it when a release build links the package.
+  Residual risks: the license data comes from ClearlyDefined through the dependency graph and can be wrong or missing (a missing
+  license is only listed); the check looks at the dependencies a change adds or updates, not at the whole tree; an exception names a
+  package and covers all its later versions; the configuration is read from the checkout of the pull request, so a pull request that
+  changes the policy and a dependency together depends on the review of the policy change (the maintainer owns every file in
+  `.github/CODEOWNERS`); and `pkg:npm/elkjs` (EPL-2.0, a dependency of Mermaid that the website serves) has no exception until the
+  question of its notice is decided.
 - **Static analysis in CI: CodeQL, Scorecard and zizmor.** Three controls look at the code and the pipeline, none replaces review:
   - *CodeQL* (`.github/workflows/codeql.yml`) analyses the Go code (built for Linux with and without the `embedui` and `devpg`
     build tags, for Windows with and without them and for macOS, so that the Windows-only code of the updater, which runs as
