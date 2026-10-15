@@ -24,6 +24,7 @@ In production mode the server does not start when one of these holds. Each messa
 | `opamp.requireEnrollmentToken` | May be `false` only together with `opamp.requireClientCert: true` (pure mTLS). |
 | `opamp.enableCompression` | Refused unless `opamp.allowUnboundedCompression: true` acknowledges that decompressed messages are not bounded by `opamp.maxMessageSize`. |
 | `artifacts.verify.requireChecksum`, `requireSignature` | Must stay `true` unless `artifacts.allowUnverified: true` (lab use). |
+| `install.grantTtl`, `install.bundleSourceBaseUrl` | While `install.enabled` is `true` (the default): the grant lifetime must be positive and at most `artifacts.downloadTokenTtl`, and the bundle source an https URL without credentials, query or fragment. Available from v0.2.0. |
 | URLs | `artifacts.sourceBaseUrl`, `releases.githubApiUrl`, `releases.rawBaseUrl` and notification URLs must be https. `gitops.repoUrl` must be https or ssh; `dir:` and local paths are for development only, and the Git URL must not carry inline credentials (use `gitops.auth.tokenFile` or an SSH key). |
 | `notifications.channels[]` | A channel of type `webhook` needs `secretFile` (at least 32 bytes). |
 
@@ -48,6 +49,7 @@ In production mode the server does not start when one of these holds. Each messa
 | `artifacts.sourceBaseUrl`, `artifacts.sourceAuth` | An internal mirror of the release downloads (layout `<base>/<tag>/<asset>`) and its credentials: `tokenFile` (bearer) or `username` + `passwordFile` (basic). Credentials go only to the origin (scheme, host, port) of `sourceBaseUrl`, never to redirect targets on other hosts, and the files are re-read when they change. `artifacts.allowedRedirectHosts` lists the hosts a mirror may redirect to. |
 | `artifacts.verify.tufRepositoryUrl`, `artifacts.verify.trustedRootFile` | The Sigstore trust base behind a proxy. The default is `tuf-repo-cdn.sigstore.dev` over the proxy. Use a 1:1 TUF mirror (https; do not cache `timestamp.json` for long) or, as a fallback, a fixed `trusted_root.json`. |
 | `artifacts.agentBaseUrls` | Base URLs that updaters download from, chosen per updater by host and port. `http://` entries need `artifacts.allowInsecureAgentBaseUrls: true` and belong only to cluster-internal services. |
+| `install.enabled`, `install.grantTtl`, `install.platforms` | *Available from v0.2.0.* The installation of hosts from the server (the plan for a host and the install grants for its downloads, [Server behaviour](../design/opamp-server.md#installation-from-the-server)) is on by default. Set `install.enabled: false` where hosts are installed on the manual path only: the routes then answer 404. `install.grantTtl` (default 1 h) is the lifetime of the grants of a plan, `install.platforms` lists the platforms. The routes need an enrollment token whatever `opamp.requireEnrollmentToken` says, and the plan names only releases that the release tracker knows (`releases.enabled`). |
 | `notifications.channels[].secretFile` | HMAC key (at least 32 bytes) for webhook channels. Receivers check the timestamp and drop repeated `X-Myriarch-Delivery` values. |
 | `gitops.auth`, `gitops.webhookSecretFile` | Read-only credentials for the repository (token, or SSH key plus known hosts) and the shared secret for `POST /api/v1/gitops/webhook`. |
 | `database.dsnFile` | The connection string with `sslmode=verify-full` (or `verify-ca`): `require` encrypts but does not verify the server, and production warns about a remote database without verification. No connection pooler in transaction mode. |
@@ -63,7 +65,7 @@ At start `myriarchd` logs a warning for every setting that weakens a control: a 
 provider-specific OIDC hints (see [Authentication](authentication.md)), the bootstrap admin as the only login path or next
 to OIDC, expired declarative enrollment tokens, enabled compression, empty `server.trustedProxies`, disabled artifact
 verification, plain `http://` entries in `artifacts.agentBaseUrls`, and mirror credentials combined with the public GitHub
-URL, a metrics endpoint on the main listener, a database connection to a remote host without certificate verification,
+URL, the installation from the server with the release tracker off, a metrics endpoint on the main listener, a database connection to a remote host without certificate verification,
 the default cache and clone directories, secrets set as literal values in the configuration file, credentials in
 `artifacts.proxyUrl` and an unlimited `auth.apiTokenMaxTtl`. `myriarchd config validate` prints the same warnings.
 
