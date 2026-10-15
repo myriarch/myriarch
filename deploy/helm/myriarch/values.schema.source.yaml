@@ -647,8 +647,12 @@ properties:
       podAnnotations:
         description: >-
           Annotations of the test Pod, for example the opt-out from the sidecar injection of a service mesh. A sidecar that keeps
-          running stops the Pod from completing. The hook annotations of the Pod cannot be changed.
+          running stops the Pod from completing. The chart sets the annotations of the hook itself, and a key that starts with
+          helm.sh/hook is refused: it would change or, as a null, remove the hook, and the Pod would become an ordinary resource
+          of the release.
         $ref: '#/$defs/stringMap'
+        patternProperties:
+          '^helm\.sh/hook': false
       resources:
         description: >-
           Resource requests and limits of the test Pod. Many clusters require them, also for ephemeral-storage.

@@ -269,4 +269,18 @@ if reuse_np "${reuse_on[@]}" --set networkPolicy.ingress.allowSameNamespace=fals
 # tests.resources is missing from such values, and the documents say so: the Pod has no requests and limits then
 reuse_pod() { render_reuse "$@" 2>/dev/null | awk '/^kind: Pod$/ {p=1} p && /^---$/ {p=0} p'; }
 if reuse_pod "${reuse_on[@]}" | grep -q '^kind: Pod$' && ! reuse_pod "${reuse_on[@]}" | grep -q 'resources:'; then ok "(117b) the test Pod has no requests and limits when tests.resources is missing"; else fail "(117b) the test Pod has no requests and limits when tests.resources is missing"; fi
+
+# --- the annotations of the test Pod must not touch the hook ---------------------------------------------------------------------------
+# The chart sets helm.sh/hook and helm.sh/hook-delete-policy. A key of the same name would give the Pod two of them (Helm keeps the last
+# one), and a changed or null value would turn the Pod into an ordinary resource that "helm install" and "helm template --skip-tests" create.
+# The schema refuses every key of the family helm.sh/hook, and the template repeats the refusal for a run without the validation.
+HOOKKEY=(--set-string 'tests.podAnnotations.helm\.sh/hook=pre-install')
+expect_schema "(118) a hook annotation of the test Pod" '/tests/podAnnotations/helm.sh~1hook' "${HOOKKEY[@]}"
+expect_schema "(119) a null does not remove an annotation of the hook either" '/tests/podAnnotations/helm.sh~1hook-weight' --set-json 'tests.podAnnotations={"helm.sh/hook-weight":null}'
+expect_schema "(120) the whole family helm.sh/hook is refused" '/tests/podAnnotations/helm.sh~1hook-delete-policy' --set-string 'tests.podAnnotations.helm\.sh/hook-delete-policy=hook-failed'
+expect_guard "(121) the template refuses a hook annotation of the test Pod" tests.podAnnotations "${HOOKKEY[@]}"
+expect_guard "(122) the template refuses a null for an annotation of the hook" tests.podAnnotations --set-json 'tests.podAnnotations={"helm.sh/hook":null}'
+MESH=(--set-string 'tests.podAnnotations.sidecar\.istio\.io/inject=false')
+expect_renders "(123) another annotation is kept next to the hook" '^    sidecar\.istio\.io/inject: "false"$' "${MESH[@]}"
+if [ "$(render "${MESH[@]}" 2>/dev/null | grep -c '^    helm\.sh/hook: ')" = 1 ]; then ok "(124) the test Pod has exactly one hook annotation"; else fail "(124) the test Pod has exactly one hook annotation"; fi
 finish_tests "helm-messages-test"

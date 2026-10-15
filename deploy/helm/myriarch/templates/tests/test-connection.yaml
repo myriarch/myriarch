@@ -20,6 +20,7 @@ SPDX-License-Identifier: Apache-2.0
 */ -}}
 {{- $tokenSecret := include "myriarch.tests.tokenSecret" . }}
 {{- $opampPath := (.Values.config.opamp | default dict).path | default "/v1/opamp" }}
+{{- $_ := include "myriarch.tests.checkPodAnnotations" . }}
 apiVersion: v1
 kind: Pod
 metadata:

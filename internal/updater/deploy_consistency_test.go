@@ -892,6 +892,10 @@ func TestHelmTestPodTemplate(t *testing.T) {
 	} {
 		assert.NotContains(t, tpl, banned)
 	}
+	// the annotations of the hook are the chart's: a key of the family helm.sh/hook in tests.podAnnotations is refused by the schema
+	// (patternProperties) and, for a run without the validation, by the template
+	assert.Contains(t, tpl, `include "myriarch.tests.checkPodAnnotations" .`)
+	assert.Contains(t, string(readDeploy(t, "helm/myriarch/templates/_helpers.tpl")), `hasPrefix "helm.sh/hook"`)
 	// the Secret is mounted behind the opt-in, once, as one key
 	assert.Equal(t, 1, strings.Count(tpl, "secretName:"))
 	assert.Equal(t, 1, strings.Count(tpl, "items:"))

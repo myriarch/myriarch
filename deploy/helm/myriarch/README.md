@@ -376,6 +376,7 @@ that starts with the value path, followed by what is wrong and how to fix it, fo
 | `bootstrapAdmin.passwordHashKey` | set without `existingSecret` |
 | `bootstrapAdmin.username` | not 1 to 64 characters of letters, digits, `.`, `_`, `@`, `-` |
 | `enrollmentTokens[<i>].name` | not a DNS label, or duplicate |
+| `tests.podAnnotations` | a key that starts with `helm.sh/hook` (the schema names the key; the template repeats the check) |
 
 ## Helm test
 
@@ -406,7 +407,9 @@ group and the `fsGroup` to the SCC, as for the server. It has no environment var
 (below), uses `image.*`, `imagePullSecrets`, `nodeSelector` and `tolerations` of the server, and takes its requests and limits from
 `tests.resources` (default 10m CPU and 32Mi memory requested, 64Mi memory limit). `tests.podAnnotations` adds annotations, for
 example the opt-out from the sidecar injection of a service mesh (`sidecar.istio.io/inject: "false"`): a sidecar that keeps running
-stops the Pod from completing, and `helm test` then waits for it. `tests.enabled: false` removes the Pod.
+stops the Pod from completing, and `helm test` then waits for it. The chart sets the annotations of the hook itself, so it refuses a
+key that starts with `helm.sh/hook` (a changed or null value would turn the Pod into an ordinary resource of the release).
+`tests.enabled: false` removes the Pod.
 `helm template | kubectl apply` and tools that render hooks as ordinary resources create it as a normal Pod that runs once and
 ends: use `helm template --skip-tests` or `tests.enabled: false` there.
 `helm upgrade --reuse-values` from a release of v0.1.0 renders with the values of that release in place of the defaults of the chart,

@@ -534,7 +534,7 @@ tests:
     key: token
   # Annotations of the test Pod, for example the opt-out from the sidecar injection of a service mesh
   # (sidecar.istio.io/inject: "false"): a sidecar that keeps running stops the Pod from completing, and helm test waits for it.
-  # The hook annotations of the Pod cannot be changed here.
+  # The chart sets the annotations of the hook itself: a key that starts with helm.sh/hook is refused (the schema and the template).
   podAnnotations: {}
   # Resources of the test Pod (many clusters require requests and limits, also for ephemeral-storage).
   resources:

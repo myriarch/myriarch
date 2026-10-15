@@ -391,3 +391,17 @@ token as well, so a mistake here is not sent to a server either.
 {{- $name -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+The annotations of the test Pod (tests.podAnnotations) must not touch the hook. The chart sets helm.sh/hook and
+helm.sh/hook-delete-policy itself: a key of the same name would give the Pod two of them (and Helm keeps the last one), and a changed
+or null value would turn the Pod into an ordinary resource of the release, which "helm install" and "helm template --skip-tests"
+then create. The schema refuses every key that starts with helm.sh/hook; this check holds when the validation is switched off.
+*/}}
+{{- define "myriarch.tests.checkPodAnnotations" -}}
+{{- range $key, $_ := ((.Values.tests | default dict).podAnnotations | default dict) -}}
+{{- if hasPrefix "helm.sh/hook" (toString $key) -}}
+{{- fail (printf "tests.podAnnotations: %q is an annotation of the hook, which the chart sets itself; remove the key (the hook would change, or the Pod would become an ordinary resource of the release)" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
