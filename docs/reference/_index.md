@@ -37,6 +37,9 @@ drift:
   test fails when the code reads an environment variable that the page does not list.
 - The metrics reference is generated with `make docs-gen` from the metric definitions in the sources. A test and the `docs` gate
   fail on drift, and a server test compares the metrics that the running server exposes with the reference.
+- The values of the Helm chart are checked against a strict schema, `deploy/helm/myriarch/values.schema.json`, which `make docs-gen`
+  assembles from a hand-written source and the configuration struct. A test and the `docs` gate fail on drift, and the tests of the
+  chart fail when `values.yaml` or a template uses a value that the schema lacks.
 - The Helm chart page is the README of the chart. Generated reference tables for its values are planned.
 
 `myriarchd config print` shows the effective configuration of a file with all defaults, and `myriarchd config validate` checks

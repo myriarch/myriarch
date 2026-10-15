@@ -40,6 +40,35 @@ The images `ghcr.io/myriarch/myriarch` (the server) and `ghcr.io/myriarch/myriar
 `X.Y.Z` and `X.Y` (`X.Y.Z-rc.N` for release candidates). There is no tag `latest`. **They exist from v0.1.0-rc.3 on.** Pin
 the image by digest in production (`image.digest`, see below).
 
+### Registry and repository of the image
+
+> **Available from v0.2.0.** The chart of v0.1.0 has the registry in `image.repository` and no `image.registry`.
+
+The chart builds the image reference from these values:
+
+| Value | Default | Meaning |
+|---|---|---|
+| `image.registry` | `ghcr.io` | Registry host with an optional port (`registry.example.com:5000`). |
+| `image.repository` | `myriarch/myriarch` | Repository without the registry host. |
+| `image.tag` | the `appVersion` of the chart | Tag of the image. |
+| `image.digest` | empty | `sha256:` and 64 hexadecimal characters. When set, the image is `<repository>@<digest>` and the tag is ignored. |
+| `global.imageRegistry` | not set | Replaces `image.registry`, so that a parent chart can point all images to a mirror. |
+
+If your cluster pulls from a mirror of `ghcr.io`, set the registry and keep the repository; pin the image with `image.digest`
+as described above:
+
+```yaml
+image:
+  registry: registry.example.com
+```
+
+A repository that starts with a registry host is used as it is, and then neither `image.registry` nor `global.imageRegistry`
+applies. The first path segment is a registry host when it contains a `.` or a `:` or is `localhost`. The values of v0.1.0
+(`image.repository: registry.example.com/myriarch/myriarch`) are of that form and render the same image as before. A repository
+**without** a host takes `image.registry` now. If you set such a repository to pull through the default registry of your
+container runtime, set `image.registry: ""` as well. The schema ([below](#the-values-schema)) refuses a registry with a scheme
+or a path, and a repository with a tag, a digest or upper case letters.
+
 ### Build the image yourself
 
 The published release images are the supported way to install: they are built from the release archives that the release
@@ -59,7 +88,8 @@ sed -n 's/^IMAGE_DIGEST=//p' image.out
 ```
 
 The last command prints the `sha256:...` digest of the pushed image. Use it in the installation with
-`--set image.repository=registry.example.com/myriarch/myriarch --set image.digest=sha256:...`. Use
+`--set image.registry=registry.example.com --set image.repository=myriarch/myriarch --set image.digest=sha256:...` (or with the
+repository in the form `registry.example.com/myriarch/myriarch` and no registry). Use
 `IMAGE_VARIANT=release`: the default variant `dev` is for `myriarchd dev` and holds the embedded PostgreSQL and test
 fixtures, and a production installation does not need them. The image is built for one platform, `linux/amd64`;
 `IMAGE_PLATFORM=linux/arm64` builds an arm64 image with a tag that ends in `-arm64`. There is no multi-platform index.
@@ -113,9 +143,9 @@ helm install myriarch ./myriarch/deploy/helm/myriarch -n myriarch -f myriarch-va
 kubectl -n myriarch rollout status deploy/myriarch
 ```
 
-(With a self-built image add `--set image.repository=... --set image.digest=sha256:...`.) The server runs in production
-mode, never in dev mode. It applies the database migrations at its first start. `helm install` prints notes that repeat the
-commands below. Without an `HTTPRoute`, `Ingress` or `Route` nothing is reachable from outside the cluster yet.
+(With a self-built image add `--set image.registry=... --set image.repository=... --set image.digest=sha256:...`.) The server
+runs in production mode, never in dev mode. It applies the database migrations at its first start. `helm install` prints notes
+that repeat the commands below. Without an `HTTPRoute`, `Ingress` or `Route` nothing is reachable from outside the cluster yet.
 
 ## Sign in
 
@@ -273,6 +303,54 @@ then switch the bootstrap admin off with `bootstrapAdmin.enabled=false`, or keep
 password hash in a vault (`keepWithOidc: true`). With OIDC enabled and no `keepWithOidc`, the chart no longer mounts the
 bootstrap credentials and the server deactivates the account.
 
+## The values schema
+
+> **Available from v0.2.0.** The chart of v0.1.0 has no schema and ignores a key that it does not know.
+
+The chart ships a strict schema for its values,
+[`values.schema.json`](../../deploy/helm/myriarch/values.schema.json). Helm checks your values against it in `helm install`,
+`helm upgrade`, `helm template` and `helm lint`, before it renders anything, and stops with the path of the value that does not
+fit. The wording depends on the Helm version; Helm 4 prints, for a misspelled key:
+
+```text
+Error: values don't meet the specifications of the schema(s) in the following chart(s):
+myriarch:
+- at '/config/server': additional properties 'listenAdr' not allowed
+```
+
+The schema refuses:
+
+- **A key that the chart does not know**, also inside `config`, where the keys are those of the
+  [configuration reference](../reference/configuration.md). A misspelled setting used to be ignored without a word.
+- **A value of the wrong type** or in the wrong form: a word for a port, a string for a list, a registry with a scheme, a digest
+  without `sha256:`, a Kubernetes name with an underscore, a quantity such as `lots`, or a duration without a Go unit
+  (`shutdownTimeout: 30` and `audit: 30d` are errors; write `30s` and `720h`).
+- **A secret as a value.** The schema has no key for a database DSN, an OIDC client secret, a webhook secret, the URL of a
+  notification channel or an enrollment token. Put them into the Secret and use the `*File` settings
+  (`database.dsnFile`, `auth.oidc.clientSecretFile`, `gitops.webhookSecretFile`, `notifications.channels[].urlFile`); a declared
+  token in `enrollmentTokens` names a Secret or is generated, and a Secret reference that looks like an enrollment token
+  (`myre_...`) is refused.
+- **Keys that the chart generates or does not offer:** `config.auth.bootstrapAdmin` and `config.opamp.enrollmentTokens`
+  (use `bootstrapAdmin` and `enrollmentTokens` at the top level) and the development mode (`config.dev`, `config.auth.devLogin`).
+
+It does not judge whether a configuration makes sense, and it does not relate values to each other. The templates still stop an
+Ingress without `trustedProxies`, and `myriarchd config validate` ([below](#check-before-you-deploy)) still checks the rendered
+configuration. Helm can skip the schema with `--skip-schema-validation`; the checks of the templates remain, but a misspelled key
+is then ignored again, so use the flag only to get past a finding while you investigate it.
+
+**Before you upgrade from v0.1.0,** run `helm lint` or `helm template` with your values file and the chart of the new release.
+Values that the old chart ignored can fail now. Typical findings and what to do:
+
+| Finding | What to do |
+|---|---|
+| `additional properties 'x' not allowed` | The chart never read this key. Correct the spelling or remove it. |
+| `got number, want string`, `got string, want integer` | Use the type of the setting. A duration is a string with a unit (`30s`), a port is a number. Quote numbers that must stay strings (`--set-string`). |
+| A key of `config` that you took from the configuration file of a standalone server | Use only the keys of the configuration reference; the settings that the chart generates or refuses (above) have top-level values or are not available. |
+| `config.database.dsn` or another secret as a value | Move the secret into the Secret and set the `*File` setting. The chart refused to render such values into the ConfigMap before as well. |
+
+The hand-written part of the schema is `values.schema.source.yaml` next to it; `make docs-gen` assembles the JSON file from it and
+from `internal/config` ([Development guide](../development.md#generated-references)).
+
 ## Check before you deploy
 
 The chart and the rendered server configuration can be checked without a cluster and without secrets. You need `helm`,
@@ -286,10 +364,10 @@ helm template myriarch ./myriarch/deploy/helm/myriarch -n myriarch -f myriarch-v
 bin/myriarchd config validate --config myriarchd.yaml --skip-files
 ```
 
-`config validate` applies the checks of `myriarchd serve` (it refuses what the server refuses) and with `--skip-files` it
-does not need the secret files. Then read the [production checklist](production-checklist.md). A complete, validated
-example with OIDC, an artifact mirror and a gateway collector is in
-[`deploy/examples/production/README.md`](../../deploy/examples/production/README.md).
+`helm lint` and `helm template` check the values against the schema first. `config validate` applies the checks of
+`myriarchd serve` (it refuses what the server refuses) and with `--skip-files` it does not need the secret files. Then read the
+[production checklist](production-checklist.md). A complete, validated example with OIDC, an artifact mirror and a gateway
+collector is in [`deploy/examples/production/README.md`](../../deploy/examples/production/README.md).
 
 ## Upgrade and uninstall
 
@@ -301,7 +379,9 @@ git -C myriarch checkout <newer tag>
 helm upgrade myriarch ./myriarch/deploy/helm/myriarch -n myriarch -f myriarch-values.yaml
 ```
 
-The server applies new database migrations at its start. An upgrade guide is planned for v0.2.0.
+The server applies new database migrations at its start. From v0.2.0 on the chart validates its values against a strict schema:
+run `helm lint` with your values file before the upgrade ([The values schema](#the-values-schema)). An upgrade guide is planned
+for v0.2.0.
 
 `helm uninstall myriarch -n myriarch` removes what the chart created, including the generated Secrets (the bootstrap
 token and the declared enrollment tokens). It keeps the Secret `myriarch-secrets`, the namespace and every external
