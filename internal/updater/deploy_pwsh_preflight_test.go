@@ -209,6 +209,8 @@ Check 'nothing was written to the working directory' (@(Get-ChildItem -LiteralPa
 // The supervisor must be a regular file with the verified hash at the path of the service after its installation step. The
 // installation step is run with stand-ins for the download and the copy; the copy removes the file or changes it, as a security
 // tool would. A step that stops at the check leaves no VERSION marker, so the next step does not take the file for an installed one.
+// A directory or a link at the path is not replaced: the run stops, before it downloads anything, and the next step that the
+// message names is to remove the item, because a new run would stop at the same item.
 func TestInstallWindowsScriptReportsAMissingSupervisorFile(t *testing.T) {
 	out, n := runPwshChecks(t, `
 $dir = Join-Path $Work 'supervisor'
@@ -221,10 +223,13 @@ $msg = Message-Of { Assert-SupervisorBinary -Path $exe -ExpectedHash $good }
 Check 'a missing file is supervisor_missing' ($msg -match '^\[supervisor_missing\] ')
 Check 'the message says that the file does not exist and names the path' ($msg.Contains('the supervisor binary does not exist: ' + $exe))
 Check 'the message names the next step: the protection history of the antivirus, and the folder to allow' ($msg.Contains('protection history') -and $msg.Contains('allow the folder ' + $dir))
+Check 'a new run fetches and verifies the file again, and the message says so' ($msg.Contains('fetches and verifies the file again'))
 
 New-Item -ItemType Directory -Path $exe | Out-Null
 $msg = Message-Of { Assert-SupervisorBinary -Path $exe }
 Check 'a directory is no regular file' ($msg -match '^\[supervisor_missing\] ' -and $msg.Contains('is not a regular file: ' + $exe))
+Check 'the next step for a directory is to remove it: the installer does not replace it' ($msg.Contains('remove the item at ' + $exe) -and $msg.Contains('does not replace a directory or a link'))
+Check 'the message for a directory promises no new download and points nowhere else' (-not $msg.Contains('fetches') -and -not $msg.Contains('protection history'))
 Remove-Item -LiteralPath $exe -Force
 
 if (-not $IsWindows) {
@@ -233,6 +238,7 @@ if (-not $IsWindows) {
   New-Item -ItemType SymbolicLink -Path $exe -Target $target | Out-Null
   $msg = Message-Of { Assert-SupervisorBinary -Path $exe }
   Check 'a link is no regular file' ($msg -match '^\[supervisor_missing\] ' -and $msg.Contains('is not a regular file'))
+  Check 'the next step for a link is to remove it' ($msg.Contains('remove the item at ' + $exe) -and -not $msg.Contains('fetches') -and -not $msg.Contains('protection history'))
   Remove-Item -LiteralPath $exe -Force
 }
 
@@ -242,6 +248,7 @@ Check 'a file with the verified hash passes' ((Message-Of { Assert-SupervisorBin
 Check 'a file passes when no hash is known (an installed supervisor)' ((Message-Of { Assert-SupervisorBinary -Path $exe }) -eq '')
 $msg = Message-Of { Assert-SupervisorBinary -Path $exe -ExpectedHash $good }
 Check 'a file with another hash is not the verified supervisor' ($msg -match '^\[supervisor_missing\] ' -and $msg.Contains('is not the file that was verified'))
+Check 'and a new run fetches and verifies it again, as the message says' ($msg.Contains('fetches and verifies the file again') -and -not $msg.Contains('remove the item'))
 Remove-Item -LiteralPath $exe -Force
 
 # Install-SupervisorBinary with stand-ins for the download, the signature check and the copy
@@ -296,12 +303,54 @@ Check 'and the marker is back' ((Get-Content -LiteralPath $verFile -Raw).Trim() 
 $seen = $script:Downloads
 $changed = Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp
 Check 'then the step finds the installed supervisor again' ($changed -eq $false -and $script:Downloads -eq $seen)
+
+# A directory at the path, with the marker of the requested version: the step that skips an installed supervisor sees a path that
+# exists, and the check stops the run. The installer does not replace the directory, so a new run stops at the same item without a
+# download until the item is removed.
 Remove-Item -LiteralPath $target -Force
 New-Item -ItemType Directory -Path $target | Out-Null
+$seen = $script:Downloads
 $msg = Message-Of { [void](Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp) }
 Check 'an installed supervisor that is no file is reported too' ($msg -match '^\[supervisor_missing\] ' -and $msg.Contains('is not a regular file: ' + $target))
+Check 'the message says to remove the item, and nothing is downloaded' ($msg.Contains('remove the item at ' + $target) -and $script:Downloads -eq $seen)
+$msg = Message-Of { [void](Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp) }
+Check 'a new run stops at the same item, again without a download' ($msg.Contains('is not a regular file: ' + $target) -and $script:Downloads -eq $seen)
+Remove-Item -LiteralPath $target -Force
+$changed = Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp
+Check 'once the item is removed the step fetches and installs the supervisor' ($changed -eq $true -and $script:Downloads -eq $seen + 1 -and (Test-Path -LiteralPath $target -PathType Leaf))
+
+# A directory at the path without the marker of the requested version (the marker of an older version, or none): the run stops
+# before it downloads, with the same message, and nothing is copied into the directory. Without this the copy would go into the
+# directory and the hash of the directory would fail with an access error that names neither the cause nor the way out.
+Remove-Item -LiteralPath $target -Force
+New-Item -ItemType Directory -Path $target | Out-Null
+Set-Content -LiteralPath $verFile -Value '0.161.0' -NoNewline
+$seen = $script:Downloads
+$msg = Message-Of { [void](Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp) }
+Check 'a directory at the path stops the step before anything is fetched' ($msg -match '^\[supervisor_missing\] ' -and $msg.Contains('remove the item at ' + $target) -and $script:Downloads -eq $seen)
+Check 'nothing was copied into the directory' (@(Get-ChildItem -LiteralPath $target -Force).Count -eq 0)
+Check 'and the marker of the older version is as it was' ((Get-Content -LiteralPath $verFile -Raw) -eq '0.161.0')
+Remove-Item -LiteralPath $verFile -Force
+$msg = Message-Of { [void](Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp) }
+Check 'a directory at the path stops the step when there is no marker either' ($msg.Contains('is not a regular file: ' + $target) -and $script:Downloads -eq $seen -and @(Get-ChildItem -LiteralPath $target -Force).Count -eq 0)
+Remove-Item -LiteralPath $target -Force
+
+if (-not $IsWindows) {
+  # a link to a file is not accepted either, and the file behind it is not written through the link
+  $linked = Join-Path $Work 'linked-file'
+  Set-Content -LiteralPath $linked -Value 'x' -NoNewline
+  New-Item -ItemType SymbolicLink -Path $target -Target $linked | Out-Null
+  Set-Content -LiteralPath $verFile -Value '0.161.0' -NoNewline
+  $msg = Message-Of { [void](Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp) }
+  Check 'a link at the path stops the step before anything is fetched' ($msg.Contains('is not a regular file: ' + $target) -and $msg.Contains('remove the item at ' + $target) -and $script:Downloads -eq $seen)
+  Check 'and the file behind the link is as it was' ((Get-Content -LiteralPath $linked -Raw) -eq 'x')
+  Set-Content -LiteralPath $verFile -Value "0.162.0" -NoNewline
+  $msg = Message-Of { [void](Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp) }
+  Check 'a link at the path of an installed supervisor is not accepted' ($msg.Contains('is not a regular file: ' + $target) -and $script:Downloads -eq $seen)
+  Remove-Item -LiteralPath $target -Force
+}
 `)
-	assert.GreaterOrEqual(t, n, 21, out)
+	assert.GreaterOrEqual(t, n, 32, out)
 }
 
 // A service that is not running is explained by the file of its binPath when that is gone: the path comes from the registry

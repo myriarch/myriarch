@@ -922,19 +922,36 @@ function Get-SupervisorMissingHint {
   return "look at the protection history of your antivirus or endpoint protection for a quarantined opampsupervisor.exe (Microsoft Defender: Windows Security, Protection history, or Get-MpThreatDetection), allow the folder $(Split-Path -Parent $Path), then run the installer again (it fetches and verifies the file again)"
 }
 
+# What to do when a directory or a link lies where the supervisor file belongs. The installer never replaces or removes either of
+# them, so the next run would stop at the same item without a download: the item has to go first.
+function Get-SupervisorNotRegularHint {
+  param([string]$Path)
+  return "remove the item at $Path yourself (the installer does not replace a directory or a link), then run the installer again"
+}
+
+# What may lie at the path of the supervisor: nothing, or a regular file. A directory or a link (a reparse point: a symbolic link or
+# a junction) is neither replaced by the installer nor accepted as the supervisor, so the run stops here with the way out, before
+# a file is copied into the directory or through the link and before the run goes on with an item that it did not install.
+function Assert-SupervisorPathUsable {
+  param([string]$Path)
+  $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+  if ($item -and ($item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+    Stop-Install 'supervisor_missing' "the supervisor binary is not a regular file: $Path; $(Get-SupervisorNotRegularHint -Path $Path)"
+  }
+}
+
 # After the installation step the supervisor must be a regular file at the path of the service and, when the file was just
 # copied, the file whose SHA-256 was verified. The copy itself was hashed again (Copy-VerifiedFile); this check catches what
-# happens after it, and an old file in a state that a re-run would not repair. The message names the path and the next step.
+# happens after it, and an old file in a state that a re-run would not repair. The message names the path and the next step,
+# which depends on the case: a file that is gone or changed is fetched again by the next run, a directory or a link is not.
 function Assert-SupervisorBinary {
   param([string]$Path, [string]$ExpectedHash)
-  $next = Get-SupervisorMissingHint -Path $Path
-  $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
-  if (-not $item) { Stop-Install 'supervisor_missing' "the supervisor binary does not exist: $Path; $next" }
-  if ($item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-    Stop-Install 'supervisor_missing' "the supervisor binary is not a regular file: $Path; $next"
+  Assert-SupervisorPathUsable -Path $Path
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    Stop-Install 'supervisor_missing' "the supervisor binary does not exist: $Path; $(Get-SupervisorMissingHint -Path $Path)"
   }
   if ($ExpectedHash -and (Get-Sha256 -Path $Path) -ne $ExpectedHash) {
-    Stop-Install 'supervisor_missing' "the supervisor binary is not the file that was verified (its SHA-256 differs): $Path; $next"
+    Stop-Install 'supervisor_missing' "the supervisor binary is not the file that was verified (its SHA-256 differs): $Path; $(Get-SupervisorMissingHint -Path $Path)"
   }
 }
 
@@ -973,6 +990,8 @@ function Install-SupervisorBinary {
     Assert-SupervisorBinary -Path $target
     return $false
   }
+  # A directory or a link at the path ends the run before anything is fetched (nothing is copied into it)
+  Assert-SupervisorPathUsable -Path $target
   $tmp = Join-Path $TmpDir $asset
   $hash = Get-VerifiedAsset -Url $url -Destination $tmp
   Confirm-Signature -File $tmp -BundleUrl "$url.sigstore.json" -IdentityRegexp (Get-CertIdentity -Workflow 'base-binary-release' -Version $version) -Version $version -TmpDir $TmpDir

@@ -99,11 +99,13 @@
 #   archive_invalid                 collector archive has no regular binary in its root
 #   collector_start_failed          the new collector binary cannot be started
 #   collector_version_mismatch      the collector reports another version than requested
-#   supervisor_missing              the supervisor binary is not there when the installation step is over: Linux, a missing or
-#                                   non-executable /opt/myriarch/supervisor/opampsupervisor; Windows, a missing file, a file that
-#                                   is no regular file or differs from the verified one at ...\supervisor\opampsupervisor.exe, and
-#                                   a service that did not start because the file of its binPath is gone (a security tool that
-#                                   quarantined the binary is the usual cause)
+#   supervisor_missing              the supervisor binary is not there when the installation step is over: Linux, a missing,
+#                                   non-executable or no regular file at /opt/myriarch/supervisor/opampsupervisor; Windows, a
+#                                   missing file, a file that differs from the verified one or an item that is no regular file at
+#                                   ...\supervisor\opampsupervisor.exe, and a service that did not start because the file of its
+#                                   binPath is gone (a security tool that quarantined the binary is the usual cause). The message
+#                                   names the path and the next step: a file that is gone or changed is installed again by the next
+#                                   run, a directory (on Windows a link too) is not replaced and has to be removed first
 #   service_not_running             WARNING: otelcol-supervisor is not running after the installation
 #   token_on_command_line           WARNING: --token is visible in the process list and shell history
 #   updater_unauthenticated         WARNING: the updater binary has no trusted hash (--insecure)
@@ -590,14 +592,17 @@ check_foreign_installations() {
 
 # The supervisor must be an executable file at the path of the unit when the installation step is over. A security tool that
 # removes an unsigned binary, a mount with noexec or a copy that went wrong would otherwise show up only as a service that does
-# not start (status 203/EXEC).
+# not start (status 203/EXEC). The next step depends on the case: a file that is gone or cannot run is installed again by the next
+# run, but a directory is not replaced by it (the test of the step that skips an installed supervisor is true for a directory), so
+# the next run would stop at the same item until it is removed.
 check_supervisor_binary() {
-  local target="${P_SUPERVISOR}/opampsupervisor" why=""
-  if [ ! -e "${target}" ]; then why="does not exist"
-  elif [ ! -f "${target}" ]; then why="is not a regular file"
-  elif [ ! -x "${target}" ]; then why="is not executable"
+  local target="${P_SUPERVISOR}/opampsupervisor" why="" next=""
+  local again="look for a cleanup or security tool that removed or changed it and for a noexec mount of its file system (findmnt -T ${target}), then run the installer again"
+  if [ ! -e "${target}" ]; then why="does not exist"; next="${again}"
+  elif [ ! -f "${target}" ]; then why="is not a regular file"; next="remove the item at ${target} yourself (the installer does not replace a directory), then run the installer again"
+  elif [ ! -x "${target}" ]; then why="is not executable"; next="${again}"
   fi
-  [ -z "${why}" ] || die supervisor_missing "the supervisor binary ${why}: ${target}; look for a cleanup or security tool that removed or changed it and for a noexec mount of its file system (findmnt -T ${target}), then run the installer again"
+  [ -z "${why}" ] || die supervisor_missing "the supervisor binary ${why}: ${target}; ${next}"
 }
 
 # ---------------------------------------------------------------- Signature verification (Sigstore, fail-closed)

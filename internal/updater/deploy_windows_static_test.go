@@ -218,6 +218,17 @@ func TestInstallWindowsScriptChecksTheSupervisorFile(t *testing.T) {
 		"the marker is removed after the stop of the service and before the copy, and written after the check and before the success message")
 	assert.Equal(t, 1, strings.Count(body, "Set-FileText -Path $verFile"), "the marker is written in one place")
 
+	// a directory or a link at the path ends the step before anything is fetched, and every check goes through the same function
+	iUsable := strings.Index(body, "Assert-SupervisorPathUsable -Path $target")
+	iFetch := strings.Index(body, "Get-VerifiedAsset")
+	require.True(t, iUsable > iSkip && iFetch > iUsable, "the kind of the item at the path is checked after the early return and before the download")
+	assert.Contains(t, psFunctionBody(t, script, "Assert-SupervisorBinary"), "Assert-SupervisorPathUsable -Path $Path")
+	// the next step differs by case: a missing or changed file is fetched again, a directory or a link has to be removed
+	assert.Contains(t, psFunctionBody(t, script, "Assert-SupervisorPathUsable"), "Get-SupervisorNotRegularHint")
+	assert.Contains(t, psFunctionBody(t, script, "Get-SupervisorNotRegularHint"), "remove the item at $Path yourself")
+	assert.NotContains(t, psFunctionBody(t, script, "Get-SupervisorNotRegularHint"), "fetches")
+	assert.Contains(t, psFunctionBody(t, script, "Get-SupervisorMissingHint"), "it fetches and verifies the file again")
+
 	main := psFunctionBody(t, script, "Invoke-Main")
 	iIf := strings.Index(main, "if ($svc.Status -ne 'Running') {")
 	iBinary := strings.Index(main, "Assert-ServiceBinaryPresent")

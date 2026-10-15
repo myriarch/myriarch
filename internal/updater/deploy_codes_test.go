@@ -395,6 +395,13 @@ func TestPreflightCodesAreDocumentedAsNewInV020(t *testing.T) {
 			assert.Contains(t, row, "from v0.2.0", "the row of %s in the Windows README says that the code is new", code)
 		}
 	}
+	// the next step depends on the case: a new run fetches a file that is gone or changed again, but it does not replace a directory
+	// or a link and would stop at the same item, so both documents tell to remove it
+	for name, doc := range map[string]string{"guide": guide, "Windows README": readme} {
+		row := tableRow(doc, "`supervisor_missing`")
+		assert.Contains(t, row, "verifies the file again", "the %s says that a new run fetches a file that is gone or changed", name)
+		assert.Contains(t, row, "remove it yourself", "the %s tells to remove a directory or a link", name)
+	}
 	// the rows that describe changed behaviour say so as well
 	assert.Contains(t, tableRow(readme, "`unsupported_platform`"), "From v0.2.0")
 	assert.Contains(t, tableRow(readme, "`service_not_running`"), "From v0.2.0")

@@ -1285,26 +1285,67 @@ func TestInstallLinuxScriptStopsWhenTheSupervisorIsMissingAfterTheInstallStep(t 
 			assert.Regexp(t, `(?m)^\[myriarch-install\] ERROR \[supervisor_missing\] \S`, out)
 			assert.Contains(t, out, "the supervisor binary "+c.why+": "+filepath.Join(root, "opt/myriarch/supervisor/opampsupervisor"), "the message names the path as it was given")
 			assert.Contains(t, out, "noexec", "the message names the next step")
+			assert.NotContains(t, out, "remove the item", "a file that is gone or cannot run is installed again by the next run")
 			assert.NoFileExists(t, filepath.Join(root, "etc/myriarch/supervisor.yaml"), "the run stops before the configuration is written")
 			assert.NoFileExists(t, filepath.Join(root, "etc/systemd/system/otelcol-supervisor.service"))
+
+			// the next step of the message works: a new run installs the supervisor again
+			out, err = runInstall(t, root, rel, baseArgs()...)
+			require.NoError(t, err, out)
+			assert.Contains(t, out, "Supervisor v0.162.0 installed", "the stopped run is not taken for an installation")
+			assert.NotContains(t, out, "Supervisor v0.162.0 is already installed")
+			info, statErr := os.Stat(filepath.Join(root, "opt/myriarch/supervisor/opampsupervisor"))
+			require.NoError(t, statErr)
+			assert.True(t, info.Mode().IsRegular() && info.Mode().Perm()&0o100 != 0, "an executable file is in place")
 		})
 	}
 }
 
-// A directory at the path of the supervisor, with the VERSION file of the requested version next to it, passes the test of
-// the step that skips an installed supervisor ("executable" is true for a directory): the check after the step catches it.
+// A directory at the path of the supervisor passes the test of the step that skips an installed supervisor when the VERSION file
+// names the requested version ("executable" is true for a directory), and the check after the step catches it. The installer does
+// not replace a directory, so a new run would stop at the same item: the message says to remove it, and after that a new run
+// installs the supervisor. With the VERSION file of another version the run downloads first and reaches the same check.
 func TestInstallLinuxScriptStopsAtAnInstalledSupervisorThatIsNoFile(t *testing.T) {
 	requireBashInstaller(t)
-	rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
-	root := t.TempDir()
-	dir := filepath.Join(root, "opt/myriarch/supervisor")
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "opampsupervisor"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "VERSION"), []byte("0.162.0\n"), 0o644))
-	out, err := runInstall(t, root, rel, baseArgs()...)
-	require.Error(t, err, out)
-	assert.Contains(t, out, "[supervisor_missing]")
-	assert.Contains(t, out, "the supervisor binary is not a regular file: "+filepath.Join(dir, "opampsupervisor"))
-	assert.Contains(t, out, "Supervisor v0.162.0 is already installed")
+	cases := []struct{ name, version, want string }{
+		{"the version that was requested", "0.162.0", "Supervisor v0.162.0 is already installed"},
+		{"another version", "0.161.0", "Supervisor v0.162.0 installed"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+			root := t.TempDir()
+			dir := filepath.Join(root, "opt/myriarch/supervisor")
+			target := filepath.Join(dir, "opampsupervisor")
+			require.NoError(t, os.MkdirAll(target, 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "VERSION"), []byte(c.version+"\n"), 0o644))
+			out, err := runInstall(t, root, rel, baseArgs()...)
+			require.Error(t, err, out)
+			assert.Regexp(t, `(?m)^\[myriarch-install\] ERROR \[supervisor_missing\] \S`, out)
+			assert.Contains(t, out, "the supervisor binary is not a regular file: "+target)
+			assert.Contains(t, out, c.want)
+			assert.Contains(t, out, "remove the item at "+target+" yourself (the installer does not replace a directory)", "the next step is to remove the item")
+			assert.NotContains(t, out, "noexec", "the hint for a file that is gone or cannot run does not fit")
+			assert.NotContains(t, out, "findmnt")
+			assert.DirExists(t, target, "nothing is removed")
+
+			// a new run does not repair it: it stops at the same item
+			out, err = runInstall(t, root, rel, baseArgs()...)
+			require.Error(t, err, out)
+			assert.Contains(t, out, "the supervisor binary is not a regular file: "+target)
+
+			// the next step of the message works
+			require.NoError(t, os.RemoveAll(target))
+			out, err = runInstall(t, root, rel, baseArgs()...)
+			require.NoError(t, err, out)
+			info, statErr := os.Stat(target)
+			require.NoError(t, statErr)
+			assert.True(t, info.Mode().IsRegular() && info.Mode().Perm()&0o100 != 0, "an executable file is in place")
+			version, readErr := os.ReadFile(filepath.Join(dir, "VERSION"))
+			require.NoError(t, readErr)
+			assert.Equal(t, "0.162.0\n", string(version))
+		})
+	}
 }
 
 // The check follows the install step and precedes everything that uses the supervisor.
