@@ -208,8 +208,9 @@ Every crawler may read the whole site, those of search engines and those of AI a
 not meant to be read, and that people ask assistants about the documentation. The firewall of the host runs Bot Protection and the AI-bot
 rule in log mode only ([Setup](#setup-once-by-a-maintainer), step 6): it records bot traffic and never blocks or challenges it. A crawler
 that harms the site is handled as an incident ([Firewall incidents](#firewall-incidents)), not by a rule in `robots.txt`, which
-`check-seo.py` would reject. Evaluating crawler requests, for example the logs of the host, is not part of this: the privacy page says that the
-project receives no host logs ([Privacy](#privacy)), so it would need a decision record first.
+`check-seo.py` would reject. Evaluating crawler requests, for example the logs of the host, is not part of this: the
+[privacy page](content/legal/privacy.md#server-logs) says in its section "Server logs" that the project does not receive these logs, so it
+would need a decision record first.
 
 ### The 404 page
 
