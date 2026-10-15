@@ -19,6 +19,11 @@ binaries   Scan of the released binaries. govulncheck's binary mode reports a fi
            result at go.mod, the file in which the source scan puts a finding about a module. Accepted findings are left out as above
            (while the review date of the entry has not passed).
            Without any LABEL=IN.sarif the report holds no result (nothing was found, or there is no release to scan).
+           The reports must be those of a scan at module level (govulncheck -mode binary -scan module, as ci/vulncheck-binaries.sh runs
+           it); a report of another mode or level is refused. The release binaries are stripped (-s -w), so govulncheck cannot read the
+           symbols of a program, and a result means that a binary was built with a module or Go version that the advisory affects, not
+           that it contains or calls the vulnerable code. govulncheck calls every finding of a module-level scan an error, because it is
+           the strongest statement that level allows; the merged result is a warning.
 
 The reports are data from a tool of this repository. A file that is not a SARIF 2.1.0 log with a tool driver in every run is refused.
 Exit status: 0 = written, 1 = refused input or unreadable file, 2 = usage error.
@@ -28,10 +33,11 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LEVELS = ["none", "note", "warning", "error"]  # ascending
+BINARY_LEVEL = "warning"  # the level of every result about the binaries: a scan at module level cannot show that a program reaches the code
 ANCHOR_URI = "go.mod"
 MAX_TEXT = 1000  # code scanning shows a message as the title of an alert; keep it short
 SOURCE_KEY = "govulncheck/v1"
@@ -126,10 +132,6 @@ def fingerprint(*parts):
     return hashlib.sha256("\0".join(str(p) for p in parts).encode("utf-8")).hexdigest()[:32]
 
 
-def rank(level):
-    return LEVELS.index(level) if level in LEVELS else LEVELS.index("warning")
-
-
 def shorten(items, fits):
     """The longest prefix of items for which fits(prefix, rest) holds, as (prefix, rest count)."""
     for n in range(len(items), -1, -1):
@@ -167,14 +169,18 @@ def cmd_filter(allowlist_path, src, dst):
     print("vulncheck-sarif: %s: %d finding(s) for code scanning%s" % (os.path.basename(dst), kept_count, describe(accepted, lapsed_seen)), file=sys.stderr)
 
 
+MODULES_RE = re.compile(r"depends on \d+ vulnerable modules? \(([^()]*)\)")
+
+
 def modules_of(result):
-    mods = set()
-    for flow in result.get("codeFlows") or []:
-        for thread in flow.get("threadFlows") or []:
-            for loc in thread.get("locations") or []:
-                if isinstance(loc.get("module"), str) and loc["module"]:
-                    mods.add(loc["module"])
-    return mods
+    """The modules that govulncheck names in the message of a result of a module-level scan ("Your code depends on 2 vulnerable modules
+    (a and b). ..."). A module path contains neither a space nor a comma, so the list is split at both and the word "and" is dropped.
+    stdlib is the Go version of the build. A message in another form names no module."""
+    text = (result.get("message") or {}).get("text")
+    found = MODULES_RE.search(text) if isinstance(text, str) else None
+    if not found:
+        return set()
+    return {word for word in re.split(r"[\s,]+", found.group(1)) if word and word != "and"}
 
 
 def compose(rid, release, names, total, mods):
@@ -183,9 +189,10 @@ def compose(rid, release, names, total, mods):
         listing = ", ".join(shown_names) + (", and %d more" % more_names if more_names else "")
         modules = ", ".join(shown_mods) + (", and %d more" % more_mods if more_mods else "")
         return (
-            "%s affects %d of the %d binaries of the release %s (%s). Vulnerable modules: %s. govulncheck found the vulnerable symbols "
-            "in the binaries; in binary mode it does not tell whether the program reaches them."
-            % (rid, len(names), total, release, listing, modules or "none named")
+            "%s affects %d of the %d binaries of the release %s (%s). Affected modules: %s (stdlib is the Go version of the build). "
+            "The release binaries are stripped, so the scan works at module level: it shows that a binary was built with an affected "
+            "version, not that it contains or calls the vulnerable code."
+            % (rid, len(names), total, release, listing, modules or "not named by govulncheck")
         )
 
     shown_mods, more_mods = shorten(mods, lambda p, rest: len(build([], 0, p, rest)) <= MAX_TEXT // 2)
@@ -202,6 +209,10 @@ def cmd_binaries(allowlist_path, dst, release, labelled):
     for label, path in labelled:
         for run in read_sarif(path)["runs"]:
             driver = run["tool"]["driver"]
+            config = driver.get("properties") if isinstance(driver.get("properties"), dict) else {}
+            if config.get("scan_mode") != "binary" or config.get("scan_level") != "module":
+                die("%s is not the report of govulncheck -mode binary -scan module (scan_mode %r, scan_level %r)"
+                    % (path, config.get("scan_mode"), config.get("scan_level")))
             if base_driver is None:
                 base_driver = driver
             rules = {rule.get("id"): rule for rule in driver.get("rules") or [] if isinstance(rule, dict)}
@@ -212,21 +223,18 @@ def cmd_binaries(allowlist_path, dst, release, labelled):
                     continue
                 if rid in lapsed:
                     lapsed_seen[rid] = lapsed[rid]
-                entry = found.setdefault(rid, {"rule": rules.get(rid), "level": "none", "labels": set(), "modules": set()})
+                entry = found.setdefault(rid, {"rule": rules.get(rid), "labels": set(), "modules": set()})
                 entry["labels"].add(label)
                 entry["modules"] |= modules_of(result)
                 if entry["rule"] is None:
                     entry["rule"] = rules.get(rid)
-                level = result.get("level") or "warning"
-                if rank(level) > rank(entry["level"]):
-                    entry["level"] = level
     results, rules_out = [], []
     for rid in sorted(found):
         entry = found[rid]
         names = sorted(entry["labels"])
         results.append({
             "ruleId": rid,
-            "level": entry["level"] if entry["level"] != "none" else "warning",
+            "level": BINARY_LEVEL,
             "message": {"text": compose(rid, release, names, len(labelled), sorted(entry["modules"]))},
             "locations": [anchor("Anchor of a finding in the released binaries of %s; the vulnerable code is in the binaries, not in this file" % release)],
             "partialFingerprints": {BINARY_KEY: fingerprint(rid)},

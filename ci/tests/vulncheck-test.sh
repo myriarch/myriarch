@@ -7,7 +7,8 @@
 # module-level findings and allowlisted findings do not. The same script writes the reports for GitHub code scanning with --sarif DIR
 # (never a gate, accepted findings left out, every result with a location and a fingerprint), and ci/vulncheck-binaries.sh scans the
 # binaries of a published release only after the keyless verification of its checksums.txt and the SHA-256 of every archive; its test
-# runs the real script and ci/release/verify-blob.sh with doubles of curl, cosign and govulncheck and a release made on the fly. The shape
+# runs the real script and ci/release/verify-blob.sh with doubles of curl, cosign and govulncheck and a release made on the fly; the scan
+# runs at module level because the release binaries are stripped, and its results say so. The shape
 # of .github/workflows/vulncheck.yml is pinned as well: the only write scope is security-events in the job upload, which runs no script.
 # shellcheck source=ci/tests/lib-test.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
@@ -326,22 +327,29 @@ exit 0
 SH
 cat > "${TB}/govulncheck" <<'SH'
 #!/bin/sh
-# prints the report of the fixture: VULNERABLE in the bytes of the binary means a finding; STUB_STATE/govulncheck.fail makes the tool fail
+# prints the report of the fixture: VULNERABLE in the bytes of the binary means a finding (the fixture named in STUB_STATE/govulncheck.report,
+# vulnerable by default); STUB_STATE/govulncheck.fail makes the tool fail
 echo "$*" >> "${STUB_CALLS}/govulncheck.log"
 if [ -f "${STUB_STATE}/govulncheck.fail" ]; then echo "govulncheck: failed to extract build info from the binary" >&2; exit 2; fi
 bin=""; for a in "$@"; do bin="$a"; done
-if grep -q VULNERABLE "${bin}"; then cat "${STUB_FIXTURES}/vulnerable.sarif"; else cat "${STUB_FIXTURES}/clean.sarif"; fi
+fixture=vulnerable; [ -f "${STUB_STATE}/govulncheck.report" ] && fixture="$(cat "${STUB_STATE}/govulncheck.report")"
+if grep -q VULNERABLE "${bin}"; then cat "${STUB_FIXTURES}/${fixture}.sarif"; else cat "${STUB_FIXTURES}/clean.sarif"; fi
 SH
 chmod 0755 "${CURLB}/curl" "${TB}/cosign" "${TB}/govulncheck"
+# The shape of the output of `govulncheck -mode binary -scan module -format sarif` (v1.8.0): the configuration of the run as the properties of
+# the driver, and a result with a rule id, the level error (the strongest statement of a module-level scan), a message that names the
+# modules, and nothing else (no location, no code flow). A scan at the default level of a stripped binary instead reports "Your code calls
+# vulnerable functions in ..." with code flows for every package of the affected modules, which the programs do not link.
 cat > "${FIX}/vulnerable.sarif" <<'JSON'
-{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"govulncheck","semanticVersion":"v1.8.0","informationUri":"https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck",
- "properties":{"scan_mode":"binary","scan_level":"symbol"},
- "rules":[{"id":"GO-2026-9999","shortDescription":{"text":"[GO-2026-9999] test vulnerability"},"helpUri":"https://pkg.go.dev/vuln/GO-2026-9999","properties":{"tags":[]}}]}},
- "results":[{"ruleId":"GO-2026-9999","level":"error","message":{"text":"Your code calls vulnerable functions in 1 package (example.test/lib)."},
- "codeFlows":[{"threadFlows":[{"locations":[{"module":"example.test/lib@v1.2.3","location":{"physicalLocation":{"artifactLocation":{},"region":{}},"message":{"text":"example.test/lib.Func"}}}]}],"message":{"text":"flow"}}],
- "stacks":[{"message":{"text":"stack"},"frames":[{"module":"example.test/lib@v1.2.3","location":{"physicalLocation":{"artifactLocation":{},"region":{}}}}]}]}]}]}
+{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"govulncheck","semanticVersion":"v1.8.0","informationUri":"https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck",
+ "properties":{"protocol_version":"v1.0.0","scanner_name":"govulncheck","scanner_version":"v1.8.0","db":"https://vuln.go.dev","scan_level":"module","scan_mode":"binary"},
+ "rules":[{"id":"GO-2026-9999","shortDescription":{"text":"[GO-2026-9999] test vulnerability"},"fullDescription":{"text":"test vulnerability"},"help":{"text":"details"},"helpUri":"https://pkg.go.dev/vuln/GO-2026-9999","properties":{"tags":[]}}]}},
+ "results":[{"ruleId":"GO-2026-9999","level":"error","message":{"text":"Your code depends on 2 vulnerable modules (example.test/lib and stdlib). Run the call-level analysis to understand whether your code actually calls the vulnerabilities."}}]}]}
 JSON
-printf '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"govulncheck","semanticVersion":"v1.8.0"}}}]}\n' > "${FIX}/clean.sarif"
+printf '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"govulncheck","semanticVersion":"v1.8.0","properties":{"scan_level":"module","scan_mode":"binary"},"rules":[]}},"results":[]}]}\n' > "${FIX}/clean.sarif"
+# reports that are not at module level: the default level of the tool, and a source scan
+sed 's/"scan_level":"module"/"scan_level":"symbol"/' "${FIX}/vulnerable.sarif" > "${FIX}/symbol-level.sarif"
+sed 's/"scan_mode":"binary"/"scan_mode":"source"/' "${FIX}/vulnerable.sarif" > "${FIX}/source-mode.sarif"
 export STUB_CALLS="${CALLS}" STUB_STATE="${STATE}" STUB_SERVE="${SERVE}" STUB_FIXTURES="${FIX}" STUB_COSIGN_VERSION="${COSIGN_PIN}"
 
 mkrelease() { # mode: makes the files of the release v9.9.9 in STUB_SERVE (modes: ok, mismatch, no-member, symlink, none, duplicate)
@@ -414,7 +422,7 @@ if mode == "mismatch":
 PY
 }
 printf '302 https://github.com/myriarch/myriarch/releases/tag/v9.9.9' > "${STATE}/latest"
-reset_world() { rm -f "${STATE}/cosign.fail" "${STATE}/curl.fail" "${STATE}/govulncheck.fail" "${STATE}/flaky"; : > "${CALLS}/curl.log"; : > "${CALLS}/cosign.log"; : > "${CALLS}/govulncheck.log"; rm -rf "${W}/out"; }
+reset_world() { rm -f "${STATE}/cosign.fail" "${STATE}/curl.fail" "${STATE}/govulncheck.fail" "${STATE}/govulncheck.report" "${STATE}/flaky"; : > "${CALLS}/curl.log"; : > "${CALLS}/cosign.log"; : > "${CALLS}/govulncheck.log"; rm -rf "${W}/out"; }
 binaries() { # script arguments...: the real script with the doubles; TOOLS_BIN holds cosign and govulncheck, curl comes first in PATH
   env PATH="${CURLB}:${PATH}" TOOLS_BIN="${TB}" VULNCHECK_ALLOWLIST="${ALLOW}" VULNCHECK_DOWNLOAD_RETRY_SECONDS="${RETRY:-0}" "${BINARIES}" --out "${W}/out" "$@"
 }
@@ -431,13 +439,22 @@ grep -q 'verify-blob' "${CALLS}/cosign.log" && grep -q -- '--certificate-identit
   && grep -q -- '--certificate-oidc-issuer https://token.actions.githubusercontent.com' "${CALLS}/cosign.log" \
   && ok "binaries: the signature is checked against the identity of the release workflow at the tag, bound to the version, and the GitHub Actions issuer" \
   || fail "binaries: the cosign call is not the bound identity ($(grep verify-blob "${CALLS}/cosign.log" | tr '\n' ' '))"
-[ "$(grep -c '^-mode binary -format sarif ' "${CALLS}/govulncheck.log")" = 3 ] && ok "binaries: govulncheck runs once per archive, in binary mode with SARIF output" || fail "binaries: wrong govulncheck calls ($(tr '\n' ';' < "${CALLS}/govulncheck.log"))"
+[ "$(grep -c '^-mode binary -scan module -format sarif ' "${CALLS}/govulncheck.log")" = 3 ] \
+  && ok "binaries: govulncheck runs once per archive, in binary mode at module level with SARIF output (the binaries are stripped)" \
+  || fail "binaries: wrong govulncheck calls ($(tr '\n' ';' < "${CALLS}/govulncheck.log"))"
 report_query 'len(d["runs"]) == 1 and [r["ruleId"] for r in d["runs"][0]["results"]] == ["GO-2026-9999"]' && ok "binaries: one result per vulnerability" || fail "binaries: wrong results"
 report_query 'd["runs"][0]["results"][0]["properties"]["binaries"] == ["myrctl_9.9.9_linux_amd64.tar.gz", "myriarchd_9.9.9_linux_amd64.tar.gz"] and "2 of the 3 binaries of the release v9.9.9" in d["runs"][0]["results"][0]["message"]["text"]' \
   && ok "binaries: the result names the two binaries that contain the vulnerable code, of three" || fail "binaries: the affected binaries are wrong"
 report_query 'all(r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "go.mod" and r["partialFingerprints"] and "codeFlows" not in r and "stacks" not in r for r in d["runs"][0]["results"]) and d["runs"][0]["tool"]["driver"]["properties"]["scan_mode"] == "binary"' \
   && ok "binaries: the result has a location (go.mod) and a fingerprint, and no code flow without a file" || fail "binaries: the result does not fit code scanning"
-report_query '"example.test/lib@v1.2.3" in d["runs"][0]["results"][0]["message"]["text"] and d["runs"][0]["tool"]["driver"]["rules"][0]["id"] == "GO-2026-9999"' && ok "binaries: the module and the rule are kept" || fail "binaries: module or rule lost"
+report_query '"Affected modules: example.test/lib, stdlib (stdlib is the Go version of the build)" in d["runs"][0]["results"][0]["message"]["text"] and d["runs"][0]["tool"]["driver"]["rules"][0]["id"] == "GO-2026-9999"' \
+  && ok "binaries: the modules that the tool names in its message and the rule are kept" || fail "binaries: module or rule lost"
+report_query 'all(r["level"] == "warning" for r in d["runs"][0]["results"]) and d["runs"][0]["tool"]["driver"]["properties"]["scan_level"] == "module"' \
+  && ok "binaries: the result is a warning although the tool calls a finding of a module-level scan an error, and the report says that it is at module level" \
+  || fail "binaries: the level of the result is wrong"
+report_query 'all("module level" in r["message"]["text"] and "stripped" in r["message"]["text"] and "not that it contains or calls the vulnerable code" in r["message"]["text"] and "vulnerable symbols" not in r["message"]["text"] and "calls vulnerable functions" not in r["message"]["text"] for r in d["runs"][0]["results"])' \
+  && ok "binaries: the message says that the scan works at module level and does not claim that the code is contained or called" \
+  || fail "binaries: the message does not state the precision of the scan"
 
 reset_world; printf 'GO-2026-9999 | review 2999-01-01 | accepted for the test\n' > "${ALLOW}"
 expect_ok "binaries: an accepted finding is left out" binaries --tag v9.9.9
@@ -472,6 +489,64 @@ expect_fail "binaries: an archive that is listed twice is refused" 'ERROR \[chec
 
 reset_world; mkrelease ok; : > "${STATE}/govulncheck.fail"
 expect_fail "binaries: a failing govulncheck fails the scan" 'ERROR \[govulncheck_failed\].*failed to extract build info' binaries --tag v9.9.9
+
+# The claim of the results (a binary was built with an affected version, nothing about what it calls) holds for a scan at module level only,
+# so the merge refuses the report of another level or mode instead of describing it wrongly.
+for other in symbol-level source-mode; do
+  reset_world; mkrelease ok; echo "${other}" > "${STATE}/govulncheck.report"
+  expect_fail "binaries: a report of the kind ${other} is refused" 'is not the report of govulncheck -mode binary -scan module' binaries --tag v9.9.9
+  [ ! -e "${W}/out/govulncheck-binaries.sarif" ] && ok "binaries: ... and no report is written" || fail "binaries: a report was written from a report of the kind ${other}"
+done
+
+# The message of a result: the modules are read from the message of the tool (a list of one, two or more), and the text stays within the
+# limit that code scanning shows as the title of an alert when the lists are long.
+MESSAGE_CHECK="${TEST_TMP}/message-check.py"
+cat > "${MESSAGE_CHECK}" <<'PY'
+import importlib.util
+import os
+import sys
+
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("vulncheck_sarif", os.path.join(sys.argv[1], "vulncheck-sarif.py"))
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+errors = []
+
+
+def result(text):
+    return {"ruleId": "GO-2026-9999", "message": {"text": text}}
+
+
+for text, want in (
+    ("Your code depends on 1 vulnerable module (stdlib). Run the call-level analysis to understand whether your code actually calls the vulnerabilities.", {"stdlib"}),
+    ("Your code depends on 2 vulnerable modules (example.test/lib and stdlib). Run the call-level analysis.", {"example.test/lib", "stdlib"}),
+    ("Your code depends on 3 vulnerable modules (a.test/x, b.test/y, and stdlib). Run the call-level analysis.", {"a.test/x", "b.test/y", "stdlib"}),
+    ("Your code calls vulnerable functions in 1 package (html/template).", set()),
+    ("", set()),
+):
+    got = module.modules_of(result(text))
+    if got != want:
+        errors.append("modules_of(%r) = %r, expected %r" % (text[:60], sorted(got), sorted(want)))
+if module.modules_of({"ruleId": "x"}) != set() or module.modules_of({"message": {"text": 7}}) != set():
+    errors.append("a result without a text of a message names a module")
+
+names = ["myriarch-updater_0.1.0_linux_amd64.tar.gz", "myriarch-updater_0.1.0_linux_arm64.tar.gz", "myriarchd_0.1.0_darwin_arm64.tar.gz"] * 6
+mods = ["example.test/module%02d" % i for i in range(30)] + ["stdlib"]
+long_text = module.compose("GO-2026-9999", "v0.1.0", names, 18, mods)
+if len(long_text) > module.MAX_TEXT:
+    errors.append("a message with long lists has %d characters, the limit is %d" % (len(long_text), module.MAX_TEXT))
+if " more" not in long_text or "module level" not in long_text or "not that it contains or calls the vulnerable code" not in long_text:
+    errors.append("a cut message keeps neither its count nor its statement of the precision: %s" % long_text)
+short_text = module.compose("GO-2026-9999", "v0.1.0", ["a.tar.gz", "b.zip"], 3, ["stdlib"])
+if "(a.tar.gz, b.zip)" not in short_text or "Affected modules: stdlib " not in short_text or " more" in short_text:
+    errors.append("a short message is cut or lost a name: %s" % short_text)
+if "not named by govulncheck" not in module.compose("GO-2026-9999", "v0.1.0", ["a.tar.gz"], 1, []):
+    errors.append("a result without a named module does not say so")
+if errors:
+    print("\n".join(errors), file=sys.stderr)
+    sys.exit(1)
+PY
+expect_ok "binaries: the modules are read from the message of the tool, and long lists are cut within the limit of a message" python3 -I "${MESSAGE_CHECK}" "${CI_DIR}"
 
 # the network
 reset_world; mkrelease ok; echo 6 > "${STATE}/curl.fail"

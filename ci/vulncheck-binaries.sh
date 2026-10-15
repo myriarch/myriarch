@@ -6,6 +6,13 @@
 # as SARIF for GitHub code scanning (.github/workflows/vulncheck.yml). The source scan (ci/vulncheck.sh) reads the code; this one reads
 # what users run, so it also finds the vulnerabilities of a toolchain or a dependency that a release was built with after the release.
 #
+# The scan works at module level (govulncheck -mode binary -scan module). The release binaries are stripped (-s -w,
+# deploy/release/goreleaser.yaml), and govulncheck cannot read the symbols of a stripped program: at its default level it would take
+# every vulnerable symbol of every affected module for present and report each as called, including packages that the program does not
+# link. A result of this scan means that a release was built with a module or a Go version that an advisory affects; it does not say
+# that a binary contains or calls the vulnerable code (the source scan and the gate of ci/vulncheck.sh tell whether the code calls a
+# symbol). ci/vulncheck-sarif.py refuses a report of another level and writes every result as a warning.
+#
 #   ci/vulncheck-binaries.sh [--tag vX.Y.Z] --out DIR
 #
 # Writes DIR/govulncheck-binaries.sarif. The release is --tag, else VULNCHECK_RELEASE_TAG, else the latest stable release of the
@@ -20,9 +27,11 @@
 #   3. every archive of myriarchd, myriarch-updater, myrctl and myriarch-sim that the verified checksums.txt lists for the version is
 #      downloaded and compared with its SHA-256 there [checksum_mismatch, checksum_entry, no_archives];
 #   4. only then the one binary of each archive is read out (the member named like the program, a regular file within a size limit;
-#      nothing else is unpacked) [archive_invalid] and scanned with `govulncheck -mode binary -format sarif` [govulncheck_failed].
-# Findings that ci/vulncheck-allowlist.txt accepts are left out of the report (ci/vulncheck-sarif.py). Binary mode reports the vulnerable
-# symbols that a binary contains; it cannot tell whether the program reaches them, so it reports more than the source scan.
+#      nothing else is unpacked) [archive_invalid] and scanned with `govulncheck -mode binary -scan module -format sarif`
+#      [govulncheck_failed].
+# Findings that ci/vulncheck-allowlist.txt accepts are left out of the report (ci/vulncheck-sarif.py) while the review date of the entry
+# has not passed. That file belongs to the gate: a finding that only this scan reports is fixed by a release that is built with the fixed
+# version, or dismissed in code scanning with a reason (docs/development.md, "Vulnerability reports in code scanning").
 #
 # Environment: TOOLS_BIN (cosign for the verification and govulncheck; default .cache/bin; the tools are never looked up in PATH),
 # GOVULNCHECK (another govulncheck), VULNCHECK_ALLOWLIST (another allowlist), VULNCHECK_RELEASE_TAG, VULNCHECK_DOWNLOAD_RETRY_SECONDS
@@ -229,7 +238,7 @@ except (OSError, ValueError, tarfile.TarError, zipfile.BadZipFile) as e:
     sys.exit(1)
 PY
   info "scanning ${names[${i}]} (${member})"
-  "${govulncheck}" -mode binary -format sarif "${binary}" > "${work}/sarif/${i}.sarif" 2> "${work}/sarif/${i}.err" \
+  "${govulncheck}" -mode binary -scan module -format sarif "${binary}" > "${work}/sarif/${i}.sarif" 2> "${work}/sarif/${i}.err" \
     || err govulncheck_failed "govulncheck failed for ${member} of ${names[${i}]}: $(grep -v '^[[:space:]]*$' "${work}/sarif/${i}.err" | tail -n 1 | tr -d '[:cntrl:]' | cut -c 1-200)"
   labelled+=("${names[${i}]}=${work}/sarif/${i}.sarif")
 done
@@ -238,4 +247,4 @@ python3 -I "${CI_DIR}/vulncheck-sarif.py" binaries "${allowlist}" "${report}" "$
 findings="$(python3 -I -c 'import json, sys; print(sum(len(r.get("results") or []) for r in json.load(open(sys.argv[1]))["runs"]))' "${report}")"
 info "${#names[@]} binaries of ${tag} scanned, ${findings} finding(s) for code scanning in ${report}"
 summary "### Vulnerability scan of the released binaries" "" \
-  "Release ${tag}: the signature of checksums.txt and the SHA-256 of ${#names[@]} archives were verified before the scan; the binaries were scanned with govulncheck in binary mode. ${findings} finding(s) went to code scanning (the findings that \`ci/vulncheck-allowlist.txt\` accepts are left out)."
+  "Release ${tag}: the signature of checksums.txt and the SHA-256 of ${#names[@]} archives were verified before the scan; the binaries were scanned with govulncheck at module level (they are stripped: a finding means a release was built with an affected module or Go version, not that a binary calls the vulnerable code). ${findings} finding(s) went to code scanning (the findings that an entry of \`ci/vulncheck-allowlist.txt\` still accepts are left out)."
