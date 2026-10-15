@@ -354,6 +354,12 @@ Exactly one of password (together with username) and token.
 | `password` | `string` | Format `password`. |
 | `token` | `string` | One-time token of the bootstrap admin (token sign-in). Format `password`. |
 
+## BridgeSpec
+
+| Field | Type | Description |
+|---|---|---|
+| `manage` (required) | `boolean` | Opts the fleet in to configure the OpAMP Bridge agents that its selector matches. Without it a Bridge never receives remote configuration from the fleet. The opt-in takes effect for Bridges in standalone mode only. Default `false`. |
+
 ## ChangelogEntry
 
 | Field | Type | Description |
@@ -609,6 +615,7 @@ Type: `string`. Values:
 | `collector` (required) | [CollectorSpec](#collectorspec) |  |
 | `update` (required) | [UpdateSpec](#updatespec) |  |
 | `rollout` (required) | [FleetRolloutSpec](#fleetrolloutspec) |  |
+| `bridge` | [BridgeSpec](#bridgespec) |  |
 | `source` (required) | [SourceRef](#sourceref) |  |
 
 ## FleetBehind

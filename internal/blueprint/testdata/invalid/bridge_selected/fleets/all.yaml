@@ -1,0 +1,9 @@
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: all
+spec:
+  blueprint: base
+  selector:
+    matchExpressions:
+      - {key: site.type, operator: NotIn, values: [edge]}

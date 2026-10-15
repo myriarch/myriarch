@@ -2040,6 +2040,13 @@ export interface components {
             /** @default default */
             versionPolicy?: string;
         };
+        BridgeSpec: {
+            /**
+             * @description Opts the fleet in to configure the OpAMP Bridge agents that its selector matches. Without it a Bridge never receives remote configuration from the fleet. The opt-in takes effect for Bridges in standalone mode only.
+             * @default false
+             */
+            manage: boolean;
+        };
         Fleet: {
             name: string;
             description?: string;
@@ -2052,6 +2059,7 @@ export interface components {
             collector: components["schemas"]["CollectorSpec"];
             update: components["schemas"]["UpdateSpec"];
             rollout: components["schemas"]["FleetRolloutSpec"];
+            bridge?: components["schemas"]["BridgeSpec"];
             source: components["schemas"]["SourceRef"];
         };
         FleetStatus: {

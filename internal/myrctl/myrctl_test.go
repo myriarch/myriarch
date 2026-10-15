@@ -89,7 +89,7 @@ func TestValidateNegativeRepos(t *testing.T) {
 		{"invalid_component_id", "error", false}, {"invalid_pipeline", "error", false}, {"config_invalid_toplevel", "error", false},
 		{"policy_invalid", "error", false}, {"invalid_name", "error", false}, {"missing_field", "error", false},
 		{"unknown_kind", "error", false}, {"unknown_api_version", "error", false}, {"invalid_config_key", "error", false},
-		{"fleet_ambiguous", "warning", false}, {"sample_unassigned", "warning", false}, {"deprecated_component", "warning", false},
+		{"fleet_ambiguous", "warning", false}, {"sample_unassigned", "warning", false}, {"bridge_selected", "warning", false}, {"deprecated_component", "warning", false},
 		{"unused_component", "warning", false}, {"env_syntax", "warning", false},
 	}
 	for _, tc := range cases {
@@ -122,6 +122,72 @@ func TestValidateNegativeRepos(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The warning bridge_selected (a fleet without spec.bridge.manage also matches
+// an OpAMP Bridge) shows in the text and in the JSON output, does not fail the
+// check, fails it with --strict, and disappears with the opt-in.
+func TestValidateBridgeSelected(t *testing.T) {
+	dir := filepath.Join(invalidDir, "bridge_selected")
+
+	code, out, errs := run(t, "validate", dir)
+	assert.Equal(t, 0, code, out+errs)
+	assert.Contains(t, out, "fleets/all.yaml:7: warning bridge_selected:")
+	assert.Contains(t, out, "samples/agents/bridge.yaml:1: warning bridge_selected: sample agent \"bridge\"")
+	assert.Contains(t, out, "2 samples; 0 errors, 2 warnings")
+	assert.Empty(t, errs)
+
+	code, out, errs = run(t, "validate", "--strict", dir)
+	assert.Equal(t, 1, code, out+errs)
+	assert.Contains(t, out, "FAILED")
+	assert.Contains(t, out, "bridge_selected")
+
+	code, out, _ = run(t, "validate", "--output", "json", dir)
+	require.Equal(t, 0, code, out)
+	var rep report
+	require.NoError(t, json.Unmarshal([]byte(out), &rep))
+	assert.True(t, rep.Valid)
+	assert.Equal(t, 2, rep.Warnings)
+	var objects []string
+	for _, is := range rep.Issues {
+		require.Equal(t, "bridge_selected", is.Code)
+		assert.Equal(t, domain.SeverityWarning, is.Severity)
+		objects = append(objects, is.Object)
+	}
+	assert.ElementsMatch(t, []string{"Fleet/all", "Sample/bridge"}, objects)
+
+	// the opt-in silences both findings and the strict check passes
+	opted := t.TempDir()
+	require.NoError(t, os.CopyFS(opted, os.DirFS(dir)))
+	fleet := filepath.Join(opted, "fleets", "all.yaml")
+	raw, err := os.ReadFile(fleet)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(fleet, append(raw, []byte("  bridge:\n    manage: true\n")...), 0o600))
+	code, out, errs = run(t, "validate", "--strict", opted)
+	assert.Equal(t, 0, code, out+errs)
+	assert.Contains(t, out, "0 errors, 0 warnings")
+	assert.NotContains(t, out, "bridge_selected")
+}
+
+// A typing mistake in spec.bridge fails the check like any unknown field.
+func TestValidateBridgeUnknownField(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.CopyFS(dir, os.DirFS(filepath.Join(invalidDir, "bridge_selected"))))
+	fleet := filepath.Join(dir, "fleets", "all.yaml")
+	raw, err := os.ReadFile(fleet)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(fleet, append(raw, []byte("  bridge:\n    managed: true\n")...), 0o600))
+	code, out, _ := run(t, "validate", "--output", "json", dir)
+	assert.Equal(t, 1, code, out)
+	var rep report
+	require.NoError(t, json.Unmarshal([]byte(out), &rep))
+	var found bool
+	for _, is := range rep.Issues {
+		if is.Code == "unknown_field" && is.Path == "spec.bridge.managed" {
+			found = true
+		}
+	}
+	assert.True(t, found, "%+v", rep.Issues)
 }
 
 func TestValidateUnknownComponentNeedsComponentList(t *testing.T) {

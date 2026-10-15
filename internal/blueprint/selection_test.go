@@ -47,10 +47,11 @@ spec:
 
 func selectionRepo(fleetSpec string) fstest.MapFS {
 	return fstest.MapFS{
-		"blueprints/base.yaml":     {Data: []byte(selectionBlueprint)},
-		"policies/gw.yaml":         {Data: []byte(selectionPolicy)},
-		"fleets/gw.yaml":           {Data: []byte("apiVersion: myriarch.dev/v1alpha1\nkind: Fleet\nmetadata:\n  name: gw\nspec:\n  blueprint: base\n" + fleetSpec)},
-		"samples/agents/gw-a.yaml": {Data: []byte("name: gw-a\nattributes:\n  host.name: gw-a\n")},
+		"blueprints/base.yaml": {Data: []byte(selectionBlueprint)},
+		"policies/gw.yaml":     {Data: []byte(selectionPolicy)},
+		// the selector is narrow: an empty one would also match OpAMP Bridge agents (bridge_selected)
+		"fleets/gw.yaml":           {Data: []byte("apiVersion: myriarch.dev/v1alpha1\nkind: Fleet\nmetadata:\n  name: gw\nspec:\n  blueprint: base\n  selector:\n    matchAttributes: {site.type: gateway}\n" + fleetSpec)},
+		"samples/agents/gw-a.yaml": {Data: []byte("name: gw-a\nattributes:\n  host.name: gw-a\n  site.type: gateway\n")},
 	}
 }
 
@@ -211,7 +212,7 @@ func TestSelectionTypoIsUnknownField(t *testing.T) {
 	require.NotNil(t, is, "%+v", issues)
 	assert.Contains(t, is.Message, "versionrange")
 	assert.Contains(t, is.Message, "versionRange", "the message suggests the right spelling")
-	assert.Equal(t, 11, is.Line)
+	assert.Equal(t, 13, is.Line) // the fixture has a selector of two lines
 }
 
 // TestSelectionParsesIntoTheFleet: the typed value arrives in the snapshot.

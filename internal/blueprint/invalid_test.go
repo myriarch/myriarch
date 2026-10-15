@@ -61,6 +61,7 @@ var invalidCases = []invalidCase{
 	{name: "invalid_config_key", severity: "error", file: "blueprints/base.yaml", line: 20},
 	{name: "fleet_ambiguous", severity: "warning", file: "samples/agents/a.yaml", line: 1},
 	{name: "sample_unassigned", severity: "warning", file: "samples/agents/a.yaml", line: 1},
+	{name: "bridge_selected", severity: "warning", file: "fleets/all.yaml", line: 7},
 	{name: "deprecated_component", severity: "warning", file: "blueprints/base.yaml"},
 	{name: "unused_component", severity: "warning", file: "blueprints/base.yaml"},
 	{name: "env_syntax", severity: "warning", file: "blueprints/base.yaml"},

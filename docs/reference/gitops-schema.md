@@ -68,6 +68,8 @@ See [Fleets](../concepts/fleets.md).
 | `spec.rollout` | object | no | see fields | The rollout policies of the fleet. |
 | `spec.rollout.configPolicy` | string | no | `default` | Name of the `RolloutPolicy` for configuration changes. |
 | `spec.rollout.versionPolicy` | string | no | `default` | Name of the `RolloutPolicy` for version changes. |
+| `spec.bridge` | object | no | see fields | How the fleet treats OpAMP Bridge agents of the OpenTelemetry Operator that its selector matches. See [Bridge agents](../concepts/fleets.md#bridge-agents). |
+| `spec.bridge.manage` | bool | no | `false` | Opts the fleet in to configure the Bridge agents that its selector matches. Without it a Bridge never receives remote configuration from the fleet, and a selector that matches Bridges is the warning `bridge_selected`. The opt-in takes effect for Bridges in standalone mode only: a Bridge in operator mode stays locked with it. |
 
 A policy name that is not `default` and does not exist is `policy_not_found`. If the policy `default` does not exist, the
 built-in policy applies ([Rollouts](../concepts/rollouts.md#which-policy-a-fleet-uses)).
@@ -208,6 +210,11 @@ Unknown fields in a sample are `unknown_field`, a value that is not a scalar is 
 fleet is the warning `sample_unassigned`. A sample that matches several fleets of equal highest priority is the warning
 `fleet_ambiguous`.
 
+A sample that is an OpAMP Bridge, because it has the `service.name` `io.opentelemetry.operator-opamp-bridge` or the
+attribute `opentelemetry.io/opamp.bridge.mode`, is never rendered and does not have to match a fleet. For every matching
+fleet without `spec.bridge.manage` it is the warning `bridge_selected`, with the name of the sample. The quickstart
+examples contain no Bridge sample.
+
 ## Selector operators
 
 Used by `spec.selector.matchExpressions` of a fleet and by wave selectors of a policy.
@@ -310,6 +317,7 @@ for all sample renderings. Without it, component names are not checked against a
 | Code | Severity | Meaning |
 |---|---|---|
 | `blueprint_not_found` | error | A fleet names a blueprint that does not exist, or an `extends` parent is missing. |
+| `bridge_selected` | warning | The selector of a fleet without `spec.bridge.manage` also matches an OpAMP Bridge agent: a synthetic Bridge in operator mode or in standalone mode (what the Bridge reports itself, with the inventory applied), or a sample agent that is a Bridge. The fleet would never configure it. Selectors on `labels.*` of an enrollment token cannot be evaluated here. With `validate --strict` the warning fails the check. |
 | `config_invalid_toplevel` | error | The rendered configuration is not a mapping, has a top-level key other than `receivers`, `processors`, `exporters`, `connectors`, `extensions` and `service`, or a section is not a mapping. |
 | `deprecated_component` | warning | A component uses an old type name (an alias), for example `hostmetrics`. |
 | `duplicate_object` | error | Two objects of one kind have the same name, two fragments of one blueprint, or two sample agents. |
