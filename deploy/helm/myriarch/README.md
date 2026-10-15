@@ -195,7 +195,8 @@ OpenShift usually demand.
 * **The Pod of `helm test`** ([Helm test](#helm-test), `tests.enabled`, default `true`) gets a source for port 8080 of its own when
   `allowSameNamespace` is `false`: a pod selector with its labels. The chart adds it only while neither
   `config.server.trustedProxies` nor `config.opamp.clientCertHeader` is set, because every pod that carries these labels could
-  use it ([Network access of the test](#network-access-of-the-test)).
+  use it ([Network access of the test](#network-access-of-the-test)). To keep the policy of v0.1.0, in which no pod of the namespace
+  reaches port 8080 unless `networkPolicy.ingress.from` names it, set `tests.enabled: false`.
 * **Port 9090** (`/metrics`, unauthenticated) only from `networkPolicy.metrics.from`; empty means nobody.
 * **Egress** (`networkPolicy.egress.enabled`): DNS (`egress.dns`; the OpenShift profile uses `openshift.dns`, UDP and TCP
   per port), and one rule for TCP `egress.ports` (default 5432 PostgreSQL, 443 HTTPS) plus `egress.extraPorts` plus the Git
@@ -464,6 +465,8 @@ networkPolicy:
 
 A cluster with a default-deny policy for the namespace (an egress rule for the test Pod, DNS) needs rules of its own for the test
 Pod as well.
+
+`tests.enabled: false` removes the Pod and the rule: the NetworkPolicy is then the one of v0.1.0.
 
 ### When the test fails
 

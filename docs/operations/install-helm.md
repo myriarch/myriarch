@@ -397,6 +397,10 @@ connect: it fails with `readyz failed: cannot reach ...: no answer within 10s`. 
 of `networkPolicy.ingress.from`, as the [README of the chart](../../deploy/helm/myriarch/README.md#network-access-of-the-test) shows.
 `helm template | kubectl apply` creates the test Pod as an ordinary Pod: add `--skip-tests`, or set `tests.enabled: false`.
 
+Without `trustedProxies` and `clientCertHeader`, and with `networkPolicy.ingress.allowSameNamespace: false`, the chart adds a source for
+the test Pod instead, and every pod that carries its labels can reach port 8080. To keep the NetworkPolicy of v0.1.0, in which no pod of
+the namespace reaches port 8080 unless `networkPolicy.ingress.from` names it, set `tests.enabled: false`.
+
 With the Prometheus Operator, `prometheusRule.enabled: true` (and `prometheusRule.labels` for the label that your Prometheus resource
 selects rules by) adds the alerts of the server; see [Alerting rules](../../deploy/helm/myriarch/README.md#alerting-rules).
 

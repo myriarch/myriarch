@@ -406,7 +406,7 @@ networkPolicy:
     # reaches port 8080 (kubectl port-forward still works), except the Pod of "helm test": while tests.enabled the chart
     # adds a source for the pods that carry the labels of that Pod (app.kubernetes.io/component: test), unless
     # trustedProxies or clientCertHeader is set. Then no rule exists for the test Pod, because any pod with those labels
-    # could use it; list the source yourself if you accept that.
+    # could use it; list the source yourself if you accept that. tests.enabled=false keeps the policy of v0.1.0.
     allowSameNamespace: true
   metrics:
     # Sources for port 9090 (/metrics, unauthenticated) in NetworkPolicy "from" format; empty = nobody. Example:
