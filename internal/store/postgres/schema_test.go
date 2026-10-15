@@ -12,10 +12,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
+	"github.com/pressly/goose/v3/lock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -332,4 +335,118 @@ func TestPrepareSchemaWithSeveralReplicasStartingTogether(t *testing.T) {
 		assert.Equal(t, latest, statuses[i].Version, "replica %d", i)
 	}
 	assert.Equal(t, int(latest-5), strings.Count(logs.String(), "migration applied"), "every migration is applied exactly once")
+}
+
+// overlap is what PrepareSchema reports for a start that overlaps with another replica that goes further.
+type overlap struct {
+	pool   *pgxpool.Pool
+	status postgres.SchemaStatus
+	err    error
+	logs   string
+}
+
+// startWhileAnotherReplicaMigrates runs PrepareSchema (with migrateOnStart) on a schema at version 5 while another replica
+// holds the advisory lock of the migrations (lock.DefaultLockID). As soon as PrepareSchema waits for the lock, the other replica
+// applies the remaining migrations, records the migration latest+1 of a newer release, sets the compatibility level to
+// newerLevel (0 leaves it alone) and releases the lock. It takes about five seconds, the interval in which the migration library
+// tries the lock again.
+func startWhileAnotherReplicaMigrates(t *testing.T, newerLevel int64) overlap {
+	t.Helper()
+	ctx := context.Background()
+	latest := latestMigration(t)
+	pool := pgtest.NewPool(t)
+	rollBackTo(t, pool, 5)
+
+	other, err := pgx.ConnectConfig(ctx, pool.Config().ConnConfig.Copy())
+	require.NoError(t, err)
+	defer other.Close(ctx) // the end of the session releases the lock as well
+	_, err = other.Exec(ctx, `SELECT pg_advisory_lock($1)`, lock.DefaultLockID)
+	require.NoError(t, err)
+
+	// A test that fails before the lock is released must not leave PrepareSchema waiting for it: the cleanup stops it before the
+	// database is dropped.
+	startCtx, cancel := context.WithCancel(ctx)
+	finished := make(chan struct{})
+	t.Cleanup(func() { cancel(); <-finished })
+	var logs lockedBuffer
+	done := make(chan overlap, 1)
+	go func() {
+		defer close(finished)
+		st, err := postgres.PrepareSchema(startCtx, pool, true, testLogger(&logs))
+		done <- overlap{pool: pool, status: st, err: err}
+	}()
+
+	// PrepareSchema has found pending migrations and waits for the lock as soon as the migration library has tried it and failed:
+	// its connection then sits idle, and its last statement is the attempt. (starts_with: this query itself names the function,
+	// and an idle pool connection that ran it before must not count.)
+	require.Eventually(t, func() bool {
+		var waiting int
+		err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND state = 'idle' AND starts_with(query, 'SELECT pg_try_advisory_lock')`).Scan(&waiting)
+		return err == nil && waiting > 0
+	}, 20*time.Second, 25*time.Millisecond, "PrepareSchema does not wait for the advisory lock of the migrations")
+	select {
+	case o := <-done:
+		t.Fatalf("PrepareSchema returned while the other replica held the lock: %v", o.err)
+	default:
+	}
+
+	// The other replica holds the lock itself, so it applies the migrations without asking for it.
+	db := stdlib.OpenDBFromPool(pool)
+	defer db.Close()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	require.NoError(t, err)
+	_, err = p.Up(ctx)
+	require.NoError(t, err)
+	pretendVersion(t, pool, latest+1)
+	if newerLevel != 0 {
+		setLevel(t, pool, newerLevel)
+	}
+	var released bool
+	require.NoError(t, other.QueryRow(ctx, `SELECT pg_advisory_unlock($1)`, lock.DefaultLockID).Scan(&released))
+	require.True(t, released, "the other replica held the lock")
+
+	select {
+	case o := <-done:
+		o.logs = logs.String()
+		return o
+	case <-time.After(30 * time.Second):
+		t.Fatal("PrepareSchema did not return after the other replica released the lock")
+		return overlap{}
+	}
+}
+
+// While this replica waits for the advisory lock of the migrations, another one can go further than this binary: it applies the
+// rest, and a migration of a newer release raises the compatibility level above the schema level of this binary. PrepareSchema
+// reads the state again after its migration step, refuses, and applies nothing twice.
+func TestPrepareSchemaRefusesASchemaThatAnotherReplicaMadeIncompatibleMeanwhile(t *testing.T) {
+	latest := latestMigration(t)
+	o := startWhileAnotherReplicaMigrates(t, latest+1)
+
+	var ie *postgres.IncompatibleSchemaError
+	require.True(t, errors.As(o.err, &ie), "the start is refused with an *IncompatibleSchemaError: %v", o.err)
+	want := postgres.SchemaStatus{Version: latest + 1, Level: latest + 1, Supported: latest}
+	assert.Equal(t, want, ie.Status)
+	assert.Equal(t, want, o.status)
+	assert.Contains(t, o.err.Error(), fmt.Sprintf("needs a myriarchd with schema level %d or higher", latest+1))
+	assert.NotContains(t, o.logs, "migration applied", "this replica applied nothing: the other one had gone further")
+	var recordedTwice int
+	require.NoError(t, o.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM (SELECT version_id FROM goose_db_version WHERE is_applied GROUP BY version_id HAVING count(*) > 1) d`).Scan(&recordedTwice))
+	assert.Zero(t, recordedTwice, "no migration is recorded twice")
+}
+
+// The same overlap with a newer release that leaves the compatibility level alone (the normal case of a rolling update): this
+// binary is still compatible, so the start goes on with the warning for a newer schema.
+func TestPrepareSchemaStartsWhenAnotherReplicaWentFurtherAndLeftTheLevel(t *testing.T) {
+	latest := latestMigration(t)
+	o := startWhileAnotherReplicaMigrates(t, 0)
+
+	require.NoError(t, o.err)
+	level := currentLevel(t, o.pool)
+	assert.Equal(t, postgres.SchemaStatus{Version: latest + 1, Level: level, Supported: latest}, o.status)
+	assert.Contains(t, o.logs, "level=WARN")
+	assert.Contains(t, o.logs, "newer than this myriarchd but compatible with it")
+	assert.Contains(t, o.logs, fmt.Sprintf("schemaVersion=%d", latest+1))
+	assert.NotContains(t, o.logs, "migration applied", "this replica applied nothing: the other one had gone further")
 }
