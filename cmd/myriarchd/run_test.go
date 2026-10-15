@@ -31,6 +31,7 @@ import (
 	"github.com/myriarch/myriarch/internal/config"
 	"github.com/myriarch/myriarch/internal/domain"
 	"github.com/myriarch/myriarch/internal/refdoc"
+	"github.com/myriarch/myriarch/internal/store/migrations"
 	"github.com/myriarch/myriarch/internal/testutil/clitest"
 	"github.com/myriarch/myriarch/internal/testutil/pgtest"
 )
@@ -427,8 +428,12 @@ func TestMigrateCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if !strings.Contains(out.String(), "schema version: 5") {
-		t.Fatalf("migrate output: %q", out.String())
+	latest, err := migrations.Latest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("schema version: %d", latest); !strings.Contains(out.String(), want) {
+		t.Fatalf("migrate output: %q, want %q", out.String(), want)
 	}
 }
 
