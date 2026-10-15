@@ -11,7 +11,8 @@
 #   ci/vulncheck.sh                         both builds, the gate
 #   ci/vulncheck.sh --sarif DIR             both builds, but no gate: writes the reports for GitHub code scanning to DIR
 #                                           (govulncheck-source-release.sarif and govulncheck-source-devpg.sarif, without the
-#                                           findings that the allowlist accepts) and exits 0 whatever it found; only a failing tool
+#                                           findings that an allowlist entry still accepts: from the day after its review date a
+#                                           finding is reported again) and exits 0 whatever it found; only a failing tool
 #                                           fails. The workflow .github/workflows/vulncheck.yml uploads them; the gate above stays the
 #                                           check that blocks (job compliance of ci.yml).
 #   GOVULNCHECK=/path/to/govulncheck ...    other binary (default: govulncheck in PATH or .cache/bin)

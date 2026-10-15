@@ -9,7 +9,8 @@
 #   govulncheck/binaries         the programs of the latest stable release, or of the tag that a manual run names
 #
 # This workflow reports and blocks nothing: the check that blocks is the gate vulncheck in the job compliance of ci.yml. A finding that
-# ci/vulncheck-allowlist.txt accepts is left out of the reports.
+# ci/vulncheck-allowlist.txt accepts is left out of the reports until the review date of the entry has passed; from the day after, it is
+# reported again.
 #
 # It runs on pushes to main, every day (an advisory can appear without a change of the code) and by hand, never for a pull request: the
 # token of a pull request from a fork is read-only and cannot upload, and a report of a pull request is no analysis of a branch that

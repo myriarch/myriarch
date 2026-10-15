@@ -555,7 +555,9 @@ guidance after each item names what to do.
   mode bound) and after the SHA-256 of every archive matched that signed list; it reads out only the member that is named like the
   program, as a regular file within a size limit, never runs a downloaded program, takes the tag only in the form of a release tag and
   fails closed on a download that fails, a signature that does not verify, an archive that does not match, a missing or irregular member
-  and a failing tool (`ci/tests/vulncheck-test.sh` covers each). Reports leave out the findings that the allowlist accepts. Limits: govulncheck knows the Go vulnerability database, not
+  and a failing tool (`ci/tests/vulncheck-test.sh` covers each). The reports leave out a finding only while its allowlist entry is in
+  force: an entry accepts until its review date has passed, and from the day after the finding is reported again, so a lapsed
+  acceptance is visible where the alerts are read (the gate itself only warns and passes). Limits: govulncheck knows the Go vulnerability database, not
   other ecosystems (the dependency review and Dependabot cover the advisories of npm, pip and the actions); the binary mode lists the
   vulnerable symbols that a binary contains and cannot tell whether the program reaches them, so it reports more than the source
   analysis; the release binaries are built with `-s -w` and are scanned without a problem, because govulncheck reads the build

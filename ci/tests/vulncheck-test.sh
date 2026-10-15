@@ -112,6 +112,46 @@ sarif_query "${SARIF_OUT}/govulncheck-source-release.sarif" '[r["ruleId"] for r 
   && ok "sarif: the results and the rules of an accepted finding are gone, the others stay" || fail "sarif: the allowlist was not applied"
 printf '%s' "${OUT}" | grep -q 'accepted in the allowlist and left out: GO-2026-9999' && ok "sarif: the log names what was left out" || fail "sarif: the log does not name the accepted finding"
 
+# An entry accepts until its review date has passed. The gate only warns about a lapsed entry (see above); the reports for code scanning
+# show the finding again, so that a lapsed acceptance becomes an alert instead of staying hidden for good.
+printf 'GO-2026-9999 | review 2000-01-01 | lapsed for the test\nGO-2026-8888 | review 2999-01-01 | accepted for the test\n' > "${ALLOW}"
+expect_ok   "sarif: a finding whose allowlist entry is past its review date is reported again" sarif_run "${TEST_TMP}/called.sarif"
+for build in release devpg; do
+  sarif_query "${SARIF_OUT}/govulncheck-source-${build}.sarif" '[r["ruleId"] for r in d["runs"][0]["results"]] == ["GO-2026-9999", "GO-2026-7777"] and [x["id"] for x in d["runs"][0]["tool"]["driver"]["rules"]] == ["GO-2026-9999", "GO-2026-7777"]' \
+    && ok "sarif: ... in the report of the ${build} build, next to the finding that an entry in force still accepts" || fail "sarif: a lapsed acceptance still hides its finding, or an acceptance in force no longer does (${build} build)"
+done
+printf '%s' "${OUT}" | grep -q 'kept although the allowlist names them, because the review date has passed: GO-2026-9999 (2000-01-01)' \
+  && ok "sarif: ... and the log names the entry that has lapsed" || fail "sarif: the log does not name the lapsed entry"
+printf '%s' "${OUT}" | grep -q 'accepted in the allowlist and left out: GO-2026-8888' \
+  && ok "sarif: ... and what an entry in force leaves out" || fail "sarif: the log does not name the finding that stays accepted"
+printf '%s' "${OUT}" | grep -q 'left out: GO-2026-9999' && fail "sarif: the lapsed entry is logged as accepted" || ok "sarif: ... the lapsed entry is not logged as accepted"
+
+# The day rule: an entry accepts on its review date and has lapsed from the day after (the same function decides for the warning of the gate).
+BOUNDARY="${TEST_TMP}/boundary.py"
+cat > "${BOUNDARY}" <<'PY'
+import datetime
+import importlib.util
+import os
+import sys
+
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("vulncheck_sarif", os.path.join(sys.argv[1], "vulncheck-sarif.py"))
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+review = datetime.date(2030, 6, 15)
+errors = []
+for offset, want in ((-1, "in force"), (0, "in force"), (1, "lapsed")):
+    in_force, lapsed = module.read_acceptances(sys.argv[2], review + datetime.timedelta(days=offset))
+    got = "in force" if in_force == {"GO-2030-0001"} and not lapsed else "lapsed" if lapsed == {"GO-2030-0001": review} and not in_force else "wrong"
+    if got != want:
+        errors.append("%d day(s) from the review date the entry is %s, expected %s" % (offset, got, want))
+if errors:
+    print("\n".join(errors), file=sys.stderr)
+    sys.exit(1)
+PY
+printf 'GO-2030-0001 | review 2030-06-15 | boundary of the review date\n' > "${TEST_TMP}/boundary-allowlist.txt"
+expect_ok   "sarif: an allowlist entry accepts on its review date and has lapsed from the day after" python3 -I "${BOUNDARY}" "${CI_DIR}" "${TEST_TMP}/boundary-allowlist.txt"
+
 printf '# nothing is accepted\n' > "${ALLOW}"
 expect_ok   "sarif: a report without results is written (it closes the alerts of an earlier run)" sarif_run "${TEST_TMP}/nothing.sarif"
 sarif_query "${SARIF_OUT}/govulncheck-source-devpg.sarif" 'd["runs"][0]["results"] == [] and d["runs"][0]["tool"]["driver"]["rules"] == []' \
@@ -404,6 +444,11 @@ expect_ok "binaries: an accepted finding is left out" binaries --tag v9.9.9
 report_query 'd["runs"][0]["results"] == [] and d["runs"][0]["tool"]["driver"]["rules"] == []' && ok "binaries: ... the report holds no result" || fail "binaries: the accepted finding is in the report"
 printf '%s' "${OUT}" | grep -q 'accepted in the allowlist and left out: GO-2026-9999' && ok "binaries: ... and the log names it" || fail "binaries: the log does not name the accepted finding"
 grep -q 'releases/latest' "${CALLS}/curl.log" && fail "binaries: --tag still looked up the latest release" || ok "binaries: --tag skips the lookup of the latest release"
+reset_world; printf 'GO-2026-9999 | review 2000-01-01 | lapsed for the test\n' > "${ALLOW}"
+expect_ok "binaries: a finding whose allowlist entry is past its review date is reported again" binaries --tag v9.9.9
+report_query '[r["ruleId"] for r in d["runs"][0]["results"]] == ["GO-2026-9999"]' && ok "binaries: ... the report holds the result" || fail "binaries: a lapsed acceptance still hides the finding"
+printf '%s' "${OUT}" | grep -q 'kept although the allowlist names them, because the review date has passed: GO-2026-9999 (2000-01-01)' \
+  && ok "binaries: ... and the log names the entry that has lapsed" || fail "binaries: the log does not name the lapsed entry"
 printf '# nothing is accepted\n' > "${ALLOW}"
 
 # a failed verification stops everything before an archive is fetched

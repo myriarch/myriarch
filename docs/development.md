@@ -572,7 +572,9 @@ of `ci.yml`. Three categories hold the reports:
 
 The job `upload` is the only one with a write scope. It uploads each report with its category, so a vulnerability that a later run no
 longer finds is closed by that run. A finding that `ci/vulncheck-allowlist.txt` accepts (the file of the gate, with ID, review date
-and reason) is left out of every report, so code scanning shows what the project has not decided about. A manual run can name
+and reason) is left out of every report while its entry is in force, so code scanning shows what the project has not decided about.
+An entry accepts until its review date has passed: from the day after, the finding is reported again and becomes an alert, while the
+gate only prints a warning and passes. Review the entry and move its date, or remove it. A manual run can name
 another release (`release_tag`, for example `v0.2.0-rc.1`); an empty value means the latest stable release, which
 `https://github.com/<repository>/releases/latest` leads to. The first run on `main` has to show that GitHub accepted the three
 reports: the step `upload-sarif` waits for the processing and fails when code scanning refuses a file.

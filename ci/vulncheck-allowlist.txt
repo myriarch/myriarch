@@ -1,3 +1,5 @@
 # Accepted findings of the vulnerability gate (ci/vulncheck.sh). Format: ID | review YYYY-MM-DD | reason
-# An entry past its review date is reported as a warning; remove entries as soon as a fixed version is in use.
+# An entry accepts until its review date has passed. From the day after, the gate reports a warning (it still passes), and the reports
+# for code scanning (.github/workflows/vulncheck.yml) show the finding again, so it becomes an alert. Review the entry and move its date,
+# or remove it as soon as a fixed version is in use.
 GO-2026-5932 | review 2027-01-15 | golang.org/x/crypto is required, but the vulnerable code is not called, and no fixed version has been published; upgrade when one is
