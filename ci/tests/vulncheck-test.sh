@@ -8,8 +8,11 @@
 # (never a gate, accepted findings left out, every result with a location and a fingerprint), and ci/vulncheck-binaries.sh scans the
 # binaries of a published release only after the keyless verification of its checksums.txt and the SHA-256 of every archive; its test
 # runs the real script and ci/release/verify-blob.sh with doubles of curl, cosign and govulncheck and a release made on the fly; the scan
-# runs at module level because the release binaries are stripped, and its results say so. The shape
-# of .github/workflows/vulncheck.yml is pinned as well: the only write scope is security-events in the job upload, which runs no script.
+# runs at module level because the release binaries are stripped, and its results say so. Its size limits are covered as well: every
+# download carries curl --max-filesize (the double records and enforces it), and the program in an archive and the number of archives
+# are limited by the script. The shape
+# of .github/workflows/vulncheck.yml is pinned as well: the only write scope is security-events in the job upload, which runs no script,
+# and a run that names a release reports to a category of its own.
 # shellcheck source=ci/tests/lib-test.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
 need_cmd python3
@@ -306,18 +309,21 @@ TB="${W}/tools"; CURLB="${W}/path"; SERVE="${W}/serve"; STATE="${W}/state"; CALL
 mkdir -p "${TB}" "${CURLB}" "${SERVE}" "${STATE}" "${CALLS}" "${FIX}"
 cat > "${CURLB}/curl" <<'SH'
 #!/bin/sh
-# double of curl: logs the URL, serves the files of STUB_SERVE by the last segment of the URL, answers the lookup of the latest release
-# from STUB_STATE/latest, fails with the exit code in STUB_STATE/curl.fail, and prints what -w asks for (http_code)
-url=""; out=""
+# double of curl: logs the URL (curl.log) and the URL with its --max-filesize (curl-limits.log), serves the files of STUB_SERVE by the last
+# segment of the URL, refuses a file above --max-filesize like curl does (exit code 63, after the status line 200), answers the lookup of
+# the latest release from STUB_STATE/latest, fails with the exit code in STUB_STATE/curl.fail, and prints what -w asks for (http_code)
+url=""; out=""; maxsize=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift 2 ;;
-    -w|--max-filesize|--connect-timeout|--max-time|--proto|--proto-redir) shift 2 ;;
+    --max-filesize) maxsize="$2"; shift 2 ;;
+    -w|--connect-timeout|--max-time|--proto|--proto-redir) shift 2 ;;
     -*) shift ;;
     *) url="$1"; shift ;;
   esac
 done
 echo "${url}" >> "${STUB_CALLS}/curl.log"
+echo "${url} ${maxsize:-none}" >> "${STUB_CALLS}/curl-limits.log"
 if [ -f "${STUB_STATE}/curl.fail" ]; then echo "curl: (6) Could not resolve host: github.com" >&2; exit "$(cat "${STUB_STATE}/curl.fail")"; fi
 case "${url}" in
   */releases/latest)
@@ -332,7 +338,12 @@ if [ -f "${STUB_STATE}/flaky" ] && [ "${name}" = checksums.txt ]; then
   left="$(cat "${STUB_STATE}/flaky")"
   if [ "${left}" -gt 0 ]; then echo $((left - 1)) > "${STUB_STATE}/flaky"; printf '503'; echo "curl: (22) The requested URL returned error: 503" >&2; exit 22; fi
 fi
-if [ -f "${STUB_SERVE}/${name}" ]; then cp "${STUB_SERVE}/${name}" "${out}"; printf '200'; exit 0; fi
+if [ -f "${STUB_SERVE}/${name}" ]; then
+  if [ -n "${maxsize}" ] && [ "$(wc -c < "${STUB_SERVE}/${name}" | tr -d ' ')" -gt "${maxsize}" ]; then
+    printf '200'; echo "curl: (63) Maximum file size exceeded" >&2; exit 63
+  fi
+  cp "${STUB_SERVE}/${name}" "${out}"; printf '200'; exit 0
+fi
 printf '404'; echo "curl: (22) The requested URL returned error: 404" >&2; exit 22
 SH
 cat > "${TB}/cosign" <<'SH'
@@ -372,7 +383,7 @@ sed 's/"scan_level":"module"/"scan_level":"symbol"/' "${FIX}/vulnerable.sarif" >
 sed 's/"scan_mode":"binary"/"scan_mode":"source"/' "${FIX}/vulnerable.sarif" > "${FIX}/source-mode.sarif"
 export STUB_CALLS="${CALLS}" STUB_STATE="${STATE}" STUB_SERVE="${SERVE}" STUB_FIXTURES="${FIX}" STUB_COSIGN_VERSION="${COSIGN_PIN}"
 
-mkrelease() { # mode: makes the files of the release v9.9.9 in STUB_SERVE (modes: ok, mismatch, no-member, symlink, none, duplicate)
+mkrelease() { # mode: makes the files of the release v9.9.9 in STUB_SERVE (modes: ok, mismatch, no-member, symlink, none, duplicate, big-zip)
   rm -rf "${SERVE}"; mkdir -p "${SERVE}"
   python3 -I - "${SERVE}" "$1" <<'PY'
 import hashlib
@@ -427,7 +438,10 @@ if mode != "none":
     sums.append((a, "myrctl_%s_linux_amd64.tar.gz" % v))
     b = tgz("myriarchd_%s_linux_amd64.tar.gz" % v, [("README.md", b"readme"), ("myriarchd", b"\x7fELF VULNERABLE myriarchd")])
     sums.append((b, "myriarchd_%s_linux_amd64.tar.gz" % v))
-    c = zipf("myrctl_%s_windows_amd64.zip" % v, [("LICENSE", b"license"), ("myrctl.exe", b"MZ clean myrctl")])
+    exe = b"MZ clean myrctl"
+    if mode == "big-zip":
+        exe += b"." * 25  # 40 bytes, the only program above 30 bytes (the others are 22, 25 and 15 bytes)
+    c = zipf("myrctl_%s_windows_amd64.zip" % v, [("LICENSE", b"license"), ("myrctl.exe", exe)])
     sums.append((c, "myrctl_%s_windows_amd64.zip" % v))
 # entries of checksums.txt that must never be fetched: a bare binary, an SBOM, a license file, an archive of another version
 for name in ("myriarch-updater_%s_linux_amd64" % v, "myrctl_%s_linux_amd64.tar.gz.sbom.json" % v, "LICENSE", "myrctl_1.0.0_linux_amd64.tar.gz"):
@@ -442,9 +456,10 @@ if mode == "mismatch":
 PY
 }
 printf '302 https://github.com/myriarch/myriarch/releases/tag/v9.9.9' > "${STATE}/latest"
-reset_world() { rm -f "${STATE}/cosign.fail" "${STATE}/curl.fail" "${STATE}/govulncheck.fail" "${STATE}/govulncheck.report" "${STATE}/flaky"; : > "${CALLS}/curl.log"; : > "${CALLS}/cosign.log"; : > "${CALLS}/govulncheck.log"; rm -rf "${W}/out"; }
+reset_world() { rm -f "${STATE}/cosign.fail" "${STATE}/curl.fail" "${STATE}/govulncheck.fail" "${STATE}/govulncheck.report" "${STATE}/flaky"; : > "${CALLS}/curl.log"; : > "${CALLS}/curl-limits.log"; : > "${CALLS}/cosign.log"; : > "${CALLS}/govulncheck.log"; rm -rf "${W}/out"; }
 binaries() { # script arguments...: the real script with the doubles; TOOLS_BIN holds cosign and govulncheck, curl comes first in PATH
-  env PATH="${CURLB}:${PATH}" TOOLS_BIN="${TB}" VULNCHECK_ALLOWLIST="${ALLOW}" VULNCHECK_DOWNLOAD_RETRY_SECONDS="${RETRY:-0}" "${BINARIES}" --out "${W}/out" "$@"
+  env PATH="${CURLB}:${PATH}" TOOLS_BIN="${TB}" VULNCHECK_ALLOWLIST="${ALLOW}" VULNCHECK_DOWNLOAD_RETRY_SECONDS="${RETRY:-0}" \
+    VULNCHECK_MAX_BINARY="${LIMIT_BINARY:-}" VULNCHECK_MAX_ARCHIVES="${LIMIT_ARCHIVES:-}" "${BINARIES}" --out "${W}/out" "$@"
 }
 report_query() { sarif_query "${W}/out/govulncheck-binaries.sarif" "$1"; }
 printf '# nothing is accepted\n' > "${ALLOW}"
@@ -567,6 +582,58 @@ if errors:
     sys.exit(1)
 PY
 expect_ok "binaries: the modules are read from the message of the tool, and long lists are cut within the limit of a message" python3 -I "${MESSAGE_CHECK}" "${CI_DIR}"
+
+# The size limits. The downloads: curl gets --max-filesize (1 MiB for checksums.txt and its bundle, 200 MiB for an archive), the double
+# records it and refuses a file above it like curl does (exit code 63), and the script fails on that without a retry. The program in an
+# archive and the number of archives are limited by the script itself; the tests lower those two limits through the environment (a
+# program of more than 512 MiB is not worth making, and the pattern of the archive names admits 48 different names, so a signed list of
+# more than 64 archives cannot exist) and check that the environment cannot raise them. The programs of the release v9.9.9 are 22 bytes
+# (myrctl), 25 (myriarchd) and 15 (myrctl.exe), or 40 in the mode big-zip.
+grow() { python3 -I -c 'import sys; f = open(sys.argv[1], "r+b"); f.truncate(int(sys.argv[2])); f.close()' "$1" "$2"; }
+reset_world; mkrelease ok
+expect_ok "binaries: the size limits that apply are logged" binaries --tag v9.9.9
+printf '%s' "${OUT}" | grep -q 'size limits: 1048576 bytes for checksums.txt and its bundle, 209715200 for an archive, 536870912 for a program, 64 archives' \
+  && ok "binaries: ... 1 MiB for the signed list and its bundle, 200 MiB for an archive, 512 MiB for a program, 64 archives" \
+  || fail "binaries: the log does not name the default size limits"
+limits="$(sed 's#https://github.com/myriarch/myriarch/releases/##' "${CALLS}/curl-limits.log" | tr '\n' ';')"
+want="download/v9.9.9/checksums.txt 1048576;download/v9.9.9/checksums.txt.sigstore.json 1048576;download/v9.9.9/myrctl_9.9.9_linux_amd64.tar.gz 209715200;download/v9.9.9/myriarchd_9.9.9_linux_amd64.tar.gz 209715200;download/v9.9.9/myrctl_9.9.9_windows_amd64.zip 209715200;"
+[ "${limits}" = "${want}" ] \
+  && ok "binaries: curl is called with --max-filesize for every download of a release file" \
+  || fail "binaries: unexpected --max-filesize arguments: ${limits}"
+
+reset_world; mkrelease ok; grow "${SERVE}/checksums.txt" 1048577
+RETRY=30 expect_fail "binaries: a signed list above 1 MiB is refused (curl exit code 63) and not retried" 'ERROR \[download_failed\] the download of https://github.com/myriarch/myriarch/releases/download/v9.9.9/checksums.txt failed \(curl exit code 63, HTTP 200; not retried, 1 attempt\): curl: \(63\) Maximum file size exceeded' binaries --tag v9.9.9
+[ "$(grep -c 'checksums.txt$' "${CALLS}/curl.log")" = 1 ] && [ ! -s "${CALLS}/cosign.log" ] && [ ! -s "${CALLS}/govulncheck.log" ] \
+  && ok "binaries: ... one attempt, no signature check and nothing scanned" || fail "binaries: the list above the limit was retried, verified or scanned"
+reset_world; mkrelease ok; grow "${SERVE}/checksums.txt.sigstore.json" 1048577
+RETRY=30 expect_fail "binaries: a bundle above 1 MiB is refused and not retried" 'ERROR \[download_failed\] the download of https://github.com/myriarch/myriarch/releases/download/v9.9.9/checksums.txt.sigstore.json failed \(curl exit code 63, HTTP 200; not retried, 1 attempt\)' binaries --tag v9.9.9
+[ ! -s "${CALLS}/cosign.log" ] && [ ! -s "${CALLS}/govulncheck.log" ] && ok "binaries: ... and the signature is not checked" || fail "binaries: the signature was checked with a bundle above the limit"
+reset_world; mkrelease ok; grow "${SERVE}/myrctl_9.9.9_linux_amd64.tar.gz" 209715201
+RETRY=30 expect_fail "binaries: an archive above 200 MiB is refused and not retried" 'ERROR \[download_failed\] the download of https://github.com/myriarch/myriarch/releases/download/v9.9.9/myrctl_9.9.9_linux_amd64.tar.gz failed \(curl exit code 63, HTTP 200; not retried, 1 attempt\)' binaries --tag v9.9.9
+[ ! -s "${CALLS}/govulncheck.log" ] && [ ! -e "${W}/out/govulncheck-binaries.sarif" ] && ok "binaries: ... and nothing is scanned" || fail "binaries: something was scanned after an archive above the limit"
+
+reset_world; mkrelease ok
+LIMIT_BINARY=25 expect_ok "binaries: a program of exactly the size limit is read out of a tar archive" binaries --tag v9.9.9
+reset_world; mkrelease ok
+LIMIT_BINARY=24 expect_fail "binaries: a program in a tar archive above the size limit is refused" 'ERROR \[archive_invalid\] myriarchd_9.9.9_linux_amd64.tar.gz does not hold myriarchd as a regular file within the size limit of 24 bytes' binaries --tag v9.9.9
+[ ! -e "${W}/out/govulncheck-binaries.sarif" ] && ok "binaries: ... and no report is written" || fail "binaries: a report was written after a program above the limit"
+reset_world; mkrelease big-zip
+LIMIT_BINARY=40 expect_ok "binaries: a program of exactly the size limit is read out of a zip archive" binaries --tag v9.9.9
+reset_world; mkrelease big-zip
+LIMIT_BINARY=39 expect_fail "binaries: a program in a zip archive above the size limit is refused" 'ERROR \[archive_invalid\] myrctl_9.9.9_windows_amd64.zip does not hold myrctl.exe as a regular file within the size limit of 39 bytes' binaries --tag v9.9.9
+
+reset_world; mkrelease ok
+LIMIT_ARCHIVES=3 expect_ok "binaries: a signed list with exactly as many archives as the limit allows is scanned" binaries --tag v9.9.9
+reset_world; mkrelease ok
+LIMIT_ARCHIVES=2 expect_fail "binaries: a signed list with more archives than the limit allows is refused" 'ERROR \[no_archives\] the signed checksums.txt of v9.9.9 lists more than 2 archives' binaries --tag v9.9.9
+grep -q 'tar.gz\|\.zip' "${CALLS}/curl.log" && fail "binaries: an archive was fetched although the list has too many" || ok "binaries: ... before an archive is fetched"
+
+reset_world; mkrelease ok
+LIMIT_BINARY=536870913 expect_fail "binaries: the environment cannot raise the limit of a program" 'ERROR \[input_invalid\] VULNCHECK_MAX_BINARY may only lower the limit of 536870912' binaries --tag v9.9.9
+LIMIT_ARCHIVES=65 expect_fail "binaries: the environment cannot raise the limit of the archives" 'ERROR \[input_invalid\] VULNCHECK_MAX_ARCHIVES may only lower the limit of 64' binaries --tag v9.9.9
+LIMIT_BINARY=ten expect_fail "binaries: a limit that is no number is refused" 'ERROR \[input_invalid\] VULNCHECK_MAX_BINARY has an unexpected format' binaries --tag v9.9.9
+LIMIT_ARCHIVES=0 expect_fail "binaries: a limit of zero is refused" 'ERROR \[input_invalid\] VULNCHECK_MAX_ARCHIVES has an unexpected format' binaries --tag v9.9.9
+[ ! -s "${CALLS}/curl.log" ] && ok "binaries: ... all before anything is downloaded" || fail "binaries: a download started with an invalid limit"
 
 # the network
 reset_world; mkrelease ok; echo 6 > "${STATE}/curl.fail"

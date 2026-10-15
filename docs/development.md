@@ -605,8 +605,10 @@ brackets): it downloads `checksums.txt` and its keyless bundle without credentia
 the frozen identity of `release.yml` at the tag of the version, issued by GitHub Actions (`signature_invalid`); only then it downloads
 every archive of `myriarchd`, `myriarch-updater`, `myrctl` and `myriarch-sim` that the signed list names for the version and compares
 each with its SHA-256 (`checksum_mismatch`); only then it reads the one member that is named like the program out of each archive, as a
-regular file within a size limit, and nothing else (`archive_invalid`), and scans it with `govulncheck -mode binary -scan module`. The
-programs are not run. Run it yourself with the pinned tools (it needs network access and downloads the 16 archives of v0.1.0, 120 MB):
+regular file of at most 512 MiB, and nothing else (`archive_invalid`), and scans it with `govulncheck -mode binary -scan module`. The
+programs are not run. Every download has a size limit (`curl --max-filesize`: 1 MiB for `checksums.txt` and its bundle, 200 MiB for an
+archive; a file above it is `download_failed` and not retried), and the signed list may name 64 archives at most (`no_archives`). Run it
+yourself with the pinned tools (it needs network access and downloads the 16 archives of v0.1.0, 120 MB):
 
 ```bash
 ci/install-tools.sh cosign govulncheck

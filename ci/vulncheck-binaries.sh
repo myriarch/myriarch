@@ -35,6 +35,9 @@
 #   4. only then the one binary of each archive is read out (the member named like the program, a regular file within a size limit;
 #      nothing else is unpacked) [archive_invalid] and scanned with `govulncheck -mode binary -scan module -format sarif`
 #      [govulncheck_failed].
+# Every size is limited: checksums.txt and its bundle to 1 MiB and an archive to 200 MiB (curl --max-filesize; curl exits with 63, which is
+# [download_failed] and not retried), the program in an archive to 512 MiB [archive_invalid] and the signed list to 64 archives
+# [no_archives]. The log names the limits that apply.
 # Findings that ci/vulncheck-allowlist.txt accepts are left out of the report (ci/vulncheck-sarif.py) while the review date of the entry
 # has not passed. That file belongs to the gate: a finding that only this scan reports is fixed by a release that is built with the fixed
 # version, or dismissed in code scanning with a reason (docs/development.md, "Vulnerability reports in code scanning").
@@ -42,7 +45,10 @@
 # Environment: TOOLS_BIN (cosign for the verification and govulncheck; default .cache/bin; the tools are never looked up in PATH),
 # GOVULNCHECK (another govulncheck), VULNCHECK_ALLOWLIST (another allowlist), VULNCHECK_RELEASE_TAG, VULNCHECK_DOWNLOAD_RETRY_SECONDS
 # (retry window of a download, default 120). The downloads retry only transient failures (a timeout, a failed connection, HTTP 408, 429,
-# 500, 502, 503, 504) with pauses of 1, 2, 4, ... s, the policy of the installers and the smoke tests.
+# 500, 502, 503, 504) with pauses of 1, 2, 4, ... s, the policy of the installers and the smoke tests. VULNCHECK_MAX_BINARY and
+# VULNCHECK_MAX_ARCHIVES lower the limit of the program in an archive (bytes) and of the archives in the list, for the tests: an archive
+# with a program of more than 512 MiB is not worth making, and the pattern of the archive names admits 48 different names, so a list of
+# more than 64 cannot exist. A value above the default is refused, so the environment never widens a limit.
 #
 # Errors: one line "[vulncheck-binaries] ERROR [<code>] <message>" on stderr, exit 1. Usage errors exit 2.
 set -euo pipefail
@@ -55,7 +61,7 @@ RETRY_SECONDS="${VULNCHECK_DOWNLOAD_RETRY_SECONDS:-120}"
 MAX_SMALL=1048576        # checksums.txt and its bundle
 MAX_ARCHIVE=209715200    # one archive: 200 MiB (the largest of v0.1.0 is 13 MiB)
 MAX_BINARY=536870912     # one binary in an archive: 512 MiB
-MAX_ARCHIVES=64
+MAX_ARCHIVES=64          # archives that the signed checksums.txt may list for the version (the pattern below admits 48 different names)
 PROGRAMS='myriarchd|myriarch-updater|myrctl|myriarch-sim'
 
 tag="${VULNCHECK_RELEASE_TAG:-}" out=""
@@ -72,6 +78,17 @@ check_text input_invalid "--out" "${out}"
 if [ -n "${tag}" ]; then check_match tag_invalid "the release tag" "${tag}" "${TAG_RE}"; fi
 RETRY_SECONDS_RE='^[0-9]{1,4}$'
 check_match input_invalid "VULNCHECK_DOWNLOAD_RETRY_SECONDS" "${RETRY_SECONDS}" "${RETRY_SECONDS_RE}"
+# lower_limit NAME: lowers the limit NAME to the value of VULNCHECK_NAME when that is set (a positive number, not above the limit)
+lower_limit() {
+  local var="VULNCHECK_$1" value default
+  default="${!1}"
+  value="${!var:-${default}}"
+  check_match input_invalid "${var}" "${value}" '^[1-9][0-9]{0,11}$'
+  [ "${value}" -le "${default}" ] || err input_invalid "${var} may only lower the limit of ${default}"
+  printf -v "$1" '%s' "${value}"
+}
+lower_limit MAX_BINARY
+lower_limit MAX_ARCHIVES
 
 load_identity
 have curl || err tool_missing "curl was not found in PATH"
@@ -160,6 +177,8 @@ if [ -z "${tag}" ]; then
 fi
 version="${tag#v}"
 info "release ${tag}"
+info "size limits: ${MAX_SMALL} bytes for checksums.txt and its bundle, ${MAX_ARCHIVE} for an archive, ${MAX_BINARY} for a program," \
+  "${MAX_ARCHIVES} archives"
 base="${repo_url}/releases/download/${tag}"
 
 # 1 and 2: the signed list of checksums; nothing else is fetched before the signature is valid
@@ -196,7 +215,7 @@ for i in "${!names[@]}"; do
   member="${programs[${i}]}"
   if [ "${oses[${i}]}" = windows ]; then member="${member}.exe"; fi
   binary="${work}/bin/${names[${i}]}.bin"
-  python3 -I - "${work}/dl/${names[${i}]}" "${member}" "${binary}" "${MAX_BINARY}" <<'PY' || err archive_invalid "${names[${i}]} does not hold ${member} as a regular file within the size limit"
+  python3 -I - "${work}/dl/${names[${i}]}" "${member}" "${binary}" "${MAX_BINARY}" <<'PY' || err archive_invalid "${names[${i}]} does not hold ${member} as a regular file within the size limit of ${MAX_BINARY} bytes"
 import os
 import sys
 import tarfile

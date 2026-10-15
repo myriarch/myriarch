@@ -561,12 +561,15 @@ guidance after each item names what to do.
   for a run that names a release (or the upload of a named release for a run that names none). The scan of the released binaries
   (`ci/vulncheck-binaries.sh`) starts only after the keyless signature of `checksums.txt` was verified with the identity of `release.yml`
   at the tag of the version (`ci/release/verify-blob.sh`, mode bound) and after the SHA-256 of every archive matched that signed list; it
-  reads out only the member that is named like the
-  program, as a regular file within a size limit, never runs a downloaded program, takes the tag only in the form of a release tag and
-  fails closed on a download that fails, a signature that does not verify, an archive that does not match, a missing or irregular member
-  and a failing tool (`ci/tests/vulncheck-test.sh` covers each). The reports leave out a finding only while its allowlist entry is in
-  force: an entry accepts until its review date has passed, and from the day after the finding is reported again, so a lapsed
-  acceptance is visible where the alerts are read (the gate itself only warns and passes).
+  reads out only the member that is named like the program, as a regular file of at most 512 MiB, never runs a downloaded program, takes
+  the tag only in the form of a release tag, limits every download (`curl --max-filesize`: 1 MiB for the signed list and its bundle,
+  200 MiB for an archive) and the signed list (64 archives), and fails closed on a download that fails or exceeds its limit, a signature
+  that does not verify, an archive that does not match, a list with too many archives, a missing, irregular or oversized member and a
+  failing tool (`ci/tests/vulncheck-test.sh` covers each; its curl double records and enforces `--max-filesize`, and the test lowers the
+  limit of a program and of the archives through `VULNCHECK_MAX_BINARY` and `VULNCHECK_MAX_ARCHIVES`, which can never raise a limit). The
+  reports leave out a finding only while its allowlist entry is in force: an entry accepts until its review date has passed, and from
+  the day after the finding is reported again, so a lapsed acceptance is visible where the alerts are read (the gate itself only warns
+  and passes).
   Limits:
   - govulncheck knows the Go vulnerability database, not other ecosystems (the dependency review and Dependabot cover the advisories of
     npm, pip and the actions).
