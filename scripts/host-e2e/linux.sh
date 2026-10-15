@@ -197,6 +197,14 @@ scenario_manual() {
   he_fault_stop
   he_wait_for 60 he_agent_is "${col}" .agent.version "${v_old}"
   he_wait_for 30 sh -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' http://localhost:13133/)\" = 200 ]"
+  # The checks below read what the server derived from the last reports of the updater and the collector, and the API returns the
+  # stored copy. The engine derives the phase and the steps of the target on its next tick after the last report of the updater (up
+  # to rollouts.tickInterval, 1 s here), so a read right after the report can still show rolling_back:running; the package status is
+  # a message of its own. Wait for that state instead of reading at a fixed moment (docs/design/version-selection.md, "Target
+  # progress", "Derivation"; scripts/e2e-ui-updates.sh waits for the same two states). The wait records PASS or FAIL with the last
+  # value it saw, and the checks go on either way.
+  he_settle "the engine derived the phase of the target" 30 rolled_back he_target_phase "${r1}"
+  he_settle "package status of the updater reports the failed install" 30 install_failed he_package_status "${upd}"
   he_check_eq "rollout paused after the failed target (policy onFailure: pause)" paused "$(he_api GET "/rollouts/${r1}" | jq -r .status)"
   he_check_eq "collector reports ${v_old} again" "${v_old}" "$(he_api GET "/agents/${col}" | jq -r .agent.version)"
   he_check_eq "current -> versions/${v_old} again" "versions/${v_old}" "$(readlink /opt/myriarch/collector/current)"
@@ -225,7 +233,7 @@ scenario_manual() {
   he_check_eq "the running collector is the binary of versions/${v_new}" "/opt/myriarch/collector/versions/${v_new}/otelcol-contrib" "$(he_collector_binary)"
   he_wait_for 60 he_agent_is "${col}" .agent.health.healthy true
   he_check_eq "collector healthy" true "$(he_api GET "/agents/${col}" | jq -r .agent.health.healthy)"
-  he_check_eq "package status installed" installed "$(he_api GET "/agents/${upd}" | jq -r '.agent.packageStatus.packages[""].status // "none"')"
+  he_check_eq "package status installed" installed "$(he_package_status "${upd}")"
   he_check_eq "the old version is kept for the step back (keepVersions 2)" yes "$([ -d "/opt/myriarch/collector/versions/${v_old}" ] && echo yes || echo no)"
   he_check_eq "selection recorded: who and why" "admin/host-e2e failure case" \
     "$(he_api GET "/fleets/${fleet}" | jq -r '"\(.status.versionTarget.selection.selectedBy)/\(.status.versionTarget.selection.reason)"')"

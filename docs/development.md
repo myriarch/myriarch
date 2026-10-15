@@ -1093,6 +1093,11 @@ uninstall and the proof that nothing is left) and the collection of the artifact
 (`linux.sh`: `scenario_manual`) that `he_run_scenario` runs; the workflow calls it by name (`scripts/host-e2e/linux.sh manual`), and
 every scenario ends with `he_reset_host`. A second scenario, for example the installation from a command of the UI, is a function, a
 call in the workflow, and nothing else: its files go to `.cache/host-e2e/upload/<scenario>/`, which the upload step already covers.
+State that the server derives is read after `he_settle`, never at a fixed moment: the engine of the rollouts derives the phase and
+the steps of a target on its tick, up to `rollouts.tickInterval` after the last report of the updater, and the API returns the stored
+copy ([Target progress](design/version-selection.md#target-progress)); the package status of an updater is a message of its own.
+`he_settle NAME TIMEOUT WANTED GETTER...` polls the getter (`he_target_phase`, `he_package_status`) and records PASS, or FAIL with the
+last value, and the checks that read the same state follow it.
 
 **Artifacts.** The work directory is `.cache/host-e2e` (`HOST_E2E_DIR`): the CA, the mirror, and for each scenario its logs, results and
 work files (the token file, the cookie jar and the database are in there). A failed run uploads only `.cache/host-e2e/upload/`

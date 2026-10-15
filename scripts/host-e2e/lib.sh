@@ -207,6 +207,28 @@ he_wait_for() { # timeout command...: polls once a second until the command succ
   return 1
 }
 
+# he_settle NAME TIMEOUT WANTED COMMAND...: waits until the output of the command is WANTED, then records PASS (with the time it took)
+# or, when the time is up, FAIL (with what the command printed last). For state that the server does not compute when it is asked:
+# the engine of the rollouts derives the phase and the steps of a target on its tick, after the last message of the updater, and the
+# API returns the stored copy (docs/design/version-selection.md, "Target progress", "Derivation"); a package status is a message of
+# its own. A check that reads such state at a fixed moment fails on the runs where the read comes before the tick. Call it
+# directly, not in a subshell: the counters of the results would be lost.
+he_settle() {
+  local name="$1" limit="$2" want="$3" from="${SECONDS}" got=""
+  shift 3
+  while :; do
+    got="$("$@" 2>/dev/null)"
+    if [ "${got}" = "${want}" ]; then
+      he_pass "${name}" "${want}, after $((SECONDS - from)) s"
+      return 0
+    fi
+    [ $((SECONDS - from)) -lt "${limit}" ] || break
+    sleep 1
+  done
+  he_fail "${name}" "wanted '${want}', found '${got}' after ${limit} s"
+  return 1
+}
+
 he_port_free() { ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
 
 # he_spawn NAME LOGFILE COMMAND...: starts a background process of this run (stopped by he_stop_tracked); its pid is HE_LAST_PID.
@@ -469,6 +491,14 @@ he_rollout_final() { # rollout-id: a predicate: the rollout is done, paused or e
 }
 he_steps_of() { # rollout-id: "name:status,..." of the first target
   he_api GET "/rollouts/$1/targets" | jq -r '[.items[0].progress.steps[]? | "\(.name):\(.status)"] | join(",")'
+}
+# The phase and the steps of a target are derived by the engine on its tick and stored: read them after he_settle, never at a fixed
+# moment after the updater has reported (the engine needs up to rollouts.tickInterval for it).
+he_target_phase() { # rollout-id: the stored phase of the first target; nothing before there is one
+  he_api GET "/rollouts/$1/targets" | jq -r '.items[0].progress.phase // empty'
+}
+he_package_status() { # updater-agent-id: the OpAMP package status of the collector package; "none" before the first report
+  he_api GET "/agents/$1" | jq -r '.agent.packageStatus.packages[""].status // "none"'
 }
 he_select_version() { # fleet version reason expected-target-version: prints the id of the rollout the UI action starts
   local resp="${HE_DIR}/api/select-version-$2.json"

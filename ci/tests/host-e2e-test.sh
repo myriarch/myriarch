@@ -9,6 +9,8 @@
 #     sudo and a host without a trace of an earlier installation (the commands uname, id, sudo, pgrep, ss and systemctl are stand-ins
 #     on PATH, so the same cases run on macOS and on Linux), that the one gate for host changes (he_sudo) checks it again and that
 #     no script of the harness calls sudo anywhere else;
+#   - the waiting for state that the server derives on its tick (he_settle, he_target_phase, he_package_status), against canned
+#     answers of the REST helper;
 #   - the artifacts: the scrubber removes tokens, credentials, DSNs, cookies and private keys, the upload directory holds the
 #     allow-listed files only (never the token file, the cookie jar, the keys, the database or the templates), and a secret in it
 #     removes it;
@@ -154,6 +156,62 @@ for pair in ServerBinary:myriarchd UpdaterBinary:myriarch-updater CLIBinary:myrc
 done
 [ -n "$(brand CSRFCookie)" ] && [ -n "$(brand SessionCookie)" ] && [ -n "$(brand UpdateHealthComponent)" ] && ok "he_brand finds the cookies and the update health component" || fail "he_brand does not find the cookies"
 [ "$(brand NoSuchConstant)" = "" ] && ok "he_brand prints nothing for an unknown constant" || fail "he_brand NoSuchConstant printed something"
+
+# ---- state that the server derives on its tick: he_settle and the getters --------------------------------------------------------
+# The engine of the rollouts derives the phase and the steps of a target on its tick, after the last report of the updater, and the
+# API returns the stored copy; a package status is a message of its own. A check that reads such state at a fixed moment fails on
+# the runs where the read comes first, so a scenario waits for it with he_settle, which records PASS or FAIL.
+api_says() { # JSON function args...: runs the function of the library with a REST helper that answers with the JSON
+  local json="$1"
+  shift
+  STUB_JSON="${json}" bash -c '. "$1"; shift; he_api() { printf "%s" "${STUB_JSON}"; }; "$@"' _ "${LIB}" "$@" 2>/dev/null
+}
+TARGET_ENDED='{"items":[{"status":"failed","progress":{"phase":"rolled_back","steps":[{"name":"health_check","status":"failed"},{"name":"rolling_back","status":"done"}]}}]}'
+GOT="$(api_says "${TARGET_ENDED}" he_target_phase r1)"
+[ "${GOT}" = rolled_back ] && ok "he_target_phase reads the stored phase of the first target" || fail "he_target_phase: '${GOT}'"
+GOT="$(api_says "${TARGET_ENDED}" he_steps_of r1)"
+[ "${GOT}" = "health_check:failed,rolling_back:done" ] && ok "... and he_steps_of the steps of the same target" || fail "he_steps_of: '${GOT}'"
+GOT="$(api_says '{"items":[{"status":"running"}]}' he_target_phase r1)"
+[ -z "${GOT}" ] && ok "he_target_phase prints nothing for a target without progress" || fail "he_target_phase of a target without progress: '${GOT}'"
+GOT="$(api_says '{"items":[]}' he_target_phase r1)"
+[ -z "${GOT}" ] && ok "... nor for a rollout without targets" || fail "he_target_phase of a rollout without targets: '${GOT}'"
+GOT="$(api_says '' he_target_phase r1)"
+[ -z "${GOT}" ] && ok "... nor when the server does not answer" || fail "he_target_phase of an empty answer: '${GOT}'"
+GOT="$(api_says '{"agent":{"packageStatus":{"packages":{"":{"status":"install_failed"}}}}}' he_package_status u1)"
+[ "${GOT}" = install_failed ] && ok "he_package_status reads the status of the collector package" || fail "he_package_status: '${GOT}'"
+GOT="$(api_says '{"agent":{}}' he_package_status u1)"
+[ "${GOT}" = none ] && ok "... and says none before the first report" || fail "he_package_status without a report: '${GOT}'"
+
+# a getter that says rolling_back twice and rolled_back from the third call on; the counter is a file, because he_settle calls the
+# getter in a subshell
+cat > "${W}/getter-flip.sh" <<'GETTER'
+#!/bin/sh
+n="$(cat "$1" 2>/dev/null || echo 0)"
+echo $((n + 1)) > "$1"
+if [ "${n}" -ge 2 ]; then echo rolled_back; else echo rolling_back; fi
+GETTER
+SETTLE_RESULTS="${W}/settle-results.txt"
+run_settle() { # shell commands: he_settle in a shell of its own, with the library and an empty results file; its status is the status
+  : > "${SETTLE_RESULTS}"
+  bash -c '. "$1"; HE_RESULTS="$2"; shift 2; eval "$*"' _ "${LIB}" "${SETTLE_RESULTS}" "$@" > /dev/null 2>&1
+}
+run_settle "he_settle 'state' 5 rolled_back echo rolled_back"; RC=$?
+GOT="$(cat "${SETTLE_RESULTS}")"
+case "${RC}:${GOT}" in "0:PASS|state|rolled_back, after "*" s") ok "he_settle returns at once when the state is there, and records PASS with the time it took" ;; *) fail "he_settle with the state there: status ${RC}, result '${GOT}'" ;; esac
+rm -f "${W}/flip-count"
+run_settle "he_settle 'state' 20 rolled_back sh '${W}/getter-flip.sh' '${W}/flip-count'"; RC=$?
+GOT="$(cat "${SETTLE_RESULTS}")"
+case "${RC}:${GOT}" in "0:PASS|state|rolled_back, after "*" s") ok "he_settle polls until the state is there (rolling_back, rolling_back, rolled_back)" ;; *) fail "he_settle with a state that comes late: status ${RC}, result '${GOT}'" ;; esac
+[ "$(cat "${W}/flip-count")" = 3 ] && ok "... after exactly three reads" || fail "the getter was read $(cat "${W}/flip-count") times, expected 3"
+run_settle "he_settle 'state' 1 rolled_back echo rolling_back"; RC=$?
+GOT="$(cat "${SETTLE_RESULTS}")"
+[ "${RC}" = 1 ] && [ "${GOT}" = "FAIL|state|wanted 'rolled_back', found 'rolling_back' after 1 s" ] && ok "he_settle fails when the time is up, and says what it found last" || fail "he_settle with a state that does not come: status ${RC}, result '${GOT}'"
+run_settle "he_settle 'state' 1 rolled_back false"; RC=$?
+GOT="$(cat "${SETTLE_RESULTS}")"
+[ "${RC}" = 1 ] && [ "${GOT}" = "FAIL|state|wanted 'rolled_back', found '' after 1 s" ] && ok "... also when the getter fails (the server does not answer)" || fail "he_settle with a failing getter: status ${RC}, result '${GOT}'"
+run_settle "he_settle 'state' 5 'a b' printf '%s %s' a b"; RC=$?
+GOT="$(cat "${SETTLE_RESULTS}")"
+[ "${RC}" = 0 ] && case "${GOT}" in "PASS|state|a b, after "*) true ;; *) false ;; esac && ok "... and it hands the arguments on to the getter" || fail "he_settle with arguments: status ${RC}, result '${GOT}'"
 
 # ---- the scrubber ----------------------------------------------------------------------------------------------------------------
 SECRET_IN="${W}/secrets.txt"
