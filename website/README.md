@@ -160,10 +160,11 @@ is part of the build and uses no third party. `scripts/check-seo.py` fails the w
 `layouts/_partials/seo/head.html` is the one partial that `head.html` calls; it writes the canonical link and chooses the structured data.
 
 **Spelling.** [ADR-0015](../docs/adr/0015-project-name-and-naming-scheme.md) decides it: `myriarch` in identifiers and in the middle of a
-sentence, `Myriarch` at the start of a sentence or a title. The home title, the text of `data/llms.yaml` and the structured data follow it.
-The site title of `hugo.yaml` (`myriarch`) is a name in that sense: it ends every other title and is the `name` in the structured data.
-`check-seo.py` lints the home title and `llms.txt`; names of programs, hosts and paths (`myriarchd`, `myriarch-updater`, `myriarch.dev`)
-are identifiers and always lower case.
+sentence, `Myriarch` at the start of a sentence or a title. The home title and the text of `data/llms.yaml` follow it, and `check-seo.py`
+lints both, the heading of `llms.txt` excepted. The spelling of the site title, `site.Title` (`title` in `hugo.yaml`), is left to a later
+change. The suffix of every other page title, the heading of `llms.txt` and the `name` in the structured data follow `site.Title`, so they
+follow that change; `check-seo.py` compares the heading and the `name` with it and has no spelling rule for them. Names of programs, hosts
+and paths (`myriarchd`, `myriarch-updater`, `myriarch.dev`) are identifiers and always lower case.
 
 ### Structured data
 
