@@ -88,4 +88,5 @@ def main():
     print(f"vulncheck: no called vulnerabilities ({len(other)} module-level finding(s))")
 
 
-main()
+if __name__ == "__main__":
+    main()
