@@ -494,8 +494,9 @@ both, so a rule does not depend on how a file is named:
   `binaries` hold `contents: read`, run govulncheck and keep the SARIF reports as artifacts of the run; only the job `upload` holds
   `security-events: write` (the one line of the workflow in `ci/workflow-permissions.txt`), and its steps are a checkout without
   credentials, the download of those artifacts and `github/codeql-action/upload-sarif` at the pin of rule R2. The workflow does not
-  run for pull requests and has no secret. The scan of the released binaries starts only after the keyless verification of the
-  release files ([Vulnerability reports in code scanning](#vulnerability-reports-in-code-scanning)).
+  run for pull requests and has no secret. `ci/tests/vulncheck-test.sh` pins this shape on the real file (no script and no other action
+  in `upload`, no other write scope, no pull request trigger, no expression in a script). The scan of the released binaries starts only
+  after the keyless verification of the release files ([Vulnerability reports in code scanning](#vulnerability-reports-in-code-scanning)).
 - **A read-only token**: `permissions: contents: read` at the top of every workflow. A job-level write scope needs a line in
   `ci/workflow-permissions.txt` (`<workflow file> <job> <scope>`) and a review of the job.
 - **The dependency review has no privilege of its own.** The job `dependency-review` of `ci.yml` uses `actions/dependency-review-action`,

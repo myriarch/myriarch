@@ -548,13 +548,14 @@ guidance after each item names what to do.
   analysis to code scanning as SARIF, in the categories `govulncheck/source-release`, `govulncheck/source-devpg` and
   `govulncheck/binaries`, and blocks nothing. Controls: the one job that holds `security-events: write` (`upload`, the only line of the
   workflow in `ci/workflow-permissions.txt`) runs no code of the repository: it checks out without credentials, downloads the reports
-  that the two scan jobs of the same run made and uploads them; the scan jobs hold `contents: read`; the workflow has no secret. The scan
-  of the released binaries (`ci/vulncheck-binaries.sh`) starts only after the keyless signature of `checksums.txt` was verified with the
-  identity of `release.yml` at the tag of the version (`ci/release/verify-blob.sh`, mode bound) and after the SHA-256 of every archive
-  matched that signed list; it reads out only the member that is named like the program, as a regular file within a size limit, never
-  runs a downloaded program, takes the tag only in the form of a release tag and fails closed on a download that fails, a signature that
-  does not verify, an archive that does not match, a missing or irregular member and a failing tool (`ci/tests/vulncheck-test.sh`
-  covers each). Reports leave out the findings that the allowlist accepts. Limits: govulncheck knows the Go vulnerability database, not
+  that the two scan jobs of the same run made and uploads them; the scan jobs hold `contents: read`; the workflow has no secret, and
+  `ci/tests/vulncheck-test.sh` fails when another job gets a write scope, when `upload` runs a script or another action, or when a
+  pull request can start the workflow. The scan of the released binaries (`ci/vulncheck-binaries.sh`) starts only after the keyless
+  signature of `checksums.txt` was verified with the identity of `release.yml` at the tag of the version (`ci/release/verify-blob.sh`,
+  mode bound) and after the SHA-256 of every archive matched that signed list; it reads out only the member that is named like the
+  program, as a regular file within a size limit, never runs a downloaded program, takes the tag only in the form of a release tag and
+  fails closed on a download that fails, a signature that does not verify, an archive that does not match, a missing or irregular member
+  and a failing tool (`ci/tests/vulncheck-test.sh` covers each). Reports leave out the findings that the allowlist accepts. Limits: govulncheck knows the Go vulnerability database, not
   other ecosystems (the dependency review and Dependabot cover the advisories of npm, pip and the actions); the binary mode lists the
   vulnerable symbols that a binary contains and cannot tell whether the program reaches them, so it reports more than the source
   analysis; the results about binaries are anchored at `go.mod` because a binary has no file or line; the binaries are the archives of
