@@ -387,8 +387,8 @@ helm upgrade myriarch ./myriarch/deploy/helm/myriarch -n myriarch -f myriarch-va
 ```
 
 **Back up the database before every upgrade.** The server applies new database migrations at its start. A database that a newer
-version has migrated cannot be used by v0.1.0 again: going back to v0.1.0 means restoring the backup, because v0.1.0 does not check
-the schema and a rollback to it is not supported. From v0.2.0 on the database records a compatibility level, and the server checks
+version has migrated must not be used with v0.1.0 again, because v0.1.0 does not check the schema and would start on it without a
+word: going back to v0.1.0 means restoring the backup, and a rollback to it is not supported. From v0.2.0 on the database records a compatibility level, and the server checks
 it at start: it refuses to start on a schema that it cannot work with, with an error that names the schema version and the levels
 (see [Troubleshooting](troubleshooting.md)), and it starts with a warning on a newer schema that is still compatible. A
 `helm rollback` between versions that have this check therefore works as long as the migrations since then were compatible.

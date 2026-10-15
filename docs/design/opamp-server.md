@@ -93,8 +93,9 @@ does on the changed schema. `-- Compatibility level:` is `unchanged`, or `raised
 cannot work with the schema. There are two valid combinations:
 
 - `-- Rolling update: expand only.` (an explanation may follow) with `-- Compatibility level: unchanged.` *Expand only* is a
-  promise that the previous version keeps working: new tables, nullable columns and columns with a default, indexes, a constraint
-  that is relaxed. The level stays.
+  promise that the previous version keeps working: new tables, nullable columns and columns with a default, indexes that are not
+  unique, a constraint that is relaxed. The level stays. A new unique index or a new `NOT NULL` or `CHECK` constraint tightens what
+  the previous version may write, so it is not expand only.
 - `-- Rolling update: not compatible, <what stops working>` with `-- Compatibility level: raised to 00NNN.` The migration is one
   that binaries below some level cannot work with (it drops, renames or tightens something that they use, or changes what stored
   data means). Up sets `min_binary_schema` to NNN, which is greater than the previous value and at most the number of the
