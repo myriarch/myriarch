@@ -60,6 +60,7 @@ Some early operational decisions were not kept as separate records. They are des
 | [0035](0035-release-workflow-with-keyless-signing-and-verification-before-publication.md) | Release workflow: tag-only, isolated jobs, keyless signing and provenance, verification before an immutable publication, and a frozen signing identity | Accepted |
 | [0036](0036-database-schema-compatibility-and-rollback.md) | Database schema compatibility and rollback | Accepted |
 | [0037](0037-opamp-bridge-agents-until-the-operator-integration.md) | OpAMP Bridge agents are recognised and locked until the Operator integration | Accepted |
+| [0038](0038-dependency-license-policy.md) | Dependency license policy: a tripwire on the CNCF allowlist for pull requests, a narrower allowlist for releases | Accepted |
 | [0046](0046-host-installation-from-the-server.md) | Host installation from the server: versions, artifacts and the installer bundle as data, integrity anchored on the host | Accepted |
 
 Two later records change earlier decisions: [ADR-0024](0024-container-registry-and-image-set.md) supersedes the "own combined image" aspect of [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) for published artifacts, and [ADR-0026](0026-collector-version-updates-on-kubernetes.md) refines [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) and [ADR-0014](0014-binary-updates-in-the-pod-via-container-mode.md) (gitops-pr as the Kubernetes default, container mode as an opt-in).
