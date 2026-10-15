@@ -9,9 +9,10 @@ The chart installs with its defaults, never starts the dev mode and has a login 
 (the bootstrap admin). Single sign-on with any OpenID Connect provider is a configuration change:
 [docs/operations/authentication.md](../../../docs/operations/authentication.md).
 
-The values are validated against a strict schema, [`values.schema.json`](values.schema.json): `helm install`, `upgrade`,
-`template` and `lint` refuse a key that the chart does not know, a value of the wrong type and a malformed value, before
-anything is rendered. See [Values schema](#values-schema).
+> **Available from v0.2.0.** The values are validated against a strict schema, [`values.schema.json`](values.schema.json):
+> `helm install`, `upgrade`, `template` and `lint` refuse a key that the chart does not know, a value of the wrong type and a
+> malformed value, before anything is rendered. The chart of v0.1.0 has no schema and ignores such a key without a message. See
+> [Values schema](#values-schema).
 
 ## Minimal installation
 
@@ -250,10 +251,16 @@ OpenShift usually demand.
 * Image: `image.registry` (default `ghcr.io`) and `image.repository` (default `myriarch/myriarch`) give the repository, and
   `image.tag` (default: `appVersion`) or, immutable, `image.digest` (`sha256:<64 hex>`; when set, the image is referenced as
   `<repository>@<digest>` and the tag is ignored) the version. Private registry: `imagePullSecrets`. See [Image](#image).
+  **Available from v0.2.0.** `image.registry` and `global.imageRegistry`: the chart of v0.1.0 ignores them without a message, and
+  its `image.repository` holds the registry host as well (`ghcr.io/myriarch/myriarch`).
 * Proxy and internal CA for outbound connections: `extraEnv` (`HTTPS_PROXY`, `NO_PROXY`) and `extraVolumes` /
   `extraVolumeMounts` for a CA ConfigMap, together with `config.outbound.caFile` and `config.outbound.allowedCidrs`.
 
 ## Image
+
+> **Available from v0.2.0.** The chart of v0.1.0 has no `image.registry` and no `global.imageRegistry` and ignores them without a
+> message; there the registry host is part of `image.repository` (default `ghcr.io/myriarch/myriarch`). With that chart, a
+> repository without a host is pulled from the default registry of your container runtime.
 
 The image is `<registry>/<repository>:<tag>`, or `<registry>/<repository>@<digest>` with `image.digest`:
 
@@ -279,6 +286,8 @@ helm install myriarch ... --set image.repository=registry.example.com/myriarch/m
 ```
 
 ## Values schema
+
+> **Available from v0.2.0.** The chart of v0.1.0 has no schema and ignores a key that it does not know.
 
 [`values.schema.json`](values.schema.json) is a JSON Schema (draft 2020-12) that Helm reads for `helm install`, `upgrade`,
 `template` and `lint`. It is **strict**:
@@ -322,6 +331,8 @@ the templates and `values.schema.source.yaml`; the tests fail when `values.yaml`
 not list.
 
 ## Misconfiguration messages
+
+> **Available from v0.2.0.** The schema, the first of the two layers. The chart of v0.1.0 has only the messages of the templates.
 
 Two layers refuse a value, and both name it. The **schema** refuses what one value can get wrong (an unknown key, a wrong type,
 a malformed string) before it renders anything; Helm reports the path of the value as a JSON pointer. The **templates** refuse
