@@ -67,6 +67,10 @@ type Deps struct {
 	InstallGrantTTL time.Duration
 }
 
+// InstallDir is the subdirectory of the cache directory in which internal/install keeps the installer bundles. The
+// cache leaves it alone: Evict does not count or remove its files.
+const InstallDir = "install"
+
 // downloadIdleTimeout aborts a download that delivers no data for this long.
 const downloadIdleTimeout = 60 * time.Second
 
@@ -102,6 +106,10 @@ type Cache struct {
 	agentBases []agentBase
 
 	ver *bundleVerifier // nil if signatures are not required
+	// verOnce builds the verifier that Verifier hands out when signatures of the artifacts are not required.
+	verOnce  sync.Once
+	verifier *Verifier
+	verErr   error
 	// verifyFn verifies a bundle; replaced in tests (real archives are too big
 	// to ship, and real bundles only match the real archives).
 	verifyFn func(bundleJSON, digest []byte, dist, version string) (*verified, error)
@@ -241,6 +249,29 @@ func (c *Cache) redirectPolicy() func(*http.Request, []*http.Request) error {
 // SignatureRequired reports whether artifacts must carry a verified sigstore
 // bundle (artifacts.verify.requireSignature).
 func (c *Cache) SignatureRequired() bool { return c.cfg.Verify.RequireSignature }
+
+// Dir is the directory of the cache (artifacts.dir, or the default below the temporary directory).
+func (c *Cache) Dir() string { return c.dir }
+
+// Verifier returns the verifier of Sigstore bundles with the trust of the cache: the trusted root of artifacts.verify (a
+// file, or TUF through the HTTP client of the cache) and no identity of its own; the caller names the identity it
+// accepts. It exists also where artifacts.verify.requireSignature is off, because a bundle that is not an upstream
+// artifact (the installer bundles of the release of this project) is verified whatever that setting says. The error
+// is that of an unusable trusted root or identity setting.
+func (c *Cache) Verifier() (*Verifier, error) {
+	c.verOnce.Do(func() {
+		v := c.ver
+		if v == nil {
+			var err error
+			if v, err = newBundleVerifier(c.cfg.Verify, c.dir, c.tuf); err != nil {
+				c.verErr = err
+				return
+			}
+		}
+		c.verifier = &Verifier{v: v}
+	})
+	return c.verifier, c.verErr
+}
 
 // DownloadTokenTTL is the lifetime of download tokens (0 = unlimited).
 func (c *Cache) DownloadTokenTTL() time.Duration { return c.cfg.DownloadTokenTTL }
