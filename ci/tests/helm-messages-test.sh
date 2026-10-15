@@ -24,6 +24,10 @@ if ! have helm; then
 fi
 
 chart="${ROOT}/deploy/helm/myriarch"
+# The default tag of the image is the appVersion of the chart, and scripts/set-version.sh moves it with every release candidate. The
+# cases of the image read it from Chart.yaml instead of repeating it, so that a version bump does not break them.
+APP="$(sed -n 's/^appVersion: "\([^"[:space:]]*\)"[[:space:]]*$/\1/p' "${chart}/Chart.yaml")"
+if [ -z "${APP}" ]; then echo "helm-messages-test: no appVersion found in ${chart}/Chart.yaml" >&2; exit 1; fi
 # German umlauts or German function words in a message (word match, case-insensitive)
 german='[äöüÄÖÜß]|(^|[^[:alpha:]])(und|oder|nicht|ist|ein|eine|der|das|muss|leer|obwohl|wenn|bei|ohne|sonst|bewusst)([^[:alpha:]]|$)'   # check-language: ignore (German words on purpose)
 
@@ -159,18 +163,18 @@ expect_ok "(65) quantities as numbers and strings" render --set resources.reques
 expect_ok "(66) a declared enrollment token with a Secret" render --set-json 'enrollmentTokens=[{"name":"gateway","existingSecret":"gateway-token","key":"token","labels":{"site":"hq"},"expiresAt":"2030-01-01T00:00:00Z"}]'
 
 # --- the image: registry, repository, digest and global.imageRegistry --------------------------------------------------------
-expect_image "(70) the default image" "ghcr.io/myriarch/myriarch:0.1.0"
-expect_image "(71) registry and repository" "registry.example.com:5000/myriarch/server:0.1.0" --set image.registry=registry.example.com:5000 --set image.repository=myriarch/server
-expect_image "(72) a repository with a host is used as it is (the values of v0.1.0)" "registry.example.com/myriarch/myriarch:0.1.0" --set image.repository=registry.example.com/myriarch/myriarch
-expect_image "(73) the host of the repository wins over image.registry" "registry.example.com/myriarch/myriarch:0.1.0" --set image.registry=other.example.com --set image.repository=registry.example.com/myriarch/myriarch
-expect_image "(74) a repository with a host and a port" "localhost:5001/myriarch/myriarch:0.1.0" --set image.repository=localhost:5001/myriarch/myriarch
-expect_image "(75) a repository on localhost" "localhost/myriarch:0.1.0" --set image.repository=localhost/myriarch
+expect_image "(70) the default image" "ghcr.io/myriarch/myriarch:${APP}"
+expect_image "(71) registry and repository" "registry.example.com:5000/myriarch/server:${APP}" --set image.registry=registry.example.com:5000 --set image.repository=myriarch/server
+expect_image "(72) a repository with a host is used as it is (the values of v0.1.0)" "registry.example.com/myriarch/myriarch:${APP}" --set image.repository=registry.example.com/myriarch/myriarch
+expect_image "(73) the host of the repository wins over image.registry" "registry.example.com/myriarch/myriarch:${APP}" --set image.registry=other.example.com --set image.repository=registry.example.com/myriarch/myriarch
+expect_image "(74) a repository with a host and a port" "localhost:5001/myriarch/myriarch:${APP}" --set image.repository=localhost:5001/myriarch/myriarch
+expect_image "(75) a repository on localhost" "localhost/myriarch:${APP}" --set image.repository=localhost/myriarch
 expect_image "(76) the digest replaces the tag" "ghcr.io/myriarch/myriarch@${DIGEST}" --set "image.digest=${DIGEST}" --set image.tag=9.9.9
 expect_image "(77) the digest with a repository that has a host" "registry.example.com/myriarch/myriarch@${DIGEST}" --set image.repository=registry.example.com/myriarch/myriarch --set "image.digest=${DIGEST}"
-expect_image "(78) an explicit tag" "ghcr.io/myriarch/myriarch:0.2.0-rc.1" --set image.tag=0.2.0-rc.1
-expect_image "(79) global.imageRegistry replaces image.registry" "mirror.example.com/myriarch/myriarch:0.1.0" --set global.imageRegistry=mirror.example.com --set image.registry=ghcr.io
-expect_image "(80) global.imageRegistry does not touch a repository with a host" "registry.example.com/x/y:0.1.0" --set global.imageRegistry=mirror.example.com --set image.repository=registry.example.com/x/y
-expect_image "(81) an empty registry leaves the repository as it is" "myriarch/myriarch:0.1.0" --set image.registry=
-expect_image "(82) a repository of one segment" "ghcr.io/myriarch:0.1.0" --set image.repository=myriarch
+expect_image "(78) an explicit tag" "ghcr.io/myriarch/myriarch:9.8.7-rc.1" --set image.tag=9.8.7-rc.1
+expect_image "(79) global.imageRegistry replaces image.registry" "mirror.example.com/myriarch/myriarch:${APP}" --set global.imageRegistry=mirror.example.com --set image.registry=ghcr.io
+expect_image "(80) global.imageRegistry does not touch a repository with a host" "registry.example.com/x/y:${APP}" --set global.imageRegistry=mirror.example.com --set image.repository=registry.example.com/x/y
+expect_image "(81) an empty registry leaves the repository as it is" "myriarch/myriarch:${APP}" --set image.registry=
+expect_image "(82) a repository of one segment" "ghcr.io/myriarch:${APP}" --set image.repository=myriarch
 expect_path "(83) an empty repository" image.repository --set image.repository=null
 finish_tests "helm-messages-test"
