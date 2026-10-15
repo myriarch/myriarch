@@ -44,7 +44,8 @@ the registry container and the work directory), `make kind-probe`.
 * Network access to Docker Hub, `ghcr.io`, GitHub (releases and the Sigstore TUF root), the Go proxy, the Alpine package
   mirror and `charts.dexidp.io`. Anonymous Docker Hub pulls are limited (100 per 6 hours and IP); a Docker Desktop login
   raises the limit and is picked up by the image scripts.
-* Free local ports: 5001 (registry), 28080 and 28081 (port-forwards to the two myriarch releases), 25554 (Dex).
+* Free local ports: 5001 (registry), 28080 and 28081 (port-forwards to the two myriarch releases), 25554 (Dex), and 28091 and 28092 (the
+  metrics of the two replicas, in the NetworkPolicy stage).
 
 ## What the probe builds
 
@@ -97,7 +98,7 @@ verified with its SHA-256 and the Sigstore bundle by the server, the updater ver
 | `PROBE_REUSE_IMAGES` | `0` | `1` keeps the last `images.env` and builds nothing |
 | `ALLOW_DIRTY` | `0` | `1` builds the server image from a dirty tree (the image script refuses it otherwise; the stage 0 check reports a `SKIP`) |
 | `WEB_BUILD` | `auto`; `--fresh` uses `always` | Web UI build for the server image |
-| `PROBE_PORT_API`, `PROBE_PORT_DEXAPI`, `PROBE_PORT_DEX` | `28080`, `28081`, `25554` | Local port-forward ports (different from the ports of `scripts/e2e*.sh`, so both can run together) |
+| `PROBE_PORT_API`, `PROBE_PORT_DEXAPI`, `PROBE_PORT_DEX` | `28080`, `28081`, `25554` | Local port-forward ports (different from the ports of `scripts/e2e*.sh`, so both can run together); the NetworkPolicy stage also forwards the metrics of the two replicas to `PROBE_PORT_API` + 11 and + 12 |
 
 Modes of `probe.sh`: `--fresh` removes cluster, registry and work directory first; `--reset` keeps cluster and registry and
 deletes the probe namespaces (and the CoreDNS rewrite); without a flag it requires `up.sh` and fails when the namespaces exist.

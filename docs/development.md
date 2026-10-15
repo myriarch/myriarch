@@ -1050,7 +1050,8 @@ supervisor and collector, and `myriarch-updater` in container mode. The test cal
 select version, then the live progress), triggers a real rollback by killing the new collector during the health check and
 succeeds after a retry. It needs network access once for the release files. Options include `E2E_KEEP=1`, `NO_BUILD=1`,
 `E2E_DIR` (default `.e2e/ui-updates`), `E2E_GIT_TARGET=git|none` and `E2E_UI=auto|1|0`; the header of the script lists them
-all. It uses its own ports (myriarchd 18090, PostgreSQL 54340, mirror 19997).
+all. It uses its own ports: 18090 (myriarchd), 54340 (PostgreSQL), 19997 (the mirror), 23133 to 23135 (health checks of the collector,
+the supervisor and the updater) and 24317 and 24318 (OTLP of the collector).
 
 ### Host end-to-end test
 

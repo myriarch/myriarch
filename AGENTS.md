@@ -62,10 +62,14 @@ scripts/e2e.sh                                     # end-to-end test (fixed port
 
 Some tests and scripts use fixed ports, a shared local cluster or the machine itself. Do not run two of them at the same time:
 
-- `scripts/e2e.sh`: the ports 18080, 18081, 54339 and 1999x.
-- `make e2e-ui-updates`: the ports 18090, 54340 and 19997.
+- `scripts/e2e.sh`: the ports 18080 and 18081 (the two replicas of the server), 54339 (PostgreSQL), 19998 and 19999 (release mirror
+  and mock receiver) and 19464 to 19469 (control and metrics of the three simulators). The step with the real supervisor and
+  collector also uses 4317, 4318, 13133 and 13134 on localhost.
+- `make e2e-ui-updates`: the ports 18090 (server), 54340 (PostgreSQL), 19997 (release mirror), 23133 to 23135 (health checks of the
+  collector, the supervisor and the updater) and 24317 and 24318 (OTLP of the collector).
 - `make kind-probe` (and `make kind-up`): the kind cluster `myriarch`, the registry container on port 5001 and the ports 28080,
-  28081 and 25554. They need a container runtime. CI runs the probe in `.github/workflows/e2e-kind.yml`.
+  28081 and 25554 (port-forwards), and 28091 and 28092 in the NetworkPolicy stage. They need a container runtime. CI runs the probe
+  in `.github/workflows/e2e-kind.yml`.
 - `scripts/host-e2e/*.sh`: CI only. They install a service user, systemd units and files below `/etc`, `/opt` and `/var`, and
   refuse to run unless `CI=true` and `HOST_E2E=1` are set, on Linux, as a user other than root and on a host without an
   installation. Never run them on your own machine; `.github/workflows/host-e2e.yml` runs them on a throwaway runner VM.
