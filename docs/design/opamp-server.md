@@ -29,7 +29,83 @@ changed in the configuration unless stated otherwise.
   and plain `http://` download base URLs without an acknowledgement.
 - `myriarchd config validate` runs the same checks, optionally also reading the referenced files, so a configuration can
   be verified in CI before it is deployed.
-- Modes: `myriarchd serve` (production), `myriarchd dev` (embedded database, development login and token), `myriarchd migrate`.
+- Modes: `myriarchd serve` (production), `myriarchd dev` (embedded database, development login and token), `myriarchd migrate`
+  (the database settings only, see [Start, migrations and schema compatibility](#start-migrations-and-schema-compatibility)).
+
+## Start, migrations and schema compatibility
+
+Three numbers describe the fit between a database and a binary:
+
+- The **schema version** of a database is its highest applied migration (0 for an empty database).
+- The **schema level** of a binary is the highest migration it embeds.
+- The **compatibility level** of a database is the lowest schema level that a binary must have to run on it. It is the column
+  `min_binary_schema` of the table `schema_compat`, which holds exactly one row (migration 00006), and it never exceeds the schema
+  version. A database that is older than migration 00006 has no compatibility level (the tools print `none`). A schema from
+  migration 00006 on without the table or without its row is damaged: without the level nobody can say whether a binary fits,
+  so the start and `myriarchd migrate` fail with an error that asks for a restore from a backup.
+
+**Start.** `myriarchd serve` and `myriarchd dev` connect to the database, read the schema version and the compatibility level
+and decide before any other component is created:
+
+| State of the database | `database.migrateOnStart: true` (default) | `database.migrateOnStart: false` |
+|---|---|---|
+| Compatibility level above the schema level of the binary (incompatible) | Refuse the start, change nothing | Refuse the start, change nothing |
+| Schema version below the schema level of the binary | Apply the pending migrations under the advisory lock, read the state again, then go on (refuse if the schema is incompatible by now) | Refuse the start at once, change nothing |
+| Schema version equal to the schema level | Start | Start |
+| Schema version above the schema level of the binary, compatibility level not above it | Log a warning and start | Log a warning and start |
+
+A refusal ends the process with exit status 1 and one of these messages (`<...>` stands for a number):
+
+- Incompatible: `the database schema is incompatible with this myriarchd: the database is at schema version <V> and needs a myriarchd
+  with schema level <C> or higher (compatibility level <C>), this myriarchd has schema level <S>; start a newer myriarchd release or
+  restore a backup of the database from before the upgrade`.
+- Older, with `database.migrateOnStart` off: `the database schema is at version <V> but this myriarchd needs version <S> and
+  database.migrateOnStart is false: run "myriarchd migrate" first, or set database.migrateOnStart to true`.
+
+The warning for a newer compatible schema has the level WARN and the text `the database schema is newer than this myriarchd but
+compatible with it (after a rollback, or while a rolling update is under way): run the release that matches the schema as soon as
+you can`, with the attributes `schemaVersion`, `compatibilityLevel` and `schemaLevel`. After the schema step the log line `database
+schema ready` names the same three numbers.
+
+The check is made at start. A replica that runs is not stopped when another replica raises the compatibility level. `/readyz`
+stays not ready while the schema version is below the schema level of the binary (for example after an older backup was restored
+into a running installation); it does not read the compatibility level again.
+
+**`myriarchd migrate`** loads the database settings and nothing else: the section `database` of the file (an unknown key inside it
+is an error, every other section is ignored), `${VAR}` references in it, the variables `MYRIARCH_DATABASE_*` and `database.dsnFile`.
+It validates only these settings, so it runs where the public URL, the login path and the secrets of other features do not exist,
+for example in a job before the server is updated. It runs the schema step of the start with `database.migrateOnStart` set: it
+applies the pending migrations, refuses an incompatible schema and warns about a newer compatible one, and a second run changes
+nothing. Results go to stdout, log lines and errors to stderr.
+
+- Without `--check` it prints `schema version before: <V>`, `schema version after: <V>` and `compatibility level: <C>` (`none`
+  when there is none).
+- With `--check` it changes nothing and prints `schema version`, `compatibility level`, `schema level of this myriarchd` and
+  `status` (`current`, `pending`, `newer` or `incompatible`).
+- Exit codes: 0 done (with `--check`: nothing is pending and this binary can run on the schema), 1 any error (settings,
+  connection, a failed migration), 3 `--check` found pending migrations, 4 the schema is incompatible with this binary (with and
+  without `--check`).
+
+**Writing migrations.** A migration is never edited after it may have been applied anywhere. From 00006 on, its header (the comment
+before `-- +goose Up`) has two lines. `-- Rolling update:` says what a replica of the previous version does on the changed schema.
+`-- Compatibility level:` is `unchanged`, or `raised to 00NNN` when binaries below the level NNN cannot work with the schema.
+
+- *Expand only* is a promise that the previous version keeps working: new tables, nullable columns and columns with a default,
+  indexes, a constraint that is relaxed. The level stays, and the migration must not say "expand only" and raise the level.
+- A migration that the previous version cannot work with (it drops, renames or tightens something that version uses, or changes
+  what stored data means) raises the level. Up sets `min_binary_schema` to NNN, which is greater than the previous value and at
+  most the number of the migration, and Down sets the previous value again. The level NNN is the number of the oldest migration
+  whose binaries still work on the new schema.
+- `TestMigrationHeaders`, `TestCompatibilityLevelFollowsTheHeaders` and `TestLevelCheckRejectsViolations` in
+  `internal/store/migrations` check the headers and apply every migration up and down against them.
+- Every consequence that a user must know before an upgrade goes into the section "Upgrade notes" of the changelog; the
+  [development guide](../development.md) describes the steps.
+
+**Rollback.** A binary that is rolled back to an older release which has this mechanism starts on the newer schema when the
+compatibility level allows it (with the warning), and is refused otherwise. v0.1.0 does not read the compatibility level, and its
+migration library accepts a database with higher versions, so it starts on any later schema without a check. A rollback to
+v0.1.0 is not supported ([ADR-0036](../adr/0036-database-schema-compatibility-and-rollback.md)): back up the database before an
+upgrade, and go back by restoring the backup.
 
 ## Persistence
 
@@ -64,7 +140,9 @@ The store interfaces define the semantics; the PostgreSQL implementation follows
 - Releases are ordered by semantic version, descending; prereleases are flagged.
 - Audit filters accept an action prefix with a trailing `*`.
 - Migrations: the first migration is a contract and never edited. Further changes are new numbered up/down files with
-  an advisory lock so that concurrent replicas are safe. Changes only add (expand).
+  an advisory lock so that concurrent replicas are safe. The header of every migration from 00006 on states whether
+  the previous version keeps working, and the database records the result as its compatibility level ([Start, migrations and
+  schema compatibility](#start-migrations-and-schema-compatibility)).
 
 ## Event bus
 

@@ -27,8 +27,8 @@ Contents: [1 Login paths](#1-login-paths) · [2 Bootstrap admin](#2-bootstrap-ad
 `myriarchd dev` has a third path, the development login with well-known users. It exists only in dev mode, is refused
 by `serve` and is never used by the Helm chart or by any production example.
 
-**Startup check.** `serve` refuses to start when neither path is configured. `myriarchd config validate`, `serve` and
-`migrate` report the same text and exit with status 1:
+**Startup check.** `serve` refuses to start when neither path is configured. `myriarchd config validate` and `serve` report
+the same text and exit with status 1 (`migrate` reads only the database settings and does not check the login path):
 
 ```text
 ERROR: auth: no login path is configured for serve mode: enable auth.oidc (single sign-on) or auth.bootstrapAdmin with passwordHashFile or tokenFile (break-glass administrator); the dev login exists only in "myriarchd dev"
