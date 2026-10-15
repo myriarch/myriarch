@@ -65,6 +65,12 @@ var auditedOperations = map[string][]string{
 // readOnlyPosts are POST operations without a state change (computations, permission read).
 var readOnlyPosts = map[string]bool{"matchFleets": true, "renderBlueprint": true}
 
+// tokenPosts are POST operations that a host calls with its enrollment token and that compute an answer without
+// changing configuration, rollouts or the inventory: the plan for installing a host from the server. They have no
+// principal to audit; the token counts as used, and the log names the token by its ID. They must authenticate
+// themselves (api.AuthCustom).
+var tokenPosts = map[string]bool{"getInstallPlan": true}
+
 // TestEveryMutatingRouteIsAudited enumerates all state-changing operations and checks that each one has a declared
 // audit action that is really written somewhere in the code base. (The behavior of the individual handlers is
 // tested next to them: agent, user, token, rollout, GitOps, artifact and notification audit tests.)
@@ -87,6 +93,12 @@ func TestEveryMutatingRouteIsAudited(t *testing.T) {
 		for _, r := range m.Routes() {
 			switch r.Method {
 			case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+				if tokenPosts[r.OperationID] {
+					if r.Auth != api.AuthCustom {
+						t.Errorf("%s is declared as a call with an enrollment token but does not authenticate itself", r.OperationID)
+					}
+					continue
+				}
 				if readOnlyPosts[r.OperationID] {
 					if r.Permission != authz.PermRead {
 						t.Errorf("%s is declared read only but requires %s", r.OperationID, r.Permission)

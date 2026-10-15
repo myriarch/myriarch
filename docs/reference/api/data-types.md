@@ -1,6 +1,6 @@
 ---
 title: "Data types"
-weight: 190
+weight: 200
 description: "Every schema of the REST API with its fields, types, constraints and values."
 ---
 
@@ -822,6 +822,60 @@ Effective target version of a fleet and where it comes from.
 Lower-case hex encoded hash
 
 Type: `string`. Pattern `^[0-9a-f]*$`.
+
+## InstallPlan
+
+The plan for a host, as JSON. The text form has the same content in the lines `format`, `fleet`, `version.source`, `opamp.endpoint`, `collector.version`, `collector.url`, `collector.grant`, `supervisor.version`, `supervisor.url`, `supervisor.grant` and `updater.install`.
+
+| Field | Type | Description |
+|---|---|---|
+| `format` (required) | `integer` | One of `1`. |
+| `fleet` (required) | `string` | The fleet that the host would join. Example `linux-hosts`. |
+| `version` (required) | [InstallPlanVersion](#installplanversion) |  |
+| `opamp` (required) | [InstallPlanOpAMP](#installplanopamp) |  |
+| `collector` (required) | [InstallPlanArtifact](#installplanartifact) |  |
+| `supervisor` (required) | [InstallPlanArtifact](#installplanartifact) |  |
+| `updater` (required) | [InstallPlanUpdater](#installplanupdater) |  |
+
+## InstallPlanArtifact
+
+| Field | Type | Description |
+|---|---|---|
+| `version` (required) | `string` | The version without "v". Example `0.162.0`. |
+| `url` (required) | `string` | The URL of the artifact on the origin of the server. Add ".sha256" and ".sigstore.json" for the checksum and the Sigstore bundle. |
+| `grant` (required) | `string` | The install grant (a "myrd_" token) for this artifact, sent as a bearer token. It is bound to the enrollment token of the request and expires after install.grantTtl. |
+
+## InstallPlanOpAMP
+
+| Field | Type | Description |
+|---|---|---|
+| `endpoint` (required) | `string` | The OpAMP endpoint of the host: wss:// for an https public URL (ws:// for the http URL of a development server). Example `wss://fleet.example.com/v1/opamp`. |
+
+## InstallPlanRequest
+
+The request for a plan. It holds no secret. `attributes` may only hold `host.name`, `site.type`, `site.id`, `site.name`,
+`site.country`, `site.region`, `site.timezone` and `deployment.environment.name` (values of 1 to 253 characters without control
+characters or surrounding spaces); `os.type` and `host.arch` come from `os` and `arch`, and the labels come from the enrollment token.
+
+| Field | Type | Description |
+|---|---|---|
+| `os` (required) | `string` | One of `linux`, `windows`. Example `linux`. |
+| `arch` (required) | `string` | amd64 or arm64; aliases such as x86_64 and aarch64 are accepted. Windows is amd64 only. Example `amd64`. |
+| `attributes` | [StringMap](#stringmap) |  |
+| `fleet` | `string` | The fleet that the person expects. The server decides; a fleet that does not agree is refused with 409 fleet_mismatch. Example `linux-hosts`. |
+| `collectorVersion` | `string` | A collector version without "v" that the host asks for, accepted inside the Git frame of the fleet only. Example `0.162.0`. |
+
+## InstallPlanUpdater
+
+| Field | Type | Description |
+|---|---|---|
+| `install` (required) | `boolean` | Whether the myriarch-updater is installed: the fleet updates its collectors through the updater executor. |
+
+## InstallPlanVersion
+
+| Field | Type | Description |
+|---|---|---|
+| `source` (required) | `string` | Where the version comes from: spec.collector.version (git), the choice in the UI (ui), the version before the running version rollout (rollout) or the version that the host asked for (request). One of `git`, `ui`, `rollout`, `request`. |
 
 ## Issue
 

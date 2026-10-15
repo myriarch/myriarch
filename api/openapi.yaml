@@ -87,6 +87,8 @@ tags:
     description: Artifact cache for collector binaries
   - name: notifications
     description: Notification channels
+  - name: install
+    description: Installation of hosts from the server - plan, install grants, installer bundles and rendered commands (available from v0.2.0)
 
 paths:
   # ===================================================================== auth
@@ -1519,6 +1521,95 @@ paths:
               schema: { $ref: '#/components/schemas/ActionAccepted' }
         '404':
           $ref: '#/components/responses/NotFound'
+
+  # ================================================================= install
+  /install/plan:
+    post:
+      operationId: getInstallPlan
+      tags: [install]
+      summary: Plan for installing a host from the server (authenticated by an enrollment token)
+      description: |
+        Available from v0.2.0. The installers call this before a host is enrolled, and so can tools. The request names the platform of the host,
+        the site attributes that it would report and, optionally, the fleet that the person expects and a collector version. The server decides the
+        fleet exactly as it does for an agent that connects (the attributes and the labels of the enrollment token), takes the version from the
+        effective target of the fleet and prepares the collector and the supervisor for the platform. The answer names the versions, the
+        URLs of the artifacts on the origin of the server and an install grant for each. The installer downloads an artifact with
+        `Authorization: Bearer <grant>` from `downloadArtifact` and fetches `<url>.sha256` and `<url>.sigstore.json` from the same route; it
+        verifies both against an identity that it builds itself, so the answer is data and never code.
+
+        The request is authenticated by the enrollment token that the host will use, as `Authorization: Bearer myre_...`, always: also
+        where `opamp.requireEnrollmentToken` is off, and with the client certificate rule of the OpAMP endpoint where
+        `opamp.requireClientCert` is set. The token never appears in a body, a URL or an answer. A request without a token and one with a token
+        that is unknown, revoked or expired get the same 401. Failed authentications are limited per client address, and the lookups of tokens
+        per replica (429 with `Retry-After`).
+
+        The plan is `text/plain` by default: one `key=value` line each, in the order of the keys below, with values from the characters
+        `A-Z a-z 0-9 . _ : / @ + = -` (the three URL values may also hold the brackets of an IPv6 literal), at most 64 lines and 8 KiB, so that bash
+        without `jq` and Windows PowerShell 5.1 can read it. `Accept: application/json` returns the object `InstallPlan`. The keys are
+        `format` (1; a reader stops at a format that it does not know), `fleet`, `version.source`, `opamp.endpoint`, `collector.version`,
+        `collector.url`, `collector.grant`, `supervisor.version`, `supervisor.url`, `supervisor.grant` and `updater.install`.
+
+        The version is the effective target of the fleet (`version.source` is `git` or `ui`). While a version rollout of the fleet is
+        pending, running or waiting for approval it is the version the fleet ran before (`rollout`), so that the new host becomes a straggler of
+        the last wave. A version that the host asks for is accepted if it is the target, the version the plan would give anyway or inside the
+        frame `spec.update.selection` in Git (`request`). The supervisor has the version of the collector, and the release tracker must know
+        both releases.
+
+        A refusal is a problem document. The class is its `code` and the reason is the `code` of `issues[0]`, which the installers show:
+        `conflict` with `fleet_mismatch`, `no_fleet`, `fleet_ambiguous` or `rollout_blocking`; `precondition_failed` with `no_target_version`,
+        `unsupported_distribution`, `unknown_version`, `unknown_supervisor_version` or `server_settings`; `validation_failed` with
+        `invalid_value`, `unknown_attribute`, `platform_not_supported`, `version_not_allowed`, `unknown_version` or `unknown_supervisor_version`;
+        `unavailable` with `preparing`. The first request for a platform makes the server download about 112 MB, so it can answer
+        `preparing` for minutes; the installer asks again after `Retry-After`.
+      security: []
+      x-permission: custom
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InstallPlanRequest' }
+      responses:
+        '200':
+          description: 'The plan (header Vary: Accept)'
+          content:
+            text/plain:
+              schema: { type: string }
+            application/json:
+              schema: { $ref: '#/components/schemas/InstallPlan' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The installation of hosts from the server is turned off (`install.enabled`; code not_found)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          description: The host cannot be placed or a version rollout is in the way (code conflict; reasons fleet_mismatch, no_fleet, fleet_ambiguous, rollout_blocking)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '412':
+          description: The server has no version to give (code precondition_failed; reasons no_target_version, unsupported_distribution, unknown_version, unknown_supervisor_version, server_settings)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: The request is not acceptable (code validation_failed; the issues name the field in `path`)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429':
+          description: Too many failed authentications from this client address, or too many token lookups on this replica (code too_many_requests, header Retry-After)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503':
+          description: The artifacts are being prepared (code unavailable, reason preparing, header Retry-After) or the database is not available
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
 components:
   securitySchemes:
@@ -3289,6 +3380,55 @@ components:
             default); when none are configured either, the distinct platforms
             of the connected collectors of the fleets that use this
             distribution. The request fails with 422 if that set is empty too.
+
+    # ------------------------------------------------------------ install
+    InstallPlanRequest:
+      type: object
+      required: [os, arch]
+      description: |
+        The request for a plan. It holds no secret. `attributes` may only hold `host.name`, `site.type`, `site.id`, `site.name`,
+        `site.country`, `site.region`, `site.timezone` and `deployment.environment.name` (values of 1 to 253 characters without control
+        characters or surrounding spaces); `os.type` and `host.arch` come from `os` and `arch`, and the labels come from the enrollment token.
+      properties:
+        os: { type: string, enum: [linux, windows], example: linux }
+        arch: { type: string, example: amd64, description: 'amd64 or arm64; aliases such as x86_64 and aarch64 are accepted. Windows is amd64 only.' }
+        attributes: { $ref: '#/components/schemas/StringMap' }
+        fleet: { type: string, example: linux-hosts, description: 'The fleet that the person expects. The server decides; a fleet that does not agree is refused with 409 fleet_mismatch.' }
+        collectorVersion: { type: string, example: 0.162.0, description: 'A collector version without "v" that the host asks for, accepted inside the Git frame of the fleet only.' }
+    InstallPlan:
+      type: object
+      required: [format, fleet, version, opamp, collector, supervisor, updater]
+      description: The plan for a host, as JSON. The text form has the same content in the lines `format`, `fleet`, `version.source`, `opamp.endpoint`, `collector.version`, `collector.url`, `collector.grant`, `supervisor.version`, `supervisor.url`, `supervisor.grant` and `updater.install`.
+      properties:
+        format: { type: integer, enum: [1] }
+        fleet: { type: string, example: linux-hosts, description: The fleet that the host would join. }
+        version: { $ref: '#/components/schemas/InstallPlanVersion' }
+        opamp: { $ref: '#/components/schemas/InstallPlanOpAMP' }
+        collector: { $ref: '#/components/schemas/InstallPlanArtifact' }
+        supervisor: { $ref: '#/components/schemas/InstallPlanArtifact' }
+        updater: { $ref: '#/components/schemas/InstallPlanUpdater' }
+    InstallPlanVersion:
+      type: object
+      required: [source]
+      properties:
+        source: { type: string, enum: [git, ui, rollout, request], description: 'Where the version comes from: spec.collector.version (git), the choice in the UI (ui), the version before the running version rollout (rollout) or the version that the host asked for (request).' }
+    InstallPlanOpAMP:
+      type: object
+      required: [endpoint]
+      properties:
+        endpoint: { type: string, example: 'wss://fleet.example.com/v1/opamp', description: 'The OpAMP endpoint of the host: wss:// for an https public URL (ws:// for the http URL of a development server).' }
+    InstallPlanArtifact:
+      type: object
+      required: [version, url, grant]
+      properties:
+        version: { type: string, example: 0.162.0, description: The version without "v". }
+        url: { type: string, description: 'The URL of the artifact on the origin of the server. Add ".sha256" and ".sigstore.json" for the checksum and the Sigstore bundle.' }
+        grant: { type: string, description: 'The install grant (a "myrd_" token) for this artifact, sent as a bearer token. It is bound to the enrollment token of the request and expires after install.grantTtl.' }
+    InstallPlanUpdater:
+      type: object
+      required: [install]
+      properties:
+        install: { type: boolean, description: 'Whether the myriarch-updater is installed: the fleet updates its collectors through the updater executor.' }
 
     # ------------------------------------------------------------ notifications
     ChannelInfo:

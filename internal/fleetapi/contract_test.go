@@ -17,7 +17,7 @@ import (
 
 // fleetTags are the OpenAPI tags served by this package. Every module is named
 // exactly after the tag whose operations it serves.
-var fleetTags = []string{"artifacts", "blueprints", "executors", "fleets", "gitops", "notifications", "releases", "rolloutPolicies", "rollouts"}
+var fleetTags = []string{"artifacts", "blueprints", "executors", "fleets", "gitops", "install", "notifications", "releases", "rolloutPolicies", "rollouts"}
 
 // Every module serves exactly the operations of the OpenAPI tag it is named
 // after, with the documented method, path and permission, and nothing else is
@@ -78,7 +78,7 @@ func TestTaggedOperationsMatchTheOpenAPIContract(t *testing.T) {
 	sort.Strings(wantIDs)
 	sort.Strings(gotIDs)
 	assert.Equal(t, wantIDs, gotIDs, "exactly the operationIds of the fleet tags")
-	assert.Len(t, wantIDs, 39)
+	assert.Len(t, wantIDs, 40)
 }
 
 func TestRoutesAreMountableWithoutConflicts(t *testing.T) {
@@ -90,6 +90,14 @@ func TestRoutesAreMountableWithoutConflicts(t *testing.T) {
 	assert.False(t, e.routes["downloadArtifact"].Streaming)
 	assert.Equal(t, api.AuthCustom, e.routes["gitopsWebhook"].Auth)
 	assert.Equal(t, http.MethodPost, e.routes["gitopsWebhook"].Method)
+	// the plan is asked for by hosts with an enrollment token: no session, a small body
+	plan := e.routes["getInstallPlan"]
+	assert.Equal(t, api.AuthCustom, plan.Auth)
+	assert.Equal(t, http.MethodPost, plan.Method)
+	assert.Equal(t, "/install/plan", plan.Pattern)
+	assert.Equal(t, int64(16<<10), plan.MaxBodyBytes)
+	assert.False(t, plan.Streaming)
+	assert.False(t, plan.LongTransfer)
 }
 
 func TestAuthenticationAndPermissions(t *testing.T) {
