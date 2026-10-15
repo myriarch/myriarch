@@ -141,7 +141,7 @@ LLMS = """# myriarch
 
 Status and license: the project is alpha. The server myriarchd renders the configuration. See myriarch.dev and the program myriarch-updater.
 
-## Key terms
+Key terms:
 
 - **Blueprint**: A layered collector configuration that myriarch renders on the server.
 
@@ -550,7 +550,7 @@ class LlmsTest(SeoCase):
         self.assert_finding("the heading must be followed by the summary in a block quote")
         self.llms(LLMS + "\n# Another heading\n")
         self.assert_finding("llms.txt: has 2 level-1 headings, expected exactly one")
-        self.llms(LLMS.replace("## Key terms", "<h2>Key terms</h2>"))
+        self.llms(LLMS.replace("Key terms:", "<h2>Key terms</h2>"))
         self.assert_finding("llms.txt: contains an HTML tag")
         self.llms(LLMS + "\n")
         self.assert_finding("llms.txt: must end with exactly one line break")
@@ -586,6 +586,26 @@ class LlmsTest(SeoCase):
         self.llms(LLMS + "- [Planned](https://example.test/docs/planned/): Not written yet.\n")
         self.assert_finding("https://example.test/docs/planned/ is a placeholder page")
 
+    def test_a_list_item_below_a_heading_must_be_a_file_link(self):
+        # llmstxt.org: free-form content, lists included, stands before the first level-2 heading; the sections below hold lists of links
+        # (the key terms were a section of their own once, which strict readers drop)
+        self.llms(LLMS.replace("Key terms:\n", "## Key terms\n"))
+        self.assert_finding("llms.txt:9: a list item below a level-2 heading must be a link of the form '- [name](url)'")
+        link = "https://example.test/docs/#a"
+        for item in ("- **Blueprint**: A layered collector configuration.", "* [Documentation](%s): A star as the marker." % link,
+                     "  - [Documentation](%s): An indented item." % link, "1. [Documentation](%s): A numbered item." % link,
+                     "- [Documentation](%s) without the colon." % link, "- [Documentation](%s):" % link,
+                     "- Documentation: [the map](%s)" % link):
+            self.llms(LLMS + item + "\n")
+            out = self.assert_finding("a list item below a level-2 heading must be a link of the form '- [name](url)'")
+            self.assertEqual(out.count("a list item below"), 1, item)
+        # the two forms of the format, with and without notes, and a list before the first heading
+        for item in ("- [Documentation](%s)" % link, "- [Documentation](%s): The notes may have a colon: here." % link):
+            self.llms(LLMS + item + "\n")
+            self.assert_clean()
+        self.llms(LLMS.replace("Key terms:\n", "Key terms:\n\n- A term without a definition.\n- [A link](%s): As a free-form item." % link))
+        self.assert_clean()
+
     def test_a_link_appears_once_and_has_a_text(self):
         self.llms(LLMS + "- [Documentation again](https://example.test/docs/): The same page.\n")
         self.assert_finding("the link https://example.test/docs/ appears twice")
@@ -603,10 +623,11 @@ class LlmsTest(SeoCase):
         self.assert_finding("the name starts a sentence, write 'Myriarch' (ADR-0015)")
 
     def test_identifiers_are_not_part_of_the_spelling_rule(self):
-        text = LLMS + (
-            "\nUse `myriarch` in code, the command myriarch-updater, the host myriarch.dev, the path ghcr.io/myriarch/myriarch and dev.myriarch.name.\n"
+        # in the free-form part, before the first heading, where lists and quotes may stand
+        text = LLMS.replace("## Start here", (
+            "Use `myriarch` in code, the command myriarch-updater, the host myriarch.dev, the path ghcr.io/myriarch/myriarch and dev.myriarch.name.\n"
             "A new sentence. Myriarch starts it, and the (myriarch) in brackets and \"myriarch\" in quotes do not.\n"
-            "- **Myriarch** starts a list item.\n> Myriarch starts a quote.\n")
+            "- **Myriarch** starts a list item.\n> Myriarch starts a quote.\n\n## Start here"), 1)
         self.llms(text)
         self.assert_clean()
 

@@ -27,10 +27,11 @@ Fails when
     class td-breadcrumbs--single, a trail of one item, is not visible: such a page has no list); every other page has no JSON-LD,
   - the title of the home page differs from params.seo.homeTitle, which must say more than the bare site title in at most 70 characters,
     or either is spelled against ADR-0015,
-  - llms.txt is missing, has not the shape of the llms.txt format (one heading with the site title, a summary in a block quote, no HTML),
-    is larger than 64 KiB, links to a page that does not exist, to a placeholder page, to another host than the production origin and the
-    repository, repeats a link, or spells the name against ADR-0015 ("Myriarch" at the start of a sentence, "myriarch" elsewhere; names of
-    programs and paths are identifiers and always lower case),
+  - llms.txt is missing, has not the shape of the llms.txt format (one heading with the site title, a summary in a block quote, no HTML,
+    and every list item below a level-2 heading a link of the form "- [name](url)" with optional ": notes": the format allows other lists
+    only before the first level-2 heading), is larger than 64 KiB, links to a page that does not exist, to a placeholder page, to another
+    host than the production origin and the repository, repeats a link, or spells the name against ADR-0015 ("Myriarch" at the start of a
+    sentence, "myriarch" elsewhere; names of programs and paths are identifiers and always lower case),
   - the 404 page is missing, can be indexed (no robots meta with noindex), has a canonical link or structured data, has not exactly one h1
     or offers no link back to the home page, the documentation or the project in its content,
   - production only: robots.txt blocks a crawler (a Disallow rule with a path: the policy is that every crawler may read the site), or
@@ -697,6 +698,9 @@ def resolve_site_file(root, path):
 
 
 LINK = re.compile(r"\[([^\]]*)\]\(([^)\s]*)\)")
+# A list item (any marker, any indentation) and the one form that llmstxt.org gives a list item below a heading: a link, then optional notes.
+LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])(?:\s|$)")
+FILE_ITEM = re.compile(r"^- \[[^\]]+\]\([^)\s]+\)(?:: \S.*)?$")
 
 
 def check_llms(root, cfg):
@@ -729,7 +733,13 @@ def check_llms(root, cfg):
         out.append("llms.txt: contains an HTML tag; the format is Markdown")
     seen = set()
     count = 0
+    sectioned = False  # past the first level-2 heading, where the format keeps its lists of links
     for number, line in enumerate(lines, 1):
+        if line.startswith("## "):
+            sectioned = True
+        elif sectioned and LIST_ITEM.match(line) and not FILE_ITEM.match(line):
+            out.append("llms.txt:%d: a list item below a level-2 heading must be a link of the form '- [name](url)' or '- [name](url): notes'; "
+                       "free-form lists belong before the first '## ' heading" % number)
         for title, url in LINK.findall(line):
             count += 1
             where = "llms.txt:%d" % number

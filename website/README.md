@@ -187,14 +187,17 @@ not define on schema.org (`PROPERTIES` in the script lists the ones the site use
 ### llms.txt
 
 `/llms.txt` follows [llmstxt.org](https://llmstxt.org/): the name of the site as the heading, a one-paragraph summary in a block quote,
-paragraphs of background, then sections of links; the section "Optional" holds what a reader may skip. It is curated, not generated from
-the pages: `data/llms.yaml` holds the summary, what the project does, for whom, its status and its independence, the key terms and the
-links, and explains its keys. A link names a page by its path, and the build fails when the page does not exist. The URL written is the
+free-form content (paragraphs of background, then the key terms as a list after the paragraph "Key terms:"), then sections of links; the
+section "Optional" holds what a reader may skip. The format allows free-form content, lists included but no headings, only before the
+first level-2 heading and keeps the sections below a heading for lists of links, so the key terms are no section of their own. It is
+curated, not generated from the pages: `data/llms.yaml` holds the summary, what the project does, for whom, its status and its
+independence, the key terms and the links, and explains its keys. A link names a page by its path, and the build fails when the page does not exist. The URL written is the
 canonical one, so the file is the same in a preview. Docsy's own template (`all.llms.txt`, a listing of the main menu and the sections of the
 documentation) is replaced for the home page by `layouts/home.llms.txt`; `outputs.home` in `hugo.yaml` switches the output format `LLMS` on.
 
 `check-seo.py` enforces: links lead only to pages of the site and to the repository, never to a placeholder page, and no link appears
-twice; the file is Markdown without HTML tags and at most 64 KiB, and it is spelled as described above. Write only what the documentation
+twice; every list item below a level-2 heading is a link, `- [name](url)` with optional `: notes`; the file is Markdown without HTML
+tags and at most 64 KiB, and it is spelled as described above. Write only what the documentation
 backs, and name neither the release status nor the support levels, which change. A note carries the caveat of its page: a tutorial that
 runs the server in development mode says so, because a reader of `llms.txt` does not open the page.
 

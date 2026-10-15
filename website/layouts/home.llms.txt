@@ -7,13 +7,15 @@ SPDX-License-Identifier: Apache-2.0
   format LLMS, which Docsy defines (baseName llms, plain text) and config/_default/hugo.yaml switches on. It replaces Docsy's all.llms.txt for
   the home page, which lists the main menu and the sections of the documentation; this one is curated: what the project is, who it is for,
   the key terms and the most important pages, all from data/llms.yaml, which also explains the keys.
+  The format lets free-form content, lists included but no headings, stand before the first level-2 heading, and reserves the sections
+  below a heading for lists of links. So the key terms are a list after a paragraph "Key terms:" in the free-form part, not a section.
   A link names a page of the site by its path: the build fails when the page does not exist. The URL is the canonical URL of the page (the
   fixed production origin of params.seo.canonicalBase, so that the file is the same in a preview). scripts/check-seo.py checks the built file.
 */ -}}
 {{- $d := hugo.Data.llms -}}
 {{- $lines := slice (printf "# %s" site.Title) "" (printf "> %s" $d.summary) "" -}}
 {{- range $d.details }}{{ $lines = $lines | append . | append "" }}{{ end -}}
-{{- $lines = $lines | append "## Key terms" | append "" -}}
+{{- $lines = $lines | append "Key terms:" | append "" -}}
 {{- range $d.terms }}{{ $lines = $lines | append (printf "- **%s**: %s" .term .text) }}{{ end -}}
 {{- $lines = $lines | append "" -}}
 {{- range $d.sections -}}

@@ -3,7 +3,8 @@
 #
 #   summary     the one-paragraph summary (the blockquote under the heading)
 #   details     paragraphs of background: what it does, who it is for, status, independence
-#   terms       key terms with a definition (term, text)
+#   terms       key terms with a definition (term, text); the list that follows the paragraph "Key terms:" before the first section
+#               (llmstxt.org allows free-form lists only there; a list below a heading holds links)
 #   sections    groups of links (title, links); a section titled "Optional" holds what a reader may skip
 #                 page   the path of a page of the site (/docs/concepts/gitops/); the build fails when it does not exist. The title of the
 #                        link is the title of the page unless `title` is set
@@ -11,10 +12,10 @@
 #                 note   one sentence about the target (required)
 #
 # scripts/check-seo.py checks the built file: links only to pages of the site and to the repository, no placeholder page, no duplicate
-# link, and one spelling of the name. Spelling (ADR-0015): "myriarch" in identifiers and in the middle of a sentence, "Myriarch" at the
-# start of a sentence. Write only what the documentation backs; the support levels and the release status change, so name neither.
-# A note carries the caveat of its page: a tutorial that runs the server in development mode says so, because a reader of llms.txt does
-# not open the page.
+# link, only links in the lists below a heading, and one spelling of the name. Spelling (ADR-0015): "myriarch" in identifiers and in the
+# middle of a sentence, "Myriarch" at the start of a sentence. Write only what the documentation backs; the support levels and the release
+# status change, so name neither. A note carries the caveat of its page: a tutorial that runs the server in development mode says so,
+# because a reader of llms.txt does not open the page.
 summary: "Myriarch is an open-source fleet manager for OpenTelemetry Collectors, built on OpAMP. Git is the source of truth for blueprints, fleets, rollout policies and the allowed collector versions; the web UI and the REST API operate within that frame, and every operator action is audited."
 
 details:
