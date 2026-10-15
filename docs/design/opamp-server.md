@@ -68,8 +68,9 @@ you can`, with the attributes `schemaVersion`, `compatibilityLevel` and `schemaL
 schema ready` names the same three numbers.
 
 The check is made at start. A replica that runs is not stopped when another replica raises the compatibility level. `/readyz`
-stays not ready while the schema version is below the schema level of the binary (for example after an older backup was restored
-into a running installation); it does not read the compatibility level again.
+checks the schema version only until that check first succeeds, which the start already guarantees; after that it reads neither
+the schema version nor the compatibility level again. It therefore notices neither a later restore of an older backup nor a raised
+compatibility level: after a restore, restart every replica.
 
 **`myriarchd migrate`** loads the database settings and nothing else: the section `database` of the file (an unknown key inside it
 is an error, every other section is ignored), `${VAR}` references in it, the variables `MYRIARCH_DATABASE_*` and `database.dsnFile`.

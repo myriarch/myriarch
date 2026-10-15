@@ -475,9 +475,15 @@ func newOutboundPolicy(o config.OutboundConfig, dev bool) (*netguard.Policy, err
 }
 
 // readiness returns the /readyz check: the database answers, the schema is at
-// the version this binary needs (migrations finished, also when they are run
-// by another replica or `myriarchd migrate`) and the event bus listener is
-// connected.
+// the version this binary needs and the event bus listener is connected.
+//
+// The schema step of the start (postgres.PrepareSchema) has made the schema fit
+// before any listener opens, so the schema check passes on the first probe. A
+// pass is kept for the lifetime of the process, because migrations only go
+// forward: /readyz reads neither the schema version nor the compatibility level
+// again, and it notices neither a later restore of an older backup nor a raised
+// compatibility level (docs/design/opamp-server.md, "Start, migrations and
+// schema compatibility"). After a restore, restart every replica.
 func readiness(db *postgres.DB, bus eventbus.Bus) func(ctx context.Context) error {
 	var schemaOK atomic.Bool
 	return func(ctx context.Context) error {
@@ -496,7 +502,7 @@ func readiness(db *postgres.DB, bus eventbus.Bus) func(ctx context.Context) erro
 			if have < want {
 				return fmt.Errorf("database schema is at version %d, this build needs %d (run migrations)", have, want)
 			}
-			schemaOK.Store(true) // migrations are forward only: stays true
+			schemaOK.Store(true) // the start guarantees the schema and migrations only go forward: a pass is kept
 		}
 		if !pgbus.Connected(bus) {
 			return errors.New("event bus is not connected")

@@ -239,3 +239,44 @@ func TestStartLogsTheSchemaState(t *testing.T) {
 	assert.Contains(t, out, fmt.Sprintf("schemaLevel=%d", latest))
 	assert.NotContains(t, out, "newer than this myriarchd")
 }
+
+// /readyz checks the schema version only until that check first succeeds (docs/design/opamp-server.md, "Start, migrations and
+// schema compatibility"): the start has made the schema fit, so the first probe passes, and a running replica reads neither the
+// schema version nor the compatibility level again. A restore of an older backup or a raised compatibility level is therefore
+// not noticed; a closure that has not passed yet still reports a schema that is behind (TestReadinessReportsSchemaProblems).
+func TestReadinessChecksTheSchemaOnlyUntilItFirstSucceeds(t *testing.T) {
+	latest := latestMigration(t)
+	for name, tc := range map[string]struct {
+		change       func(t *testing.T, pool *pgxpool.Pool)
+		freshFailure string // what a closure that has not passed yet reports after the change, "" = ready
+	}{
+		"an older backup is restored": {
+			func(t *testing.T, pool *pgxpool.Pool) { rollBackTo(t, pool, 5) },
+			"database schema is at version 5",
+		},
+		"another replica raises the compatibility level": {
+			func(t *testing.T, pool *pgxpool.Pool) { pretendNewerRelease(t, pool, latest+1, latest+1) },
+			"",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			pool := pgtest.NewPool(t)
+			cfg, _ := devConfigDSN(t, pool.Config().ConnString())
+			db, bus := openForReadiness(t, cfg)
+			ready := readiness(db, bus)
+			require.NoError(t, ready(ctx), "the first probe passes on the schema that the start left")
+
+			tc.change(t, pool)
+			assert.NoError(t, ready(ctx), "a pass is kept: the running replica does not read the schema again")
+
+			fresh := readiness(db, bus)(ctx)
+			if tc.freshFailure == "" {
+				assert.NoError(t, fresh, "/readyz does not read the compatibility level at all")
+				return
+			}
+			require.Error(t, fresh)
+			assert.Contains(t, fresh.Error(), tc.freshFailure)
+		})
+	}
+}
