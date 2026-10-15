@@ -200,16 +200,23 @@ func TestInstallWindowsScriptChecksTheLanguageModeBeforeAnythingElse(t *testing.
 }
 
 // The supervisor has to be a regular file with the verified hash at the path of the service when its installation step is over,
-// whichever way the step ends, and a service that is not running is explained by its file first.
+// whichever way the step ends, and a service that is not running is explained by its file first. The VERSION marker, which lets
+// the next run take the file as it is, is removed before the file is replaced and written after the check: a step that stops at
+// the check must not leave a marker that makes the next run accept the file.
 func TestInstallWindowsScriptChecksTheSupervisorFile(t *testing.T) {
 	script := string(readDeploy(t, "scripts/install-windows.ps1"))
 	body := psFunctionBody(t, script, "Install-SupervisorBinary")
 	iSkip := strings.Index(body, "Assert-SupervisorBinary -Path $target\n    return $false")
+	iStop := strings.Index(body, "Stop-ServiceAndWait")
+	iDrop := strings.Index(body, "Remove-Item -LiteralPath $verFile")
 	iCopy := strings.Index(body, "Copy-VerifiedFile")
 	iCheck := strings.Index(body, "Assert-SupervisorBinary -Path $target -ExpectedHash $hash")
+	iMark := strings.Index(body, "Set-FileText -Path $verFile")
 	iDone := strings.Index(body, `Write-Log "Supervisor v$version installed"`)
 	assert.True(t, iSkip > 0, "an installed supervisor is checked too (the early return)")
-	require.True(t, iCopy > 0 && iCheck > iCopy && iDone > iCheck, "the check follows the copy and precedes the success message")
+	require.True(t, iStop > 0 && iDrop > iStop && iCopy > iDrop && iCheck > iCopy && iMark > iCheck && iDone > iMark,
+		"the marker is removed after the stop of the service and before the copy, and written after the check and before the success message")
+	assert.Equal(t, 1, strings.Count(body, "Set-FileText -Path $verFile"), "the marker is written in one place")
 
 	main := psFunctionBody(t, script, "Invoke-Main")
 	iIf := strings.Index(main, "if ($svc.Status -ne 'Running') {")

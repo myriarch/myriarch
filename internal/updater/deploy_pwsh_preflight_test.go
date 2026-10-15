@@ -207,7 +207,8 @@ Check 'nothing was written to the working directory' (@(Get-ChildItem -LiteralPa
 }
 
 // The supervisor must be a regular file with the verified hash at the path of the service after its installation step. The
-// installation step is run with stand-ins for the download and the copy; the copy removes the file, as a security tool would.
+// installation step is run with stand-ins for the download and the copy; the copy removes the file or changes it, as a security
+// tool would. A step that stops at the check leaves no VERSION marker, so the next step does not take the file for an installed one.
 func TestInstallWindowsScriptReportsAMissingSupervisorFile(t *testing.T) {
 	out, n := runPwshChecks(t, `
 $dir = Join-Path $Work 'supervisor'
@@ -252,28 +253,55 @@ $script:ReleaseBaseUrl = 'https://mirror.example.com/r'
 $tmp = Join-Path $Work 'tmp'
 New-Item -ItemType Directory -Path $tmp | Out-Null
 $target = Join-Path $L.Supervisor 'opampsupervisor.exe'
-function Get-VerifiedAsset { param($Url, $Destination) Set-Content -LiteralPath $Destination -Value 'MZ-fake-supervisor' -NoNewline; return (Get-Sha256 -Path $Destination) }
+$verFile = Join-Path $L.Supervisor 'VERSION'
+$script:Downloads = 0
+function Get-VerifiedAsset { param($Url, $Destination) $script:Downloads++; Set-Content -LiteralPath $Destination -Value 'MZ-fake-supervisor' -NoNewline; return (Get-Sha256 -Path $Destination) }
 function Confirm-Signature { param($File, $BundleUrl, $IdentityRegexp, $Version, $TmpDir) }
-$script:Quarantine = $true
+# what happens to the file after the copy: a security tool removes it ('quarantine') or changes it ('tamper'), or nothing ('intact')
+$script:AfterCopy = 'quarantine'
 function Copy-VerifiedFile {
   param($Source, $Destination, $ExpectedHash)
   Copy-Item -LiteralPath $Source -Destination $Destination -Force
-  if ($script:Quarantine) { Remove-Item -LiteralPath $Destination -Force }
+  if ($script:AfterCopy -eq 'quarantine') { Remove-Item -LiteralPath $Destination -Force }
+  if ($script:AfterCopy -eq 'tamper') { Set-Content -LiteralPath $Destination -Value 'MZ-changed-after-the-copy' -NoNewline }
 }
 $msg = Message-Of { [void](Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp) }
 Check 'a file that is gone right after the copy stops the installation step' ($msg -match '^\[supervisor_missing\] ' -and $msg.Contains($target))
+Check 'the stopped step wrote no VERSION marker' (-not (Test-Path -LiteralPath $verFile))
 
-$script:Quarantine = $false
+$script:AfterCopy = 'intact'
 $changed = Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp
 Check 'an intact installation step reports a change and leaves the file' ($changed -eq $true -and (Test-Path -LiteralPath $target -PathType Leaf))
+Check 'the marker is written after the check has passed' ((Get-Content -LiteralPath $verFile -Raw).Trim() -eq '0.162.0')
+$seen = $script:Downloads
 $changed = Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp
-Check 'a repeated step finds the installed supervisor' ($changed -eq $false)
+Check 'a repeated step finds the installed supervisor' ($changed -eq $false -and $script:Downloads -eq $seen)
+
+# A file that changed after the copy stops the step, and the next step must not take it for an installed one: it would accept it
+# without a hash. The marker of an earlier installation (the same version) is removed before the file is replaced, so it does not
+# survive the stop either.
+Remove-Item -LiteralPath $target -Force
+Check 'the marker of the earlier installation is still there' (Test-Path -LiteralPath $verFile)
+$script:AfterCopy = 'tamper'
+$seen = $script:Downloads
+$msg = Message-Of { [void](Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp) }
+Check 'a file that changed after the copy is not the verified supervisor' ($msg -match '^\[supervisor_missing\] ' -and $msg.Contains('is not the file that was verified') -and $msg.Contains($target))
+Check 'the stopped step left no VERSION marker, not even the one of the earlier installation' (-not (Test-Path -LiteralPath $verFile))
+Check 'the changed file stays where it is: nothing is removed' ((Get-Content -LiteralPath $target -Raw) -eq 'MZ-changed-after-the-copy')
+$script:AfterCopy = 'intact'
+$changed = Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp
+Check 'the next step fetches the file again and reports a change' ($changed -eq $true -and $script:Downloads -eq $seen + 2)
+Check 'the verified content is in place' ((Get-Content -LiteralPath $target -Raw) -eq 'MZ-fake-supervisor')
+Check 'and the marker is back' ((Get-Content -LiteralPath $verFile -Raw).Trim() -eq '0.162.0')
+$seen = $script:Downloads
+$changed = Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp
+Check 'then the step finds the installed supervisor again' ($changed -eq $false -and $script:Downloads -eq $seen)
 Remove-Item -LiteralPath $target -Force
 New-Item -ItemType Directory -Path $target | Out-Null
 $msg = Message-Of { [void](Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp) }
 Check 'an installed supervisor that is no file is reported too' ($msg -match '^\[supervisor_missing\] ' -and $msg.Contains('is not a regular file: ' + $target))
 `)
-	assert.GreaterOrEqual(t, n, 11, out)
+	assert.GreaterOrEqual(t, n, 21, out)
 }
 
 // A service that is not running is explained by the file of its binPath when that is gone: the path comes from the registry

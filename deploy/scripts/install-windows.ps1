@@ -913,8 +913,10 @@ function Enable-CollectorVersion {
   return $true
 }
 
-# What to do when the supervisor file is gone: security software removes or quarantines an unsigned binary after it was written, and
-# the service then fails to start with an error (1053) that names neither the file nor the cause.
+# What to do when the supervisor file is gone or is not the one that was verified: security software removes or quarantines an
+# unsigned binary after it was written, and the service then fails to start with an error (1053) that names neither the file nor
+# the cause. The promise at the end holds because Install-SupervisorBinary writes its VERSION marker only after the check: the run
+# that stops with this hint leaves no marker, so the next run fetches and verifies the file again.
 function Get-SupervisorMissingHint {
   param([string]$Path)
   return "look at the protection history of your antivirus or endpoint protection for a quarantined opampsupervisor.exe (Microsoft Defender: Windows Security, Protection history, or Get-MpThreatDetection), allow the folder $(Split-Path -Parent $Path), then run the installer again (it fetches and verifies the file again)"
@@ -976,9 +978,13 @@ function Install-SupervisorBinary {
   Confirm-Signature -File $tmp -BundleUrl "$url.sigstore.json" -IdentityRegexp (Get-CertIdentity -Workflow 'base-binary-release' -Version $version) -Version $version -TmpDir $TmpDir
   New-Item -ItemType Directory -Path $L.Supervisor -Force | Out-Null
   Stop-ServiceAndWait -Name $script:SupervisorService
+  # VERSION says that this version is installed and was checked, and the next run then takes the file as it is, without a hash. It is
+  # removed before the file is replaced and written after the check: a run that stops in between (a file that a security tool
+  # quarantined or changed) leaves no marker, so the next run fetches and verifies the file again instead of accepting it.
+  if (Test-Path -LiteralPath $verFile -PathType Leaf) { Remove-Item -LiteralPath $verFile -Force }
   Copy-VerifiedFile -Source $tmp -Destination $target -ExpectedHash $hash
-  Set-FileText -Path $verFile -Text "$version`n"
   Assert-SupervisorBinary -Path $target -ExpectedHash $hash
+  Set-FileText -Path $verFile -Text "$version`n"
   Write-Log "Supervisor v$version installed"
   return $true
 }
