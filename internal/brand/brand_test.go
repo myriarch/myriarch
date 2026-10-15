@@ -58,6 +58,8 @@ func TestValuesArePinned(t *testing.T) {
 		{"APITokenPrefix", APITokenPrefix, "myra_"},
 		{"EnrollmentTokenPrefix", EnrollmentTokenPrefix, "myre_"},
 		{"DownloadTokenPrefix", DownloadTokenPrefix, "myrd_"},
+		{"EnrollmentTokenPlaceholder", EnrollmentTokenPlaceholder, "@@MYRIARCH_ENROLLMENT_TOKEN@@"},
+		{"InstallSetupDir", InstallSetupDir, "myriarch-setup"},
 		{"NotifyChannel", NotifyChannel, "myriarch_events"},
 	}
 	for _, c := range cases {
@@ -92,6 +94,8 @@ func TestDerivations(t *testing.T) {
 	check("ExecSecretEnvPrefix starts with EnvPrefix", strings.HasPrefix(ExecSecretEnvPrefix, EnvPrefix))
 	check("ExecSecretEnvPrefix ends with _", strings.HasSuffix(ExecSecretEnvPrefix, "_"))
 	check("SimMetricsNamespace == MetricsNamespace + _sim", SimMetricsNamespace == MetricsNamespace+"_sim")
+	check("EnrollmentTokenPlaceholder wraps EnrollmentTokenEnv in @@", EnrollmentTokenPlaceholder == "@@"+EnrollmentTokenEnv+"@@")
+	check("InstallSetupDir starts with Name", strings.HasPrefix(InstallSetupDir, Name))
 
 	for name, h := range map[string]string{
 		"DeliveryHeader": DeliveryHeader, "TimestampHeader": TimestampHeader, "SignatureHeader": SignatureHeader,

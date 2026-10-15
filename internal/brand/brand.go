@@ -109,5 +109,17 @@ const (
 	DownloadTokenPrefix   = "myrd_"
 )
 
+// Installation of hosts from the server (ADR-0046).
+const (
+	// EnrollmentTokenPlaceholder stands for the enrollment token in a rendered
+	// install command. The web UI replaces it in the browser, so the server
+	// never sees the token that it stands for.
+	EnrollmentTokenPlaceholder = "@@" + EnrollmentTokenEnv + "@@"
+	// InstallSetupDir is the name of the private working directory of the
+	// copied install command: below the home directory of root on Linux
+	// (mktemp -d), below %ProgramData% on Windows.
+	InstallSetupDir = "myriarch-setup"
+)
+
 // NotifyChannel is the PostgreSQL LISTEN/NOTIFY channel of the event bus.
 const NotifyChannel = "myriarch_events"
