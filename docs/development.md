@@ -226,8 +226,8 @@ be raised. `make vulncheck` itself does not scan `ci/tools`. `ci/check.sh` verif
 that the syft and zizmor pins are SHA-256 values. `ci/tests/tool-downloads-test.sh` covers the refusal of a syft or zizmor archive
 whose checksum differs from the pin, and of a binary that reports another version.
 
-PowerShell is only needed for the Windows installer tests: the `pwsh` cases in `internal/updater`,
-`ci/tests/installer-verify.ps1` and `ci/tests/download-retry.ps1`. Without it these tests are skipped and the report says
+PowerShell is only needed for the Windows installer tests: the `pwsh` cases in `internal/updater` and `internal/install` (the Windows
+command), `ci/tests/installer-verify.ps1` and `ci/tests/download-retry.ps1`. Without it these tests are skipped and the report says
 so. `MYRIARCH_PWSH` points the Go tests at a different `pwsh` binary. `download-retry.ps1` also runs under Windows PowerShell
 5.1 (on 5.1 it leaves out the cases that need PowerShell 7 types and `smoke-windows.ps1`, which requires PowerShell 7); the
 Windows row of `go-test-native` runs it under both. The cases behind a proxy that refuses CONNECT start two more fault-server
@@ -240,6 +240,22 @@ The real-cosign cases of `ci/tests/installer-verify.sh` and `ci/tests/installer-
 `CI=true`. They run offline against the committed trusted root and fixtures of `internal/updater/testdata/sigstore`: the upstream
 collector bundles, and the keyless bundle of `checksums.txt` of the release `v0.1.0-rc.3` (`myriarch_0.1.0-rc.3_checksums.txt` and
 its `.sigstore.json`, byte-identical to the release assets), which the installers must accept for 0.1.0-rc.3 only.
+
+The installer bundles of the server (`internal/install`) are tested the same way. `internal/install/testdata/sigstore` holds the
+same two assets of the release `v0.1.0` (`myriarch_0.1.0_checksums.txt` and its `.sigstore.json`; the tests check the digests that
+GitHub reports for the assets), and the tests verify them offline against the trusted root of `internal/artifact/testdata/sigstore`:
+the signature is accepted for `v0.1.0` and refused for every other version, for a changed file, for another repository, workflow
+or issuer and for the bundle of an upstream workflow. The success path with archives uses small archives and a verifier that
+accepts, because the real archives are too large for the repository.
+
+The tests of the install commands run the commands. `internal/testutil/linuxhost` runs the Linux command in a real shell (the system
+`sh`, and `dash` when it is installed) with stand-ins for `sudo`, `id` and `mktemp`, and with the real `curl` against a TLS server in
+`TestLinuxCommandWithTheRealCurl` and against a real server process in `TestInstallCommandThroughTheRealServer`
+(`cmd/myriarchd`). The Windows command runs in PowerShell 7 with stand-ins for the natives and for the cmdlets that need Windows, also
+in Constrained Language Mode; these tests need `pwsh` (`MYRIARCH_PWSH`, `TOOLS_BIN`, `.cache/bin` or the `PATH`) and are skipped
+without it. The golden files of the commands are in `internal/install/testdata/commands`
+(`INSTALL_GOLDEN_UPDATE=1 go test ./internal/install -run TestCommandsGolden` writes them). `make tools` installs `shellcheck`, which
+also checks the script of the Linux command.
 
 ## Gates
 
