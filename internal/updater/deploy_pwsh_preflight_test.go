@@ -89,6 +89,18 @@ func runPwshChecks(t *testing.T, body string) (string, int) {
 	return out.String(), n
 }
 
+// pwshFlowSpies makes Invoke-Main run as an administrator on a host where nothing is installed (Get-Service finds no service
+// unless the script defines it) and replaces every function that creates, fetches, stops or installs something by one that
+// records its call and fails the run. A check that comes too late shows as "unexpected call of <function>".
+const pwshFlowSpies = `
+$script:Calls = New-Object System.Collections.Generic.List[string]
+function Test-Administrator { return $true }
+foreach ($name in @('New-WorkDirectory', 'Invoke-Download', 'Stop-ServiceAndWait', 'Resolve-Verifier', 'Get-UpdaterDownload', 'Initialize-DataDirectories',
+    'Install-Collector', 'Install-SupervisorBinary', 'Install-SupervisorService')) {
+  Set-Item -Path "function:$name" -Value ([scriptblock]::Create("param() [void]` + "`" + `$script:Calls.Add('$name'); throw ('unexpected call of $name')"))
+}
+`
+
 // installerLines returns the lines of the output that carry the prefix of an installer message.
 func installerLines(out string) []string {
 	var lines []string
@@ -180,16 +192,10 @@ Check 'staging mode neither reads nor reports services' ((Message-Of { Assert-No
 // The whole run stops at the services of an upstream package before it creates the work directory, downloads, stops a service
 // or writes a file: the functions that do those things are replaced by ones that fail the run when they are called.
 func TestInstallWindowsScriptStopsAtAnUpstreamServiceBeforeItDoesAnything(t *testing.T) {
-	out, n := runPwshChecks(t, `
-$script:Calls = New-Object System.Collections.Generic.List[string]
+	out, n := runPwshChecks(t, pwshFlowSpies+`
 function Get-Service {
   [CmdletBinding()] param([string]$Name)
   if ($Name -eq 'opampsupervisor') { return [pscustomobject]@{ Name = $Name; Status = 'Running' } }
-}
-function Test-Administrator { return $true }
-foreach ($name in @('New-WorkDirectory', 'Invoke-Download', 'Stop-ServiceAndWait', 'Resolve-Verifier', 'Get-UpdaterDownload', 'Initialize-DataDirectories',
-    'Install-Collector', 'Install-SupervisorBinary', 'Install-SupervisorService')) {
-  Set-Item -Path "function:$name" -Value ([scriptblock]::Create("param() [void]`+"`"+`$script:Calls.Add('$name'); throw ('unexpected call of $name')"))
 }
 Check 'a normal run is not in staging mode' (-not [bool]$Root)
 $msg = Message-Of { Invoke-Main }
@@ -301,4 +307,59 @@ Check 'without a registry entry the default is used' ((Get-ServiceBinaryPath -Na
 Check 'and it is checked like any other' ((Assert-ServiceBinaryPresent -Name 'otelcol-supervisor' -Default $fallback) -eq $fallback)
 `)
 	assert.GreaterOrEqual(t, n, 7, out)
+}
+
+// An ARM64 host without -Arch amd64 stops as soon as the architecture is known: before the work directory, a download, the
+// verifier and the stop of a service. The installer of v0.1.0 stopped at the supervisor step, after it had stopped the service
+// and installed the ARM64 collector.
+func TestInstallWindowsScriptStopsOnArm64BeforeItDoesAnything(t *testing.T) {
+	out, n := runPwshChecks(t, pwshFlowSpies+`
+function Get-Service { [CmdletBinding()] param([string]$Name) }
+
+# the architecture of the host decides when -Arch is not given
+$Arch = ''
+$env:PROCESSOR_ARCHITEW6432 = ''
+$env:PROCESSOR_ARCHITECTURE = 'ARM64'
+$msg = Message-Of { Invoke-Main }
+Check 'an ARM64 host without -Arch stops with unsupported_platform' ($msg -match '^\[unsupported_platform\] ')
+Check 'the message names the way out' ($msg.Contains('-Arch amd64'))
+Check 'no work directory, download, service stop, verifier or install step was reached' ($script:Calls.Count -eq 0)
+
+$Arch = 'arm64'
+$env:PROCESSOR_ARCHITECTURE = 'AMD64'
+$msg = Message-Of { Invoke-Main }
+Check 'an explicit -Arch arm64 stops the same way' ($msg -match '^\[unsupported_platform\] ' -and $script:Calls.Count -eq 0)
+
+# amd64, given or detected, gets past the check: the run reaches the work directory, where the spy stops it
+foreach ($case in @(@('amd64', 'AMD64'), @('', 'AMD64'))) {
+  $Arch = $case[0]
+  $env:PROCESSOR_ARCHITECTURE = $case[1]
+  $msg = Message-Of { Invoke-Main }
+  Check "amd64 passes the check (-Arch '$($case[0])', host $($case[1]))" ($msg -eq 'unexpected call of New-WorkDirectory')
+}
+`)
+	assert.GreaterOrEqual(t, n, 6, out)
+}
+
+// The same through the real script in staging mode, where the fake mirror has no arm64 collector: the run ends at the
+// architecture, not at a download that fails, and the install root stays empty.
+func TestInstallWindowsScriptStagingRunStopsOnArm64WithoutDownloading(t *testing.T) {
+	skipOnWindowsHost(t)
+	relDir, _, _ := newFakeWindowsRelease(t, "0.162.0")
+	root := t.TempDir()
+	args := append([]string{"-NoProfile", "-NonInteractive", "-File", filepath.Join(deployDir, "scripts", "install-windows.ps1"),
+		"-Root", root, "-Arch", "arm64", "-ReleaseBaseUrl", "file://" + relDir, "-TemplatesDir", deployDir, "-Insecure", "-VerifySignatures", "skip"},
+		windowsGoodArgs()...)
+	cmd := exec.Command(pwshPath(t), args...)
+	var buf bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &buf, &buf
+	err := cmd.Run()
+	out := buf.String()
+	require.Error(t, err, out)
+	assert.Regexp(t, `(?m)^\[myriarch-install\] ERROR \[unsupported_platform\] \S`, out)
+	assert.Contains(t, out, "-Arch amd64")
+	assert.NotContains(t, out, "downloading")
+	entries, rerr := os.ReadDir(root)
+	require.NoError(t, rerr)
+	assert.Empty(t, entries, "nothing is created below the root")
 }

@@ -218,6 +218,24 @@ func TestInstallWindowsScriptChecksTheSupervisorFile(t *testing.T) {
 	require.True(t, iIf > 0 && iBinary > iIf && iWarn > iBinary, "the file of the binPath is checked before service_not_running is reported")
 }
 
+// The architecture check of the supervisor comes as soon as the architecture is known, before the first step that changes or
+// fetches anything: the work directory, the updater download, the verifier, the stop of a service and the collector.
+func TestInstallWindowsScriptChecksThePlatformBeforeItDoesAnything(t *testing.T) {
+	script := string(readDeploy(t, "scripts/install-windows.ps1"))
+	main := psFunctionBody(t, script, "Invoke-Main")
+	iArch := strings.Index(main, "$arch = Resolve-Arch")
+	iCheck := strings.Index(main, "Assert-SupervisorPlatform -Arch $arch")
+	require.True(t, iArch > 0 && iCheck > iArch, "the check follows Resolve-Arch")
+	for _, step := range []string{"New-WorkDirectory", "Get-UpdaterDownload", "Resolve-Verifier", "Stop-ServiceAndWait", "Install-Collector"} {
+		at := strings.Index(main, step)
+		require.GreaterOrEqual(t, at, 0, step)
+		assert.Greater(t, at, iCheck, "%s comes after the platform check", step)
+	}
+	// the step that installs the supervisor keeps its own check, through the same function and the same message
+	assert.Contains(t, psFunctionBody(t, script, "Install-SupervisorBinary"), "Assert-SupervisorPlatform -Arch $Arch")
+	assert.Contains(t, psFunctionBody(t, script, "Assert-SupervisorPlatform"), "-Arch amd64")
+}
+
 // With a checksums.txt the verifier exists before the updater is downloaded, the file is checked through the same
 // function as the upstream bundles, and the removed key options fail before anything else happens.
 func TestInstallWindowsScriptKeylessChecksumsFlow(t *testing.T) {

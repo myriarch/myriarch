@@ -809,6 +809,16 @@ function Resolve-Arch {
   return $a
 }
 
+# The upstream project publishes the supervisor for Windows amd64 only (opampsupervisor_<v>_windows_amd64.exe). On ARM64 the x64
+# build runs under emulation, which -Arch amd64 asks for. Invoke-Main checks it as soon as the architecture is known, before a
+# service is stopped or a file is fetched; Install-SupervisorBinary keeps the check for the case that it is called on its own.
+function Assert-SupervisorPlatform {
+  param([string]$Arch)
+  if ($Arch -ne 'amd64') {
+    Stop-Install 'unsupported_platform' 'upstream publishes only opampsupervisor_<v>_windows_amd64.exe for Windows; on ARM64 install with -Arch amd64 (x64 emulation)'
+  }
+}
+
 function Install-Collector {
   param($L, [string]$Arch, [string]$TmpDir)
   $version = $script:CollectorVersion
@@ -941,9 +951,7 @@ function Assert-ServiceBinaryPresent {
 
 function Install-SupervisorBinary {
   param($L, [string]$Arch, [string]$TmpDir)
-  if ($Arch -ne 'amd64') {
-    Stop-Install 'unsupported_platform' 'upstream publishes only opampsupervisor_<v>_windows_amd64.exe for Windows; on ARM64 install with -Arch amd64 (x64 emulation)'
-  }
+  Assert-SupervisorPlatform -Arch $Arch
   $version = $script:SupervisorVersion
   $asset = "opampsupervisor_${version}_windows_amd64.exe"
   $url = "$($script:ReleaseBaseUrl)/cmd/opampsupervisor/v$version/$asset"
@@ -1183,6 +1191,7 @@ function Invoke-Main {
   $script:OpampEndpoint = $OpampEndpoint
   Test-Inputs
   $arch = Resolve-Arch
+  Assert-SupervisorPlatform -Arch $arch
   $templates = Resolve-TemplatesDir
   if (-not (Test-Path -LiteralPath ([IO.Path]::Combine($templates, 'supervisor', 'windows')))) {
     Stop-Install 'template_missing' "templates not found under $templates (-TemplatesDir)"
