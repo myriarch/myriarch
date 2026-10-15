@@ -115,6 +115,21 @@ func pathless(err error) string {
 
 // ------------------------------------------------------------- database ---
 
+// checkDatabase validates the database settings: the part of the validation that "myriarchd migrate" shares with the
+// server. A DSN (or a DSN file) is required outside dev mode.
+func (v *validator) checkDatabase(d config.DatabaseConfig, dev bool) {
+	if !dev && strings.TrimSpace(d.DSN) == "" && d.DSNFile == "" {
+		v.add("database.dsn", "is required (or database.dsnFile)")
+	}
+	v.checkDSN(d.DSN)
+	if d.StatementTimeout < 0 {
+		v.add("database.statementTimeout", "must not be negative")
+	}
+	if d.MaxConns < 5 {
+		v.add("database.maxConns", "must be at least 5 (event bus and leader election hold dedicated connections)")
+	}
+}
+
 // checkDSN parses the connection string (no connection is made). The message
 // does not repeat it: it holds the password.
 func (v *validator) checkDSN(dsn string) {

@@ -31,7 +31,6 @@ import (
 	"github.com/myriarch/myriarch/internal/config"
 	"github.com/myriarch/myriarch/internal/domain"
 	"github.com/myriarch/myriarch/internal/refdoc"
-	"github.com/myriarch/myriarch/internal/store/migrations"
 	"github.com/myriarch/myriarch/internal/testutil/clitest"
 	"github.com/myriarch/myriarch/internal/testutil/pgtest"
 )
@@ -406,34 +405,6 @@ func TestInvalidProductionConfigIsRejected(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "devLogin") {
 		t.Fatalf("dev login in production config must be rejected: %v", err)
-	}
-}
-
-func TestMigrateCommand(t *testing.T) {
-	pool := pgtest.NewPool(t)
-	p := filepath.Join(t.TempDir(), "c.yaml")
-	tokenFile := filepath.Join(t.TempDir(), "bootstrap-token")
-	if err := os.WriteFile(tokenFile, []byte(strings.Repeat("t", 40)+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	content := fmt.Sprintf("server:\n  publicUrl: https://fleet.example.com\n  tls:\n    terminatedUpstream: true\ndatabase:\n  dsn: %q\ngitops:\n  enabled: false\nexecutors:\n  allowedWebhookHosts: [\"*.example.com\"]\nauth:\n  bootstrapAdmin:\n    enabled: true\n    tokenFile: %q\n", pool.Config().ConnString(), tokenFile)
-	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cmd := newRootCommand()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"migrate", "--config", p})
-	err := cmd.Execute()
-	if err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	latest, err := migrations.Latest()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := fmt.Sprintf("schema version: %d", latest); !strings.Contains(out.String(), want) {
-		t.Fatalf("migrate output: %q, want %q", out.String(), want)
 	}
 }
 

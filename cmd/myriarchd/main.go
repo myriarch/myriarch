@@ -10,7 +10,8 @@
 //	myriarchd serve   --config myriarchd.yaml     production server (external PostgreSQL)
 //	myriarchd dev     [--gitops-dir DIR]       local development: embedded PostgreSQL,
 //	                                        dev login, quickstart GitOps repo
-//	myriarchd migrate --config myriarchd.yaml     apply database migrations and exit
+//	myriarchd migrate --config myriarchd.yaml     apply database migrations and exit (the database settings
+//	                                        are enough; --check changes nothing and reports by exit code)
 //	myriarchd config validate --config F       check a configuration without starting
 //	                                        (--skip-files: do not read referenced files)
 //	myriarchd config print    --config F       print the effective configuration, secrets redacted
@@ -45,7 +46,6 @@ import (
 
 	"github.com/myriarch/myriarch/internal/brand"
 	"github.com/myriarch/myriarch/internal/configload"
-	"github.com/myriarch/myriarch/internal/store/postgres"
 	"github.com/myriarch/myriarch/internal/version"
 )
 
@@ -129,32 +129,7 @@ func newRootCommand() *cobra.Command {
 	devCmd.Flags().StringVar(&dev.dsn, "dsn", "", "use this PostgreSQL DSN instead of starting embedded PostgreSQL (second dev replica; required when myriarchd was built without the devpg build tag)")
 	devCmd.Flags().StringVar(&dev.replicaID, "replica-id", "", "replica id (default: hostname + random suffix)")
 
-	migrate := &cobra.Command{
-		Use:   "migrate",
-		Short: "Apply database migrations and exit",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := configload.Load(configPath, false)
-			if err != nil {
-				return fmt.Errorf("load config: %w", err)
-			}
-			ctx, stop := signalContext()
-			defer stop()
-			pool, err := postgres.Connect(ctx, cfg.Database)
-			if err != nil {
-				return err
-			}
-			defer pool.Close()
-			v, err := postgres.Migrate(ctx, pool, nil)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), "schema version:", v)
-			return nil
-		},
-	}
-	migrate.Flags().StringVarP(&configPath, "config", "c", "", "path to myriarchd.yaml")
-
-	root.AddCommand(serve, devCmd, migrate, newConfigCommand(), newAuthCommand(), &cobra.Command{
+	root.AddCommand(serve, devCmd, newMigrateCommand(), newConfigCommand(), newAuthCommand(), &cobra.Command{
 		Use:   "version",
 		Short: "Print the version",
 		Run: func(cmd *cobra.Command, args []string) {

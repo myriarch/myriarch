@@ -13,7 +13,7 @@ Every setting of the [server configuration](configuration.md) except lists of ob
 - A list is given as comma separated values, for example `MYRIARCH_AUTH_OIDC_SCOPES=openid,profile,email`.
 - A duration uses Go syntax such as `30s` or `5m`. A plain integer is rejected.
 - An empty value is ignored for a boolean, a number and a duration. For a string it sets the empty string.
-- The overrides apply to `myriarchd serve`, `myriarchd dev`, `myriarchd migrate`, `myriarchd config validate` and `myriarchd config print`.
+- The overrides apply to `myriarchd serve`, `myriarchd dev`, `myriarchd config validate` and `myriarchd config print`. `myriarchd migrate` applies only the overrides of the `database` settings (`MYRIARCH_DATABASE_*`).
 - An override wins over the configuration file.
 - Lists of objects and maps (`opamp.enrollmentTokens`, `notifications.channels`, `auth.devLogin.users` and the `executors` maps) cannot be set through the environment.
 

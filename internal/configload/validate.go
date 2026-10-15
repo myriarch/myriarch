@@ -143,16 +143,7 @@ func ValidateOptions(c *config.Config, opts Options) error {
 	}
 
 	// -------------------------------------------------------- database ---
-	if !dev && strings.TrimSpace(c.Database.DSN) == "" && c.Database.DSNFile == "" {
-		v.add("database.dsn", "is required (or database.dsnFile)")
-	}
-	v.checkDSN(c.Database.DSN)
-	if c.Database.StatementTimeout < 0 {
-		v.add("database.statementTimeout", "must not be negative")
-	}
-	if c.Database.MaxConns < 5 {
-		v.add("database.maxConns", "must be at least 5 (event bus and leader election hold dedicated connections)")
-	}
+	v.checkDatabase(c.Database, dev)
 
 	// ------------------------------------------------------------ auth ---
 	v.positive("auth.sessionTtl", c.Auth.SessionTTL)

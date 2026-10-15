@@ -171,7 +171,7 @@ func RenderEnvironment(overrides []configload.EnvOverride, templateVars []Templa
 	b.WriteString("- A list is given as comma separated values, for example `" + brand.EnvPrefix + "AUTH_OIDC_SCOPES=openid,profile,email`.\n")
 	b.WriteString("- A duration uses Go syntax such as `30s` or `5m`. A plain integer is rejected.\n")
 	b.WriteString("- An empty value is ignored for a boolean, a number and a duration. For a string it sets the empty string.\n")
-	b.WriteString("- The overrides apply to `" + brand.ServerBinary + " serve`, `" + brand.ServerBinary + " dev`, `" + brand.ServerBinary + " migrate`, `" + brand.ServerBinary + " config validate` and `" + brand.ServerBinary + " config print`.\n")
+	b.WriteString("- The overrides apply to `" + brand.ServerBinary + " serve`, `" + brand.ServerBinary + " dev`, `" + brand.ServerBinary + " config validate` and `" + brand.ServerBinary + " config print`. `" + brand.ServerBinary + " migrate` applies only the overrides of the `database` settings (`" + brand.EnvPrefix + "DATABASE_*`).\n")
 	b.WriteString("- An override wins over the configuration file.\n")
 	b.WriteString("- Lists of objects and maps (`opamp.enrollmentTokens`, `notifications.channels`, `auth.devLogin.users` and the `executors` maps) cannot be set through the environment.\n\n")
 	var rows [][]string

@@ -355,8 +355,14 @@ func IsSecretKey(key string) bool { return redactedKeys[key] }
 // applyEnvOverrides applies MYRIARCH_<PATH> overrides to the overridable leaves (see overridable). Slices of structs (dev
 // users, notification channels) and maps are not overridable by environment.
 func applyEnvOverrides(cfg *config.Config, lookup func(string) (string, bool)) error {
+	return applyEnvOverridesAt(reflect.ValueOf(cfg).Elem(), nil, lookup)
+}
+
+// applyEnvOverridesAt applies the overrides to the leaves of the struct v, whose YAML path is path ("database" for the
+// database settings, nil for the whole configuration).
+func applyEnvOverridesAt(v reflect.Value, path []string, lookup func(string) (string, bool)) error {
 	var errs []error
-	walkLeaves(reflect.ValueOf(cfg).Elem(), nil, func(path []string, f reflect.Value) {
+	walkLeaves(v, path, func(path []string, f reflect.Value) {
 		if !overridable(f.Type()) {
 			return
 		}
@@ -454,24 +460,9 @@ func setFromString(f reflect.Value, raw string) error {
 func readSecretFiles(cfg *config.Config) error {
 	var errs []error
 	read := func(dst *string, file, setting string) {
-		if file == "" {
-			return
+		if err := readSecretFile(dst, file, setting); err != nil {
+			errs = append(errs, err)
 		}
-		b, err := os.ReadFile(file)
-		if err != nil {
-			var pe *os.PathError
-			if errors.As(err, &pe) {
-				err = pe.Err
-			}
-			errs = append(errs, &secretFileError{setting: setting, msg: fmt.Sprintf("cannot read %s: %v", file, err)})
-			return
-		}
-		v := strings.TrimSpace(string(b))
-		if v == "" {
-			errs = append(errs, &secretFileError{setting: setting, msg: fmt.Sprintf("file %s is empty", file)})
-			return
-		}
-		*dst = v
 	}
 	read(&cfg.Database.DSN, cfg.Database.DSNFile, "database.dsnFile")
 	if cfg.Auth.OIDC.Enabled {
@@ -485,6 +476,29 @@ func readSecretFiles(cfg *config.Config) error {
 		read(&ch.URL, ch.URLFile, fmt.Sprintf("notifications.channels[%d].urlFile", i))
 	}
 	return errors.Join(errs...)
+}
+
+// readSecretFile reads the secret file of a setting into dst (nothing happens for an empty path). The content, without
+// surrounding white space, wins over the inline value in dst. A file that cannot be read or is empty is a
+// *secretFileError, whose message names the setting and the path, never the content.
+func readSecretFile(dst *string, file, setting string) error {
+	if file == "" {
+		return nil
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		var pe *os.PathError
+		if errors.As(err, &pe) {
+			err = pe.Err
+		}
+		return &secretFileError{setting: setting, msg: fmt.Sprintf("cannot read %s: %v", file, err)}
+	}
+	v := strings.TrimSpace(string(b))
+	if v == "" {
+		return &secretFileError{setting: setting, msg: fmt.Sprintf("file %s is empty", file)}
+	}
+	*dst = v
+	return nil
 }
 
 // secretFileError is a secret file that cannot be used.
