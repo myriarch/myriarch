@@ -70,6 +70,35 @@ Assignment is evaluated again when an agent registers, when its description chan
 revision. Give fleets that can match the same agents different priorities. The three quickstart fleets use disjoint
 selectors instead, so no agent is ambiguous.
 
+## Bridge agents
+
+*Available from v0.2.0.*
+
+The OpAMP Bridge of the OpenTelemetry Operator connects as one agent for many collectors. In operator mode its remote
+configuration is the complete set of the collector resources it manages: an entry replaces a resource, and a message that
+lacks the entry of a managed resource deletes it. The server therefore does not treat it like a collector, and a fleet
+configures a Bridge only when you say so.
+
+- **Recognition.** An agent is a Bridge when it reports the `service.name` `io.opentelemetry.operator-opamp-bridge`
+  (operator mode) or the attribute `opentelemetry.io/opamp.bridge.mode` (`operator` or `standalone`; both modes since
+  Operator 0.157.0). The agent reports both itself, so this protects against mistakes and is no authentication. The
+  details are in the [upstream notes](../design/upstream-notes.md#opamp-bridge-identity-modes-and-remote-config).
+- **Opt-in.** `spec.bridge.manage: true` lets a fleet configure the Bridges that its selector matches. The default is
+  `false`: a Bridge never receives remote configuration from a fleet without the opt-in.
+- **Standalone mode only.** The opt-in takes effect for Bridges in standalone mode, where each client of the Bridge
+  manages one workload. A Bridge in operator mode stays locked with or without the opt-in, and so does a Bridge that
+  reports no known mode.
+- **Warning.** `myrctl validate` and the GitOps sync warn with `bridge_selected` when a fleet without the opt-in has a
+  selector that also matches a Bridge. An empty selector does, and so does a selector made only of `NotIn` and
+  `DoesNotExist` conditions. The check matches the selector against a synthetic Bridge in each mode (the attributes the
+  Bridge reports itself, the [inventory](inventory.md) applied) and against every sample agent that is a Bridge. It
+  ignores priorities and cannot evaluate `labels.*` of enrollment tokens. With `--strict` the warning fails the check.
+- **Keeping a Bridge out of a fleet.** Select on what a collector reports and a Bridge does not: `os.type`, `site.type`
+  and the other `site.*` attributes. Or give the Bridge its own enrollment token and select on its `labels.*`.
+
+The field is listed in the [schema reference](../reference/gitops-schema.md#fleet). The decisions behind these rules are in
+[ADR-0037](../adr/0037-opamp-bridge-agents-until-the-operator-integration.md).
+
 ## When does the offered configuration change?
 
 Every agent has three configuration hashes: the **assigned** one (what the current revision renders for it), the

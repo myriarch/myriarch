@@ -35,6 +35,7 @@ This page is generated from the metric definitions in the Go sources by `make do
 | `myriarch_job_cycle_duration_seconds` | histogram | `job` | `metrics` | Duration of one cycle of a leader job (rollout tick/plan, GitOps sync, release poll, artifact prefetch). Buckets: 0.05, 0.25, 1, 5, 15, 30, 60, 120, 300, 600. Series: `_bucket`, `_sum`, `_count`. |
 | `myriarch_leader` | gauge |  | `leader/pglock` | 1 while this replica holds the leader lock, else 0. |
 | `myriarch_notifications_total` | counter | `channel`, `result` | `notify/channels` | Notification deliveries by channel and result. |
+| `myriarch_opamp_config_reoffers_total` | counter | `reason` | `opamp` | Remote configs offered to an agent again although it reported the hash, by reason (stale\_applying: the agent kept reporting APPLYING after a reconnect or restart). |
 | `myriarch_opamp_connect_rejected_total` | counter | `reason` | `opamp` | Rejected OpAMP connection attempts by reason. |
 | `myriarch_opamp_connections` | gauge | `transport` | `opamp` | Live OpAMP connections on this replica by transport. |
 | `myriarch_opamp_dropped_total` | counter | `queue` | `opamp` | Internal queue overflows (events, bus publications, pushes). |

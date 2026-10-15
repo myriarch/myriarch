@@ -98,6 +98,9 @@ telemetry:
 	if cfg.OpAMP.Path != "/v1/opamp" || cfg.OpAMP.SendTimeout != 10*time.Second || !cfg.OpAMP.RequireEnrollmentToken {
 		t.Errorf("defaults lost: %+v", cfg.OpAMP)
 	}
+	if cfg.OpAMP.StaleApplyingAfter != 90*time.Second {
+		t.Errorf("opamp.staleApplyingAfter default = %v, want 1m30s", cfg.OpAMP.StaleApplyingAfter)
+	}
 	if cfg.Database.MaxConns != 20 || !cfg.Database.MigrateOnStart {
 		t.Errorf("database defaults lost: %+v", cfg.Database)
 	}
@@ -351,6 +354,7 @@ func TestValidateProduction(t *testing.T) {
 		}, "auth.oidc.defaultRole"},
 		{"zero offline", func(c *config.Config) { c.OpAMP.OfflineAfter = 0 }, "opamp.offlineAfter"},
 		{"flapping offline", func(c *config.Config) { c.OpAMP.OfflineAfter = 20 * time.Second }, "opamp.offlineAfter"},
+		{"negative stale applying", func(c *config.Config) { c.OpAMP.StaleApplyingAfter = -time.Second }, "opamp.staleApplyingAfter"},
 		{"opamp path", func(c *config.Config) { c.OpAMP.Path = "opamp" }, "opamp.path"},
 		{"opamp path api", func(c *config.Config) { c.OpAMP.Path = "/api/v1/opamp" }, "opamp.path"},
 		{"tiny pool", func(c *config.Config) { c.Database.MaxConns = 2 }, "database.maxConns"},
@@ -435,6 +439,42 @@ func TestValidateProduction(t *testing.T) {
 				t.Errorf("expected issue for %s, got %v", tc.path, err)
 			}
 		})
+	}
+}
+
+// opamp.staleApplyingAfter: 0 turns the re-offer of a stale APPLYING off, every
+// other non-negative value is accepted, a negative one is refused; the key
+// takes a file value and an environment override like any duration.
+func TestStaleApplyingAfterSetting(t *testing.T) {
+	for _, v := range []time.Duration{0, time.Second, 90 * time.Second, 10 * time.Minute} {
+		c := prodConfig()
+		c.OpAMP.StaleApplyingAfter = v
+		if err := Validate(&c, false); err != nil {
+			t.Errorf("opamp.staleApplyingAfter %v rejected: %v", v, err)
+		}
+	}
+	c := prodConfig()
+	c.OpAMP.StaleApplyingAfter = -time.Nanosecond
+	err := Validate(&c, false)
+	if err == nil || !issuePaths(err)["opamp.staleApplyingAfter"] || !strings.Contains(err.Error(), "must not be negative") {
+		t.Errorf("a negative value must be refused with the key in the message: %v", err)
+	}
+
+	p := writeFile(t, "c.yaml", prodMinimal+"\nopamp:\n  staleApplyingAfter: 0s\n")
+	cfg, err := load(p, false, env(nil))
+	if err != nil || cfg.OpAMP.StaleApplyingAfter != 0 {
+		t.Errorf("file value 0s: %v %v", cfg.OpAMP.StaleApplyingAfter, err)
+	}
+	cfg, err = load(p, false, env(map[string]string{"MYRIARCH_OPAMP_STALEAPPLYINGAFTER": "2m"}))
+	if err != nil || cfg.OpAMP.StaleApplyingAfter != 2*time.Minute {
+		t.Errorf("environment override: %v %v", cfg.OpAMP.StaleApplyingAfter, err)
+	}
+	bad := writeFile(t, "bad.yaml", prodMinimal+"\nopamp:\n  staleApplyingAfter: -5s\n")
+	if _, err := load(bad, false, env(nil)); err == nil || !strings.Contains(err.Error(), "opamp.staleApplyingAfter") {
+		t.Errorf("a negative file value must be refused with the key in the message: %v", err)
+	}
+	if _, err := load(p, false, env(map[string]string{"MYRIARCH_OPAMP_STALEAPPLYINGAFTER": "90"})); err == nil {
+		t.Error("a duration without a unit must be refused")
 	}
 }
 

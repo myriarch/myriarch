@@ -1,0 +1,6 @@
+name: bridge
+attributes:
+  service.name: io.opentelemetry.operator-opamp-bridge
+  opentelemetry.io/opamp.bridge.mode: operator
+  os.family: linux
+  host.name: opamp-bridge-5d8f7c9b4-x2k7p

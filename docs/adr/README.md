@@ -48,7 +48,7 @@ Some early operational decisions were not kept as separate records. They are des
 | [0023](0023-keyless-release-signing.md) | Keyless release signing with Sigstore | Accepted, superseded in part by [0029](0029-host-under-the-myriarch-organization.md) |
 | [0024](0024-container-registry-and-image-set.md) | Container registry (ghcr.io) and published image set | Accepted, superseded in part by [0029](0029-host-under-the-myriarch-organization.md) |
 | [0025](0025-login-without-enterprise-idp.md) | Login without an enterprise identity provider: bootstrap admin | Accepted |
-| [0026](0026-collector-version-updates-on-kubernetes.md) | Collector version updates on Kubernetes | Accepted |
+| [0026](0026-collector-version-updates-on-kubernetes.md) | Collector version updates on Kubernetes | Accepted, refined by [0037](0037-opamp-bridge-agents-until-the-operator-integration.md) |
 | [0027](0027-mcp-principles.md) | Model Context Protocol (MCP) access: principles | Accepted, superseded in part by [0029](0029-host-under-the-myriarch-organization.md) |
 | [0028](0028-relationship-to-opentelemetry-and-foundation-path.md) | Relationship to OpenTelemetry and path towards a foundation | Accepted, superseded in part by [0029](0029-host-under-the-myriarch-organization.md) |
 | [0029](0029-host-under-the-myriarch-organization.md) | Host the project in the GitHub organization "myriarch" from the start | Accepted |
@@ -59,6 +59,7 @@ Some early operational decisions were not kept as separate records. They are des
 | [0034](0034-authenticode-signing-of-windows-release-artifacts.md) | Authenticode signing of Windows release artifacts by the SignPath Foundation, with a defined fallback and an exception for v0.1.0 | Accepted |
 | [0035](0035-release-workflow-with-keyless-signing-and-verification-before-publication.md) | Release workflow: tag-only, isolated jobs, keyless signing and provenance, verification before an immutable publication, and a frozen signing identity | Accepted |
 | [0036](0036-database-schema-compatibility-and-rollback.md) | Database schema compatibility and rollback | Accepted |
+| [0037](0037-opamp-bridge-agents-until-the-operator-integration.md) | OpAMP Bridge agents are recognised and locked until the Operator integration | Accepted |
 | [0046](0046-host-installation-from-the-server.md) | Host installation from the server: versions, artifacts and the installer bundle as data, integrity anchored on the host | Accepted |
 
 Two later records change earlier decisions: [ADR-0024](0024-container-registry-and-image-set.md) supersedes the "own combined image" aspect of [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) for published artifacts, and [ADR-0026](0026-collector-version-updates-on-kubernetes.md) refines [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) and [ADR-0014](0014-binary-updates-in-the-pod-via-container-mode.md) (gitops-pr as the Kubernetes default, container mode as an opt-in).

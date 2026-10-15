@@ -2610,6 +2610,16 @@ components:
       properties:
         configPolicy: { type: string, default: default }
         versionPolicy: { type: string, default: default }
+    BridgeSpec:
+      type: object
+      required: [manage]
+      properties:
+        manage:
+          type: boolean
+          default: false
+          description: >-
+            Opts the fleet in to configure the OpAMP Bridge agents that its selector matches. Without it a Bridge never
+            receives remote configuration from the fleet. The opt-in takes effect for Bridges in standalone mode only.
     Fleet:
       type: object
       required: [name, priority, selector, blueprint, collector, update, rollout, source]
@@ -2625,6 +2635,7 @@ components:
         collector: { $ref: '#/components/schemas/CollectorSpec' }
         update: { $ref: '#/components/schemas/UpdateSpec' }
         rollout: { $ref: '#/components/schemas/FleetRolloutSpec' }
+        bridge: { $ref: '#/components/schemas/BridgeSpec' }
         source: { $ref: '#/components/schemas/SourceRef' }
     FleetStatus:
       type: object

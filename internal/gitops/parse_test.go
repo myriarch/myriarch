@@ -195,6 +195,70 @@ func TestParseEnvelopeErrors(t *testing.T) {
 	}
 }
 
+// spec.bridge.manage (docs/reference/gitops-schema.md, Fleet): the opt-in to
+// configure OpAMP Bridge agents.
+func TestParseFleetBridgeManage(t *testing.T) {
+	fleet := func(block string) string {
+		return hdr + "kind: Fleet\nmetadata: {name: f}\nspec:\n  blueprint: b\n" + block
+	}
+	t.Run("the default is false", func(t *testing.T) {
+		snap, issues := Parse(mapFS(map[string]string{"f.yaml": fleet("")}), ".", "c")
+		require.Empty(t, issues)
+		assert.Equal(t, domain.BridgeSpec{}, snap.Fleets[0].Bridge)
+	})
+	for name, block := range map[string]string{
+		"block style": "  bridge:\n    manage: true\n",
+		"flow style":  "  bridge: {manage: true}\n",
+	} {
+		t.Run("accepted, "+name, func(t *testing.T) {
+			snap, issues := Parse(mapFS(map[string]string{"f.yaml": fleet(block)}), ".", "c")
+			require.Empty(t, issues)
+			assert.True(t, snap.Fleets[0].Bridge.Manage)
+		})
+	}
+	t.Run("explicit false", func(t *testing.T) {
+		snap, issues := Parse(mapFS(map[string]string{"f.yaml": fleet("  bridge:\n    manage: false\n")}), ".", "c")
+		require.Empty(t, issues)
+		assert.False(t, snap.Fleets[0].Bridge.Manage)
+	})
+	t.Run("an empty block", func(t *testing.T) {
+		snap, issues := Parse(mapFS(map[string]string{"f.yaml": fleet("  bridge: {}\n")}), ".", "c")
+		require.Empty(t, issues)
+		assert.False(t, snap.Fleets[0].Bridge.Manage)
+	})
+	t.Run("an unknown sub-field is unknown_field", func(t *testing.T) {
+		snap, issues := Parse(mapFS(map[string]string{"f.yaml": fleet("  bridge:\n    manag: true\n")}), ".", "c")
+		require.Len(t, issues, 1)
+		assert.Equal(t, "unknown_field", issues[0].Code)
+		assert.Equal(t, domain.SeverityError, issues[0].Severity)
+		assert.Equal(t, "f.yaml", issues[0].File)
+		assert.Equal(t, 7, issues[0].Line)
+		assert.Equal(t, "spec.bridge.manag", issues[0].Path)
+		assert.Contains(t, issues[0].Message, `did you mean "manage"`)
+		assert.Len(t, snap.Fleets, 1, "the object is kept, strictness only reports")
+	})
+	t.Run("a wrong type is invalid_field", func(t *testing.T) {
+		for name, block := range map[string]string{
+			"a string for manage": "  bridge:\n    manage: sometimes\n",
+			"a list for manage":   "  bridge:\n    manage: [true]\n",
+			"a scalar for bridge": "  bridge: yes please\n",
+			"a list for bridge":   "  bridge: [manage]\n",
+		} {
+			_, issues := Parse(mapFS(map[string]string{"f.yaml": fleet(block)}), ".", "c")
+			require.NotEmpty(t, issues, name)
+			assert.Equal(t, "invalid_field", issues[0].Code, "%s: %+v", name, issues)
+			assert.Equal(t, "f.yaml", issues[0].File, name)
+		}
+	})
+	t.Run("the content hash of a fleet without the block does not change", func(t *testing.T) {
+		with, _ := Parse(mapFS(map[string]string{"f.yaml": fleet("  bridge: {manage: false}\n")}), ".", "c")
+		without, _ := Parse(mapFS(map[string]string{"f.yaml": fleet("")}), ".", "c")
+		assert.Equal(t, without.Fleets[0].Source.ContentHash, with.Fleets[0].Source.ContentHash, "an unset block is not serialized")
+		opted, _ := Parse(mapFS(map[string]string{"f.yaml": fleet("  bridge: {manage: true}\n")}), ".", "c")
+		assert.NotEqual(t, without.Fleets[0].Source.ContentHash, opted.Fleets[0].Source.ContentHash, "the opt-in is part of the object")
+	})
+}
+
 func TestParseDuplicateObjects(t *testing.T) {
 	fs := mapFS(map[string]string{
 		"a.yaml": hdr + "kind: Fleet\nmetadata: {name: x}\nspec: {blueprint: b}\n",

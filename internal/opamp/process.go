@@ -295,6 +295,10 @@ func (s *Server) processRemoteConfigStatus(ctx context.Context, sess *session, r
 				pr.change("remote_config")
 			}
 		}
+		// A status the server stored already, reported again: the agent
+		// reconnected or restarted. Nothing is written; an APPLYING that the agent
+		// keeps reporting becomes stale (staleapplying.go).
+		sess.trackApplying(st, true, s.now())
 		return nil
 	}
 	now := s.now()
@@ -304,6 +308,7 @@ func (s *Server) processRemoteConfigStatus(ctx context.Context, sess *session, r
 	}
 	a.RemoteConfig = st
 	pr.change("remote_config")
+	sess.trackApplying(st, false, now)
 
 	desired := a.Assignment.DesiredConfigHash
 	switch st.Status {

@@ -169,6 +169,7 @@ type serverMetrics struct {
 	agents      *prometheus.GaugeVec
 	configSync  *prometheus.GaugeVec
 	dropped     *prometheus.CounterVec
+	reoffers    *prometheus.CounterVec
 }
 
 // New creates the server (does not start goroutines).
@@ -261,6 +262,9 @@ func (s *Server) registerMetrics(reg prometheus.Registerer) {
 	s.m.dropped = metrics.Register(reg, prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "myriarch_opamp_dropped_total", Help: "Internal queue overflows (events, bus publications, pushes).",
 	}, []string{"queue"}))
+	s.m.reoffers = metrics.Register(reg, prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "myriarch_opamp_config_reoffers_total", Help: "Remote configs offered to an agent again although it reported the hash, by reason (stale_applying: the agent kept reporting APPLYING after a reconnect or restart).",
+	}, []string{"reason"}))
 }
 
 // Handler returns the http.Handler to mount at cfg.Path (WebSocket and plain

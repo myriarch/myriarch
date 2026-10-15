@@ -28,6 +28,9 @@ import (
 //     local packages);
 //   - never offer the failed config hash again (resync clears it);
 //   - do not offer the same hash twice within 60s on one connection;
+//   - offer a hash that the agent keeps reporting as APPLYING once more after
+//     opamp.staleApplyingAfter, once per connection (staleapplying.go); a
+//     pooled HTTP session confirms it against the stored status first;
 //   - commands are never part of this message (a command displaces all other
 //     fields).
 func (s *Server) reconcile(sess *session, flags uint64) *protobufs.ServerToAgent {
@@ -42,12 +45,19 @@ func (s *Server) reconcile(sess *session, flags uint64) *protobufs.ServerToAgent
 	}
 	now := s.now()
 
+	// A pooled HTTP session may cache a status that another replica has replaced
+	// (staleapplying.go): the agent is read again when an offer is due.
+	a, confirmed := s.confirmStaleApplying(sess, a, now)
+	if a == nil {
+		return resp // the agent does not exist any more
+	}
+
 	// ---- remote config
 	if domain.HasCapability(a.Capabilities, domain.CapAcceptsRemoteConfig) && !a.Assignment.DesiredConfigHash.IsZero() {
 		desired := a.Assignment.DesiredConfigHash
 		needs := sess.resync || configNeedsOffer(a, desired)
-		recently := sess.offeredConfig.Equal(desired) && now.Sub(sess.offeredConfigAt) < reofferGuard
-		if needs && (!recently || sess.resync) {
+		stale := confirmed && !needs && s.staleApplying(sess, a, desired, now)
+		if (needs || stale) && (!sess.offeredRecently(desired, now) || sess.resync) {
 			body, err := s.renderedBody(desired)
 			switch {
 			case err != nil:
@@ -62,8 +72,12 @@ func (s *Server) reconcile(sess *session, flags uint64) *protobufs.ServerToAgent
 					ConfigHash: append([]byte(nil), desired...),
 				}
 				sess.offeredConfig, sess.offeredConfigAt = append(domain.Hash(nil), desired...), now
-				s.emit(sess.id, domain.AgentEventConfigOffered, "info", fmt.Sprintf("config %s offered", desired.Short()),
-					map[string]any{"hash": desired.String(), "resync": sess.resync})
+				if stale {
+					s.offeredStale(sess, desired, now)
+				} else {
+					s.emit(sess.id, domain.AgentEventConfigOffered, "info", fmt.Sprintf("config %s offered", desired.Short()),
+						map[string]any{"hash": desired.String(), "resync": sess.resync})
+				}
 			}
 		}
 	}
@@ -97,7 +111,9 @@ func (s *Server) reconcile(sess *session, flags uint64) *protobufs.ServerToAgent
 }
 
 // configNeedsOffer reports whether the desired config has to be offered: the
-// agent does not run it and it is not the hash that failed.
+// agent does not run it and it is not the hash that failed. An agent that
+// reports APPLYING for the desired hash is not offered it again here; only the
+// stale APPLYING rule does that (staleapplying.go).
 //
 // An agent that reports FAILED for the desired hash did not apply it (the
 // supervisor keeps the previous config; with validate_config there is not even

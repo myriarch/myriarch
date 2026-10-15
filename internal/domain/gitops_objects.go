@@ -65,6 +65,10 @@ type FleetSpec struct {
 	Update UpdateSpec `json:"update" yaml:"update"`
 	// Rollout references the rollout policies for config and version changes.
 	Rollout FleetRolloutSpec `json:"rollout" yaml:"rollout"`
+	// Bridge controls whether the fleet configures OpAMP Bridge agents that its
+	// selector matches. The block is omitted from the serialized spec while it
+	// is unset, so existing fleets keep their content hash.
+	Bridge BridgeSpec `json:"bridge,omitzero" yaml:"bridge,omitempty"`
 }
 
 // CollectorSpec is the desired collector of a fleet.
@@ -113,6 +117,18 @@ type FleetRolloutSpec struct {
 	ConfigPolicy string `json:"configPolicy,omitempty" yaml:"configPolicy,omitempty"`
 	// VersionPolicy for version changes; default "default".
 	VersionPolicy string `json:"versionPolicy,omitempty" yaml:"versionPolicy,omitempty"`
+}
+
+// BridgeSpec is spec.bridge of a Fleet: how the fleet treats the OpAMP Bridge
+// agents of the OpenTelemetry Operator that its selector matches
+// (docs/concepts/fleets.md, "Bridge agents").
+type BridgeSpec struct {
+	// Manage opts the fleet in to configure the Bridge agents that its selector
+	// matches (default false). Without it a Bridge never receives remote
+	// configuration from the fleet. The opt-in takes effect for Bridges in
+	// standalone mode only: a Bridge in operator mode stays locked, because a
+	// message that lacks the key of a managed collector deletes that resource.
+	Manage bool `json:"manage" yaml:"manage,omitempty"`
 }
 
 // ------------------------------------------------------------ Blueprint ----

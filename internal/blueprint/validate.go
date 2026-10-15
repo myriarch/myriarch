@@ -35,6 +35,8 @@ type validator struct {
 	seen   map[string]bool
 	// syntaxObjects are objects with a static template_syntax finding.
 	syntaxObjects map[string]bool
+	// bridges caches the synthetic OpAMP Bridge views (bridgeViews).
+	bridges []bridgeView
 }
 
 func (v *validator) add(sev domain.IssueSeverity, code, msg string, src domain.SourceRef, object, path string) {
@@ -607,6 +609,7 @@ func (v *validator) checkFleet(f *domain.Fleet) {
 			v.err("policy_not_found", fmt.Sprintf("rollout policy %q does not exist", ref.name), src, obj, ref.field)
 		}
 	}
+	v.checkBridgeSelection(f)
 }
 
 // checkSelection validates spec.update.selection, the frame for UI-selected
@@ -693,6 +696,111 @@ func (v *validator) findPolicy(name string) *domain.RolloutPolicy {
 	return nil
 }
 
+// ---------------------------------------------------------------- bridges --
+
+// bridgeValue stands for every attribute value that a Bridge chooses itself
+// (names, versions, identifiers): a selector that pins such an attribute to a
+// value does not match it, a selector that only needs the attribute to exist
+// does.
+const bridgeValue = "bridge-reported"
+
+// bridgeView is the attribute view of a synthetic OpAMP Bridge agent.
+type bridgeView struct {
+	mode domain.BridgeMode
+	view domain.AttributeView
+}
+
+// bridgeViews returns the views of one Bridge in operator mode and one in
+// standalone mode, as the Bridge reports itself
+// (docs/design/upstream-notes.md, "OpAMP Bridge: identity, modes and remote
+// config"), with the labels of the inventory applied. A Bridge has no os.type,
+// no site.* attributes and no server labels of an enrollment token: selectors
+// on those never match, which is what the warning bridge_selected relies on.
+// Selectors on labels.* from a token are decided at run time by the assignment.
+func (v *validator) bridgeViews() []bridgeView {
+	if v.bridges != nil {
+		return v.bridges
+	}
+	operator := map[string]string{
+		domain.AttrServiceName: domain.BridgeServiceName, domain.AttrServiceInstanceID: bridgeValue, domain.AttrServiceVersion: bridgeValue,
+		"os.family": "linux", domain.AttrHostName: bridgeValue, domain.AttrBridgeMode: string(domain.BridgeModeOperator),
+	}
+	standalone := map[string]string{
+		domain.AttrServiceName: bridgeValue, domain.AttrServiceInstanceID: bridgeValue, domain.AttrServiceVersion: bridgeValue,
+		"os.family": "linux", domain.AttrHostName: bridgeValue, domain.AttrBridgeMode: string(domain.BridgeModeStandalone),
+		"k8s.cluster.uid": bridgeValue, "k8s.namespace.name": bridgeValue, "k8s.workload.name": bridgeValue, "k8s.workload.type": bridgeValue,
+		"opentelemetry.io/agent.type": bridgeValue,
+	}
+	for _, b := range []struct {
+		mode  domain.BridgeMode
+		attrs map[string]string
+	}{{domain.BridgeModeOperator, operator}, {domain.BridgeModeStandalone, standalone}} {
+		v.bridges = append(v.bridges, bridgeView{mode: b.mode, view: ViewFrom(b.attrs, ApplyInventory(v.snap, b.attrs).Labels)})
+	}
+	return v.bridges
+}
+
+// checkBridgeSelection warns when the selector of a fleet without
+// spec.bridge.manage also matches a Bridge (docs/reference/gitops-schema.md,
+// issue code bridge_selected): the fleet would never configure it. Priorities
+// are not considered.
+func (v *validator) checkBridgeSelection(f *domain.Fleet) {
+	if f.Bridge.Manage || f.Selector.Validate() != nil {
+		return
+	}
+	var modes []domain.BridgeMode
+	for _, b := range v.bridgeViews() {
+		if f.Selector.Matches(b.view) {
+			modes = append(modes, b.mode)
+		}
+	}
+	if len(modes) == 0 {
+		return
+	}
+	names := make([]string, len(modes))
+	for i, m := range modes {
+		names[i] = string(m)
+	}
+	list := strings.Join(names, " and ")
+	msg := fmt.Sprintf("the selector also matches OpAMP Bridge agents (%s mode): without spec.bridge.manage the fleet configures none of them, and with it only Bridges in standalone mode; narrow the selector or set spec.bridge.manage", list)
+	if len(modes) == 1 && modes[0] == domain.BridgeModeOperator {
+		msg = "the selector also matches OpAMP Bridge agents in operator mode, which no fleet configures: narrow the selector"
+	}
+	v.add(domain.SeverityWarning, "bridge_selected", msg, f.Source, objRef(domain.KindFleet, f.Name), "spec.selector")
+}
+
+// checkBridgeSample warns for every fleet without spec.bridge.manage whose
+// selector matches the sample agent that is an OpAMP Bridge. The inventory is
+// applied like for every sample.
+func (v *validator) checkBridgeSample(sm Sample) {
+	inv := ApplyInventory(v.snap, sm.Attributes)
+	labels := map[string]string{}
+	for k, val := range sm.Labels {
+		labels[k] = val
+	}
+	for k, val := range inv.Labels {
+		labels[k] = val
+	}
+	view := ViewFrom(sm.Attributes, labels)
+	mode := "mode not reported"
+	if m := domain.BridgeModeOf(sm.Attributes); m != domain.BridgeModeUnknown {
+		mode = string(m) + " mode"
+	}
+	fleets := make([]*domain.Fleet, 0, len(v.snap.Fleets))
+	for i := range v.snap.Fleets {
+		fleets = append(fleets, &v.snap.Fleets[i])
+	}
+	sort.SliceStable(fleets, func(i, j int) bool { return fleets[i].Name < fleets[j].Name })
+	for _, f := range fleets {
+		if f.Bridge.Manage || !f.Selector.Matches(view) {
+			continue
+		}
+		v.addAt(domain.SeverityWarning, "bridge_selected",
+			fmt.Sprintf("sample agent %q is an OpAMP Bridge (%s) and matches fleet %q, which does not set spec.bridge.manage: a Bridge like it gets no remote configuration from the fleet, and the sample is not rendered", sm.Name, mode, f.Name),
+			domain.SourceRef{Path: sm.File}, sm.Line, "Sample/"+sm.Name)
+	}
+}
+
 // ---------------------------------------------------------------- samples --
 
 func (v *validator) renderSamples(opts ValidateOptions) {
@@ -705,6 +813,13 @@ func (v *validator) renderSamples(opts ValidateOptions) {
 		if !opts.Deadline.IsZero() && time.Now().After(opts.Deadline) {
 			v.err("time_budget_exceeded", "validation took longer than the time budget; the remaining samples were not rendered", domain.SourceRef{Path: sm.File}, "Sample/"+sm.Name, "")
 			return
+		}
+		if domain.IsOpAMPBridge(sm.Attributes) {
+			// a Bridge is configured by no fleet without the opt-in and by no fleet
+			// in operator mode: the sample is checked, never rendered, and does not
+			// have to match a fleet
+			v.checkBridgeSample(sm)
+			continue
 		}
 		inv := ApplyInventory(v.snap, sm.Attributes)
 		labels := map[string]string{}

@@ -84,6 +84,7 @@ func TestOpenAPIContract(t *testing.T) {
 		"CollectorSpec":              tof[domain.CollectorSpec](),
 		"UpdateSpec":                 tof[domain.UpdateSpec](),
 		"FleetRolloutSpec":           tof[domain.FleetRolloutSpec](),
+		"BridgeSpec":                 tof[domain.BridgeSpec](),
 		"Fleet":                      tof[domain.Fleet](),
 		"FleetStatus":                tof[dto.FleetStatus](),
 		"FleetSummary":               tof[dto.FleetSummary](),
@@ -242,7 +243,8 @@ func jsonFields(t reflect.Type) []field {
 		if name == "" {
 			name = f.Name
 		}
-		out = append(out, field{name: name, omitempty: strings.Contains(opts, "omitempty")})
+		// omitzero leaves a zero value out like omitempty does (for structs, which omitempty never does)
+		out = append(out, field{name: name, omitempty: strings.Contains(opts, "omitempty") || strings.Contains(opts, "omitzero")})
 	}
 	return out
 }

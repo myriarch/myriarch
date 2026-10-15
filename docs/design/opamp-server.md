@@ -256,7 +256,8 @@ For each agent message, in this order:
 9. The effective configuration is stored by hash when it changed and is within the size limit (1 MiB default); an empty
    content type means YAML.
 10. A remote config status is stored. `FAILED` for the desired hash marks that hash as failed. Events `config_applied`
-    and `config_failed`.
+    and `config_failed`. A report of `APPLYING` also feeds the rule for a
+    [stale `APPLYING`](#stale-applying-after-a-reconnect).
 11. Available components are stored by hash. If only the hash arrives and the set is unknown, the server asks for the
     components. When the set of a collector changed, the assignment runs again, because the rendering validates against it.
 12. Package statuses are stored; an event on status change. Download progress is compared at whole percent.
@@ -269,8 +270,10 @@ For each agent message, in this order:
   packages, accepts package status). The library does not set them.
 - Remote config is offered when the agent accepts it, a desired hash exists, the agent has not reported that hash as
   applied, and the hash is not marked failed (a resync clears the mark). The same hash is not offered twice within 60
-  seconds on one connection. The message carries exactly one entry, key `myriarch.yaml`, content type `text/yaml`, and
-  the hash. An empty configuration map is never sent, because the supervisor would start its no-op pipeline.
+  seconds on one connection. A hash that the agent reports as `APPLYING` is not offered again, except under the rule for a
+  [stale `APPLYING`](#stale-applying-after-a-reconnect). The message carries exactly one entry, key `myriarch.yaml`,
+  content type `text/yaml`, and the hash. An empty configuration map is never sent, because the supervisor would start its
+  no-op pipeline.
 - A supervisor that rolls back reports `APPLIED` for the old hash, so the failed marker must be respected or the
   offer would loop. A repeated failure of the same hash sets the marker again.
 - Package offers go only to updaters that accept packages, only when offers exist and the reported package hash
@@ -283,7 +286,60 @@ For each agent message, in this order:
 - For performance, heartbeats must not query the database. Each connection caches the desired and failed hashes, the
   reported hash, the offer hash and the capabilities. The cache is refreshed on own writes, on desired-state,
   assignment and command events, after a bus reconnect and at least every five minutes. Every write that changes
-  desired state, failed marker or offers must call `DesiredStateChanged`.
+  desired state, failed marker or offers must call `DesiredStateChanged`. A status that another replica stores is none of
+  these events. The one decision that rests on the stored status is the offer for a stale `APPLYING` of a pooled HTTP
+  session (see [Stale APPLYING after a reconnect](#stale-applying-after-a-reconnect)).
+
+### Stale APPLYING after a reconnect
+
+A supervisor that restarts while it applies a config has stored the status `APPLYING`, reports it again after it
+reconnects, and has no timer that ends it
+([upstream notes](upstream-notes.md#restart-while-a-remote-config-is-applying)). The base rule never offers a hash again
+that the agent reports as `APPLYING`, so the target of a configuration rollout would wait for the `applyTimeout` of its
+policy (10 minutes for configuration by default). The server therefore offers the desired config once more under this
+rule. It is evaluated per connection from the cached state of the session, so heartbeats stay free of database access;
+only a pooled HTTP session reads the agent, once, when an offer is due.
+
+- **A window opens** when the agent reports `APPLYING` for a hash on a connection and either this connection did not
+  offer that hash itself (a new WebSocket connection, another replica, a new pooled HTTP session), or the server had
+  stored the very same status already (the agent reported it again: after a reconnect, after a restart on a long-lived
+  pooled HTTP session, or because the full state was requested). The window starts with that report. A status that this
+  connection caused with its own offer opens no window: the `applyTimeout` of the rollout bounds it. Any other status
+  closes the window, and `APPLYING` for another hash is judged by the same rules.
+- **A status that the server stores anew is a new episode.** The status differs from the one stored before. It replaces an
+  open window, also one for the same hash, and ends the record of an earlier stale offer. A session that did not see the
+  report that ended an earlier episode (the polls of one agent are spread over the replicas) therefore does not reuse its
+  old window when the agent applies the same hash again, as after a rollback.
+- **The offer** goes out with the next reply of the connection (a heartbeat, a poll or a push) when all of these hold:
+  `opamp.staleApplyingAfter` is greater than 0; the window of the desired hash has been open for at least that long
+  (default 90 seconds); the cached status of the agent is still `APPLYING` for the desired hash; the hash is not marked
+  failed; this connection has not made such an offer for the hash yet; and the conditions of every offer hold (the agent
+  accepts remote config, the rendered body exists and is not empty, the same hash is not sent twice within 60 seconds on
+  one connection). The message is the ordinary remote config with one entry. A supervisor answers it with `APPLIED` at once
+  when its merged configuration did not change, without restarting the collector.
+- **A pooled HTTP session decides on the stored status.** It shares its agent with the sessions of the other replicas, and a
+  status that one of them stores does not reach its cache: after `APPLYING` on one replica and `APPLIED` on another, the
+  first still caches `APPLYING` until its next refresh. When the cache says that an offer is due, the session therefore
+  reads the agent again, replaces its cache and makes the offer only if the stored status is still `APPLYING` for the
+  desired hash. A read that fails makes no offer, and the next reply tries again. That is one read for an offer that is due.
+  Heartbeats before that, WebSocket sessions (their connection is the only writer of the status of its agent) and a
+  resync stay free of database access.
+- **At most once per connection and hash.** The record of that offer ends when the agent reports another status or the
+  server stores a new episode of the hash.
+- **The time counts from the report on the connection**, not from the time the status was stored. A connection that ends
+  before the time has passed never causes an offer, so an agent that flaps cannot be offered the same config on every
+  connection, and an agent that comes back after a long absence is not offered the config before it has told its current
+  status. An agent that reports no status in its full state opens no window, and its target waits for the `applyTimeout` as
+  before. The time of the store only postpones an offer: the status cannot have been unchanged for longer than it has been
+  stored, so when another replica stored a newer status of the same hash after this session opened its window, the count
+  starts at that time. A stored time in the future of the clock of this replica is ignored.
+- **Visible** as one agent event `config_offered` with severity `warning` and `details.reason` `stale_applying` (with
+  `hash`, `resync: false` and `applyingSeconds`), as the counter `myriarch_opamp_config_reoffers_total{reason="stale_applying"}`
+  and as a log line. The rollout engine is unchanged: the target reaches `verifying` when `APPLIED` arrives.
+- **Off** with `opamp.staleApplyingAfter: 0`. The value must not be negative. Keep it above the `config_apply_timeout` of the
+  supervisors (30 seconds in the shipped templates), so that a supervisor that is merely slow is not offered the config
+  again: the repeated offer makes it report `APPLIED` before the collector has proven healthy, and with
+  `automatic_config_rollback` it records the configuration as the last working one.
 
 ### Push path
 
@@ -312,6 +368,8 @@ their next poll response. A resync command clears the failed marker and requests
   collector's follows (about 30 KB with defaults). Only a changed hash is stored.
 - Health status strings are `StatusStarting`, `StatusOK` and `StatusStopping`; the top-level `healthy` flag decides.
 - Heartbeats are empty messages with an increasing sequence number.
+- A remote config status that comes back after a reconnect is not progress. `APPLYING` can be the stored status of a
+  supervisor that restarted while it applied (see [Stale APPLYING after a reconnect](#stale-applying-after-a-reconnect)).
 
 ## HTTP server
 
