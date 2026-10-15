@@ -6,7 +6,7 @@ version update by the calls of the UI button (including the automatic rollback o
 server pod and the takeover of the leader. Everything runs on your machine with Docker, without sudo, without edits of
 `/etc/hosts`, without a browser and without a container runtime other than the one that runs kind.
 
-The probe is a local test. A smoke test for CI and a cluster end-to-end test can reuse the scripts (`up.sh`, `images.sh`,
+The probe is a test of its own that CI runs too ([In CI](#in-ci)). Other cluster tests can reuse the scripts (`up.sh`, `images.sh`,
 `install.sh`, `diag.sh` and the stage libraries).
 
 ## Quick start
@@ -122,6 +122,28 @@ hack/kind/diag.sh                        # collect diagnostics now
 make kind-down                           # delete the cluster
 make kind-down ALL=1                     # also the registry container and .cache/kind
 ```
+
+## In CI
+
+`.github/workflows/e2e-kind.yml` runs `make kind-probe` on an `ubuntu-24.04` runner of GitHub Actions: every night (01:51 UTC), for pull
+requests that touch the chart, the updater, the images or the scripts of the probe (a path filter), and on a manual run
+(`workflow_dispatch`), which can set `PROBE_SKIP` (`rotation,netpol,dex,downgrade`). The job installs the pinned tools with
+`.github/actions/setup` (kind, kubectl, helm, crane and yq; `ci/install-tools.sh` retries their downloads after a transient network
+error), runs the probe without any change and shows the summary block of `probe.log` in the job summary. It is not part of `ci-ok` and
+not a gate of the release; before a tag the last green run of the commit does what a local `make kind-probe` did
+([Releasing](../../docs/releasing.md)).
+
+The matrix has one entry per Kubernetes version. `image-var` names the pin of `versions.env` with the node image (`KIND_NODE_IMAGE`
+today) and the workflow passes it as `KIND_NODE_IMAGE`, so the digest is in this file only and `ci/check.sh` keeps holding it. A second
+Kubernetes version is a second pin in `versions.env` and a second entry with its `image-var`; the kubectl pin must stay within the skew
+of both node images.
+
+A failed run uploads an allow-list for seven days: `probe.log`, `results.txt`, `durations.txt`, `logs/` and `diag/` below
+`.cache/kind`. It never uploads the kubeconfig, `secrets/`, the cookie jars, the Helm credentials in `helm/`, `values-tokens.yaml` or
+`logs/hygiene-dump/` (the scan dump of stage 15), because anyone who is signed in to GitHub can download the artifacts of a public
+repository; `ci/tests/workflow-artifacts-test.sh` checks the patterns. Anonymous pulls from Docker Hub (the node image, `registry`,
+`postgres`, `alpine`, `busybox`, `curlimages/curl` and the upstream collector images) can hit the pull limit of a busy day; the workflow
+has no secret to log in with, so rerun the job.
 
 ## Troubleshooting
 

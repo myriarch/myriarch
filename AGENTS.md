@@ -60,8 +60,15 @@ scripts/e2e.sh                                     # end-to-end test (fixed port
 `make dev` starts the server in development mode with an embedded PostgreSQL on <http://localhost:8080>, `make sim` connects
 1,000 simulated collectors. Development mode has well-known logins and tokens and is never a production setup.
 
-Some tests and scripts use fixed ports or a shared local cluster (`scripts/e2e.sh`, `make e2e-ui-updates`,
-`make kind-probe`). Do not run two of them at the same time.
+Some tests and scripts use fixed ports, a shared local cluster or the machine itself. Do not run two of them at the same time:
+
+- `scripts/e2e.sh`: the ports 18080, 18081, 54339 and 1999x.
+- `make e2e-ui-updates`: the ports 18090, 54340 and 19997.
+- `make kind-probe` (and `make kind-up`): the kind cluster `myriarch`, the registry container on port 5001 and the ports 28080,
+  28081 and 25554. They need a container runtime. CI runs the probe in `.github/workflows/e2e-kind.yml`.
+- `scripts/host-e2e/*.sh`: CI only. They install a service user, systemd units and files below `/etc`, `/opt` and `/var`, and
+  refuse to run unless `CI=true` and `HOST_E2E=1` are set, on Linux, as a user other than root and on a host without an
+  installation. Never run them on your own machine; `.github/workflows/host-e2e.yml` runs them on a throwaway runner VM.
 
 ## Conventions
 

@@ -181,6 +181,14 @@ kind (the Kubernetes-in-Docker tool of the probe in `hack/kind`) is built like t
 download from `dl.k8s.io`, verified against the `KUBECTL_SHA256_*` values in `ci/versions.env`: its minor version has to
 be within the supported skew of the kind node image, which is why the kubectl of a container desktop is not used.
 
+A short outage of a download host or of the Go module proxy does not fail the installation: `ci/install-tools.sh` retries a release
+download (kubectl, shellcheck, `pwsh`, Hugo, Dart Sass, lychee, syft, zizmor, the source of osslsigncode) after a timeout, a failed
+connection or HTTP 408, 429, 500, 502, 503 or 504, with pauses of 1, 2, 4, ... s, no attempt later than 120 s after the first (the
+policy of the installers), and a Go tool (kind, helm and the others) up to four times, 5, 10 and 20 s apart, when `go build` fails
+with a network error of the module download. A 404, a certificate error, a checksum that differs from the pin, a failed module
+verification and an error of the compiler end the script at once, and the checks after a download are the same as without
+retries (`ci/tests/install-tools-test.sh`).
+
 The website tools are release downloads as well, verified against the SHA-256 values in `ci/versions.env`: Hugo extended
 (`hugo`, unpacked from the `.pkg` on macOS and linked from `.cache/hugo/<version>`), Dart Sass (`sass`, in
 `.cache/dart-sass/<version>`; Hugo compiles the theme's SCSS with it) and lychee (`lychee`, the link checker). They are
@@ -359,12 +367,18 @@ this tree through a docker double.
 ## Continuous integration
 
 GitHub Actions runs the gates of `ci/check-local.sh` on every pull request, on every push to `main`, in a merge queue and
-nightly ([ADR-0032](adr/0032-continuous-integration-on-github-actions.md)). There are two workflows:
+nightly ([ADR-0032](adr/0032-continuous-integration-on-github-actions.md)). There are two workflows for the gates, and two more
+that run the tests which need a machine of their own:
 
 - `.github/workflows/ci.yml` has one job per gate group, the platform matrix of the Go tests, the script tests, the end-to-end
   smoke test (by calling `e2e.yml`) and the aggregate job `ci-ok`.
 - `.github/workflows/e2e.yml` runs `scripts/e2e.sh` (the smoke test, called from `ci.yml`), and nightly the load run with
   1,000 simulated collectors and `make e2e-ui-updates`. A manual run (`workflow_dispatch`) picks the mode.
+- `.github/workflows/host-e2e.yml` runs the installer and the `myriarch-updater` on a fresh runner VM
+  ([Host end-to-end test](#host-end-to-end-test)), and `.github/workflows/e2e-kind.yml` runs the Kubernetes probe of `hack/kind` on
+  a kind cluster on a runner ([Kubernetes probe on kind](#kubernetes-probe-on-kind-hackkind)). Both run nightly, for pull requests
+  that touch what they test (a path filter) and on a manual run; neither is part of `ci-ok`, because they need a machine that
+  the other jobs do not (a systemd host with `sudo`, a container runtime) and take half an hour or more.
 
 The local composite action `.github/actions/setup` installs Go (from `go.mod`), optionally Node.js (from `.node-version`) and pnpm
 (through corepack), restores the caches and installs the pinned tools of `ci/install-tools.sh`.
@@ -889,6 +903,17 @@ The probe is part of the language guard (`hack` is in the strict scope) and of t
 `ci/check.sh` verifies the digest pins, `ci/helm-conform.sh` renders the probe values). Prerequisites, stages, environment
 variables and troubleshooting: [`hack/kind/README.md`](../hack/kind/README.md).
 
+**In CI.** `.github/workflows/e2e-kind.yml` runs `make kind-probe` on an `ubuntu-24.04` runner, whose Docker engine runs the cluster:
+every night, for pull requests that touch the chart, the updater, the images or the scripts of the probe, and on a manual run, which
+can skip optional parts (`PROBE_SKIP`). It is not part of `ci-ok` and not a gate of the release; before a tag the last green run of
+the commit replaces a local `make kind-probe` ([Releasing](releasing.md)). The matrix has one entry per Kubernetes version: `image-var`
+names the pin of `hack/kind/versions.env` that holds the node image (`KIND_NODE_IMAGE` today), so the digest stays in one place
+and `ci/check.sh` keeps holding it; a second version is a second pin and a second entry. The summary block of the probe goes to the job
+summary. A failed run uploads an allow-list from `.cache/kind` (the log of the probe, the result list, the durations, the logs of the
+pods and the diagnostics of `hack/kind/diag.sh`) for seven days, and never the kubeconfig, the generated secrets, cookie jars or the
+scan dump of the hygiene stage (`ci/tests/workflow-artifacts-test.sh`). The runner pulls the images anonymously, so Docker Hub can
+limit the pulls of a busy day; the workflow has no secret to log in with, and a rerun of the job is the answer.
+
 ## Web UI
 
 The UI is React 19, TypeScript, Vite 8 and Mantine 9. It is built into static files in `internal/webui/dist` and embedded
@@ -1021,6 +1046,75 @@ select version, then the live progress), triggers a real rollback by killing the
 succeeds after a retry. It needs network access once for the release files. Options include `E2E_KEEP=1`, `NO_BUILD=1`,
 `E2E_DIR` (default `.e2e/ui-updates`), `E2E_GIT_TARGET=git|none` and `E2E_UI=auto|1|0`; the header of the script lists them
 all. It uses its own ports (myriarchd 18090, PostgreSQL 54340, mirror 19997).
+
+### Host end-to-end test
+
+The installers are tested in staging mode (`--root`) and with stand-ins by the script tests, and the UI-triggered update runs the
+updater in container mode. Nothing of that starts a service under systemd, replaces the binary of a running host or takes a host
+back to nothing. `scripts/host-e2e/linux.sh` does: on a fresh Ubuntu runner VM of GitHub Actions (amd64 and arm64) it runs
+`install-linux.sh` as root, lets the services run under systemd, updates the collector with a real rollback, and removes everything
+again. It runs in CI only, in `.github/workflows/host-e2e.yml`: every night, for pull requests that touch the installer, the updater,
+the templates of a host or the harness, and on a manual run. It is not part of `ci-ok`.
+
+The scenario `manual` is the installation of [Connect a host](tasks/connect-a-host.md), step by step:
+
+1. `myriarchd` in dev mode with TLS (a throwaway CA, `outbound.caFile`), the GitOps fixture `scripts/host-e2e/gitops` (fleet
+   `host-e2e`, frame `>=0.161.0, <=0.162.0`, Git target 0.161.0) and a mirror of the **real** release files of the collector and the
+   supervisor in both versions as artifact source (`artifacts.sourceBaseUrl`, verified offline against the trusted root of the
+   mirror). The mirror directory comes from `scripts/build-mirror-image-crane.sh` (`COMPONENTS="contrib supervisor"`) and is served
+   by `scripts/host-e2e/httpsd.py`; the installer reads the same files as `--release-base-url`.
+2. An enrollment token through the REST API; the secret goes to a file with mode 0600 and is never printed.
+3. `install-linux.sh` as root without `--insecure`: collector 0.161.0, supervisor, and the `myriarch-updater` built from the checkout
+   (`--updater-sha256`), the CA of `myriarchd` as `--ca-file`, offline Sigstore verification with `--trusted-root`. The installer
+   reads its templates from a copy of `deploy/` in which the updater waits less (health timeout 40 s, check every 2 s, retry after a
+   failed version after 15 s), so that the rollback and the retry take minutes.
+4. The host registers: collector and updater are agents, the fleet `host-e2e` matches, the configuration is `in_sync`, the collector is
+   healthy and runs as `otelcol`, and both units are enabled.
+5. A second run of the installer changes nothing (no restart of the supervisor, the collector or the updater).
+6. A collector archive that the release did not sign (the checksum file fits the changed file, only the Sigstore bundle can tell) is
+   refused with `sigstore_verification_failed`; the old version keeps running.
+7. The update to 0.162.0 as the UI starts it (`select-version`): a helper kills the new collector during the health check, the updater
+   rolls back by itself, the rollout pauses.
+8. `retry-failed`: the update succeeds (download, verification, installation, restart, health check, health wait).
+9. `install-linux.sh --uninstall --purge`, and nothing is left: no file, user, unit, process or listener of the installation.
+
+**What the scripts refuse and protect.** The scripts install a service user, units and files below `/etc`, `/opt` and `/var`. They
+refuse to run unless `CI=true` and `HOST_E2E=1` are set (the workflow sets the second one on the step that runs a scenario only), on
+Linux, as a user other than root (the embedded PostgreSQL refuses root; the harness uses `sudo` for every change of the host, through
+one function that checks the guard again, and a test fails when a script calls it anywhere else), with passwordless `sudo`, and on a
+host without any trace of an installation; the check for that comes first, and the reset at the end of
+a scenario runs only after it, so an installation of a developer is never removed. Do not run them on your machine and do not move
+the workflow to a self-hosted runner that is not recreated for each job. The throwaway CA is trusted only by the process of the
+installer (`CURL_CA_BUNDLE`); the trust store of the host is untouched.
+
+**Structure.** `scripts/host-e2e/lib.sh` is the harness: the guard, the results, the CA, the https file server, the mirror, the server
+start (`he_server_start`, which passes extra flags on to `myriarchd dev`), the REST helper (`he_api`), the host reset (`he_reset_host`:
+uninstall and the proof that nothing is left) and the collection of the artifacts. A scenario is a function in a script of its own
+(`linux.sh`: `scenario_manual`) that `he_run_scenario` runs; the workflow calls it by name (`scripts/host-e2e/linux.sh manual`), and
+every scenario ends with `he_reset_host`. A second scenario, for example the installation from a command of the UI, is a function, a
+call in the workflow, and nothing else: its files go to `.cache/host-e2e/upload/<scenario>/`, which the upload step already covers.
+
+**Artifacts.** The work directory is `.cache/host-e2e` (`HOST_E2E_DIR`): the CA, the mirror, and for each scenario its logs, results and
+work files (the token file, the cookie jar and the database are in there). A failed run uploads only `.cache/host-e2e/upload/`
+(seven days): the harness copies an allow-list of files into it (results, the logs of `myriarchd`, the mirror and the installer runs,
+the journal and the state of both services, `supervisor.yaml` and `updater.yaml`, snapshots of the API), scrubs them of tokens,
+bearer credentials, DSNs, session cookies and private keys, and removes the directory if the token or a key of the run, or anything
+shaped like one, is still in it. `myriarch.env` and the token file of the host are never copied. `ci/tests/workflow-artifacts-test.sh`
+holds the patterns of the upload step to this, with copies of the workflow that are broken on purpose.
+
+| Variable | Meaning |
+|---|---|
+| `CI`, `HOST_E2E` | the guard: both are required (`true` and `1`) |
+| `HOST_E2E_DIR` | work directory (default `.cache/host-e2e`) |
+| `HOST_E2E_BIN_DIR` | the directory with `myriarchd`, `myriarch-updater` and `myrctl` (default `bin/`; `make build` makes them) |
+| `HOST_E2E_DEPLOY_DIR` | the `deploy/` tree with the installer and the templates (default the checkout) |
+| `HOST_E2E_PORT_SERVER`, `_PG`, `_MIRROR`, `_EVIL` | ports of `myriarchd`, its PostgreSQL, the mirror and the tampered mirror (18443, 54341, 19443, 19444) |
+
+A failed run: download the artifact `host-e2e-linux-<runner>` of the run; `results.txt` lists every check, `diag/journal-*.txt` the
+journal of the services, `install-*.log` the output of each installer run, `myriarchd.log` the server, `mirror.log` the requests to
+the mirror. The harness runs on a Mac too as far as it needs no host (`ci/tests/host-e2e-test.sh` covers the guard with stand-ins
+for `uname`, `id`, `sudo` and `systemctl`, the scrubber and the allow-list, the CA, the file server and the fixture); the scenario
+itself only on a runner. The scripts are listed in [AGENTS.md](../AGENTS.md) among the tests that must not run in parallel.
 
 ## Database migrations and upgrade notes
 
