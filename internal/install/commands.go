@@ -181,6 +181,7 @@ func (p *Planner) RenderCommands(req CommandsRequest) (*Commands, error) {
 			return nil, err
 		}
 		out.Commands = append(out.Commands, cmd)
+		out.Version = b.Version // the bundles that the commands pin, not the state of an earlier moment
 	}
 	return out, nil
 }
@@ -190,7 +191,7 @@ type commandInput struct {
 	variant   string
 	server    string
 	platforms []Platform
-	// options are the options of the installer (without the leading dashes' spelling: they are rendered per shell)
+	// the checked values; the options of the installer are built from them in the spelling of each shell
 	fleet, collectorVersion          string
 	siteType, siteID                 string
 	siteName, siteCountry            string
