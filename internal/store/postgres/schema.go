@@ -87,14 +87,22 @@ func ReadSchemaStatus(ctx context.Context, pool *pgxpool.Pool) (SchemaStatus, er
 		return SchemaStatus{}, err
 	}
 	st := SchemaStatus{Supported: supported}
+	// The order of the reads matters while another replica migrates: each statement sees what was committed before it
+	// started, and a migration commits its tables together with its version. Reading the version first and only then
+	// looking for the table schema_compat means that a version at or above 00006 always comes with the table. The other
+	// order can see the version of a migration that committed between the two reads, but not its table, and would refuse
+	// a sound schema.
 	var haveVersions, haveCompat bool
-	if err := pool.QueryRow(ctx, `SELECT to_regclass('goose_db_version') IS NOT NULL, to_regclass('schema_compat') IS NOT NULL`).Scan(&haveVersions, &haveCompat); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('goose_db_version') IS NOT NULL`).Scan(&haveVersions); err != nil {
 		return st, fmt.Errorf("postgres: read the schema state: %w", err)
 	}
 	if haveVersions {
 		if err := pool.QueryRow(ctx, `SELECT COALESCE(max(version_id), 0) FROM goose_db_version WHERE is_applied`).Scan(&st.Version); err != nil {
 			return st, fmt.Errorf("postgres: read the schema version: %w", err)
 		}
+	}
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('schema_compat') IS NOT NULL`).Scan(&haveCompat); err != nil {
+		return st, fmt.Errorf("postgres: read the schema state: %w", err)
 	}
 	if !haveCompat && st.Version >= compatMigration {
 		return st, fmt.Errorf("postgres: the database is at schema version %d but the table schema_compat is missing: restore the database from a backup", st.Version)
