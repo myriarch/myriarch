@@ -95,7 +95,7 @@
 #
 # Windows-only codes (see install-windows.ps1 and deploy/windows/README.md): authenticode_invalid,
 # directory_unsafe, acl_failed, service_config_failed, updater_install_failed, group_membership_failed,
-# unexpected_error; service_not_running is fatal there.
+# language_mode_unsupported, unexpected_error; service_not_running is fatal there.
 # ---- End of error code catalog ---------------------------------------------------------------------
 set -euo pipefail
 

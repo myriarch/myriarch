@@ -138,14 +138,16 @@ $script:MinCosignVersion = [Version]'3.0.4'
 # collector_start_failed, collector_version_mismatch, service_not_running, token_on_command_line,
 # updater_unauthenticated) is at the top of install-linux.sh.
 # Windows-only codes:
-#   authenticode_invalid      the Authenticode signature of the updater is invalid or from another certificate
-#   directory_unsafe          reparse point, wrong owner, unexpected ACE, or not a directory; also a -Verifier in a directory
-#                             that unprivileged accounts can change
-#   acl_failed                icacls failed
-#   service_config_failed     sc.exe failed
-#   updater_install_failed    "myriarch-updater install" failed
-#   group_membership_failed   WARNING: the service account could not be added to a local group
-#   unexpected_error          a failure that is not classified above (the original message follows the code)
+#   authenticode_invalid       the Authenticode signature of the updater is invalid or from another certificate
+#   directory_unsafe           reparse point, wrong owner, unexpected ACE, or not a directory; also a -Verifier in a directory
+#                              that unprivileged accounts can change
+#   acl_failed                 icacls failed
+#   service_config_failed      sc.exe failed
+#   updater_install_failed     "myriarch-updater install" failed
+#   group_membership_failed    WARNING: the service account could not be added to a local group
+#   language_mode_unsupported  PowerShell runs the script in Constrained Language Mode (App Control for Business) or another
+#                              mode below FullLanguage; it is the first check of the run, before anything else happens
+#   unexpected_error           a failure that is not classified above (the original message follows the code)
 # service_not_running is fatal here (a warning on Linux).
 # Every fatal error goes through Stop-Install; the top-level catch prints
 #   [myriarch-install] ERROR [<code>] <message>
@@ -156,6 +158,19 @@ function Write-Warn { param([string]$Code, [string]$Message) Write-Warning "[myr
 
 # Stop-Install <code> <message>: the only way to raise a fatal error (see the error code catalog above).
 function Stop-Install { param([string]$Code, [string]$Message) throw "[$Code] $Message" }
+
+# The installer needs the FullLanguage mode: it calls .NET methods for hashes, ACLs, the registry and services. App Control for
+# Business with script enforcement runs a script that no rule allows, an unsigned one among them, in Constrained Language Mode,
+# where the first method call fails with a PowerShell error that does not name the cause. This is the first action of Invoke-Main
+# (a test pins the order) and it uses a property, cmdlets and a throw only, nothing that a restricted mode refuses. It changes
+# nothing; the message names the file and the rule that lets it run.
+function Assert-FullLanguageMode {
+  $mode = $ExecutionContext.SessionState.LanguageMode
+  if ($mode -eq 'FullLanguage') { return }
+  $file = Get-Variable -Name PSCommandPath -ValueOnly -ErrorAction SilentlyContinue
+  if (-not $file) { $file = 'install-windows.ps1' }
+  Stop-Install 'language_mode_unsupported' "PowerShell runs $file in the language mode $mode instead of FullLanguage. App Control for Business with script enforcement does that to a script that no rule allows, and the installer cannot work in this mode; it changed nothing. Allow the file with a hash rule (create the rule from the copy that you verified, one rule per release; a publisher rule works once the Windows files are Authenticode-signed), then start the installer again; deploy\windows\README.md, section Language mode and App Control, has the details"
+}
 
 function Test-Administrator {
   $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -1085,6 +1100,7 @@ function Invoke-Uninstall {
 }
 
 function Invoke-Main {
+  Assert-FullLanguageMode
   if ($script:BoundParameters.ContainsKey('SigningKey')) {
     Stop-Install 'option_removed' '-SigningKey was removed: releases are signed keyless. Pass -UpdaterChecksumsUrl (its Sigstore bundle is verified against the release identity, verifier: cosign 3.0.4 or newer or an installed myriarch-updater) or -UpdaterSha256'
   }
@@ -1193,9 +1209,15 @@ if ($MyInvocation.InvocationName -ne '.') {
     # Fatal errors carry a code ("[<code>] <message>", see Stop-Install); anything else is unexpected.
     $msg = $_.Exception.Message
     if ($msg -notmatch '^\[[a-z][a-z0-9_]*\] ') { $msg = "[unexpected_error] $msg" }
-    # Through the host (not [Console]::Error): the line also reaches callers in PowerShell remoting and ISE;
-    # in a console host it still goes to stderr.
-    $Host.UI.WriteErrorLine("[myriarch-install] ERROR $msg")
+    if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') {
+      # Through the host (not [Console]::Error): the line also reaches callers in PowerShell remoting and ISE;
+      # in a console host it still goes to stderr.
+      $Host.UI.WriteErrorLine("[myriarch-install] ERROR $msg")
+    } else {
+      # A restricted language mode refuses a method call on the host, and language_mode_unsupported is the error that gets here
+      # in it: Write-Host prints the same line without one (on the console, not on stderr).
+      Write-Host "[myriarch-install] ERROR $msg"
+    }
     exit 1
   }
 }

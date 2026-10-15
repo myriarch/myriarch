@@ -57,7 +57,8 @@ What the start does and what it avoids:
 - A policy set by Group Policy wins over the parameter. `Get-ExecutionPolicy -List` shows it: a value other than `Undefined` for
   `MachinePolicy` or `UserPolicy` decides. If that policy forbids the script (`Restricted`, or `AllSigned`, which also refuses
   unsigned files), the installer cannot start; ask the owner of the policy for an exception.
-- App Control for Business with script enforcement is a separate limit: see "Known limitation" below.
+- App Control for Business with script enforcement is a separate limit: see
+  [Language mode and App Control](#language-mode-and-app-control).
 - `Set-ServiceEnvironment.ps1` is a script too. Start it the same way. `-File` passes strings only, so use `-EnvFile` with it, not
   `-Set`, which takes a hashtable.
 
@@ -193,9 +194,19 @@ repository, a bundle that does not belong to the file, or a host that cannot rea
 differs from the verified checksum). The internal CA of a mirror must be in the Windows certificate store (`-CaFile` only
 applies to the connection to myriarchd).
 
-Known limitation: with App Control for Business (WDAC) script enforcement a PowerShell script that is not signed runs in
-Constrained Language Mode, and `install-windows.ps1` fails there. Allow the installer by its hash, and allow the binaries
-by a hash rule for each release until the Windows files are Authenticode-signed (then one publisher rule is enough).
+## Language mode and App Control
+
+With App Control for Business (WDAC) script enforcement a PowerShell script that is not signed runs in Constrained Language
+Mode, and `install-windows.ps1` fails there. Allow the installer by its hash, and allow the binaries by a hash rule for each
+release until the Windows files are Authenticode-signed (then one publisher rule is enough). Create each rule from the copy
+that you verified with the App Control tools: the hash that App Control uses for a script is not the SHA-256 of
+`checksums.txt`. App Control decides this independently of the execution policy, and `-ExecutionPolicy RemoteSigned` does not
+change it. `$ExecutionContext.SessionState.LanguageMode` shows the mode of a session.
+
+From v0.2.0 the installer checks the language mode first, before it reads an input, stops a service or writes a file. In any mode
+other than `FullLanguage` it stops with `language_mode_unsupported`, and the message names the file and the rule that lets it
+run. The installer of v0.1.0 fails on its first method call with the PowerShell error "Cannot invoke method. Method invocation
+is supported only on core types in this language mode", which does not name the cause.
 
 ## Error codes
 
@@ -227,6 +238,7 @@ is at the top of that script.
 | `sigstore_verifier_missing` | no Sigstore verifier (`-Verifier`, an installed updater, or `cosign.exe` from an administrator-only directory) |
 | `sigstore_verifier_outdated` | `cosign.exe` is older than 3.0.4 or reports no usable version |
 | `privilege_required` | not running as Administrator |
+| `language_mode_unsupported` | (from v0.2.0) PowerShell runs the script in Constrained Language Mode or another mode below `FullLanguage`, usually because App Control for Business with script enforcement allows no unsigned script. It is the first check of a run and changes nothing. Allow the installer with a hash rule ([Language mode and App Control](#language-mode-and-app-control)) |
 | `unsupported_platform` | unsupported CPU architecture, or the supervisor on Windows ARM64 (install with `-Arch amd64`) |
 | `download_failed` | a download did not succeed: a permanent error (for example HTTP 404) at once, a transient one (timeout, failed connection, HTTP 408, 429, 500, 502, 503, 504) after the retry window of 2 minutes; the message names the number of attempts. Under PowerShell 7.5 or later behind an `HTTPS_PROXY` that refuses the connection, the status of the proxy decides (`proxy HTTP 503` is retried, `proxy HTTP 407` is not); PowerShell 7.4 retries it like a failed connection |
 | `template_missing` | template directory or template file not found |

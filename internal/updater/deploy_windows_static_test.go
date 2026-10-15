@@ -149,6 +149,56 @@ func TestInstallWindowsScriptDoesNotTrustUserControllableLocations(t *testing.T)
 	assert.Contains(t, psFunctionBody(t, script, "Grant-ServiceAccountAccess"), "ca.pem")
 }
 
+// psUsesDotNet matches what a restricted language mode refuses in PowerShell code: a static member (::), a method call
+// (.Name( ) and a cmdlet that creates objects of any type.
+var psUsesDotNet = regexp.MustCompile(`::|\.[A-Za-z]+\(|New-Object|Add-Type`)
+
+// psWithoutComments drops the lines of a function body that are comments.
+func psWithoutComments(body string) string {
+	var kept []string
+	for _, l := range strings.Split(body, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(l), "#") {
+			kept = append(kept, l)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
+// The language mode is the first action of Invoke-Main, before the first .NET method call, which App Control for Business
+// makes fail with an error that does not name the cause. The check, the error that it raises and the way the error is printed
+// use properties, cmdlets and a throw only; a method call on the host is replaced by Write-Host in the restricted modes.
+func TestInstallWindowsScriptChecksTheLanguageModeBeforeAnythingElse(t *testing.T) {
+	script := string(readDeploy(t, "scripts/install-windows.ps1"))
+	main := psFunctionBody(t, script, "Invoke-Main")
+	var statements []string
+	for _, l := range strings.Split(main, "\n")[1:] {
+		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
+			statements = append(statements, l)
+		}
+	}
+	require.NotEmpty(t, statements)
+	assert.Equal(t, "Assert-FullLanguageMode", statements[0], "the language mode check is the first action of Invoke-Main")
+	iFirstMethod := psUsesDotNet.FindStringIndex(main)
+	require.NotNil(t, iFirstMethod, "Invoke-Main calls methods")
+	assert.Less(t, strings.Index(main, "Assert-FullLanguageMode"), iFirstMethod[0], "the check comes before the first .NET use")
+
+	check := psFunctionBody(t, script, "Assert-FullLanguageMode")
+	assert.Contains(t, check, "$ExecutionContext.SessionState.LanguageMode")
+	assert.Contains(t, check, "Stop-Install 'language_mode_unsupported'")
+	assert.NotRegexp(t, psUsesDotNet, psWithoutComments(check), "the check itself must work in Constrained Language Mode")
+	stop := strings.SplitN(psFunctionBody(t, script, "Stop-Install"), "\n", 2)[0] // a one-line function
+	assert.NotRegexp(t, psUsesDotNet, stop, "the error that it raises must work in Constrained Language Mode")
+
+	// the top-level handler: the method call on the host stays in FullLanguage, the other modes print with Write-Host
+	tail := script[strings.Index(script, "# Do not run when the script is dot-sourced"):]
+	iMode := strings.Index(tail, "$ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage'")
+	iHost := strings.Index(tail, `$Host.UI.WriteErrorLine("[myriarch-install] ERROR $msg")`)
+	iWrite := strings.Index(tail, `Write-Host "[myriarch-install] ERROR $msg"`)
+	iExit := strings.Index(tail, "exit 1")
+	require.True(t, iMode > 0 && iHost > iMode && iWrite > iHost && iExit > iWrite,
+		"FullLanguage: the host prints the error; any other mode: Write-Host does; then exit 1")
+}
+
 // With a checksums.txt the verifier exists before the updater is downloaded, the file is checked through the same
 // function as the upstream bundles, and the removed key options fail before anything else happens.
 func TestInstallWindowsScriptKeylessChecksumsFlow(t *testing.T) {
