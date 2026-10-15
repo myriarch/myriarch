@@ -11,6 +11,7 @@ import {
   IconPlayerSkipForward,
 } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
+import { useParams } from 'react-router';
 import type { RolloutWave } from '@/api/types';
 import { Can } from '@/components/Can';
 import { SelectorView } from '@/components/misc';
@@ -19,6 +20,7 @@ import { WaveStatusBadge } from '@/components/StatusBadge';
 import { DateTime } from '@/components/TimeAgo';
 import { toneColor, waveTone } from '@/theme/status';
 import { waveApproval } from './waveDisplay';
+import { WaveHealthWait } from './WaveHealthWait';
 
 const icons = {
   pending: <IconCircleDashed size={18} />,
@@ -46,6 +48,9 @@ export function WaveSteps({
   onSelect?: (wave: number | undefined) => void;
 }) {
   const { t } = useTranslation();
+  // The wave cards sit on the page of one rollout (/rollouts/:id); the health wait of a wave is
+  // read from the targets of that rollout.
+  const { id: rolloutId } = useParams();
   return (
     <Stack gap="sm" role="list" aria-label={t('policy.waves')}>
       {waves.map((w) => {
@@ -135,6 +140,9 @@ export function WaveSteps({
                     <SelectorView selector={w.selector} />
                   )}
                 <RolloutProgress counts={w.counts} />
+                {rolloutId && w.counts.inProgress > 0 && (
+                  <WaveHealthWait rolloutId={rolloutId} wave={w.index} />
+                )}
                 <Group gap="lg" wrap="wrap">
                   {w.startedAt && (
                     <Text fz="xs" c="dimmed">

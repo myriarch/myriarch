@@ -10,6 +10,7 @@ import { agentLink } from '@/lib/links';
 import { phaseTone, stepPercent, stepView } from '@/lib/updates';
 import { toneColor } from '@/theme/status';
 import { StepDuration } from './Elapsed';
+import { HealthWaitCountdown } from './HealthWaitCountdown';
 import { TargetStatusBadge } from './StatusBadge';
 import { DateTime } from './TimeAgo';
 
@@ -93,6 +94,15 @@ export function UpdateTimeline({ target }: { target: RolloutTarget }) {
                   {step.detail}
                 </Text>
               )}
+              {step.name === 'health_wait' &&
+                step.status === 'running' &&
+                target.status === 'verifying' && (
+                  <HealthWaitCountdown
+                    rolloutId={target.rolloutId}
+                    verifiedAt={target.verifiedAt ?? step.startedAt}
+                    showSource
+                  />
+                )}
             </Stack>
           </Timeline.Item>
         );

@@ -734,7 +734,17 @@
     "flow": "Ablauf",
     "flowDetails": "Ablauf anzeigen",
     "flowTitle": "Update-Ablauf",
-    "attempt": "Versuch"
+    "attempt": "Versuch",
+    "healthWait": {
+      "remaining": "noch {{time}}",
+      "finishing": "wird abgeschlossen …",
+      "waveEnds_one": "Bewährung: {{count}} Ziel, endet in {{time}}",
+      "waveEnds_other": "Bewährung: {{count}} Ziele, das letzte endet in {{time}}",
+      "waveFinishing_one": "Bewährung: {{count}} Ziel, wird abgeschlossen …",
+      "waveFinishing_other": "Bewährung: {{count}} Ziele, wird abgeschlossen …",
+      "policy": "Policy",
+      "builtIn": "eingebaute Policy"
+    }
   },
   "dashboard": {
     "title": "Übersicht",
