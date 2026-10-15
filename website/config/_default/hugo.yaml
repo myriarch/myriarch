@@ -44,8 +44,10 @@ security:
     urls: ['^$']
     methods: ['(?i)GET|POST']
 
+# The home page also writes /llms.txt: the LLMS output format of Docsy (baseName llms, plain text), rendered by layouts/home.llms.txt from
+# data/llms.yaml. The head of every page links to it (rel="describedby", layouts/_partials/head.html).
 outputs:
-  home: [HTML]
+  home: [HTML, LLMS]
   section: [HTML]
   page: [HTML]
 

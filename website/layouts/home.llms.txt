@@ -1,0 +1,35 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  /llms.txt: the summary of the site for language models and AI assistants (https://llmstxt.org/). It is the output of the home page in the
+  format LLMS, which Docsy defines (baseName llms, plain text) and config/_default/hugo.yaml switches on. It replaces Docsy's all.llms.txt for
+  the home page, which lists the main menu and the sections of the documentation; this one is curated: what the project is, who it is for,
+  the key terms and the most important pages, all from data/llms.yaml, which also explains the keys.
+  A link names a page of the site by its path: the build fails when the page does not exist. The URL is the canonical URL of the page (the
+  fixed production origin of params.seo.canonicalBase, so that the file is the same in a preview). scripts/check-seo.py checks the built file.
+*/ -}}
+{{- $d := hugo.Data.llms -}}
+{{- $lines := slice (printf "# %s" site.Title) "" (printf "> %s" $d.summary) "" -}}
+{{- range $d.details }}{{ $lines = $lines | append . | append "" }}{{ end -}}
+{{- $lines = $lines | append "## Key terms" | append "" -}}
+{{- range $d.terms }}{{ $lines = $lines | append (printf "- **%s**: %s" .term .text) }}{{ end -}}
+{{- $lines = $lines | append "" -}}
+{{- range $d.sections -}}
+  {{- $lines = $lines | append (printf "## %s" .title) | append "" -}}
+  {{- range .links -}}
+    {{- $title := .title | default "" -}}
+    {{- $url := .url | default "" -}}
+    {{- with .page -}}
+      {{- $page := site.GetPage (path.Clean .) -}}
+      {{- if not $page }}{{ errorf "llms.txt: data/llms.yaml names the page %q, which does not exist" . }}{{ end -}}
+      {{- $url = partial "seo/canonical-url.html" $page -}}
+      {{- if not $title }}{{ $title = $page.LinkTitle }}{{ end -}}
+    {{- end -}}
+    {{- if or (not $title) (not $url) (not .note) }}{{ errorf "llms.txt: every link of data/llms.yaml needs a page or a url, a title (for a url) and a note: %v" . }}{{ end -}}
+    {{- $lines = $lines | append (printf "- [%s](%s): %s" $title $url .note) -}}
+  {{- end -}}
+  {{- $lines = $lines | append "" -}}
+{{- end -}}
+{{ strings.TrimRight "\n" (delimit $lines "\n") }}
