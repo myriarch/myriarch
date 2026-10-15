@@ -494,9 +494,10 @@ guidance after each item names what to do.
     holds both lists of patterns against names that must and must not be uploaded, and breaks copies of the workflows (a path that
     is too wide, a missing exclusion, an upload for every job, a secret, a registry login, an image reference) to prove that each is
     found.
-  - *Tool downloads retry only transient errors.* `ci/install-tools.sh` retries a timeout, a failed connection, HTTP 408, 429, 5xx
-    and a `go build` that fails with a network error of the module download; a 404, a certificate error, a checksum that differs
-    from the pin and a failed module verification end it at once, and every check after a download is unchanged.
+  - *Tool downloads retry only transient errors.* `ci/install-tools.sh` retries a download after a timeout, a failed connection or
+    HTTP 408, 429, 500, 502, 503 or 504, and a `go build` that fails with a network error of the module download; any other status (a
+    404 or a 501, for example), a certificate error, a checksum that differs from the pin and a failed module verification end it at
+    once, and every check after a download is unchanged.
 
   Residual risk: the host test runs the code of the commit with `sudo` on the runner VM, as every job runs the code of the commit.
   The isolation is that of a GitHub-hosted runner (a fresh VM for each job). A self-hosted runner that is not recreated for each job

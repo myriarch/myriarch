@@ -11,9 +11,9 @@
 #
 # And the retries of the installer: a Go tool is built again (4 attempts) when `go build` fails with a network error of the module
 # download and never when its output names a checksum mismatch or anything else; the download of kubectl (and with it every
-# download of the script, they share fetch_file) is retried after a timeout, a refused connection or HTTP 408, 429, 5xx, with the
-# window of 120 s, and not after a 404 or a checksum that differs from the pin. The downloads run against the scripted HTTP faults of
-# ci/tests/http-fault-server.py on 127.0.0.1.
+# download of the script, they share fetch_file) is retried after a timeout, a refused connection or HTTP 408, 429, 500, 502, 503 or
+# 504, with the window of 120 s, and not after a 404 or a checksum that differs from the pin. The downloads run against the scripted
+# HTTP faults of ci/tests/http-fault-server.py on 127.0.0.1.
 # shellcheck source=ci/tests/lib-test.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
 set -u

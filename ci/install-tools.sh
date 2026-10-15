@@ -20,8 +20,8 @@
 #     or HTTP 408, 429, 500, 502, 503 or 504 is retried with pauses of 1, 2, 4, ... s; no attempt starts later than 120 s after the
 #     first one. This is the policy of deploy/scripts/install-linux.sh and ci/release/smoke.sh.
 #   - A Go tool (kind, helm and the others, built from ci/tools/<tool>): `go build` fetches the modules, and it is tried again, up
-#     to 4 attempts with pauses of 5, 10 and 20 s, only when its output names a network error (timeout, reset connection, DNS, a 5xx
-#     or 429 answer of the proxy). A checksum mismatch, a missing version or an error of the compiler is never retried.
+#     to 4 attempts with pauses of 5, 10 and 20 s, only when its output names a network error (timeout, reset connection, DNS, a 429,
+#     500, 502, 503 or 504 answer of the proxy). A checksum mismatch, a missing version or an error of the compiler is never retried.
 #   TOOLS_RETRY_SECONDS (window of the downloads, default 120) and TOOLS_RETRY_PAUSE (first pause: 1 s for downloads, 5 s for builds)
 #   exist for the tests.
 set -euo pipefail
