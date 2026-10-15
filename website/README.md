@@ -194,7 +194,8 @@ documentation) is replaced for the home page by `layouts/home.llms.txt`; `output
 
 `check-seo.py` enforces: links lead only to pages of the site and to the repository, never to a placeholder page, and no link appears
 twice; the file is Markdown without HTML tags and at most 64 KiB, and it is spelled as described above. Write only what the documentation
-backs, and name neither the release status nor the support levels, which change.
+backs, and name neither the release status nor the support levels, which change. A note carries the caveat of its page: a tutorial that
+runs the server in development mode says so, because a reader of `llms.txt` does not open the page.
 
 ### Crawler policy
 
