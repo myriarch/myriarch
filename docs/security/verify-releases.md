@@ -94,26 +94,45 @@ trusted root now and then: Sigstore rotates its keys.
 
 The release archives of `myriarch-updater` (`.tar.gz` for Linux, `.zip` for Windows) also contain the installation scripts
 `install-linux.sh` and `install-windows.ps1`. A script that runs as root or Administrator is only as trustworthy as its
-download, so check the archive **before** you extract and run anything from it. On Linux do it in a directory that root owns and
-no other account can write, such as one below `/root`, so that nobody can replace a file between the check and the run:
+download, so check the archive **before** you extract and run anything from it. Download, check and unpack it in one folder
+that only root (on Windows: SYSTEM and the administrators) can write, so that nobody can replace a file between the check and
+the run. A file that you checked in a folder that other accounts can write, such as a download folder, can be replaced there
+before you unpack it. [Connect a host](../tasks/connect-a-host.md#2-download-and-verify-the-installer) has the complete
+blocks for both systems: they create the folder and end at the first failed check.
+
+On Linux, in a root shell on the host, in a directory that only root can write, such as one below `/root`:
 
 ```bash
-# in a root shell on the host, or on an admin host (then copy the archive over and repeat the sha256sum check on the host)
+VERSION=0.1.0                  # the release, without the "v"
+BASE="https://github.com/myriarch/myriarch/releases/download/v${VERSION}"
+
+install -d -m 0700 /root/myriarch-setup && cd /root/myriarch-setup &&
+curl -fsSL -O "${BASE}/checksums.txt" -O "${BASE}/checksums.txt.sigstore.json" \
+  -O "${BASE}/myriarch-updater_${VERSION}_linux_amd64.tar.gz" &&
 cosign verify-blob --bundle checksums.txt.sigstore.json \
   --certificate-identity "https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/v${VERSION}" \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
-sha256sum --check --ignore-missing checksums.txt
-tar -xzf myriarch-updater_${VERSION}_linux_amd64.tar.gz
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt &&
+sha256sum --check --ignore-missing checksums.txt &&
+tar -xzf "myriarch-updater_${VERSION}_linux_amd64.tar.gz"
 ```
 
+A host without `cosign` gets its files from an admin host: check them there, copy `checksums.txt` and the archive into such a
+directory on the host, and run the `sha256sum` and `tar` commands of the block there.
+
 On Windows, a browser marks the files it downloads (the *Mark of the Web*), and the usual execution policy of a client
-(`Restricted`) refuses every script. Run `Unblock-File` **only after** the checks above have passed, never to get past the
-prompt first, and unpack the archive into a folder that only administrators can write (a folder below `C:\Program Files`, not
-`C:\Temp`, a user profile or a download folder), so that nobody can replace a file between the check and the run:
+(`Restricted`) refuses every script. Run `Unblock-File` **only after** the checks have passed, never to get past the prompt
+first. Work in a folder that only administrators can write (a folder below `C:\Program Files`, not `C:\Temp`, a user profile
+or a download folder), such as the setup folder that
+[Connect a host](../tasks/connect-a-host.md#2-download-and-verify-the-installer) creates. Download the three files into it, run
+the checks above there, and unpack from it. The unpack names the folder in its path, so it never takes a zip from another
+folder:
 
 ```powershell
-Expand-Archive myriarch-updater_0.1.0_windows_amd64.zip -DestinationPath 'C:\Program Files\myriarch-setup\package'
-Unblock-File 'C:\Program Files\myriarch-setup\package\deploy\scripts\install-windows.ps1'
+$Setup = 'C:\Program Files\myriarch-setup'
+Set-Location $Setup -ErrorAction Stop
+# download checksums.txt, checksums.txt.sigstore.json and the zip here and check them here, as shown above, then:
+Expand-Archive "$Setup\myriarch-updater_0.1.0_windows_amd64.zip" -DestinationPath "$Setup\package"
+Unblock-File "$Setup\package\deploy\scripts\install-windows.ps1"
 ```
 
 Then start the installer in a new PowerShell process with the execution policy for that process only
