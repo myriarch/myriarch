@@ -305,7 +305,21 @@ class CanonicalTest(SeoCase):
 
     def test_the_canonical_origin_must_be_https(self):
         self.params = self.params.replace("canonicalBase: https://example.test/", "canonicalBase: http://example.test/")
-        self.assert_finding("params.yaml: seo.canonicalBase must be an absolute https URL")
+        self.assert_finding("params.yaml: seo.canonicalBase must be an origin (https://host[:port]/) without a path")
+
+    def test_the_canonical_origin_has_no_path_query_or_fragment(self):
+        # the site is served at the root of its host: a path would promise what the rest of the check does not keep
+        for value in ("https://example.test/myriarch/", "https://example.test/myriarch", "https://example.test:8443/docs/", "https://example.test//",
+                      "https://example.test/?x=1", "https://example.test/#a", "example.test", ""):
+            self.params = PARAMS.replace("canonicalBase: https://example.test/", "canonicalBase: " + value)
+            self.assert_finding("params.yaml: seo.canonicalBase must be an origin (https://host[:port]/) without a path")
+
+    def test_an_origin_may_name_a_port_and_leave_out_the_final_slash(self):
+        for value in ("https://example.test:8443/", "https://example.test", "https://example.test:8443"):
+            self.hugo = HUGO.replace("baseURL: https://example.test/", "baseURL: " + value)
+            self.params = PARAMS.replace("canonicalBase: https://example.test/", "canonicalBase: " + value)
+            self.write_site()
+            self.assertEqual(self.mod.Config(self.config, self.release).problems, [], value)
 
     def test_a_page_that_the_check_cannot_map_to_a_url_fails(self):
         self.files["verification.html"] = page("Verification | myriarch", None)

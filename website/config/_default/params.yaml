@@ -11,7 +11,8 @@ repo:
 # GEO"). scripts/check-seo.py reads this block and compares it with the built pages, so the values and the pages cannot drift apart.
 seo:
   # The origin of every canonical link and of the URLs in the structured data and in llms.txt. It is fixed on purpose: a preview is built
-  # with WEBSITE_BASEURL=/ and would name itself as the original otherwise. It must equal baseURL in hugo.yaml (check-seo.py).
+  # with WEBSITE_BASEURL=/ and would name itself as the original otherwise. It is an origin (https://host[:port]/) without a path, because
+  # the site is served at the root of its host, and it must equal baseURL in hugo.yaml (check-seo.py).
   canonicalBase: https://myriarch.dev/
   # The title of the home page. Every other page is titled "<page title> | <site title>". Spelling (ADR-0015): "Myriarch" starts a title.
   homeTitle: "Myriarch: GitOps fleet manager for OpenTelemetry Collectors"

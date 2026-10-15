@@ -150,7 +150,7 @@ is part of the build and uses no third party. `scripts/check-seo.py` fails the w
 
 | What | Where it comes from | What the build writes |
 |---|---|---|
-| Canonical link | `layouts/_partials/seo/canonical-*.html`, `params.seo.canonicalBase` | One absolute `<link rel="canonical">` per page, always below the production origin. The origin is fixed: a preview is built with `WEBSITE_BASEURL=/` and still names the production page as the original. `canonicalBase` must equal `baseURL` of `hugo.yaml`. The 404 page has none |
+| Canonical link | `layouts/_partials/seo/canonical-*.html`, `params.seo.canonicalBase` | One absolute `<link rel="canonical">` per page, always below the production origin. The origin is fixed: a preview is built with `WEBSITE_BASEURL=/` and still names the production page as the original. `canonicalBase` is an origin (`https://host[:port]/`, no path: the site is served at the root of its host) and must equal `baseURL` of `hugo.yaml`. The 404 page has none |
 | Title of the home page | `params.seo.homeTitle` | The `<title>` of `/`; every other page is titled `<page title> \| myriarch`. The Open Graph and Twitter titles of the home page stay `myriarch`, which the description completes |
 | Structured data | `layouts/_partials/seo/` | JSON-LD for schema.org, see [Structured data](#structured-data) |
 | `llms.txt` | `data/llms.yaml`, `layouts/home.llms.txt` | `/llms.txt`, announced by a `<link rel="describedby">` in the head and by a visually hidden line at the start of the body of every page (`llms-directive.html` of Docsy), see [llms.txt](#llmstxt) |
@@ -391,7 +391,7 @@ except `production` as development and would ship unminified assets and a source
 preview would not be the bytes that production ships. A preview has no known host name at build time (the URL of a Vercel
 deployment exists only after the upload), so it is built with `WEBSITE_BASEURL=/` and root-relative URLs. `check-indexing.py`
 verifies the mode on the built site. The canonical links, the structured data and `llms.txt` of a preview name the production origin all the
-same (`params.seo.canonicalBase`, [SEO and GEO](#seo-and-geo)), so a preview never names itself as the original; `check-seo.py` runs in both modes. A build for another host (`WEBSITE_BASEURL`) is
+same (`params.seo.canonicalBase`, [SEO and GEO](#seo-and-geo)), so a preview never names itself as the original; `check-seo.py` runs in both modes. A build for the root of another host (`WEBSITE_BASEURL`) is
 checked against that host for the sitemap and for the link to `llms.txt`; its canonical links stay on the production origin.
 
 ## Deployment

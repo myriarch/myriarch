@@ -10,12 +10,14 @@ The expected values come from the site configuration (config/_default/hugo.yaml 
 pages cannot drift from them. The mode comes from the environment variable WEBSITE_ENV (production, the default, or preview;
 ci/website.sh exports it). A preview names the production pages as the originals too, so the mode limits only the checks that depend on
 the sitemap and on the policy of robots.txt, which differ in a preview (check-indexing.py checks those files for it). A build for another
-host (WEBSITE_BASEURL) has its sitemap and its describedby link below that host; the canonical links stay on the production origin.
+host (WEBSITE_BASEURL, the root of that host) has its sitemap and its describedby link below that host; the canonical links stay on the
+production origin.
 
 Fails when
 
-  - the configuration: params.seo.canonicalBase is not an absolute https URL or differs from baseURL of hugo.yaml, or a fact of the structured
-    data (license, languages, keywords, repository, description) is missing,
+  - the configuration: params.seo.canonicalBase is not an origin (https://host[:port]/, no path: the site is served at the root of its host)
+    or differs from baseURL of hugo.yaml, or a fact of the structured data (license, languages, keywords, repository, description) is
+    missing,
   - a page (every HTML file but the 404 page and redirect stubs): has not exactly one canonical link, or its href is not the absolute URL of
     the page below the production origin; has not exactly one non-empty title and description; has no link rel="describedby" to /llms.txt;
     has an image without alt text; carries JSON-LD that is not valid JSON, has a raw < or > (a value that was not escaped could end the
@@ -211,8 +213,8 @@ class Config:
 
     def _validate(self):
         problems = self.problems
-        if not re.match(r"^https://[a-z0-9.-]+(:[0-9]+)?(/[^\s?#]*)?$", self.canonical_base):
-            problems.append("params.yaml: seo.canonicalBase must be an absolute https URL")
+        if not re.fullmatch(r"https://[a-z0-9.-]+(:[0-9]+)?/?", self.canonical_base):
+            problems.append("params.yaml: seo.canonicalBase must be an origin (https://host[:port]/) without a path")
         elif self.base_url and self.canonical_base.rstrip("/") != self.base_url.rstrip("/"):
             problems.append("params.yaml: seo.canonicalBase (%s) differs from baseURL of hugo.yaml (%s)" % (self.canonical_base, self.base_url))
         if not self.base_url:

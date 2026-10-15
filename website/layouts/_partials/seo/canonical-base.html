@@ -3,14 +3,15 @@ Copyright The Myriarch Authors
 SPDX-License-Identifier: Apache-2.0
 */ -}}
 {{- /*
-  Returns the origin of all canonical URLs without a final slash: params.seo.canonicalBase, a fixed absolute https URL (a preview is built
-  with another base URL and must still name the production page as the original). The build fails when the value is missing or not an
-  absolute https URL. scripts/check-seo.py compares the value with baseURL in config/_default/hugo.yaml.
+  Returns the origin of all canonical URLs without a final slash: params.seo.canonicalBase, a fixed https origin (scheme, host and an
+  optional port, with or without the final slash, and no path: the site is served at the root of its host). It is fixed because a preview
+  is built with another base URL and must still name the production page as the original. The build fails when the value is missing or is
+  not such an origin. scripts/check-seo.py checks the form too and compares the value with baseURL in config/_default/hugo.yaml.
   Call: partial "seo/canonical-base.html" .
 */ -}}
 {{ $base := "" -}}
 {{ with site.Params.seo }}{{ $base = .canonicalBase | default "" }}{{ end -}}
-{{ if not (findRE `^https://[a-z0-9.-]+(:[0-9]+)?(/[^\s?#]*)?$` $base) -}}
-  {{ errorf "seo: params.seo.canonicalBase must be an absolute https URL, got %q" $base -}}
+{{ if not (findRE `^https://[a-z0-9.-]+(:[0-9]+)?/?$` $base) -}}
+  {{ errorf "seo: params.seo.canonicalBase must be an origin (https://host[:port]/) without a path, got %q" $base -}}
 {{ end -}}
 {{ return (strings.TrimSuffix "/" $base) -}}
