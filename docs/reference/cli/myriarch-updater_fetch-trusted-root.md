@@ -1,6 +1,6 @@
 ---
 title: "myriarch-updater fetch-trusted-root"
-weight: 170
+weight: 180
 description: "Fetch the Sigstore trusted root via TUF and write it as trusted_root.json (diagnostics, mirror image build)."
 ---
 

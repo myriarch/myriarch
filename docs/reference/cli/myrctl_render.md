@@ -1,6 +1,6 @@
 ---
 title: "myrctl render"
-weight: 120
+weight: 130
 description: "Render the collector config of a fleet for a (sample) agent."
 ---
 

@@ -1,6 +1,6 @@
 ---
 title: "myriarch-updater version"
-weight: 260
+weight: 270
 description: "Print the version."
 ---
 

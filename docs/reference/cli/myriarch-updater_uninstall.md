@@ -1,6 +1,6 @@
 ---
 title: "myriarch-updater uninstall"
-weight: 240
+weight: 250
 description: "Stop and remove the myriarch-updater service."
 ---
 

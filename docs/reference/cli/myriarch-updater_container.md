@@ -1,6 +1,6 @@
 ---
 title: "myriarch-updater container"
-weight: 160
+weight: 170
 description: "Run as PID 1 of a container: supervise the OpAMP supervisor and update the collector binary on a volume."
 ---
 

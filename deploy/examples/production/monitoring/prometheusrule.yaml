@@ -1,10 +1,13 @@
-# Example alerting rules for myriarchd (Prometheus Operator, CRD monitoring.coreos.com/v1 PrometheusRule).
-# Optional: adapt as needed and apply:
+# Example alerting rules for myriarchd (Prometheus Operator, CRD monitoring.coreos.com/v1 PrometheusRule), for a cluster that does
+# not install the Helm chart or does not enable prometheusRule there. Optional: adapt as needed and apply:
 #   kubectl apply -f deploy/examples/production/monitoring/prometheusrule.yaml
-# Prerequisites: the ServiceMonitor of the chart (serviceMonitor.enabled=true, job label = service name "myriarch";
-# with a different scrape setup adapt job/namespace in the expressions) and kube-state-metrics for the pod rule.
+# The Helm chart renders the same rules with prometheusRule.enabled=true (templates/prometheusrule.yaml; the namespace, the name of
+# the Service and the number of replicas come from the release there). This file is that rendering for the release "myriarch" in the
+# namespace "myriarch" with two replicas; ci/helm-conform.sh fails when the two differ, so change both.
+# Prerequisites: the ServiceMonitor of the chart (serviceMonitor.enabled=true, job label = service name "myriarch" and the namespace
+# label of the release; with a different scrape setup adapt job/namespace in the expressions) and kube-state-metrics for the pod rule.
 # ADJUST the label your Prometheus instance uses to select rules (here release: kube-prometheus-stack).
-# Only metrics that myriarchd actually exports are used (grep -rn 'Name: *"myriarch_' internal).
+# Only metrics that myriarchd actually exports are used (grep -rn 'Name: *"myriarch_' internal; docs/reference/metrics.md).
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -21,21 +24,21 @@ spec:
         - alert: MyriarchNoLeader
           # myriarch_leader is 1 on the replica that holds the leader lock, otherwise 0. Without a leader rollouts, GitOps sync,
           # release tracker and housekeeping do not run (briefly normal during a failover: the lock is taken over after a few seconds).
-          expr: max(myriarch_leader{job="myriarch"}) < 1
+          expr: max(myriarch_leader{job="myriarch", namespace="myriarch"}) < 1
           for: 3m
           labels: {severity: critical}
           annotations:
             summary: myriarchd has no leader
             description: No replica holds the leader lock (PostgreSQL advisory lock). Check the replica logs and the database connection.
         - alert: MyriarchMultipleLeaders
-          expr: sum(myriarch_leader{job="myriarch"}) > 1
+          expr: sum(myriarch_leader{job="myriarch", namespace="myriarch"}) > 1
           for: 3m
           labels: {severity: critical}
           annotations:
             summary: myriarchd has more than one leader
             description: Several replicas report the leader lock at the same time (split brain, for example after connection problems to the database).
         - alert: MyriarchReplicaNotReady
-          # needs kube-state-metrics; target = replicaCount (example: 2)
+          # needs kube-state-metrics; the target is replicaCount
           expr: kube_deployment_status_replicas_available{namespace="myriarch", deployment="myriarch"} < 2
           for: 10m
           labels: {severity: warning}
@@ -43,7 +46,7 @@ spec:
             summary: A myriarchd replica is not ready
             description: Fewer than 2 myriarchd pods are ready (readyz). Check kubectl -n myriarch describe pod / logs.
         - alert: MyriarchTargetDown
-          expr: up{job="myriarch"} == 0
+          expr: up{job="myriarch", namespace="myriarch"} == 0
           for: 5m
           labels: {severity: warning}
           annotations:
@@ -54,7 +57,7 @@ spec:
         - alert: MyriarchAgentConnectionsDropped
           # Dropped connections: the total number of OpAMP connections falls by more than 20 % within 15 minutes
           # (evaluated only if there were more than 5 connections before)
-          expr: sum(myriarch_opamp_connections{job="myriarch"}) < 0.8 * sum(myriarch_opamp_connections{job="myriarch"} offset 15m) and sum(myriarch_opamp_connections{job="myriarch"} offset 15m) > 5
+          expr: sum(myriarch_opamp_connections{job="myriarch", namespace="myriarch"}) < 0.8 * sum(myriarch_opamp_connections{job="myriarch", namespace="myriarch"} offset 15m) and sum(myriarch_opamp_connections{job="myriarch", namespace="myriarch"} offset 15m) > 5
           for: 5m
           labels: {severity: warning}
           annotations:
@@ -62,14 +65,16 @@ spec:
             description: The number of OpAMP connections has fallen by more than 20 % over the last 15 minutes. Check ingress timeouts (drops after 60 s), the network or a rollout of the replicas.
         - alert: MyriarchConnectRejected
           # 429/503 on connect: connectRatePerIp/connectRateLimit too small (NAT!) or maxConnectionsPerReplica reached
-          expr: sum by (reason) (rate(myriarch_opamp_connect_rejected_total{job="myriarch", reason=~"rate_limited|rate_limited_ip|max_connections"}[5m])) > 0
+          expr: sum by (reason) (rate(myriarch_opamp_connect_rejected_total{job="myriarch", namespace="myriarch", reason=~"rate_limited|rate_limited_ip|max_connections"}[5m])) > 0
           for: 10m
           labels: {severity: warning}
           annotations:
             summary: myriarchd rejects connections ({{ $labels.reason }})
-            description: Agents are rejected with 429/503. Adapt opamp.connectRatePerIp or connectRateLimit to the NAT groups (see the comments in myriarch-values.yaml).
+            description: Agents are rejected with 429/503. Adapt opamp.connectRatePerIp or opamp.connectRateLimit to the NAT groups, or raise opamp.maxConnectionsPerReplica.
         - alert: MyriarchUnauthorizedConnects
-          expr: sum(rate(myriarch_opamp_connect_rejected_total{job="myriarch", reason="unauthorized"}[10m])) > 1
+          # The check of "helm test" and of the health check of a container ("myriarchd healthcheck") without a token is one such
+          # connect each time; a check every 10 seconds adds 0.1 per second to the rate that this alert compares with 1.
+          expr: sum(rate(myriarch_opamp_connect_rejected_total{job="myriarch", namespace="myriarch", reason="unauthorized"}[10m])) > 1
           for: 15m
           labels: {severity: info}
           annotations:
@@ -80,21 +85,21 @@ spec:
         - alert: MyriarchReleaseTrackerErrors
           # Release tracker (leader job, hourly by default): GitHub API unreachable (for example through a proxy) or
           # rate-limited (no or wrong token). The tracker is informational only, rollouts do not depend on it.
-          expr: sum(increase(myriarch_release_polls_total{job="myriarch", result=~"error|rate_limited"}[3h])) >= 2
+          expr: sum(increase(myriarch_release_polls_total{job="myriarch", namespace="myriarch", result=~"error|rate_limited"}[3h])) >= 2
           for: 5m
           labels: {severity: warning}
           annotations:
             summary: The release tracker fails repeatedly
             description: Check the proxy (HTTPS_PROXY/NO_PROXY, if used), github-token and the reachability of api.github.com.
         - alert: MyriarchGitOpsSyncFailing
-          expr: sum(increase(myriarch_gitops_sync_total{job="myriarch", result=~"invalid|error"}[15m])) > 0
+          expr: sum(increase(myriarch_gitops_sync_total{job="myriarch", namespace="myriarch", result=~"invalid|error"}[15m])) > 0
           for: 15m
           labels: {severity: warning}
           annotations:
             summary: GitOps sync fails
             description: The GitOps repository is invalid (invalid) or unreachable (error). Check the status at /api/v1/gitops/status and in the UI.
         - alert: MyriarchGitOpsStale
-          expr: time() - max(myriarch_gitops_last_success_timestamp_seconds{job="myriarch"}) > 1800
+          expr: time() - max(myriarch_gitops_last_success_timestamp_seconds{job="myriarch", namespace="myriarch"}) > 1800
           for: 10m
           labels: {severity: warning}
           annotations:
@@ -102,20 +107,20 @@ spec:
             description: Neither applied nor confirmed. Check the reachability of the Git server, git-token and gitops.path.
         - alert: MyriarchRolloutFailed
           # myriarch_rollout_transitions_total{to="failed"}: a rollout moved to the final state "failed"
-          expr: sum(increase(myriarch_rollout_transitions_total{job="myriarch", to="failed"}[30m])) > 0
+          expr: sum(increase(myriarch_rollout_transitions_total{job="myriarch", namespace="myriarch", to="failed"}[30m])) > 0
           labels: {severity: warning}
           annotations:
             summary: A rollout has failed
             description: Check the rollout in the UI (targets, health gates, failure threshold); roll back if needed.
         - alert: MyriarchNotificationsFailing
-          expr: sum by (channel) (increase(myriarch_notifications_total{job="myriarch", result=~"error|dropped"}[1h])) > 0
+          expr: sum by (channel) (increase(myriarch_notifications_total{job="myriarch", namespace="myriarch", result=~"error|dropped"}[1h])) > 0
           for: 10m
           labels: {severity: info}
           annotations:
             summary: Notifications to {{ $labels.channel }} fail
             description: Check the webhook URL (key slack-webhook-url), the proxy (if used) and reachability.
         - alert: MyriarchHousekeepingFailing
-          expr: increase(myriarch_housekeeping_failures_total{job="myriarch"}[2h]) > 0
+          expr: increase(myriarch_housekeeping_failures_total{job="myriarch", namespace="myriarch"}[2h]) > 0
           for: 10m
           labels: {severity: info}
           annotations:

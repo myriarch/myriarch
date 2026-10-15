@@ -1,6 +1,6 @@
 ---
 title: "myriarchd serve"
-weight: 90
+weight: 100
 description: "Run the myriarchd server."
 ---
 

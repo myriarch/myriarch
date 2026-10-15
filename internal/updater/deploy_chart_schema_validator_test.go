@@ -137,14 +137,32 @@ func (v *schemaValidator) checkObject(value any, s map[string]any, ptr string) [
 					out = append(out, v.check(member, sub, ptr+"/"+escapePointer(name))...)
 				}
 			}
+		case "patternProperties":
+			obj, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+			patterns := arg.(map[string]any)
+			for _, pattern := range sortedSchemaKeys(patterns) {
+				re := v.regexp(pattern)
+				for _, name := range sortedSchemaKeys(obj) {
+					if re.MatchString(name) {
+						out = append(out, v.check(obj[name], patterns[pattern], ptr+"/"+escapePointer(name))...)
+					}
+				}
+			}
 		case "additionalProperties":
 			obj, ok := value.(map[string]any)
 			if !ok {
 				continue
 			}
 			props, _ := s["properties"].(map[string]any)
+			patterns, _ := s["patternProperties"].(map[string]any)
 			for name, member := range obj {
 				if _, known := props[name]; known {
+					continue
+				}
+				if v.matchesAnyPattern(name, patterns) {
 					continue
 				}
 				if arg == false {
@@ -210,6 +228,25 @@ func (v *schemaValidator) checkObject(value any, s map[string]any, ptr string) [
 		}
 	}
 	return out
+}
+
+// matchesAnyPattern reports whether a property name matches a key of patternProperties.
+func (v *schemaValidator) matchesAnyPattern(name string, patterns map[string]any) bool {
+	for pattern := range patterns {
+		if v.regexp(pattern).MatchString(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func sortedSchemaKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (v *schemaValidator) regexp(pattern string) *regexp.Regexp {
@@ -318,6 +355,12 @@ func TestSchemaValidatorKeywords(t *testing.T) {
 		{"additionalProperties schema", `{"additionalProperties": {"type": "string"}}`, `{"a": "x", "b": 2}`, "/b: is integer"},
 		{"property schema", `{"properties": {"a": {"type": "string"}}}`, `{"a": 1}`, "/a: is integer"},
 		{"pointer escapes", `{"additionalProperties": {"type": "string"}}`, `{"a/b": 1}`, "/a~1b:"},
+		{"patternProperties refuses a name", `{"patternProperties": {"^helm": false}}`, `{"ok": 1, "helm.sh/hook": null}`, `/helm.sh~1hook: false schema`},
+		{"patternProperties ok", `{"patternProperties": {"^helm": false}}`, `{"ok": 1, "x.helm": null}`, ""},
+		{"patternProperties applies the schema to the value", `{"patternProperties": {"^n": {"type": "integer"}}}`, `{"n1": "x", "m": "y"}`, "/n1: is string"},
+		{"patternProperties ignores a value that is no object", `{"patternProperties": {"^a": false}}`, `["a"]`, ""},
+		{"additionalProperties leaves the names of a pattern alone", `{"patternProperties": {"^n": {}}, "additionalProperties": false}`, `{"n1": 1}`, ""},
+		{"additionalProperties still refuses the others", `{"patternProperties": {"^n": {}}, "additionalProperties": false}`, `{"n1": 1, "x": 2}`, `additional property "x"`},
 		{"items", `{"items": {"type": "string"}}`, `["a", 1]`, "/1: is integer"},
 		{"minItems", `{"minItems": 1}`, `[]`, "fewer"},
 		{"maxItems", `{"maxItems": 1}`, `[1, 2]`, "more"},

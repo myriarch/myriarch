@@ -1538,6 +1538,52 @@
         }
       }
     },
+    "tests": {
+      "description": "The Pod of \"helm test\" (the Helm hook test), which runs \"myriarchd healthcheck\" against the Service of the release: GET /readyz must answer 200, and a WebSocket upgrade at config.opamp.path must be refused with 401 or, with tests.token, accepted with 101. The Pod sends no OpAMP message and registers no agent. It runs under the restricted Pod Security profile and mounts no Secret unless tests.token names one.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Render the test Pod. The Pod exists only while \"helm test\" runs. \"helm template | kubectl apply\" creates it as an ordinary Pod; \"helm template --skip-tests\" leaves it out.",
+          "type": "boolean"
+        },
+        "token": {
+          "description": "Opt-in for the complete OpAMP handshake. The Secret holds an enrollment token that exists for the test only, never the Secret of the agents. The chart refuses the Secrets of the server itself (existingSecret and the bootstrap Secret), and only the key below is mounted, at /etc/myriarchd-test/token.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {
+              "description": "Name of the Secret with the token of the test. Empty means that the Pod mounts no Secret.",
+              "$ref": "#/$defs/nameOrEmpty"
+            },
+            "key": {
+              "description": "Key of the token in the Secret.",
+              "$ref": "#/$defs/secretKey"
+            }
+          }
+        },
+        "podAnnotations": {
+          "description": "Annotations of the test Pod, for example the opt-out from the sidecar injection of a service mesh. A sidecar that keeps running stops the Pod from completing. The chart sets the annotations of the hook itself, and a key that starts with helm.sh/hook is refused: it would change or, as a null, remove the hook, and the Pod would become an ordinary resource of the release.",
+          "$ref": "#/$defs/stringMap",
+          "patternProperties": {
+            "^helm\\.sh/hook": false
+          }
+        },
+        "resources": {
+          "description": "Resource requests and limits of the test Pod. Many clusters require them, also for ephemeral-storage.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requests": {
+              "$ref": "#/$defs/quantityMap"
+            },
+            "limits": {
+              "$ref": "#/$defs/quantityMap"
+            }
+          }
+        }
+      }
+    },
     "podDisruptionBudget": {
       "description": "PodDisruptionBudget. It is rendered only while replicaCount is greater than 1, because a budget of 1 on a single replica would block every node drain.",
       "type": "object",
@@ -1781,6 +1827,21 @@
         },
         "labels": {
           "description": "Labels of the ServiceMonitor, for example the label that selects it in the Prometheus resource.",
+          "$ref": "#/$defs/stringMap"
+        }
+      }
+    },
+    "prometheusRule": {
+      "description": "A Prometheus Operator PrometheusRule with the alerts of the server. The rules select the metrics by job (the name of the Service, which the ServiceMonitor of the chart gives to the series) and by the namespace of the release. The cluster needs the CRD monitoring.coreos.com before it is enabled.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Create the PrometheusRule.",
+          "type": "boolean"
+        },
+        "labels": {
+          "description": "Labels of the PrometheusRule, for example the label that selects it in the Prometheus resource (ruleSelector).",
           "$ref": "#/$defs/stringMap"
         }
       }

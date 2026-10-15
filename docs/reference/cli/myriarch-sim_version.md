@@ -1,6 +1,6 @@
 ---
 title: "myriarch-sim version"
-weight: 290
+weight: 300
 description: "Print the version."
 ---
 

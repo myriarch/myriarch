@@ -192,6 +192,11 @@ OpenShift usually demand.
   still works. **`allowSameNamespace` must be `false` while `config.server.trustedProxies` or
   `config.opamp.clientCertHeader` is set** (rendering fails otherwise): any pod of the namespace could forge the
   forwarded headers.
+* **The Pod of `helm test`** ([Helm test](#helm-test), `tests.enabled`, default `true`) gets a source for port 8080 of its own when
+  `allowSameNamespace` is `false`: a pod selector with its labels. The chart adds it only while neither
+  `config.server.trustedProxies` nor `config.opamp.clientCertHeader` is set, because every pod that carries these labels could
+  use it ([Network access of the test](#network-access-of-the-test)). To keep the policy of v0.1.0, in which no pod of the namespace
+  reaches port 8080 unless `networkPolicy.ingress.from` names it, set `tests.enabled: false`.
 * **Port 9090** (`/metrics`, unauthenticated) only from `networkPolicy.metrics.from`; empty means nobody.
 * **Egress** (`networkPolicy.egress.enabled`): DNS (`egress.dns`; the OpenShift profile uses `openshift.dns`, UDP and TCP
   per port), and one rule for TCP `egress.ports` (default 5432 PostgreSQL, 443 HTTPS) plus `egress.extraPorts` plus the Git
@@ -254,7 +259,9 @@ OpenShift usually demand.
   TLS terminates outside the ingress); an HTTPRoute needs `httpRoute.tlsTerminatedAtGateway=true`. The Route terminates TLS at
   the router and redirects plain HTTP requests (`openshift.route.tls.insecureEdgeTerminationPolicy: Redirect`); `Allow` serves
   plain HTTP at the router, and so `ws://`, and `None` serves none.
-* Metrics: port `metrics` (9090); `serviceMonitor.enabled=true` creates a ServiceMonitor.
+* Metrics: port `metrics` (9090); `serviceMonitor.enabled=true` creates a ServiceMonitor, and `prometheusRule.enabled=true` a
+  PrometheusRule with the alerts of the server ([Alerting rules](#alerting-rules)).
+* Test: `helm test <release>` checks `/readyz` and the OpAMP endpoint of the Service ([Helm test](#helm-test)).
 * Image: `image.registry` (default `ghcr.io`) and `image.repository` (default `myriarch/myriarch`) give the repository, and
   `image.tag` (default: `appVersion`) or, immutable, `image.digest` (`sha256:<64 hex>`; when set, the image is referenced as
   `<repository>@<digest>` and the tag is ignored) the version. Private registry: `imagePullSecrets`. See [Image](#image).
@@ -365,11 +372,147 @@ that starts with the value path, followed by what is wrong and how to fix it, fo
 | `config.opamp.enrollmentTokens` | set in `config`; use the top-level `enrollmentTokens` values |
 | `config.auth.devLogin` | not available in this chart |
 | `config.dev` | not available in this chart |
+| `config.database.dsn` | set in `config` (the ConfigMap would hold the password); put the DSN into the Secret and use `config.database.dsnFile` |
+| `config.auth.oidc.clientSecret` | set in `config`; put it into the Secret and use `config.auth.oidc.clientSecretFile` |
+| `config.gitops.webhookSecret` | set in `config`; put it into the Secret and use `config.gitops.webhookSecretFile` |
+| `config.notifications.channels[<i>].url` | set in `config`; put the URL into the Secret and set `urlFile` |
 | `bootstrapAdmin.enabled` | no login path: `bootstrapAdmin.enabled` is `false` while neither `config.auth.oidc.enabled` nor `oidcFromEnvironment` is `true` |
 | `bootstrapAdmin.tokenKey` | `existingSecret` set without `tokenKey` and `passwordHashKey` |
 | `bootstrapAdmin.passwordHashKey` | set without `existingSecret` |
 | `bootstrapAdmin.username` | not 1 to 64 characters of letters, digits, `.`, `_`, `@`, `-` |
 | `enrollmentTokens[<i>].name` | not a DNS label, or duplicate |
+| `tests.token.key` | empty while `tests.token.existingSecret` is set |
+| `tests.token.existingSecret` | a Secret of the server itself: `existingSecret` or the bootstrap Secret (generated, or `bootstrapAdmin.existingSecret`) |
+| `tests.podAnnotations` | a key that starts with `helm.sh/hook` (the schema names the key; the template repeats the check) |
+
+## Helm test
+
+> **Available from v0.2.0.** The chart of v0.1.0 has no test.
+
+```bash
+helm test myriarch -n myriarch
+```
+
+runs one Pod (`templates/tests/test-connection.yaml`, the Helm hook `test`) with the image of the server and the command
+[`myriarchd healthcheck`](../../../docs/reference/cli/myriarchd_healthcheck.md) against the Service of the release
+(`http://<fullname>.<namespace>.svc:<service.port>`):
+
+1. `GET /readyz` must answer 200: the database answers, the schema fits and the event bus is connected.
+2. A WebSocket upgrade at `config.opamp.path` must be **refused with 401**. That shows that the route and the authentication are
+   in place, and the Pod needs no credential for it.
+
+The test goes through the Service, so it checks one ready replica, not every replica. The command sends no OpAMP message, so it
+registers no agent and stores nothing ([Server behaviour](../../../docs/design/opamp-server.md#health-check)).
+The server counts the second request as an unauthorized OpAMP connect (`myriarch_opamp_connect_rejected_total{reason="unauthorized"}`),
+one for each run of the test; the alert `MyriarchUnauthorizedConnects` does not notice that. The Pod exists only while the test
+runs: a successful Pod is deleted, a failed one stays for `kubectl -n myriarch logs <fullname>-test-connection` until the next run.
+The output names the failing request, for example `myriarchd: readyz failed: GET http://myriarch.myriarch.svc:8080/readyz answered 503, want 200`.
+
+The Pod follows the restricted Pod Security profile: non-root, no privilege escalation, all capabilities dropped, seccomp
+`RuntimeDefault`, a read-only root file system and no service account token. The OpenShift profile (`openshift.enabled`) leaves the user, the
+group and the `fsGroup` to the SCC, as for the server. It has no environment variable, mounts no Secret unless you opt in
+(below), uses `image.*`, `imagePullSecrets`, `nodeSelector` and `tolerations` of the server, and takes its requests and limits from
+`tests.resources` (default 10m CPU and 32Mi memory requested, 64Mi memory limit). `tests.podAnnotations` adds annotations, for
+example the opt-out from the sidecar injection of a service mesh (`sidecar.istio.io/inject: "false"`): a sidecar that keeps running
+stops the Pod from completing, and `helm test` then waits for it. The chart sets the annotations of the hook itself, so it refuses a
+key that starts with `helm.sh/hook` (a changed or null value would turn the Pod into an ordinary resource of the release).
+`tests.enabled: false` removes the Pod.
+`helm template | kubectl apply` and tools that render hooks as ordinary resources create it as a normal Pod that runs once and
+ends: use `helm template --skip-tests` or `tests.enabled: false` there.
+`helm upgrade --reuse-values` from a release of v0.1.0 renders with the values of that release in place of the defaults of the chart,
+and they have no `tests` and no `prometheusRule`: the chart then renders neither the Pod nor the PrometheusRule, as v0.1.0 did. Upgrade
+with `--reset-then-reuse-values` or a values file to get the defaults ([Install with Helm](../../../docs/operations/install-helm.md#test-the-installation)).
+
+### Complete handshake with a token (opt-in)
+
+With a token the test also proves that the server accepts an enrollment token: the upgrade must be answered with 101, and the
+command closes the connection at once without a message. Create a token **for the test only** (in the UI under *Settings*,
+*Enrollment tokens*, with a label of its own and a short expiry; never the token of your agents), put it into a Secret and name
+the Secret:
+
+```bash
+kubectl -n myriarch create secret generic myriarch-test-token --from-file=token=./test-token
+helm upgrade myriarch ... --set tests.token.existingSecret=myriarch-test-token      # tests.token.key is token
+```
+
+The Pod mounts that one key, read-only, at `/etc/myriarchd-test/token`, and the command reads the token from there and nowhere
+else: it is never an argument or an environment variable and it is never printed. The chart refuses the Secrets of the server
+itself (`existingSecret` and the bootstrap Secret) as the Secret of the test, the schema refuses a name or key in the form of an
+enrollment token (`myre_...`), and the command refuses a file that holds anything but one enrollment token, so a Secret named by
+mistake is not sent to the server. Revoke the token when you no longer run the test.
+
+### Network access of the test
+
+The NetworkPolicy selects the pods of the server, not the test Pod. For port 8080 of the server:
+
+| `allowSameNamespace` | `trustedProxies` or `clientCertHeader` | Source for the test Pod |
+|---|---|---|
+| `true` (default) | not set | none needed: every pod of the namespace is a source |
+| `false` | not set | the chart adds one: the pods with the labels of the test Pod |
+| `false` (required) | set | none: the test cannot connect unless you list the test Pod yourself |
+
+The last row is deliberate. Those settings are safe only if no pod of the namespace reaches port 8080 directly (any pod could
+forge the forwarded client address or certificate), and every pod that carries the labels of the test Pod could use a rule for
+it. To run `helm test` there, accept that and name the labels in `networkPolicy.ingress.from` (the chart prints this hint with
+the install notes as well):
+
+```yaml
+networkPolicy:
+  ingress:
+    allowSameNamespace: false
+    from:
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: <ingress-namespace>}}
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/component: test
+            app.kubernetes.io/instance: myriarch          # the release name
+            app.kubernetes.io/name: myriarch-test         # the name of the chart, or nameOverride, and -test
+```
+
+A cluster with a default-deny policy for the namespace (an egress rule for the test Pod, DNS) needs rules of its own for the test
+Pod as well.
+
+`tests.enabled: false` removes the Pod and the rule: the NetworkPolicy is then the one of v0.1.0.
+
+### When the test fails
+
+| Output of the Pod | Cause |
+|---|---|
+| `readyz failed: cannot reach ...: no answer within 10s`, or `connection refused` | No ready replica, or the NetworkPolicy keeps the test Pod out ([Network access of the test](#network-access-of-the-test)), or the Service name does not resolve in this cluster |
+| `readyz failed: ... answered 503, want 200: the server is not ready` | The server reports that its database, schema or event bus is not ready; its log names the cause |
+| `opamp failed: the upgrade at /v1/opamp was answered with 404` | `config.opamp.path` differs from the path that the server serves, for example an environment override in `extraEnv` |
+| `opamp failed: ... was refused with 401 although a token was given` | The token of the test is revoked, expired or unknown, or the server also requires a client certificate |
+| `--token-file: file ... must contain an enrollment token` | The key of `tests.token.key` holds something else (the Pod then makes no request) |
+
+## Alerting rules
+
+> **Available from v0.2.0.**
+
+`prometheusRule.enabled=true` creates a Prometheus Operator `PrometheusRule` (CRD `monitoring.coreos.com/v1`; the cluster needs
+the CRD, otherwise `helm install` fails) with the alerts of the server. `prometheusRule.labels` adds labels, for example the one that
+the `ruleSelector` of the Prometheus resource uses (`release: kube-prometheus-stack`). There is no dashboard.
+
+| Group | Alert | Severity | Fires when |
+|---|---|---|---|
+| availability | `MyriarchNoLeader` | critical | no replica holds the leader lock for 3 minutes |
+| availability | `MyriarchMultipleLeaders` | critical | more than one replica reports the leader lock for 3 minutes |
+| availability | `MyriarchReplicaNotReady` | warning | fewer than `replicaCount` pods are available for 10 minutes (kube-state-metrics) |
+| availability | `MyriarchTargetDown` | warning | the metrics of a replica are unreachable for 5 minutes (`networkPolicy.metrics.from`) |
+| agents | `MyriarchAgentConnectionsDropped` | warning | the OpAMP connections fall by more than 20 % within 15 minutes |
+| agents | `MyriarchConnectRejected` | warning | agents are rejected with 429 or 503 (connection limits) for 10 minutes |
+| agents | `MyriarchUnauthorizedConnects` | info | more than one unauthorized OpAMP connect per second for 15 minutes |
+| jobs | `MyriarchReleaseTrackerErrors` | warning | the release tracker fails twice within 3 hours |
+| jobs | `MyriarchGitOpsSyncFailing` | warning | the GitOps repository is invalid or unreachable for 15 minutes |
+| jobs | `MyriarchGitOpsStale` | warning | no successful GitOps sync for 30 minutes |
+| jobs | `MyriarchRolloutFailed` | warning | a rollout moved to `failed` |
+| jobs | `MyriarchNotificationsFailing` | info | a notification channel fails for 10 minutes |
+| jobs | `MyriarchHousekeepingFailing` | info | housekeeping runs fail for 10 minutes |
+
+The rules select the series of the server by `job` and `namespace`. The `job` label is the name of the Service, because the
+ServiceMonitor of this chart (`serviceMonitor.enabled=true`) sets no `jobLabel`; with another scrape configuration use the
+[example for clusters without Helm](../../examples/production/monitoring/prometheusrule.yaml), which has the same rules for the
+release `myriarch` in the namespace `myriarch`, and adapt the selectors. `ci/helm-conform.sh` fails when the two differ. Details of
+the metrics: [Metrics](../../../docs/reference/metrics.md).
 
 ## Production example
 
@@ -394,4 +537,6 @@ helm template myriarch deploy/helm/myriarch --set openshift.enabled=auto --api-v
 deploy/examples/production/verify.sh
 # CI: both profiles, all examples and the assertions of the chart contract:
 ci/helm-conform.sh
+# after the installation: /readyz and the OpAMP endpoint through the Service (see "Helm test")
+helm test myriarch -n myriarch
 ```

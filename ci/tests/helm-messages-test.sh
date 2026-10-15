@@ -211,4 +211,76 @@ expect_schema "(86) the policy for plain HTTP at the router is one of three" /op
 expect_renders "(87) the Route terminates TLS at the router" '^ +termination: edge$' --set openshift.enabled=true
 expect_renders "(88) the Route redirects plain HTTP by default" '^ +insecureEdgeTerminationPolicy: Redirect$' --set openshift.enabled=true
 expect_renders "(89) plain HTTP at the router is an explicit opt-in" '^ +insecureEdgeTerminationPolicy: Allow$' --set openshift.enabled=true --set openshift.route.tls.insecureEdgeTerminationPolicy=Allow
+
+# --- the Pod of "helm test" and the PrometheusRule (tests.*, prometheusRule.*) ------------------------------------------------------
+# The schema refuses what one value can get wrong; the templates repeat the refusal of the Secrets of the server itself (a Pod that
+# runs a health check must not get the database DSN or the credentials of the bootstrap admin), which also holds without the schema.
+expect_schema "(90) the switch of the test Pod is a boolean" /tests/enabled --set-string tests.enabled=false
+expect_schema "(91) unknown key of the test Pod" /tests --set tests.tokenSecret=helm-test-token
+expect_schema "(92) unknown key of the test token" /tests/token --set tests.token.secret=helm-test-token
+expect_schema "(93) the Secret of the test token has the form of an enrollment token" /tests/token/existingSecret --set "tests.token.existingSecret=${TOKEN}"
+expect_schema "(94) the key of the test token has the form of an enrollment token" /tests/token/key --set tests.token.existingSecret=helm-test-token --set "tests.token.key=${TOKEN}"
+expect_schema "(95) the key of the test token is empty" /tests/token/key --set tests.token.existingSecret=helm-test-token --set tests.token.key=
+expect_schema "(96) a quantity of the test Pod" /tests/resources/requests/cpu --set tests.resources.requests.cpu=lots
+expect_schema "(97) the test Pod has no image of its own" /tests --set tests.image.tag=0.2.0
+expect_schema "(98) the switch of the PrometheusRule is a boolean" /prometheusRule/enabled --set-string prometheusRule.enabled=false
+expect_schema "(99) unknown key of the PrometheusRule" /prometheusRule --set prometheusRule.groups=none
+expect_schema "(100) a label of the PrometheusRule is a number" /prometheusRule/labels/release --set-json 'prometheusRule.labels={"release":1}'
+expect_guard "(101) the key of the test token is empty" tests.token.key --set tests.token.existingSecret=helm-test-token --set tests.token.key=
+expect_path "(102) the test token in the Secret of the server" tests.token.existingSecret --set tests.token.existingSecret=myriarch-secrets
+expect_path "(103) the test token in the generated bootstrap Secret" tests.token.existingSecret --set tests.token.existingSecret=t-myriarch-bootstrap
+expect_path "(104) the test token in the bootstrap Secret of the values" tests.token.existingSecret --set bootstrapAdmin.existingSecret=my-bootstrap --set tests.token.existingSecret=my-bootstrap
+expect_path "(105) the test token in a changed Secret of the server" tests.token.existingSecret --set existingSecret=fleet-secrets --set tests.token.existingSecret=fleet-secrets
+expect_schema "(105b) an annotation of the test Pod is a number" /tests/podAnnotations/sidecar.istio.io~1inject --set-json 'tests.podAnnotations={"sidecar.istio.io/inject":1}'
+expect_ok "(106) the test token in a Secret of its own" render --set tests.token.existingSecret=helm-test-token
+expect_ok "(107) the test Pod and the PrometheusRule are switched off" render --set tests.enabled=false --set prometheusRule.enabled=false
+expect_ok "(108) the PrometheusRule renders" render --set prometheusRule.enabled=true --set-json 'prometheusRule.labels={"release":"kube-prometheus-stack"}'
+# the Pod of "helm test" is a hook; a render without it has no Pod, and a render with it has exactly one
+test_pods() { render "$@" 2>/dev/null | grep -c '^kind: Pod$'; }
+if [ "$(test_pods)" = 1 ] && [ "$(test_pods --set tests.enabled=false)" = 0 ] && [ "$(test_pods --skip-tests)" = 0 ]; then ok "(109) one test Pod by default, none with tests.enabled=false or --skip-tests"; else fail "(109) one test Pod by default, none with tests.enabled=false or --skip-tests"; fi
+# no Secret reaches the Pod without the opt-in: the rendered Pod names no Secret, and with the opt-in only the named one
+pod_text() { render "$@" 2>/dev/null | awk '/^kind: Pod$/ {p=1} p && /^---$/ {p=0} p'; }
+if ! pod_text | grep -Eq 'secretName|secretKeyRef|--token-file'; then ok "(110) the test Pod refers to no Secret by default"; else fail "(110) the test Pod refers to no Secret by default"; fi
+if [ "$(pod_text --set tests.token.existingSecret=helm-test-token | grep -c 'secretName:')" = 1 ] && pod_text --set tests.token.existingSecret=helm-test-token | grep -q 'secretName: "helm-test-token"'; then ok "(111) with the opt-in the test Pod mounts the named Secret and no other"; else fail "(111) with the opt-in the test Pod mounts the named Secret and no other"; fi
+
+# --- helm upgrade --reuse-values from a release of v0.1.0 ----------------------------------------------------------------------------
+# "helm upgrade --reuse-values" renders the chart with the values of the release that is upgraded in place of the defaults of the new
+# chart (Helm replaces the values of the chart with those of the old release). A map that values.yaml gained after v0.1.0 (tests,
+# prometheusRule) is then missing, and a template that reads a key of it without a default stops with "nil pointer evaluating
+# interface {}.enabled". The copy of the chart below has the values.yaml of v0.1.0 as its defaults (the file of the tag, unchanged:
+# ci/tests/testdata/helm-values-v0.1.0.yaml) and the templates and the schema of this chart. A later map without a guard fails here too.
+reuse="${TEST_TMP}/reuse-values"
+mkdir -p "${reuse}"
+cp -R "${chart}" "${reuse}/myriarch"
+cp "${ROOT}/ci/tests/testdata/helm-values-v0.1.0.yaml" "${reuse}/myriarch/values.yaml"
+render_reuse() { helm template t "${reuse}/myriarch" "$@"; }
+reuse_text() { render_reuse "$@" 2>/dev/null; }
+expect_ok "(112) the chart renders with the defaults of v0.1.0, as in helm upgrade --reuse-values" render_reuse
+# what the old values lack keeps the behaviour of v0.1.0: no test Pod, no PrometheusRule, no source for the test Pod in the NetworkPolicy
+reuse_np() { render_reuse --show-only templates/networkpolicy.yaml "$@" 2>/dev/null; }
+reuse_all="$(reuse_text)"
+if printf '%s\n' "${reuse_all}" | grep -q '^kind: Deployment$' && ! printf '%s\n' "${reuse_all}" | grep -Eq '^kind: (Pod|PrometheusRule)$'; then ok "(113) no test Pod and no PrometheusRule without the maps in the values"; else fail "(113) no test Pod and no PrometheusRule without the maps in the values"; fi
+if reuse_np --set networkPolicy.ingress.allowSameNamespace=false | grep -q 'kind: NetworkPolicy' && ! reuse_np --set networkPolicy.ingress.allowSameNamespace=false | grep -q 'component: test'; then ok "(114) no source for the test Pod in the NetworkPolicy without the map tests"; else fail "(114) no source for the test Pod in the NetworkPolicy without the map tests"; fi
+# switching both on by --set still renders: the maps are partial then (only the switch), and the Pod has no requests and limits
+reuse_on=(--set tests.enabled=true --set prometheusRule.enabled=true)
+expect_ok "(115) the switches alone, on top of the values of v0.1.0, render" render_reuse "${reuse_on[@]}"
+if [ "$(reuse_text "${reuse_on[@]}" | grep -c '^kind: Pod$')" = 1 ] && [ "$(reuse_text "${reuse_on[@]}" | grep -c '^kind: PrometheusRule$')" = 1 ]; then ok "(116) one test Pod and one PrometheusRule with the switches on"; else fail "(116) one test Pod and one PrometheusRule with the switches on"; fi
+if reuse_np "${reuse_on[@]}" --set networkPolicy.ingress.allowSameNamespace=false | grep -q 'app.kubernetes.io/component: test'; then ok "(117) the source for the test Pod follows the switch"; else fail "(117) the source for the test Pod follows the switch"; fi
+# tests.resources is missing from such values, and the documents say so: the Pod has no requests and limits then
+reuse_pod() { render_reuse "$@" 2>/dev/null | awk '/^kind: Pod$/ {p=1} p && /^---$/ {p=0} p'; }
+if reuse_pod "${reuse_on[@]}" | grep -q '^kind: Pod$' && ! reuse_pod "${reuse_on[@]}" | grep -q 'resources:'; then ok "(117b) the test Pod has no requests and limits when tests.resources is missing"; else fail "(117b) the test Pod has no requests and limits when tests.resources is missing"; fi
+
+# --- the annotations of the test Pod must not touch the hook ---------------------------------------------------------------------------
+# The chart sets helm.sh/hook and helm.sh/hook-delete-policy. A key of the same name would give the Pod two of them (Helm keeps the last
+# one), and a changed or null value would turn the Pod into an ordinary resource that "helm install" and "helm template --skip-tests" create.
+# The schema refuses every key of the family helm.sh/hook, and the template repeats the refusal for a run without the validation.
+HOOKKEY=(--set-string 'tests.podAnnotations.helm\.sh/hook=pre-install')
+expect_schema "(118) a hook annotation of the test Pod" '/tests/podAnnotations/helm.sh~1hook' "${HOOKKEY[@]}"
+expect_schema "(119) a null does not remove an annotation of the hook either" '/tests/podAnnotations/helm.sh~1hook-weight' --set-json 'tests.podAnnotations={"helm.sh/hook-weight":null}'
+expect_schema "(120) the whole family helm.sh/hook is refused" '/tests/podAnnotations/helm.sh~1hook-delete-policy' --set-string 'tests.podAnnotations.helm\.sh/hook-delete-policy=hook-failed'
+expect_guard "(121) the template refuses a hook annotation of the test Pod" tests.podAnnotations "${HOOKKEY[@]}"
+expect_guard "(122) the template refuses a null for an annotation of the hook" tests.podAnnotations --set-json 'tests.podAnnotations={"helm.sh/hook":null}'
+MESH=(--set-string 'tests.podAnnotations.sidecar\.istio\.io/inject=false')
+expect_renders "(123) another annotation is kept next to the hook" '^    sidecar\.istio\.io/inject: "false"$' "${MESH[@]}"
+if [ "$(render "${MESH[@]}" 2>/dev/null | grep -c '^    helm\.sh/hook: ')" = 1 ]; then ok "(124) the test Pod has exactly one hook annotation"; else fail "(124) the test Pod has exactly one hook annotation"; fi
 finish_tests "helm-messages-test"

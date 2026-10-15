@@ -16,7 +16,7 @@ Kubernetes defaults (`10.96.0.0/12` service CIDR and `10.244.0.0/16` pod CIDR of
 | `myriarchd.yaml` | standalone `myriarchd serve` configuration, equivalent to the `config:` block of the values |
 | `create-secrets.example.sh` | example script for namespaces, CA bundle, TLS secret, pull secret and secrets (reads files only) |
 | `collector/` | kustomize overlay for the gateway collector (`kubectl apply -k`) |
-| `monitoring/prometheusrule.yaml` | optional alerting rules |
+| `monitoring/prometheusrule.yaml` | optional alerting rules for a cluster without Helm (the chart renders the same rules with `prometheusRule.enabled`) |
 | `verify.sh` | offline verification (lint, render, `myriarchd config validate`, kustomize, optional kubeconform) |
 
 The ingress variants for other controllers live next to the chart, in

@@ -18,6 +18,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/myriarch/myriarch/internal/config"
+	"github.com/myriarch/myriarch/internal/refdoc"
 )
 
 // Helm default values must be a valid myriarchd configuration (unknown keys are errors in myriarchd).
@@ -42,6 +43,7 @@ func TestHelmChartHasRequiredTemplatesAndSettings(t *testing.T) {
 	for _, f := range []string{
 		"deployment.yaml", "service.yaml", "ingress.yaml", "httproute.yaml", "route.yaml", "pdb.yaml", "configmap.yaml",
 		"networkpolicy.yaml", "secret-bootstrap.yaml", "secret-enrollment.yaml", "servicemonitor.yaml", "serviceaccount.yaml",
+		"prometheusrule.yaml", "tests/test-connection.yaml",
 	} {
 		assert.FileExists(t, filepath.Join(deployDir, "helm/myriarch/templates", f))
 	}
@@ -866,4 +868,179 @@ func TestCollectorPodsMountNoServiceAccountTokenAndDoNotChownRecursively(t *test
 		}
 	}
 	assert.GreaterOrEqual(t, pods, 2, "the DaemonSet and the StatefulSet are checked")
+}
+
+// The Pod of "helm test" (templates/tests/test-connection.yaml) runs the health check of the server image. The rendered pod is
+// checked by ci/helm-conform.sh and ci/tests/helm-messages-test.sh; this test pins what the template must never contain, so that a
+// change of the template cannot go unnoticed in the Go tests either.
+func TestHelmTestPodTemplate(t *testing.T) {
+	tpl := string(readDeploy(t, "helm/myriarch/templates/tests/test-connection.yaml"))
+	for _, want := range []string{
+		"helm.sh/hook: test", "helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded", "restartPolicy: Never",
+		"automountServiceAccountToken: false", "allowPrivilegeEscalation: false", "readOnlyRootFilesystem: true", "runAsNonRoot: true",
+		"drop: [ALL]", "type: RuntimeDefault", "- healthcheck", "- --url", "- --opamp-path", `include "myriarch.testLabels"`, `include "myriarch.image"`,
+	} {
+		assert.Contains(t, tpl, want)
+	}
+	for _, banned := range []string{
+		// the OpenShift profile leaves the user to the SCC, so the template names no user, and it needs no other privilege
+		"runAsUser", "runAsGroup", "fsGroup", "privileged", "add:", "hostPath", "hostNetwork", "hostPID",
+		// no environment, so no secret in it; the token reaches the command through a file only
+		"env:", "valueFrom", "secretKeyRef", "--token ", "--token=", "MYRIARCH_",
+		// the labels of the server select the Service and the Deployment: the test Pod must not carry them
+		`include "myriarch.labels"`, `include "myriarch.selectorLabels"`,
+	} {
+		assert.NotContains(t, tpl, banned)
+	}
+	// the annotations of the hook are the chart's: a key of the family helm.sh/hook in tests.podAnnotations is refused by the schema
+	// (patternProperties) and, for a run without the validation, by the template
+	assert.Contains(t, tpl, `include "myriarch.tests.checkPodAnnotations" .`)
+	assert.Contains(t, string(readDeploy(t, "helm/myriarch/templates/_helpers.tpl")), `hasPrefix "helm.sh/hook"`)
+	// the Secret is mounted behind the opt-in, once, as one key
+	assert.Equal(t, 1, strings.Count(tpl, "secretName:"))
+	assert.Equal(t, 1, strings.Count(tpl, "items:"))
+	assert.Contains(t, tpl, "{{- if $tokenSecret }}")
+	assert.Contains(t, tpl, "--token-file")
+
+	vals := chartValues(t)
+	tests, ok := vals["tests"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, true, tests["enabled"], "the Pod is rendered by default; it exists only while helm test runs")
+	assert.Equal(t, "", tests["token"].(map[string]any)["existingSecret"], "no Secret without the opt-in")
+	assert.Equal(t, false, vals["prometheusRule"].(map[string]any)["enabled"], "the PrometheusRule needs a CRD: off by default")
+
+	// the network policy rule for the Pod: only behind tests.enabled, without allowSameNamespace, and never with the settings that
+	// need the port to be closed to the pods of the namespace
+	np := string(readDeploy(t, "helm/myriarch/templates/networkpolicy.yaml"))
+	assert.Contains(t, np, `and (include "myriarch.tests.enabled" .) (not $np.ingress.allowSameNamespace) (not (or .Values.config.server.trustedProxies $clientCertHeader))`)
+	assert.Contains(t, np, `include "myriarch.testSelectorLabels"`)
+}
+
+// Every refusal of the templates for the test Pod names a value path, and the table "Misconfiguration messages" in the README of the
+// chart, which calls itself the complete list, has a row for each of them.
+func TestReadmeListsTheMessagesOfTheTestPod(t *testing.T) {
+	failPath := regexp.MustCompile(`fail (?:\(printf )?"(tests\.[A-Za-z.]+): `)
+	paths := map[string]bool{}
+	for _, f := range chartTemplateFiles(t) {
+		b, err := os.ReadFile(f)
+		require.NoError(t, err)
+		for _, m := range failPath.FindAllStringSubmatch(string(b), -1) {
+			paths[m[1]] = true
+		}
+	}
+	for _, want := range []string{"tests.token.key", "tests.token.existingSecret", "tests.podAnnotations"} {
+		assert.True(t, paths[want], "%s: the templates refuse it", want)
+	}
+	readme := string(readDeploy(t, "helm/myriarch/README.md"))
+	for path := range paths {
+		assert.Contains(t, readme, "| `"+path+"` |", "the table of messages in the README of the chart lists %s", path)
+	}
+}
+
+// "helm upgrade --reuse-values" renders a release of v0.1.0 with the values of that release in place of the defaults of the chart. They
+// have neither the map tests nor the map prometheusRule, and a template that reads .Values.tests.enabled or
+// .Values.prometheusRule.enabled then stops with "nil pointer evaluating interface {}.enabled". The switches are read through the
+// helper myriarch.tests.enabled and through a default; ci/tests/helm-messages-test.sh renders the chart with the values of v0.1.0.
+func TestTemplatesReadTheNewSwitchesThroughADefault(t *testing.T) {
+	direct := regexp.MustCompile(`\.Values\.(tests|prometheusRule)\.enabled\b`)
+	users := map[string]bool{}
+	for _, f := range chartTemplateFiles(t) {
+		b, err := os.ReadFile(f)
+		require.NoError(t, err)
+		assert.NotRegexp(t, direct, string(b), "%s reads a switch of a map that the values of v0.1.0 lack; read it through a default", filepath.Base(f))
+		if strings.Contains(string(b), `include "myriarch.tests.enabled" .`) {
+			users[filepath.Base(f)] = true
+		}
+	}
+	for _, f := range []string{"test-connection.yaml", "networkpolicy.yaml", "NOTES.txt"} {
+		assert.True(t, users[f], "%s asks the helper myriarch.tests.enabled", f)
+	}
+	assert.Contains(t, string(readDeploy(t, "helm/myriarch/templates/prometheusrule.yaml")), "(.Values.prometheusRule | default dict).enabled")
+}
+
+// The alerts of the chart and of the example for a cluster without Helm are the same rules (ci/helm-conform.sh compares the
+// rendered rules with the example), and every metric they name is one that myriarchd exports.
+func TestPrometheusRuleOfTheChartAndTheExample(t *testing.T) {
+	type rule struct {
+		Alert  string            `yaml:"alert"`
+		Expr   string            `yaml:"expr"`
+		For    string            `yaml:"for"`
+		Labels map[string]string `yaml:"labels"`
+	}
+	var example struct {
+		Spec struct {
+			Groups []struct {
+				Name  string `yaml:"name"`
+				Rules []rule `yaml:"rules"`
+			} `yaml:"groups"`
+		} `yaml:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(readDeploy(t, "examples/production/monitoring/prometheusrule.yaml"), &example))
+	var alerts []string
+	for _, g := range example.Spec.Groups {
+		for _, r := range g.Rules {
+			alerts = append(alerts, r.Alert)
+			assert.NotEmpty(t, r.Labels["severity"], r.Alert)
+			// the series of the server by job and namespace, the series of kube-state-metrics by deployment and namespace
+			assert.Contains(t, r.Expr, `namespace="myriarch"`, "%s: selected by namespace", r.Alert)
+			assert.True(t, strings.Contains(r.Expr, `job="myriarch"`) || strings.Contains(r.Expr, `deployment="myriarch"`), "%s: selected by job or deployment", r.Alert)
+		}
+	}
+	require.Len(t, alerts, 13)
+	// the README of the chart lists every alert
+	readme := string(readDeploy(t, "helm/myriarch/README.md"))
+	for _, a := range alerts {
+		assert.Contains(t, readme, "| `"+a+"` |", "the table of alerts in the README of the chart")
+	}
+
+	// the template names the same alerts in the same order, with the same duration
+	tpl := string(readDeploy(t, "helm/myriarch/templates/prometheusrule.yaml"))
+	var fromTemplate []string
+	for _, m := range regexp.MustCompile(`(?m)^\s+- alert: (\w+)$`).FindAllStringSubmatch(tpl, -1) {
+		fromTemplate = append(fromTemplate, m[1])
+	}
+	assert.Equal(t, alerts, fromTemplate, "templates/prometheusrule.yaml and the example name different alerts")
+	assert.Equal(t, strings.Count(tpl, "\n          for: "), func() int {
+		n := 0
+		for _, g := range example.Spec.Groups {
+			for _, r := range g.Rules {
+				if r.For != "" {
+					n++
+				}
+			}
+		}
+		return n
+	}(), "the alerts that wait before they fire")
+
+	// every metric in the expressions is exported by the server (the documentation of the metrics lists the same names)
+	metrics, err := refdoc.ScanMetrics(filepath.Join(deployDir, ".."))
+	require.NoError(t, err)
+	known := map[string]bool{}
+	for _, m := range metrics {
+		known[m.Name] = true
+	}
+	re := regexp.MustCompile(`\bmyriarch_[a-z0-9_]+`)
+	used := map[string]bool{}
+	for _, text := range []string{tpl, string(readDeploy(t, "examples/production/monitoring/prometheusrule.yaml"))} {
+		for _, line := range strings.Split(text, "\n") {
+			if i := strings.Index(line, "expr:"); i >= 0 {
+				for _, name := range re.FindAllString(line[i:], -1) {
+					used[name] = true
+					assert.True(t, known[name], "%s is not a metric of myriarchd", name)
+				}
+			}
+		}
+	}
+	assert.Len(t, used, 9, "the metrics of the alerts")
+
+	// the one alert that the health check touches names the threshold that the documentation quotes
+	for _, g := range example.Spec.Groups {
+		for _, r := range g.Rules {
+			if r.Alert == "MyriarchUnauthorizedConnects" {
+				assert.Contains(t, r.Expr, "[10m])) > 1")
+				assert.Equal(t, "15m", r.For)
+				assert.Equal(t, "info", r.Labels["severity"])
+			}
+		}
+	}
 }

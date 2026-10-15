@@ -342,3 +342,66 @@ nothing and the value is constant.
 {{- fail "networkPolicy.ingress.from: must name the ingress controller or Gateway (namespace and pod selector) when networkPolicy.enabled and ingress.enabled or httpRoute.enabled are true; otherwise the NetworkPolicy blocks the traffic from it" -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Labels that select the Pod of "helm test". The name differs from the selector labels of the server on purpose: the Service and
+the Deployment select by app.kubernetes.io/name and app.kubernetes.io/instance, and the test Pod must be neither an endpoint of the
+Service nor a pod the Deployment counts. The NetworkPolicy selects the test Pod by these labels.
+*/}}
+{{- define "myriarch.testSelectorLabels" -}}
+app.kubernetes.io/name: {{ printf "%s-test" (include "myriarch.name" . | trunc 58 | trimSuffix "-") }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: test
+{{- end -}}
+
+{{- define "myriarch.testLabels" -}}
+helm.sh/chart: {{ include "myriarch.chart" . }}
+{{ include "myriarch.testSelectorLabels" . }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end -}}
+
+{{/*
+Whether the Pod of "helm test" is rendered (tests.enabled): renders "true", or nothing. A missing tests map counts as off.
+"helm upgrade --reuse-values" replaces the defaults of the chart with the values of the release that is upgraded, so a release of
+v0.1.0 has no tests map there, and the chart has to render for it as it did before: without the Pod and without a source for it in
+the NetworkPolicy. Ask this helper, and do not read the switch from .Values directly; the same holds for the map prometheusRule,
+which templates/prometheusrule.yaml reads with a default.
+*/}}
+{{- define "myriarch.tests.enabled" -}}
+{{- if (.Values.tests | default dict).enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The Secret of the test token (tests.token.existingSecret): renders the name, or nothing without the opt-in. The Pod of "helm test"
+mounts one key of it and nothing else, and the Secrets of the server itself are refused: the test would hand the database DSN or the
+credentials of the bootstrap admin to a Pod that has no use for them. The command refuses a file that holds anything but an enrollment
+token as well, so a mistake here is not sent to a server either.
+*/}}
+{{- define "myriarch.tests.tokenSecret" -}}
+{{- $t := (.Values.tests | default dict).token | default dict -}}
+{{- $name := toString ($t.existingSecret | default "") -}}
+{{- if $name -}}
+{{- if not (toString ($t.key | default "")) -}}
+{{- fail "tests.token.key: must not be empty when tests.token.existingSecret is set; name the key of the token in the Secret" -}}
+{{- end -}}
+{{- if or (eq $name (toString .Values.existingSecret)) (eq $name (include "myriarch.bootstrap.secretName" .)) -}}
+{{- fail (printf "tests.token.existingSecret: %q is a Secret of the server itself (existingSecret or the bootstrap Secret); name a Secret of its own that holds an enrollment token for the test only" $name) -}}
+{{- end -}}
+{{- $name -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The annotations of the test Pod (tests.podAnnotations) must not touch the hook. The chart sets helm.sh/hook and
+helm.sh/hook-delete-policy itself: a key of the same name would give the Pod two of them (and Helm keeps the last one), and a changed
+or null value would turn the Pod into an ordinary resource of the release, which "helm install" and "helm template --skip-tests"
+then create. The schema refuses every key that starts with helm.sh/hook; this check holds when the validation is switched off.
+*/}}
+{{- define "myriarch.tests.checkPodAnnotations" -}}
+{{- range $key, $_ := ((.Values.tests | default dict).podAnnotations | default dict) -}}
+{{- if hasPrefix "helm.sh/hook" (toString $key) -}}
+{{- fail (printf "tests.podAnnotations: %q is an annotation of the hook, which the chart sets itself; remove the key (the hook would change, or the Pod would become an ordinary resource of the release)" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

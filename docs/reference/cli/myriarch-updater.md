@@ -1,6 +1,6 @@
 ---
 title: "myriarch-updater"
-weight: 150
+weight: 160
 description: "Myriarch host agent: installs collector updates offered via OpAMP."
 ---
 

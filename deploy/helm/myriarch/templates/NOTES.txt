@@ -79,6 +79,14 @@ Check:
   kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ $fullname }}
   kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
   kubectl -n {{ .Release.Namespace }} port-forward deploy/{{ $fullname }} 8080:8080   # then open /healthz and /readyz
+{{- if include "myriarch.tests.enabled" . }}
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}   # GET /readyz and the OpAMP endpoint, through the Service
+{{- if and .Values.networkPolicy.enabled (or .Values.config.server.trustedProxies (.Values.config.opamp | default dict).clientCertHeader) }}
+  The NetworkPolicy has no rule for the test Pod while config.server.trustedProxies or config.opamp.clientCertHeader is set (any
+  pod with its labels could then reach port 8080 directly). The test can connect only if networkPolicy.ingress.from names the
+  test Pod (labels app.kubernetes.io/component=test and app.kubernetes.io/instance={{ .Release.Name }}).
+{{- end }}
+{{- end }}
 
 Validate the configuration before deploying (no secrets, no network):
   helm template {{ .Release.Name }} <chart> -f <values> | yq 'select(.kind == "ConfigMap").data["myriarchd.yaml"]' > myriarchd.yaml

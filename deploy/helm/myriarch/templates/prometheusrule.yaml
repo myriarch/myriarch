@@ -1,0 +1,138 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- if (.Values.prometheusRule | default dict).enabled }}
+{{- /*
+  The alerts of the server. They are the rules of deploy/examples/production/monitoring/prometheusrule.yaml for a cluster without
+  Helm; ci/helm-conform.sh compares the two for the release "myriarch" in the namespace "myriarch" with two replicas, so change both.
+
+  The metrics are selected by job and namespace. The job label of a series is the name of the Service, because the ServiceMonitor of
+  this chart sets no jobLabel (Prometheus Operator then uses the name of the Service). The namespace stops a second release with
+  the same name in another namespace from being counted in. The replica alert uses the metrics of kube-state-metrics.
+
+  The annotations are Prometheus templates: {{`{{ $labels.x }}`}} is written in backticks so that Helm leaves it as it is.
+*/ -}}
+{{- $job := include "myriarch.fullname" . }}
+{{- $ns := .Release.Namespace }}
+{{- $sel := printf "{job=%q, namespace=%q}" $job $ns }}
+{{- $m := printf "job=%q, namespace=%q" $job $ns }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $job }}
+  labels:
+    {{- include "myriarch.labels" . | nindent 4 }}
+    {{- with (.Values.prometheusRule | default dict).labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: myriarch.availability
+      rules:
+        - alert: MyriarchNoLeader
+          # myriarch_leader is 1 on the replica that holds the leader lock, otherwise 0. Without a leader rollouts, GitOps sync,
+          # release tracker and housekeeping do not run (briefly normal during a failover: the lock is taken over after a few seconds).
+          expr: max(myriarch_leader{{ $sel }}) < 1
+          for: 3m
+          labels: {severity: critical}
+          annotations:
+            summary: myriarchd has no leader
+            description: No replica holds the leader lock (PostgreSQL advisory lock). Check the replica logs and the database connection.
+        - alert: MyriarchMultipleLeaders
+          expr: sum(myriarch_leader{{ $sel }}) > 1
+          for: 3m
+          labels: {severity: critical}
+          annotations:
+            summary: myriarchd has more than one leader
+            description: Several replicas report the leader lock at the same time (split brain, for example after connection problems to the database).
+        - alert: MyriarchReplicaNotReady
+          # needs kube-state-metrics; the target is replicaCount
+          expr: kube_deployment_status_replicas_available{namespace={{ $ns | quote }}, deployment={{ $job | quote }}} < {{ int .Values.replicaCount }}
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: A myriarchd replica is not ready
+            description: Fewer than {{ int .Values.replicaCount }} myriarchd pods are ready (readyz). Check kubectl -n {{ $ns }} describe pod / logs.
+        - alert: MyriarchTargetDown
+          expr: up{{ $sel }} == 0
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: myriarchd metrics are unreachable
+            description: Prometheus cannot reach {{`{{ $labels.instance }}`}} (check the NetworkPolicy networkPolicy.metrics.from).
+    - name: myriarch.agents
+      rules:
+        - alert: MyriarchAgentConnectionsDropped
+          # Dropped connections: the total number of OpAMP connections falls by more than 20 % within 15 minutes
+          # (evaluated only if there were more than 5 connections before)
+          expr: sum(myriarch_opamp_connections{{ $sel }}) < 0.8 * sum(myriarch_opamp_connections{{ $sel }} offset 15m) and sum(myriarch_opamp_connections{{ $sel }} offset 15m) > 5
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: OpAMP connections are dropping
+            description: The number of OpAMP connections has fallen by more than 20 % over the last 15 minutes. Check ingress timeouts (drops after 60 s), the network or a rollout of the replicas.
+        - alert: MyriarchConnectRejected
+          # 429/503 on connect: connectRatePerIp/connectRateLimit too small (NAT!) or maxConnectionsPerReplica reached
+          expr: sum by (reason) (rate(myriarch_opamp_connect_rejected_total{ {{- $m -}}, reason=~"rate_limited|rate_limited_ip|max_connections"}[5m])) > 0
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: myriarchd rejects connections ({{`{{ $labels.reason }}`}})
+            description: Agents are rejected with 429/503. Adapt opamp.connectRatePerIp or opamp.connectRateLimit to the NAT groups, or raise opamp.maxConnectionsPerReplica.
+        - alert: MyriarchUnauthorizedConnects
+          # The check of "helm test" and of the health check of a container ("myriarchd healthcheck") without a token is one such
+          # connect each time; a check every 10 seconds adds 0.1 per second to the rate that this alert compares with 1.
+          expr: sum(rate(myriarch_opamp_connect_rejected_total{ {{- $m -}}, reason="unauthorized"}[10m])) > 1
+          for: 15m
+          labels: {severity: info}
+          annotations:
+            summary: Many OpAMP connections with an invalid enrollment token
+            description: Expired or revoked tokens or a misconfigured collector. Check the audit log.
+    - name: myriarch.jobs
+      rules:
+        - alert: MyriarchReleaseTrackerErrors
+          # Release tracker (leader job, hourly by default): GitHub API unreachable (for example through a proxy) or
+          # rate-limited (no or wrong token). The tracker is informational only, rollouts do not depend on it.
+          expr: sum(increase(myriarch_release_polls_total{ {{- $m -}}, result=~"error|rate_limited"}[3h])) >= 2
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: The release tracker fails repeatedly
+            description: Check the proxy (HTTPS_PROXY/NO_PROXY, if used), github-token and the reachability of api.github.com.
+        - alert: MyriarchGitOpsSyncFailing
+          expr: sum(increase(myriarch_gitops_sync_total{ {{- $m -}}, result=~"invalid|error"}[15m])) > 0
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: GitOps sync fails
+            description: The GitOps repository is invalid (invalid) or unreachable (error). Check the status at /api/v1/gitops/status and in the UI.
+        - alert: MyriarchGitOpsStale
+          expr: time() - max(myriarch_gitops_last_success_timestamp_seconds{{ $sel }}) > 1800
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: No successful GitOps sync for 30 minutes
+            description: Neither applied nor confirmed. Check the reachability of the Git server, git-token and gitops.path.
+        - alert: MyriarchRolloutFailed
+          # myriarch_rollout_transitions_total{to="failed"}: a rollout moved to the final state "failed"
+          expr: sum(increase(myriarch_rollout_transitions_total{ {{- $m -}}, to="failed"}[30m])) > 0
+          labels: {severity: warning}
+          annotations:
+            summary: A rollout has failed
+            description: Check the rollout in the UI (targets, health gates, failure threshold); roll back if needed.
+        - alert: MyriarchNotificationsFailing
+          expr: sum by (channel) (increase(myriarch_notifications_total{ {{- $m -}}, result=~"error|dropped"}[1h])) > 0
+          for: 10m
+          labels: {severity: info}
+          annotations:
+            summary: Notifications to {{`{{ $labels.channel }}`}} fail
+            description: Check the webhook URL (key slack-webhook-url), the proxy (if used) and reachability.
+        - alert: MyriarchHousekeepingFailing
+          expr: increase(myriarch_housekeeping_failures_total{{ $sel }}[2h]) > 0
+          for: 10m
+          labels: {severity: info}
+          annotations:
+            summary: Housekeeping runs fail
+            description: Retention periods are not applied (leader job). Check the logs of the leader replica.
+{{- end }}

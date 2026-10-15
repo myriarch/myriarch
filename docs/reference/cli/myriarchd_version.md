@@ -1,6 +1,6 @@
 ---
 title: "myriarchd version"
-weight: 100
+weight: 110
 description: "Print the version."
 ---
 

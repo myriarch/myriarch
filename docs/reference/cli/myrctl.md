@@ -1,6 +1,6 @@
 ---
 title: "myrctl"
-weight: 110
+weight: 120
 description: "Validate and render myriarch GitOps repositories."
 ---
 
