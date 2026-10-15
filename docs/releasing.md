@@ -203,9 +203,11 @@ the pull request of [After every publication](#after-every-publication), or in a
 been observed yet.
 
 1. **Run the kind smoke test once before you tag.** `smoke-kind` runs only after publication, where a failure can only be fixed
-   forward, and no CI job runs kind. On a machine with a container runtime run `make kind-probe` (the same cluster configuration
-   and chart), and fix what it finds before the tag. `ci/release/smoke.sh kind` is not a substitute: it always installs the published
-   image of the tag, which does not exist before the tag.
+   forward, and no job of `ci.yml` or of the release workflow runs the probe before the tag (`e2e-kind.yml` runs `make kind-probe`
+   every night, outside `ci-ok`, and it is no gate of the release). Run `make kind-probe` on a machine with a container runtime (the
+   same cluster configuration and chart) or read the last green run of `e2e-kind.yml` on the commit, and fix what it finds before the
+   tag. `ci/release/smoke.sh kind` is not a substitute: it always installs the published image of the tag, which does not exist before
+   the tag.
 2. **Observe re-run approvals.** After the first candidate went through gate 2, re-run one failed or completed job on a throw-away
    candidate if you can, and write down whether "Re-run failed jobs" asks for gate 1 or gate 2 again. The runbook and the security
    model state the safe reading (no new approval for the privileged jobs before `finalize`) until you have observed it.
@@ -379,7 +381,7 @@ Other files of the repository, such as `deploy/README.md`, are not in an archive
 | `finalize`, `draft_foreign`, `draft_ambiguous`, `release_not_draft` | The release is not the draft that the workflow made, the tag has a second release, or the draft was published by hand; every re-read of the release repeats these checks | Nothing was published by this job (after the PATCH: see `release_assets_changed`). Investigate who changed the release, do not approve again, tag the next candidate. |
 | `finalize`, `release_assets_changed` | After the PATCH the release (now immutable) differs from the verified files | **Do not use this release and do not announce it.** It cannot be changed or deleted into shape; say in its notes that it is void and publish the next version. |
 | `finalize`, `release_state`, `release_attestation`, `release_asset_attestation` | The release is published, but GitHub does not (yet) show it as published or attested | "Re-run failed jobs": `finalize` resumes because the attempt is above 1, tags nothing twice and repeats the checks. |
-| `smoke-*` | A problem found after publication | The release is immutable: fix forward in the next version and describe the problem in the release notes, which stay editable. A `[download_failed]` whose message says "retry window of 120 s used up" is an outage of github.com, not a problem of the release: use "Re-run failed jobs". Two kinds of download still have the short policy of their tools and can fail during a shorter outage: `ci/install-tools.sh` (kind, kubectl and helm in `smoke-kind` download once, without a retry), and the service checks of `ci/release/smoke.sh` (`docker pull` from ghcr.io, `crane`, `cosign` and `gh`: `SMOKE_RETRIES` attempts, 3 by default, 10 s apart). Re-run the job in this case too. |
+| `smoke-*` | A problem found after publication | The release is immutable: fix forward in the next version and describe the problem in the release notes, which stay editable. A `[download_failed]` whose message says "retry window of 120 s used up" is an outage of github.com, not a problem of the release: use "Re-run failed jobs". Two kinds of step have a policy of their own and can fail during a shorter outage: the installation of kind, kubectl and helm in `smoke-kind` (`ci/install-tools.sh` retries the download of kubectl for up to 120 s and a `go build` of kind or helm up to 4 times, 5, 10 and 20 s apart, each only after a transient network error; "retry window of 120 s used up" or a `go build` that failed four times with a network error is an outage of dl.k8s.io or of the Go module proxy), and the service checks of `ci/release/smoke.sh` (`docker pull` from ghcr.io, `crane`, `cosign` and `gh`: `SMOKE_RETRIES` attempts, 3 by default, 10 s apart). Re-run the job in this case too. |
 
 **Abandoned candidates.** Delete the draft of a candidate that never went through gate 2 with
 `gh release delete <tag> --repo myriarch/myriarch --yes`, **without** `--cleanup-tag`. Untagged image versions left by a failed

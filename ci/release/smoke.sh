@@ -45,8 +45,10 @@
 #                      connection, HTTP 408, 429, 500, 502, 503, 504) is retried with pauses of 1, 2, 4, ... s for up to 120 s;
 #                      any other failure (a 404 for example) fails at once. SMOKE_RETRIES and SMOKE_RETRY_DELAY do not apply.
 #                      Not covered by that policy: the service checks above (docker pull from ghcr.io, crane, cosign, gh) retry
-#                      SMOKE_RETRIES times 10 s apart, a window of 20 s, and ci/install-tools.sh downloads kind, kubectl and helm
-#                      for the kind test once, without a retry. An outage that lasts longer fails those steps; re-run the job.
+#                      SMOKE_RETRIES times 10 s apart, a window of 20 s. An outage that lasts longer fails those steps; re-run the
+#                      job. The installation of kind, kubectl and helm for the kind test (ci/install-tools.sh) has a policy of its
+#                      own: a download retries for up to 120 s, a go build of kind or helm up to 4 attempts, both only after a
+#                      transient network error (the header of ci/install-tools.sh).
 #   SMOKE_WAIT_SECONDS how long the kind test waits for /healthz and /readyz, default 90
 #
 # Errors: one line "[smoke] ERROR [<code>] <message>" on stderr, exit 1. Usage errors "[smoke] usage: ...", exit 2. Info lines

@@ -1,0 +1,159 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Kubernetes end-to-end test (docs/development.md, "Kubernetes probe on kind"; hack/kind/README.md). The probe of hack/kind on a
+# kind cluster on a runner of GitHub Actions, from zero: the cluster and a local registry, the server and the collector image built
+# from the commit, PostgreSQL and a Git server, the Helm chart, registration, a configuration rollout, a collector version update
+# with a rollback and a retry on the real collector, the takeover of the leader, NetworkPolicy, the Dex quickstart and the hygiene of
+# logs and secrets. Containers run on the runner only: nothing here is started on a developer machine, and the tests never need it.
+#
+# Not part of ci-ok: a pull request starts it only when it touches the chart, the updater, the images of the probe (their build
+# scripts and pins), the tools it installs, the probe or this workflow; every night it runs against main, which also covers a
+# change in code that only goes into the images; a manual run (workflow_dispatch) starts it on any branch and can skip optional
+# parts (PROBE_SKIP of hack/kind/README.md). The path filter names the files that the probe reads or runs, except the code of the
+# product itself; ci/tests/workflow-artifacts-check.py holds the list. The matrix has one entry per Kubernetes version: the node
+# image comes from a pin of hack/kind/versions.env (image-var), which ci/check.sh holds to a digest, so a second version is a
+# second entry and a second pin, not a digest in this file.
+#
+# The token is read-only and the workflow has no secret. Artifacts of a failed run are an allow-list (the log of the probe, the
+# result list, the durations, the logs of the pods and the diagnostics of diag.sh) and never the kubeconfig, the generated secrets or
+# a cookie jar: anyone who is signed in to GitHub can download them (ci/tests/workflow-artifacts-test.sh checks the list).
+#
+# GitHub disables scheduled workflows of a public repository after 60 days without repository activity.
+name: e2e-kind
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      # the probe, what it installs (chart, collector pod, updater, supervisor) and the code it exercises most
+      - 'hack/kind/**'
+      - 'deploy/helm/**'
+      - 'deploy/updater/**'
+      - 'deploy/supervisor/**'
+      - 'deploy/k8s/**'
+      - 'cmd/myriarch-updater/**'
+      - 'internal/updater/**'
+      - 'internal/leader/**'
+      # the simulator profile and the component list that the probe uses
+      - 'examples/sim/**'
+      # the images of the probe: the build scripts, what they source, and the labels they read
+      - 'scripts/build-image-crane.sh'
+      - 'scripts/build-collector-image-crane.sh'
+      - 'scripts/lib/image-common.sh'
+      - 'scripts/lib/oci_image.py'
+      - 'ci/image-labels.env'
+      # the tools (kind, kubectl, helm, crane, yq) and the pins of the tools and of the upstream collector images
+      - 'ci/install-tools.sh'
+      - 'ci/lib.sh'
+      - 'ci/versions.env'
+      - 'ci/tools/kind/**'
+      - 'ci/tools/helm/**'
+      - 'ci/tools/crane/**'
+      - 'ci/tools/yq/**'
+      # how the job starts the probe, and the Node.js version that the setup action installs for the web UI of the server image
+      - 'Makefile'
+      - '.github/actions/setup/**'
+      - '.node-version'
+      - '.github/workflows/e2e-kind.yml'
+  schedule:
+    - cron: '51 1 * * *'
+  workflow_dispatch:
+    inputs:
+      skip:
+        description: 'Optional parts to skip (PROBE_SKIP): a comma list of rotation, netpol, dex and downgrade'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-kind-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GOTOOLCHAIN: local
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+  CI: 'true'
+
+jobs:
+  kind:
+    name: kind (${{ matrix.label }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # label: the name of the job; image-var: the pin of hack/kind/versions.env that holds the node image of the cluster
+          - label: newest
+            image-var: KIND_NODE_IMAGE
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+        with:
+          node: 'true'
+          tools: kind kubectl helm crane yq cosign
+      - name: Describe the runner
+        run: |
+          docker version --format '{{.Server.Version}} {{.Server.Os}}/{{.Server.Arch}}'
+          docker info --format '{{.NCPU}} CPUs, {{.MemTotal}} bytes of memory'
+          df -h . | tail -n 1
+      # The step has a timeout of its own, below that of the job. A step that runs out of time counts as failed, so the upload below
+      # runs; a job that runs out of time is cancelled, and failure() is false for a cancelled job, so nothing would be uploaded.
+      # ci/tests/workflow-artifacts-check.py holds the margin for the steps around it (checkout, toolchain with tools, and upload).
+      - name: Run the probe
+        timeout-minutes: 65
+        env:
+          IMAGE_VAR: ${{ matrix.image-var }}
+          PROBE_SKIP: ${{ inputs.skip }}
+        run: |
+          KIND_NODE_IMAGE="$(sed -n "s/^${IMAGE_VAR}=//p" hack/kind/versions.env)"
+          test -n "${KIND_NODE_IMAGE}" || { echo "hack/kind/versions.env has no pin ${IMAGE_VAR}" >&2; exit 1; }
+          export KIND_NODE_IMAGE
+          make kind-probe
+      # The summary block that the probe prints at its end: the counts, the failed and skipped checks, the stage durations, the
+      # versions, the takeover time of the leader. It holds no secret (the probe never prints one).
+      - name: Show the summary of the probe
+        if: always()
+        env:
+          NODE_LABEL: ${{ matrix.label }}
+        run: |
+          log=.cache/kind/probe.log
+          [ -f "${log}" ] || exit 0
+          {
+            printf '### Kubernetes probe (%s)\n\n```text\n' "${NODE_LABEL}"
+            sed -n '/== summary ==/,$p' "${log}"
+            printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+      # Only these files, never the kubeconfig, .cache/kind/secrets, a cookie jar, the generated values or the scan dump of the hygiene stage.
+      - name: Upload the logs of a failed run
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-kind-${{ matrix.label }}
+          path: |
+            .cache/kind/probe.log
+            .cache/kind/results.txt
+            .cache/kind/durations.txt
+            .cache/kind/logs/**
+            .cache/kind/diag/**
+            !.cache/kind/logs/hygiene-dump/**
+            !.cache/kind/**/secrets/**
+            !.cache/kind/**/kubeconfig*
+            !.cache/kind/**/cookies*
+            !.cache/kind/**/*.key
+            !.cache/kind/**/*.pem
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore

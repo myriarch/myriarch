@@ -1,0 +1,29 @@
+# Fleet of the host end-to-end test: Git sets the frame (>=0.161.0, <=0.162.0) and the Git target 0.161.0, and the test picks
+# 0.162.0 like an operator in the UI. The selector matches the one host of the test by the attributes the installer writes
+# (--site-type edge --site-id host-e2e-01).
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: host-e2e
+  description: Linux host of the host end-to-end test (systemd, supervisor, collector and myriarch-updater)
+spec:
+  displayName: Host end-to-end test
+  priority: 100
+  selector:
+    matchAttributes:
+      site.type: edge
+      site.id: host-e2e-01
+  blueprint: host-e2e
+  collector:
+    distribution: otelcol-contrib
+    version: 0.161.0              # Git target; the UI selection overrides it with 0.162.0
+  update:
+    executor: updater
+    selection:
+      enabled: true
+      versionRange: ">=0.161.0, <=0.162.0"
+      allowDowngrade: false
+      requireReason: false
+  rollout:
+    configPolicy: host-e2e-config
+    versionPolicy: host-e2e-version

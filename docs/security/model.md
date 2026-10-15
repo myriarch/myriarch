@@ -464,6 +464,45 @@ guidance after each item names what to do.
   test are checked against the SHA-256 that the upstream release publishes. The `workflows` gate (`ci/check-workflows.py`,
   `actionlint`, `zizmor`) enforces these rules, and the commits of a pull request are scanned for secrets. A change of a workflow is a
   security-relevant change and is reviewed as one.
+- **End-to-end tests on runners: the host test and the cluster test.** `.github/workflows/host-e2e.yml` and
+  `.github/workflows/e2e-kind.yml` follow the rules above (pinned GitHub-owned actions, a read-only token, no secret, no
+  `pull_request_target` or `workflow_run`, a timeout, GitHub-hosted runners only) and add these controls
+  ([development guide](../development.md), "Host end-to-end test" and "Kubernetes probe on kind"):
+  - *The host scripts change the machine, so they refuse to run anywhere else.* `scripts/host-e2e` installs a service user, systemd
+    units and files below `/etc`, `/opt` and `/var` as root. It stops unless `CI=true` and `HOST_E2E=1` are set (the workflow sets
+    the second one on the step that runs a scenario, not for the workflow), on Linux, as a user other than root, with passwordless
+    `sudo` and on a host without any trace of an installation (files, user, units, processes, listeners). Every call that changes the
+    host goes through one function that checks the guard again, and a test fails when a script uses the word `sudo` anywhere else
+    than in a comment, in that function and in the probe for passwordless `sudo`; the static check does not try to find out where
+    a command stands, so a call behind `env`, a wrapper function, `bash -c` or an assignment is found too. The
+    reset at the end of a scenario runs only after the proof that the host was fresh, so it never removes an installation that
+    was there before. `ci/tests/host-e2e-test.sh` covers every refusal.
+  - *The test takes the strict path.* The throwaway CA (EC key, valid for two days) stays in a directory of the user and is never
+    uploaded; only the process of the installer trusts it (`CURL_CA_BUNDLE`), and the trust store of the host is not touched. The
+    installer runs without `--insecure`: https only, SHA-256 and Sigstore verification offline against the trusted root. The
+    collector and supervisor files are the real upstream release files, verified by their checksum file and their Sigstore bundle
+    (identity of the upstream release workflow for exactly that tag) before the test uses them; a tampered archive must be refused.
+    `myriarchd` runs in dev mode on `127.0.0.1` only (its well-known logins exist on no other machine), and the file server of the
+    mirror binds to a loopback address, serves GET and HEAD, lists no directory and logs no query string.
+  - *Artifacts are an allow-list.* The host test copies a fixed list of log files into a directory of its own and scrubs them
+    (enrollment, API and download tokens, bearer credentials, DSNs, session cookies, private keys); it then looks for the token and
+    the keys of the run and for anything shaped like a token or a key, and removes the directory if it finds one. The workflow
+    uploads only that directory, for seven days and only for a failed job, and excludes cookie jars, token files, keys, kubeconfigs
+    and `secrets/` as a second line. The cluster test uploads the log of the probe, the result list, the durations, the pod logs and
+    the diagnostics of `hack/kind/diag.sh`, and never the kubeconfig, the generated secrets, cookie jars, the credentials of Helm or the
+    scan dump of the hygiene stage. `ci/tests/workflow-artifacts-test.sh` emulates the glob rules of `actions/upload-artifact`,
+    holds both lists of patterns against names that must and must not be uploaded, and breaks copies of the workflows (a path that
+    is too wide, a missing exclusion, an upload for every job, a secret, a registry login, an image reference) to prove that each is
+    found.
+  - *Tool downloads retry only transient errors.* `ci/install-tools.sh` retries a download after a timeout, a failed connection or
+    HTTP 408, 429, 500, 502, 503 or 504, and a `go build` that fails with a network error of the module download; any other status (a
+    404 or a 501, for example), a certificate error, a checksum that differs from the pin and a failed module verification end it at
+    once, and every check after a download is unchanged.
+
+  Residual risk: the host test runs the code of the commit with `sudo` on the runner VM, as every job runs the code of the commit.
+  The isolation is that of a GitHub-hosted runner (a fresh VM for each job). A self-hosted runner that is not recreated for each job
+  must not run these workflows: the check for a fresh host finds a leftover installation, not other state. The cluster test pulls
+  its images anonymously and has no way to log in; the pull limit of a registry can fail a run, but not weaken a check.
 - **Secrets in deployment jobs.** A deployment job that `ci/workflow-secrets.txt` lists (workflow file, job, secret name)
   may read an environment secret. The job must declare `environment:`, so that the protection rules of the environment apply
   before it starts, and the secret must be the whole value of a key, `KEY: ${{ secrets.NAME }}`, in the `env:` of the job or

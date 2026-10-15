@@ -6,7 +6,7 @@ version update by the calls of the UI button (including the automatic rollback o
 server pod and the takeover of the leader. Everything runs on your machine with Docker, without sudo, without edits of
 `/etc/hosts`, without a browser and without a container runtime other than the one that runs kind.
 
-The probe is a local test. A smoke test for CI and a cluster end-to-end test can reuse the scripts (`up.sh`, `images.sh`,
+The probe is a test of its own that CI runs too ([In CI](#in-ci)). Other cluster tests can reuse the scripts (`up.sh`, `images.sh`,
 `install.sh`, `diag.sh` and the stage libraries).
 
 ## Quick start
@@ -44,7 +44,8 @@ the registry container and the work directory), `make kind-probe`.
 * Network access to Docker Hub, `ghcr.io`, GitHub (releases and the Sigstore TUF root), the Go proxy, the Alpine package
   mirror and `charts.dexidp.io`. Anonymous Docker Hub pulls are limited (100 per 6 hours and IP); a Docker Desktop login
   raises the limit and is picked up by the image scripts.
-* Free local ports: 5001 (registry), 28080 and 28081 (port-forwards to the two myriarch releases), 25554 (Dex).
+* Free local ports: 5001 (registry), 28080 and 28081 (port-forwards to the two myriarch releases), 25554 (Dex), and 28091 and 28092 (the
+  metrics of the two replicas, in the NetworkPolicy stage).
 
 ## What the probe builds
 
@@ -97,7 +98,7 @@ verified with its SHA-256 and the Sigstore bundle by the server, the updater ver
 | `PROBE_REUSE_IMAGES` | `0` | `1` keeps the last `images.env` and builds nothing |
 | `ALLOW_DIRTY` | `0` | `1` builds the server image from a dirty tree (the image script refuses it otherwise; the stage 0 check reports a `SKIP`) |
 | `WEB_BUILD` | `auto`; `--fresh` uses `always` | Web UI build for the server image |
-| `PROBE_PORT_API`, `PROBE_PORT_DEXAPI`, `PROBE_PORT_DEX` | `28080`, `28081`, `25554` | Local port-forward ports (different from the ports of `scripts/e2e*.sh`, so both can run together) |
+| `PROBE_PORT_API`, `PROBE_PORT_DEXAPI`, `PROBE_PORT_DEX` | `28080`, `28081`, `25554` | Local port-forward ports (different from the ports of `scripts/e2e*.sh`, so both can run together); the NetworkPolicy stage also forwards the metrics of the two replicas to `PROBE_PORT_API` + 11 and + 12 |
 
 Modes of `probe.sh`: `--fresh` removes cluster, registry and work directory first; `--reset` keeps cluster and registry and
 deletes the probe namespaces (and the CoreDNS rewrite); without a flag it requires `up.sh` and fails when the namespaces exist.
@@ -122,6 +123,31 @@ hack/kind/diag.sh                        # collect diagnostics now
 make kind-down                           # delete the cluster
 make kind-down ALL=1                     # also the registry container and .cache/kind
 ```
+
+## In CI
+
+`.github/workflows/e2e-kind.yml` runs `make kind-probe` on an `ubuntu-24.04` runner of GitHub Actions: every night (01:51 UTC), for pull
+requests that touch the chart, the updater, the images (their build scripts, labels and pins), the tools or the scripts of the probe (a
+path filter that names the files the probe reads or runs besides this directory), and on a manual run (`workflow_dispatch`), which can
+set `PROBE_SKIP` (`rotation,netpol,dex,downgrade`). The job installs the pinned tools with
+`.github/actions/setup` (kind, kubectl, helm, crane and yq; `ci/install-tools.sh` retries their downloads after a transient network
+error), runs the probe without any change and shows the summary block of `probe.log` in the job summary. It is not part of `ci-ok` and
+not a gate of the release; before a tag the last green run of the commit does what a local `make kind-probe` did
+([Releasing](../../docs/releasing.md)).
+
+The matrix has one entry per Kubernetes version. `image-var` names the pin of `versions.env` with the node image (`KIND_NODE_IMAGE`
+today) and the workflow passes it as `KIND_NODE_IMAGE`, so the digest is in this file only and `ci/check.sh` keeps holding it. A second
+Kubernetes version is a second pin in `versions.env` and a second entry with its `image-var`; the kubectl pin must stay within the skew
+of both node images.
+
+A failed run uploads an allow-list for seven days: `probe.log`, `results.txt`, `durations.txt`, `logs/` and `diag/` below
+`.cache/kind`. It never uploads the kubeconfig, `secrets/`, the cookie jars, the Helm credentials in `helm/`, `values-tokens.yaml` or
+`logs/hygiene-dump/` (the scan dump of stage 15), because anyone who is signed in to GitHub can download the artifacts of a public
+repository; `ci/tests/workflow-artifacts-test.sh` checks the patterns. The step that runs the probe has a timeout of its own, below
+that of the job, so that a probe that hangs counts as a failed step and still uploads its logs (a job that runs out of time is
+cancelled, and the upload is skipped for a cancelled job); the same test holds the margin and the path filter. Anonymous pulls from
+Docker Hub (the node image, `registry`, `postgres`, `alpine`, `busybox`, `curlimages/curl` and the upstream collector images) can hit
+the pull limit of a busy day; the workflow has no secret to log in with, so rerun the job.
 
 ## Troubleshooting
 

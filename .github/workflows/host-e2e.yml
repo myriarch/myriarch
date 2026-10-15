@@ -1,0 +1,105 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Host end-to-end test (docs/development.md, "Host end-to-end test"). The installer and the myriarch-updater on a fresh runner VM
+# of GitHub Actions (Ubuntu 24.04, amd64 and arm64): install-linux.sh as root, the services under systemd, a real collector and
+# supervisor from a local mirror of the upstream release files (verified offline), a myriarchd built from the commit, an update with
+# a rollback and a retry, then the uninstallation and the proof that nothing is left. The scripts of scripts/host-e2e change the
+# machine they run on and refuse to run anywhere else.
+#
+# Not part of ci-ok: a pull request starts it only when it touches the installer, the updater, the templates of a host or the
+# harness; every night it runs against main; a manual run (workflow_dispatch) starts it on any branch. A new scenario is a new step
+# that calls it by name, with a timeout of its own (together the steps stay below the timeout of the job, see the step below); its
+# logs go to .cache/host-e2e/upload/<scenario>/, which the upload step below already covers.
+#
+# The token is read-only and the workflow has no secret. The job runs the code of the commit with sudo on a throwaway VM, like every
+# job of the CI runs it. Never move it to a self-hosted runner that is not recreated for each job.
+#
+# GitHub disables scheduled workflows of a public repository after 60 days without repository activity.
+name: host-e2e
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'deploy/scripts/install-linux.sh'
+      - 'deploy/supervisor/linux/**'
+      - 'deploy/updater/linux/**'
+      - 'deploy/systemd/**'
+      - 'cmd/myriarch-updater/**'
+      - 'internal/updater/**'
+      - 'internal/artifact/**'
+      - 'scripts/host-e2e/**'
+      - 'scripts/e2e/ui-updates/killer.sh'
+      - 'scripts/build-mirror-image-crane.sh'
+      - '.github/workflows/host-e2e.yml'
+  schedule:
+    - cron: '27 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-e2e-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GOTOOLCHAIN: local
+  CI: 'true'
+
+jobs:
+  linux:
+    name: linux (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+      - name: Describe the runner
+        run: |
+          uname -srm
+          systemctl --version | head -n 1
+          openssl version
+          curl --version | head -n 1
+          python3 --version
+          jq --version
+      - name: Build the binaries
+        run: make build
+      # HOST_E2E=1 says that this machine is a throwaway VM; the scripts refuse to run without it.
+      # The step has a timeout of its own, below that of the job. A step that runs out of time counts as failed, so the upload below
+      # runs; a job that runs out of time is cancelled, and failure() is false for a cancelled job, so nothing would be uploaded.
+      # ci/tests/workflow-artifacts-check.py holds the margin for the steps around it (checkout, toolchain, build and upload).
+      - name: 'Scenario manual: the installer as the documentation describes it'
+        timeout-minutes: 35
+        env:
+          HOST_E2E: '1'
+        run: scripts/host-e2e/linux.sh manual
+      # The upload directory is assembled by the harness from an allow-list of files and scrubbed; the exclusions are a second line.
+      - name: Upload the logs of a failed run
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: host-e2e-linux-${{ matrix.os }}
+          path: |
+            .cache/host-e2e/upload/**
+            !.cache/host-e2e/upload/**/cookies*
+            !.cache/host-e2e/upload/**/*token*
+            !.cache/host-e2e/upload/**/*.key
+            !.cache/host-e2e/upload/**/kubeconfig*
+            !.cache/host-e2e/upload/**/secrets/**
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore

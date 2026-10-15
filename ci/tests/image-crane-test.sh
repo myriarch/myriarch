@@ -72,6 +72,84 @@ expect_fail "mirror login without IMAGE_REPO fails" "IMAGE_REPO is not set" t_mi
 t_img_base() { IMAGE_REPO=registry.example.com/x/y BASE_IMAGE=docker.io/library/alpine:3 bash "${IMG}"; }
 expect_fail "image script rejects a base image without digest" "pinned by digest" t_img_base
 
+# ---- (e2) mirror directory: components, layout and certificate identity (OUT_DIR, offline fixtures, stand-in verifier) -----
+# The upstream layout is a directory tree of small files with the names of the release assets (SOURCE_BASE=file://...), the
+# trusted root is the committed fixture, and VERIFIER_BIN is a stand-in that records its arguments: no network, no go build.
+UPSTREAM="${W}/upstream"
+mk_asset() { # tag-dir asset: a small file, its .sha256 (64 hex digits, as upstream publishes it) and a placeholder bundle
+  mkdir -p "${UPSTREAM}/$1"
+  printf 'content of %s\n' "$2" > "${UPSTREAM}/$1/$2"
+  sha256_of "${UPSTREAM}/$1/$2" | tr -d '\n' > "${UPSTREAM}/$1/$2.sha256"
+  printf '{"stand-in":"bundle of %s"}\n' "$2" > "${UPSTREAM}/$1/$2.sigstore.json"
+}
+for pl in linux_amd64 linux_arm64 windows_amd64 windows_arm64; do mk_asset v0.162.0 "otelcol-contrib_0.162.0_${pl}.tar.gz"; done
+for pl in linux_amd64 linux_arm64; do mk_asset cmd/opampsupervisor/v0.162.0 "opampsupervisor_0.162.0_${pl}"; done
+mk_asset cmd/opampsupervisor/v0.162.0 opampsupervisor_0.162.0_windows_amd64.exe
+STUB_UPDATER="${W}/stub-updater"
+cat > "${STUB_UPDATER}" <<'STUB'
+#!/bin/sh
+# stand-in for myriarch-updater: records the call; fails for the asset that FAKE_FAIL names
+echo "$*" >> "${FAKE_CALLS}"
+[ "$1" = verify-bundle ] || { echo "unexpected command $1" >&2; exit 2; }
+if [ -n "${FAKE_FAIL:-}" ] && printf '%s' "$*" | grep -q -- "${FAKE_FAIL}"; then echo "bundle does not match" >&2; exit 1; fi
+STUB
+chmod +x "${STUB_UPDATER}"
+mirror() { # out-name [VAR=value...]: runs the mirror script in OUT_DIR mode against the fixture; stdout is the machine readable part
+  local name="$1"; shift
+  env -u IMAGE_REPO -u COMPONENTS -u VERSIONS -u PLATFORMS -u TAG OUT_DIR="${W}/out-${name}" SOURCE_BASE="file://${UPSTREAM}" \
+    DOWNLOAD_CACHE="${W}/dl-${name}" TRUSTED_ROOT="${REPO}/internal/updater/testdata/sigstore/trusted_root.json" VERIFIER_BIN="${STUB_UPDATER}" \
+    FAKE_CALLS="${W}/calls-${name}" VERSIONS=0.162.0 "$@" bash "${MIR}"
+}
+SUP_ID_162='^https://github\.com/open-telemetry/opentelemetry-collector-releases/\.github/workflows/base-binary-release\.yaml@refs/tags/v0\.162\.0$'
+
+expect_ok "mirror directory with the default components" mirror default
+case "${OUT}" in *MIRROR_COMPONENTS=contrib*) ok "... reports MIRROR_COMPONENTS=contrib" ;; *) fail "the machine readable output lacks MIRROR_COMPONENTS=contrib: ${OUT}" ;; esac
+if [ -f "${W}/out-default/srv/mirror/v0.162.0/otelcol-contrib_0.162.0_linux_amd64.tar.gz.sigstore.json" ] && [ -f "${W}/out-default/srv/mirror/trusted_root.json" ]; then
+  ok "... holds the contrib archive with checksum and bundle, and trusted_root.json"
+else fail "the contrib files or trusted_root.json are missing in the default mirror directory"; fi
+if [ ! -e "${W}/out-default/srv/mirror/cmd" ]; then ok "... holds no supervisor (the default is unchanged)"; else fail "the default components wrote cmd/"; fi
+if ! grep -q -- '--identity-regexp' "${W}/calls-default"; then ok "... verifies the contrib archive with the default identity"; else fail "contrib was verified with an explicit identity: $(cat "${W}/calls-default")"; fi
+
+expect_ok "mirror directory with contrib and supervisor, linux and windows" mirror both COMPONENTS="contrib supervisor" PLATFORMS="linux/amd64 windows/amd64"
+S="${W}/out-both/srv/mirror"
+n=0
+for f in v0.162.0/otelcol-contrib_0.162.0_linux_amd64.tar.gz v0.162.0/otelcol-contrib_0.162.0_windows_amd64.tar.gz \
+         cmd/opampsupervisor/v0.162.0/opampsupervisor_0.162.0_linux_amd64 cmd/opampsupervisor/v0.162.0/opampsupervisor_0.162.0_windows_amd64.exe; do
+  if [ -f "${S}/${f}" ] && [ -f "${S}/${f}.sha256" ] && [ -f "${S}/${f}.sigstore.json" ]; then n=$((n + 1)); else fail "missing in the mirror directory: ${f}{,.sha256,.sigstore.json}"; fi
+done
+[ "${n}" = 4 ] && ok "... holds the four assets with checksum and bundle in the layout of the upstream releases (cmd/opampsupervisor/v<ver>/, .exe on Windows)"
+[ "$(wc -l < "${S}/SHA256SUMS" | tr -d ' ')" = 4 ] && grep -q '  cmd/opampsupervisor/v0.162.0/opampsupervisor_0.162.0_windows_amd64.exe$' "${S}/SHA256SUMS" \
+  && ok "... lists the four files with their path in SHA256SUMS" || fail "SHA256SUMS is not as expected: $(cat "${S}/SHA256SUMS")"
+case "${OUT}" in *MIRROR_COMPONENTS=contrib,supervisor*) ok "... reports MIRROR_COMPONENTS=contrib,supervisor" ;; *) fail "MIRROR_COMPONENTS is missing: ${OUT}" ;; esac
+if [ "$(grep -c -F -- "--identity-regexp ${SUP_ID_162}" "${W}/calls-both")" = 2 ]; then
+  ok "... verifies each supervisor binary against the identity base-binary-release.yaml@refs/tags/v0.162.0 (anchored, version escaped)"
+else fail "the supervisor calls do not carry the identity: $(cat "${W}/calls-both")"; fi
+if [ "$(grep -c -- '--identity-regexp' "${W}/calls-both")" = 2 ] && [ "$(grep -c -- '--version v0.162.0' "${W}/calls-both")" = 4 ]; then
+  ok "... verifies the contrib archives with the default identity and every file against the tag v0.162.0"
+else fail "unexpected verify-bundle calls: $(cat "${W}/calls-both")"; fi
+
+expect_ok "a platform without an upstream supervisor is skipped with a warning" mirror winarm COMPONENTS="contrib supervisor" PLATFORMS="windows/arm64"
+case "${OUT}" in *"publishes no OpAMP supervisor for windows/arm64"*) ok "... says so" ;; *) fail "no warning for windows/arm64: ${OUT}" ;; esac
+if [ -f "${W}/out-winarm/srv/mirror/v0.162.0/otelcol-contrib_0.162.0_windows_arm64.tar.gz" ] && [ ! -e "${W}/out-winarm/srv/mirror/cmd" ]; then ok "... and mirrors the contrib archive only"; else fail "windows/arm64 mirror directory has the wrong content"; fi
+expect_fail "a supervisor-only mirror without a published platform has nothing to mirror" "nothing to mirror" mirror winarm2 COMPONENTS=supervisor PLATFORMS="windows/arm64"
+expect_fail "an unknown component is refused" "invalid component 'kubelet'" mirror badcomp COMPONENTS="contrib kubelet"
+expect_fail "an empty component list is refused" "COMPONENTS is empty" mirror nocomp COMPONENTS=" "
+expect_fail "a supervisor binary that the source does not serve fails the download" "download of .*opampsupervisor_0.162.0_linux_ppc64le.* failed" mirror missing COMPONENTS=supervisor PLATFORMS="linux/ppc64le"
+
+# a changed supervisor binary: its checksum file no longer matches
+cp -R "${UPSTREAM}" "${W}/upstream-bad"
+printf 'x' >> "${W}/upstream-bad/cmd/opampsupervisor/v0.162.0/opampsupervisor_0.162.0_linux_amd64"
+t_mir_badsum() { mirror badsum COMPONENTS="contrib supervisor" PLATFORMS="linux/amd64" SOURCE_BASE="file://${W}/upstream-bad"; }
+expect_fail "a supervisor binary that differs from its .sha256 is refused" "SHA-256 mismatch for opampsupervisor_0.162.0_linux_amd64" t_mir_badsum
+[ ! -e "${W}/out-badsum" ] && ok "... and nothing is written to OUT_DIR" || fail "OUT_DIR exists after a failed run"
+# a supervisor bundle that the verifier refuses
+expect_fail "a supervisor bundle that does not verify is refused" "Sigstore verification of opampsupervisor_0.162.0_linux_arm64 failed" \
+  mirror badbundle COMPONENTS="contrib supervisor" PLATFORMS="linux/arm64" FAKE_FAIL=opampsupervisor_0.162.0_linux_arm64
+[ ! -e "${W}/out-badbundle" ] && ok "... and nothing is written to OUT_DIR" || fail "OUT_DIR exists after a failed verification"
+chmod -x "${STUB_UPDATER}"
+expect_fail "VERIFIER_BIN must be executable" "VERIFIER_BIN=.* is not an executable file" mirror noexec
+chmod +x "${STUB_UPDATER}"
+
 # ---- (g) help works without IMAGE_REPO -----------------------------------------------------------------------------------
 t_help() { env -u IMAGE_REPO bash "$1" help; }
 expect_ok "build-image-crane.sh help" t_help "${IMG}"
