@@ -37,6 +37,11 @@ const (
 var (
 	rollingUpdateRE = regexp.MustCompile(`(?m)^-- Rolling update: (\S.*)$`)
 	levelRE         = regexp.MustCompile(`(?m)^-- Compatibility level: (unchanged|raised to (\d+))\b`)
+
+	// The two forms of the text of the "Rolling update:" line. "expand only" goes with "Compatibility level: unchanged" and
+	// "not compatible, <what stops working>" with "raised to 00NNN".
+	expandOnlyRE    = regexp.MustCompile(`^expand only\b`)
+	notCompatibleRE = regexp.MustCompile(`^not compatible, \S`)
 )
 
 type migrationFile struct {
@@ -108,8 +113,19 @@ func headerProblems(f migrationFile) []string {
 	if !ok {
 		return append(out, `the header needs exactly one line "-- Compatibility level: unchanged." or "-- Compatibility level: raised to 00NNN."`)
 	}
-	if len(rolling) == 1 && strings.HasPrefix(rolling[0][1], "expand only") && level != 0 {
-		out = append(out, `"expand only" means that the previous version keeps working: the compatibility level has to stay "unchanged"`)
+	if len(rolling) == 1 {
+		switch text := rolling[0][1]; {
+		case expandOnlyRE.MatchString(text):
+			if level != 0 {
+				out = append(out, `"expand only" means that the previous version keeps working: the compatibility level has to stay "unchanged"`)
+			}
+		case notCompatibleRE.MatchString(text):
+			if level == 0 {
+				out = append(out, `"not compatible" means that binaries below some level cannot work with the schema: the compatibility level has to be "raised to 00NNN"`)
+			}
+		default:
+			out = append(out, `the "Rolling update" text has to start with "expand only" or with "not compatible, " and say what stops working`)
+		}
 	}
 	if level != 0 && level > f.version {
 		out = append(out, fmt.Sprintf("a migration cannot raise the level to %d, above its own number %d", level, f.version))
@@ -142,17 +158,23 @@ func TestHeaderCheckRejectsViolations(t *testing.T) {
 		header  string
 		want    string // part of the expected problem, "" = no problem
 	}{
-		"expand only and unchanged":      {7, good, ""},
-		"not compatible and raised":      {9, "-- Rolling update: not compatible, the column x is gone.\n-- Compatibility level: raised to 9.\n", ""},
-		"raised to an earlier migration": {12, "-- Rolling update: not compatible, y.\n-- Compatibility level: raised to 10.\n", ""},
-		"no rolling update line":         {7, "-- Compatibility level: unchanged.\n", "Rolling update"},
-		"empty rolling update line":      {7, "-- Rolling update:\n-- Compatibility level: unchanged.\n", "Rolling update"},
-		"two rolling update lines":       {7, good + "-- Rolling update: expand only.\n", "Rolling update"},
-		"no level line":                  {7, "-- Rolling update: expand only.\n", "Compatibility level"},
-		"a level line that says nothing": {7, "-- Rolling update: expand only.\n-- Compatibility level: maybe.\n", "Compatibility level"},
-		"expand only but raised":         {7, "-- Rolling update: expand only.\n-- Compatibility level: raised to 7.\n", "expand only"},
-		"raised above the own number":    {7, "-- Rolling update: not compatible, z.\n-- Compatibility level: raised to 8.\n", "above its own number"},
-		"raised below the baseline":      {7, "-- Rolling update: not compatible, z.\n-- Compatibility level: raised to 2.\n", "below the baseline"},
+		"expand only and unchanged":       {7, good, ""},
+		"expand only with an explanation": {7, "-- Rolling update: expand only. Older replicas ignore the new column.\n-- Compatibility level: unchanged.\n", ""},
+		"not compatible and raised":       {9, "-- Rolling update: not compatible, the column x is gone.\n-- Compatibility level: raised to 9.\n", ""},
+		"raised to an earlier migration":  {12, "-- Rolling update: not compatible, y.\n-- Compatibility level: raised to 10.\n", ""},
+		"no rolling update line":          {7, "-- Compatibility level: unchanged.\n", "Rolling update"},
+		"empty rolling update line":       {7, "-- Rolling update:\n-- Compatibility level: unchanged.\n", "Rolling update"},
+		"two rolling update lines":        {7, good + "-- Rolling update: expand only.\n", "Rolling update"},
+		"no level line":                   {7, "-- Rolling update: expand only.\n", "Compatibility level"},
+		"a level line that says nothing":  {7, "-- Rolling update: expand only.\n-- Compatibility level: maybe.\n", "Compatibility level"},
+		"expand only but raised":          {7, "-- Rolling update: expand only.\n-- Compatibility level: raised to 7.\n", `"expand only" means`},
+		"not compatible but unchanged":    {7, "-- Rolling update: not compatible, x stops working.\n-- Compatibility level: unchanged.\n", `"not compatible" means`},
+		"not compatible without a reason": {7, "-- Rolling update: not compatible.\n-- Compatibility level: raised to 7.\n", "has to start with"},
+		"neither form and unchanged":      {7, "-- Rolling update: the previous version ignores the column.\n-- Compatibility level: unchanged.\n", "has to start with"},
+		"neither form and raised":         {7, "-- Rolling update: x stops working.\n-- Compatibility level: raised to 7.\n", "has to start with"},
+		"expand only in other capitals":   {7, "-- Rolling update: Expand only.\n-- Compatibility level: unchanged.\n", "has to start with"},
+		"raised above the own number":     {7, "-- Rolling update: not compatible, z.\n-- Compatibility level: raised to 8.\n", "above its own number"},
+		"raised below the baseline":       {7, "-- Rolling update: not compatible, z.\n-- Compatibility level: raised to 2.\n", "below the baseline"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			problems := headerProblems(migrationFile{version: tc.version, name: "x.sql", header: tc.header})

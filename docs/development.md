@@ -904,14 +904,17 @@ and a binary fit together, and what the server does when they do not, is specifi
 
 1. Create `NNNNN_description.sql` with the next number (no gaps), the SPDX header, a header comment, `-- +goose Up` and
    `-- +goose Down`. Never edit a migration that may have been applied anywhere; a mistake is fixed by a new migration.
-2. State the effect in the header comment with two lines. For a change that the previous version keeps working with:
+2. State the effect in the header comment with two lines that agree with each other. These are the only two forms, and
+   `TestMigrationHeaders` rejects a text that starts with neither of them and any other combination. For a change that the
+   previous version keeps working with:
 
    ```sql
    -- Rolling update: expand only. Older replicas ignore the new column.
    -- Compatibility level: unchanged.
    ```
 
-   For a change that it cannot work with (it drops, renames or tightens something it uses, or changes what stored data means):
+   For a change that binaries below some level cannot work with (it drops, renames or tightens something they use, or changes what
+   stored data means), the text starts with `not compatible,` and says what stops working:
 
    ```sql
    -- Rolling update: not compatible, replicas of the previous version can no longer store x until they are updated.
@@ -922,11 +925,14 @@ and a binary fit together, and what the server does when they do not, is specifi
    number of the migration itself. Up ends with `UPDATE schema_compat SET min_binary_schema = 9, updated_at = now();` and Down
    sets the previous value again. Binaries below that level refuse to start on the database; binaries at or above it start.
    Split a destructive change into two releases to keep rollbacks possible: add the new object in one release (expand only),
-   drop the old one in a later release, and raise the level to the number of the migration that added the new object.
+   drop the old one in a later release, and raise the level to the number of the migration that added the new object. The
+   migration that drops it is `not compatible` for the releases before the first one: its text names them and says that the
+   previous release keeps working.
 3. Add a test for the change itself (see `TestBootstrapAdminMigration` and `TestUIVersionSelectionMigration`), and raise the table
    count in `TestSchema` when the migration adds a table. `TestMigrationNumbersAreConsecutive`, `TestMigrationHeaders` and
    `TestCompatibilityLevelFollowsTheHeaders` run for every migration from 00006 on and fail when the numbers have a gap, a header
-   line is missing or wrong, the header and the effect on `schema_compat` differ, or Down does not restore the previous level.
+   line is missing or wrong, the two lines contradict each other (for example `not compatible` with `unchanged`), the header and
+   the effect on `schema_compat` differ, or Down does not restore the previous level.
 4. Describe every consequence that a user must know before the upgrade in the changelog (next paragraph), and change the design
    documents in the same pull request.
 

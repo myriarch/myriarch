@@ -12,16 +12,18 @@
 //     session advisory lock, so concurrent replicas are safe.
 //   - From 00006 on, the header (the comment before "-- +goose Up") of every
 //     migration states its effect on the compatibility level of the schema
-//     (table schema_compat), in these two lines:
-//     "-- Rolling update: expand only." (or any other text that says why not)
-//     and "-- Compatibility level: unchanged." or "-- Compatibility level:
-//     raised to 00NNN." "Expand only" means that the previous version keeps
-//     working on the changed schema and requires "unchanged". A migration that
-//     binaries below some level cannot work with raises the level: Up sets
-//     schema_compat.min_binary_schema to NNN (more than the previous value, at
-//     most the number of the migration) and Down sets the previous value
-//     again. TestMigrationHeaders and TestCompatibilityLevelFollowsTheHeaders
-//     check this; docs/development.md explains how to choose.
+//     (table schema_compat) in two lines that agree with each other: either
+//     "-- Rolling update: expand only." with "-- Compatibility level:
+//     unchanged.", or "-- Rolling update: not compatible, <what stops
+//     working>" with "-- Compatibility level: raised to 00NNN." "Expand only"
+//     means that the previous version keeps working on the changed schema.
+//     A migration that binaries below some level cannot work with is "not
+//     compatible" and raises the level: Up sets schema_compat.min_binary_schema
+//     to NNN (more than the previous value, at most the number of the
+//     migration) and Down sets the previous value again. TestMigrationHeaders
+//     and TestCompatibilityLevelFollowsTheHeaders check this (a text of
+//     neither form, and a text that contradicts the level line, fail);
+//     docs/development.md explains how to choose.
 package migrations
 
 import (

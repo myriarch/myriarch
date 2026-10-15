@@ -88,17 +88,21 @@ nothing. Results go to stdout, log lines and errors to stderr.
   without `--check`).
 
 **Writing migrations.** A migration is never edited after it may have been applied anywhere. From 00006 on, its header (the comment
-before `-- +goose Up`) has two lines. `-- Rolling update:` says what a replica of the previous version does on the changed schema.
-`-- Compatibility level:` is `unchanged`, or `raised to 00NNN` when binaries below the level NNN cannot work with the schema.
+before `-- +goose Up`) has two lines that agree with each other. `-- Rolling update:` says what a replica of the previous version
+does on the changed schema. `-- Compatibility level:` is `unchanged`, or `raised to 00NNN` when binaries below the level NNN
+cannot work with the schema. There are two valid combinations:
 
-- *Expand only* is a promise that the previous version keeps working: new tables, nullable columns and columns with a default,
-  indexes, a constraint that is relaxed. The level stays, and the migration must not say "expand only" and raise the level.
-- A migration that the previous version cannot work with (it drops, renames or tightens something that version uses, or changes
-  what stored data means) raises the level. Up sets `min_binary_schema` to NNN, which is greater than the previous value and at
-  most the number of the migration, and Down sets the previous value again. The level NNN is the number of the oldest migration
-  whose binaries still work on the new schema.
-- `TestMigrationHeaders`, `TestCompatibilityLevelFollowsTheHeaders` and `TestLevelCheckRejectsViolations` in
-  `internal/store/migrations` check the headers and apply every migration up and down against them.
+- `-- Rolling update: expand only.` (an explanation may follow) with `-- Compatibility level: unchanged.` *Expand only* is a
+  promise that the previous version keeps working: new tables, nullable columns and columns with a default, indexes, a constraint
+  that is relaxed. The level stays.
+- `-- Rolling update: not compatible, <what stops working>` with `-- Compatibility level: raised to 00NNN.` The migration is one
+  that binaries below some level cannot work with (it drops, renames or tightens something that they use, or changes what stored
+  data means). Up sets `min_binary_schema` to NNN, which is greater than the previous value and at most the number of the
+  migration, and Down sets the previous value again. The level NNN is the number of the oldest migration whose binaries still
+  work on the new schema.
+- A text that starts with neither form, and any other combination ("expand only" with a raised level, "not compatible" with an
+  unchanged level), fails `TestMigrationHeaders`. `TestCompatibilityLevelFollowsTheHeaders` and `TestLevelCheckRejectsViolations`
+  in `internal/store/migrations` apply every migration up and down and compare the level in the database with the header.
 - Every consequence that a user must know before an upgrade goes into the section "Upgrade notes" of the changelog; the
   [development guide](../development.md) describes the steps.
 
