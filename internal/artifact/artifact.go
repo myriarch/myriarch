@@ -62,6 +62,9 @@ type Deps struct {
 	// Policy (optional) is the outbound destination policy used for the proxy
 	// transport; the shared HTTPClient carries it otherwise.
 	Policy *netguard.Policy
+	// InstallGrantTTL is the lifetime of an install grant (install.grantTtl;
+	// 0 = no expiry, development only).
+	InstallGrantTTL time.Duration
 }
 
 // downloadIdleTimeout aborts a download that delivers no data for this long.
@@ -376,7 +379,8 @@ func (c *Cache) ensure(ctx context.Context, s spec) (*domain.Artifact, error) {
 	rec, err := arts.Find(ctx, s.dist, s.version, s.os, s.arch, s.format)
 	switch {
 	case err == nil:
-		if rec.Status == domain.ArtifactReady && (!c.cfg.Verify.RequireSignature || rec.SignatureVerified) {
+		// a record that would not be served (no pinned hash, no verified bundle) is fetched again
+		if c.servable(rec) {
 			return rec, nil
 		}
 	case !errors.Is(err, domain.ErrNotFound):

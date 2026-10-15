@@ -4,6 +4,7 @@
 package artifact
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -107,10 +108,43 @@ func (i *idleReader) Read(p []byte) (int, error) {
 
 // ------------------------------------------------------------------- tokens ----
 
+// There are two kinds of download credentials, both "myrd_<b64url(json)>.<b64url(HMAC-SHA256(secret, json))>"
+// with the signature over the JSON as sent:
+//
+//   - the token of a package offer, bound to one artifact and one updater agent ({"a","g","t"}, no kind);
+//     ServeContent accepts it only while that agent has an offer for the artifact;
+//   - the install grant, bound to one artifact and one enrollment token ({"a","t","k":"i","e"}), which a host
+//     gets from its install plan before it is enrolled; ServeContent accepts it only while that enrollment
+//     token is valid.
+//
+// The kind is part of the signed payload, so neither credential can be turned into the other. An unknown kind
+// is refused.
+const grantKindInstall = "i"
+
+// updaterClaims is the payload of the token of a package offer.
+type updaterClaims struct {
+	Artifact uuid.UUID      `json:"a"`
+	Agent    domain.AgentID `json:"g"`
+	Issued   int64          `json:"t"`
+}
+
+// installClaims is the payload of an install grant.
+type installClaims struct {
+	Artifact uuid.UUID `json:"a"`
+	Issued   int64     `json:"t"`
+	Kind     string    `json:"k"`
+	Token    uuid.UUID `json:"e"`
+}
+
+// tokenClaims is the payload of either kind, as parsed.
 type tokenClaims struct {
 	Artifact uuid.UUID      `json:"a"`
 	Agent    domain.AgentID `json:"g"`
 	Issued   int64          `json:"t"`
+	// Kind is "" for the token of a package offer and grantKindInstall for an install grant.
+	Kind string `json:"k"`
+	// Token is the ID of the enrollment token of an install grant.
+	Token uuid.UUID `json:"e"`
 }
 
 func (c *Cache) mac(payload []byte) []byte {
@@ -119,17 +153,22 @@ func (c *Cache) mac(payload []byte) []byte {
 	return m.Sum(nil)
 }
 
-// signToken builds "myrd_<b64url(json)>.<b64url(HMAC-SHA256(secret, json))>".
-func (c *Cache) signToken(artifact uuid.UUID, agent domain.AgentID, at time.Time) (string, error) {
+// sign builds "myrd_<b64url(json)>.<b64url(HMAC-SHA256(secret, json))>".
+func (c *Cache) sign(claims any) (string, error) {
 	if len(c.deps.DownloadSecret) == 0 {
 		return "", errors.New("artifact download secret is not configured")
 	}
-	payload, err := json.Marshal(tokenClaims{Artifact: artifact, Agent: agent, Issued: at.Unix()})
+	payload, err := json.Marshal(claims)
 	if err != nil {
 		return "", err
 	}
 	enc := base64.RawURLEncoding
 	return domain.DownloadTokenPrefix + enc.EncodeToString(payload) + "." + enc.EncodeToString(c.mac(payload)), nil
+}
+
+// signToken builds the token of a package offer.
+func (c *Cache) signToken(artifact uuid.UUID, agent domain.AgentID, at time.Time) (string, error) {
+	return c.sign(updaterClaims{Artifact: artifact, Agent: agent, Issued: at.Unix()})
 }
 
 var errBadToken = errors.New("invalid download token")
@@ -203,15 +242,52 @@ func (c *Cache) DownloadURLFor(a *domain.Artifact, updater *domain.Agent) (strin
 }
 
 func (c *Cache) downloadURL(a *domain.Artifact, agentID domain.AgentID, base string) (string, map[string]string, error) {
-	if base == "" {
-		return "", nil, errors.New("server.publicUrl is not configured: cannot build download URLs")
+	u, err := contentURL(a, base)
+	if err != nil {
+		return "", nil, err
 	}
 	tok, err := c.signToken(a.ID, agentID, c.now())
 	if err != nil {
 		return "", nil, err
 	}
-	u := strings.TrimRight(base, "/") + api.BasePath + "/artifacts/" + a.ID.String() + "/content/" + url.PathEscape(a.Filename)
 	return u, map[string]string{"Authorization": "Bearer " + tok}, nil
+}
+
+// contentURL is <base>/api/v1/artifacts/<id>/content/<filename>.
+func contentURL(a *domain.Artifact, base string) (string, error) {
+	if base == "" {
+		return "", errors.New("server.publicUrl is not configured: cannot build download URLs")
+	}
+	return strings.TrimRight(base, "/") + api.BasePath + "/artifacts/" + a.ID.String() + "/content/" + url.PathEscape(a.Filename), nil
+}
+
+// InstallURL returns the absolute URL <publicUrl>/api/v1/artifacts/<id>/content/<filename> of an artifact, for
+// a host that downloads with an install grant (InstallGrant). The checksum and the Sigstore bundle of the
+// artifact are served under the same URL with the suffixes ".sha256" and ".sigstore.json".
+func (c *Cache) InstallURL(a *domain.Artifact) (string, error) {
+	return contentURL(a, c.deps.PublicURL)
+}
+
+// InstallGrant mints the credential with which a host that is not enrolled yet downloads an artifact
+// (ADR-0046): a "myrd_" token bound to the artifact and to the ID of the enrollment token that the host
+// presented to get its plan. ServeContent accepts it for the artifact, its ".sha256" and its ".sigstore.json"
+// until it is older than Deps.InstallGrantTTL, and only while the enrollment token is neither revoked nor
+// expired. It is never accepted as the token of a package offer. A grant is issued only for an artifact that
+// is ready, has a pinned SHA-256 and, where signatures are required, a verified bundle.
+func (c *Cache) InstallGrant(a *domain.Artifact, enrollmentToken uuid.UUID) (string, error) {
+	if a == nil || !c.servable(a) {
+		return "", errors.New("install grant: the artifact is not ready and verified")
+	}
+	if enrollmentToken == uuid.Nil {
+		return "", errors.New("install grant: no enrollment token")
+	}
+	return c.sign(installClaims{Artifact: a.ID, Issued: c.now().Unix(), Kind: grantKindInstall, Token: enrollmentToken})
+}
+
+// servable reports whether an artifact may be served: ready, with a pinned SHA-256 and, when signatures are
+// required, a verified bundle.
+func (c *Cache) servable(a *domain.Artifact) bool {
+	return a.Status == domain.ArtifactReady && len(a.SHA256) == sha256.Size && (!c.cfg.Verify.RequireSignature || a.SignatureVerified)
 }
 
 // ------------------------------------------------------------------- serving ----
@@ -219,8 +295,15 @@ func (c *Cache) downloadURL(a *domain.Artifact, agentID domain.AgentID, base str
 func (c *Cache) result(res string) { c.downloads.WithLabelValues(res).Inc() }
 
 // ServeContent serves the artifact bytes (operation downloadArtifact,
-// api.AuthCustom): verifies the download token, fetches the file into the
+// api.AuthCustom): verifies the download credential, fetches the file into the
 // local cache if this replica does not have it yet, supports Range.
+//
+// Two credentials work (see the comment on grantKindInstall). The token of a package offer is accepted only
+// while its agent has an offer for the artifact and serves the artifact itself. An install grant is accepted
+// only while its enrollment token is valid and serves the artifact and, from the record, its checksum
+// (<filename>.sha256) and its Sigstore bundle (<filename>.sigstore.json), the files that the installer checks
+// the artifact with. Everything that is served is verified: ready, with a pinned SHA-256 and, where
+// signatures are required, a verified bundle.
 func (c *Cache) ServeContent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id, err := uuid.Parse(r.PathValue("id"))
@@ -246,41 +329,56 @@ func (c *Cache) ServeContent(w http.ResponseWriter, r *http.Request) {
 		unauthorized("invalid download token")
 		return
 	}
-	if ttl := c.cfg.DownloadTokenTTL; ttl > 0 && c.now().Sub(time.Unix(cl.Issued, 0)) > ttl {
-		unauthorized("download token expired")
-		return
-	}
-	// The token is only valid while the agent has a current offer for this artifact.
-	offers, err := c.deps.Store.Packages().GetOffers(ctx, cl.Agent)
-	if err != nil {
-		c.result("error")
-		api.WriteError(w, r, err)
-		return
-	}
-	marker := "/artifacts/" + id.String() + "/content/"
-	offered := false
-	for _, o := range offers {
-		if strings.Contains(o.DownloadURL, marker) {
-			offered = true
-			break
+	var install bool
+	switch cl.Kind {
+	case "": // the token of a package offer
+		if msg, err := c.authorizeOffer(ctx, cl, id); err != nil {
+			c.result("error")
+			api.WriteError(w, r, err)
+			return
+		} else if msg != "" {
+			unauthorized(msg)
+			return
 		}
-	}
-	if !offered {
-		unauthorized("the agent has no package offer for this artifact")
+	case grantKindInstall:
+		install = true
+		if msg, err := c.authorizeInstall(ctx, cl); err != nil {
+			c.result("error")
+			api.WriteError(w, r, err)
+			return
+		} else if msg != "" {
+			unauthorized(msg)
+			return
+		}
+	default:
+		unauthorized("invalid download token")
 		return
 	}
 
 	rec, err := c.deps.Store.Artifacts().Get(ctx, id)
-	if err != nil || rec.Status != domain.ArtifactReady || r.PathValue("filename") != rec.Filename {
+	if err != nil || rec.Status != domain.ArtifactReady {
 		c.result("not_found")
 		api.WriteError(w, r, fmt.Errorf("%w: artifact not available", domain.ErrNotFound))
 		return
 	}
 	// Only verified artifacts are served: a pinned SHA-256 and, when
 	// signatures are required, a verified sigstore bundle.
-	if len(rec.SHA256) != 32 || (c.cfg.Verify.RequireSignature && !rec.SignatureVerified) {
+	if !c.servable(rec) {
 		c.result("not_found")
 		c.log.Warn("artifact is not verified, refusing to serve it", "artifact_id", id)
+		api.WriteError(w, r, fmt.Errorf("%w: artifact not available", domain.ErrNotFound))
+		return
+	}
+	switch name := r.PathValue("filename"); {
+	case name == rec.Filename:
+	case install && name == rec.Filename+checksumSuffix:
+		c.serveRecordFile(w, r, rec, name, "text/plain; charset=utf-8", []byte(rec.SHA256.String()+"  "+rec.Filename+"\n"))
+		return
+	case install && name == rec.Filename+bundleSuffix && len(rec.SigstoreBundle) > 0:
+		c.serveRecordFile(w, r, rec, name, "application/json", rec.SigstoreBundle)
+		return
+	default:
+		c.result("not_found")
 		api.WriteError(w, r, fmt.Errorf("%w: artifact not available", domain.ErrNotFound))
 		return
 	}
@@ -315,7 +413,70 @@ func (c *Cache) ServeContent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("ETag", `"sha256-`+rec.SHA256.String()+`"`)
 	c.result("ok")
+	if install && r.Header.Get("Range") == "" {
+		// only the ID of the enrollment token is logged, never a credential
+		c.log.Info("artifact served with an install grant", "artifact_id", id, "token_id", cl.Token)
+	}
 	http.ServeContent(w, r, rec.Filename, st.ModTime(), f)
+}
+
+// Suffixes of the files that an install grant gets next to the artifact.
+const (
+	checksumSuffix = ".sha256"
+	bundleSuffix   = ".sigstore.json"
+)
+
+// authorizeOffer checks the token of a package offer: it is valid only while the agent has an offer for the
+// artifact and, if artifacts.downloadTokenTtl is set, while it is younger than that. It returns the reason of a
+// refusal (the answer is 401) or an error of the store.
+func (c *Cache) authorizeOffer(ctx context.Context, cl tokenClaims, id uuid.UUID) (string, error) {
+	if ttl := c.cfg.DownloadTokenTTL; ttl > 0 && c.now().Sub(time.Unix(cl.Issued, 0)) > ttl {
+		return "download token expired", nil
+	}
+	// The token is only valid while the agent has a current offer for this artifact.
+	offers, err := c.deps.Store.Packages().GetOffers(ctx, cl.Agent)
+	if err != nil {
+		return "", err
+	}
+	marker := "/artifacts/" + id.String() + "/content/"
+	for _, o := range offers {
+		if strings.Contains(o.DownloadURL, marker) {
+			return "", nil
+		}
+	}
+	return "the agent has no package offer for this artifact", nil
+}
+
+// authorizeInstall checks an install grant: it is valid while it is younger than Deps.InstallGrantTTL (0: no
+// expiry) and only while the enrollment token it is bound to exists and is neither revoked nor expired. The
+// token is read from the store for every request, so a revocation takes effect at once on every replica. The
+// reasons are the same for a token that is gone and for one that is revoked or expired.
+func (c *Cache) authorizeInstall(ctx context.Context, cl tokenClaims) (string, error) {
+	if cl.Token == uuid.Nil {
+		return "invalid download token", nil
+	}
+	now := c.now()
+	if ttl := c.deps.InstallGrantTTL; ttl > 0 && now.Sub(time.Unix(cl.Issued, 0)) > ttl {
+		return "install grant expired", nil
+	}
+	tok, err := c.deps.Store.Identity().GetEnrollmentToken(ctx, cl.Token)
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		return "invalid install grant", nil
+	case err != nil:
+		return "", fmt.Errorf("%w: enrollment token lookup: %v", domain.ErrUnavailable, err)
+	case tok.RevokedAt != nil || (tok.ExpiresAt != nil && !now.Before(*tok.ExpiresAt)):
+		return "invalid install grant", nil
+	}
+	return "", nil
+}
+
+// serveRecordFile serves a small file that comes from the record of the artifact (checksum, Sigstore bundle).
+func (c *Cache) serveRecordFile(w http.ResponseWriter, r *http.Request, rec *domain.Artifact, name, contentType string, content []byte) {
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "private, no-store")
+	c.result("ok")
+	http.ServeContent(w, r, name, rec.UpdatedAt, bytes.NewReader(content))
 }
 
 // fileStamp identifies the state of a file whose content hash was verified.
