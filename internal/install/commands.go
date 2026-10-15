@@ -138,6 +138,9 @@ func (p *Planner) RenderCommands(req CommandsRequest) (*Commands, error) {
 	if p.d.Bundles == nil {
 		return nil, refuse(domain.ErrPrecondition, CodeLocalBuild, "this server has no installer bundles")
 	}
+	// Asking for commands is what makes the server look at its bundles: it starts the preparation of a bundle that is
+	// pending, or failed a minute ago, and a development server reads its directory again.
+	p.d.Bundles.Prepare()
 	st := p.d.Bundles.State()
 	if st.Source == BundleSourceNone {
 		return nil, refuse(domain.ErrPrecondition, CodeLocalBuild,
@@ -166,11 +169,10 @@ func (p *Planner) RenderCommands(req CommandsRequest) (*Commands, error) {
 			waiting = append(waiting, b)
 		}
 	}
-	if len(failed) > 0 || len(waiting) > 0 {
-		p.d.Bundles.Prepare()
-		if len(failed) > 0 {
-			return nil, bundleFailedRefusal(failed[0])
-		}
+	if len(failed) > 0 {
+		return nil, bundleFailedRefusal(failed[0])
+	}
+	if len(waiting) > 0 {
 		return nil, bundlePreparingRefusal()
 	}
 	for _, b := range bundles {

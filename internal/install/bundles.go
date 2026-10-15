@@ -251,7 +251,9 @@ type Bundles struct {
 	mu      sync.Mutex
 	items   []*bundleItem
 	running bool
-	wg      sync.WaitGroup
+	// runCtx is the context of Run: the preparation stops with the server instead of running on in a process that ends
+	runCtx context.Context
+	wg     sync.WaitGroup
 }
 
 type bundleItem struct {
@@ -348,24 +350,27 @@ func (b *Bundles) Find(p Platform) (Bundle, bool) {
 	return Bundle{}, false
 }
 
-// Run prepares the bundles shortly after the start, so that they are ready when somebody asks, and waits for the end
-// of the server and of a preparation that is under way.
+// Run prepares the bundles shortly after the start, so that they are ready when somebody asks, and ends with the
+// server: it stops a preparation that is under way and waits for it, because it writes into the cache directory.
 func (b *Bundles) Run(ctx context.Context) error {
-	if b.source == BundleSourceNone {
-		<-ctx.Done()
-		return nil
+	b.mu.Lock()
+	b.runCtx = ctx
+	b.mu.Unlock()
+	if b.source != BundleSourceNone {
+		delay := b.d.startDelay
+		if delay == 0 {
+			delay = bundleStartDelay
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(delay):
+			b.Prepare()
+		}
 	}
-	delay := b.d.startDelay
-	if delay == 0 {
-		delay = bundleStartDelay
-	}
-	select {
-	case <-ctx.Done():
-		return nil
-	case <-time.After(delay):
-	}
-	b.Prepare()
 	<-ctx.Done()
+	wctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = b.Wait(wctx)
 	return nil
 }
 
@@ -410,9 +415,13 @@ func (b *Bundles) Prepare() {
 		for _, it := range todo {
 			it.b.Status, it.b.Error = BundlePreparing, ""
 		}
+		base := b.runCtx
+		if base == nil {
+			base = context.Background()
+		}
 		b.running = true
 		b.wg.Add(1)
-		go b.prepareRelease(todo)
+		go b.prepareRelease(base, todo)
 	}
 }
 
@@ -504,14 +513,14 @@ func (b *Bundles) lost(it *bundleItem, snap Bundle, path, why string, remove boo
 
 func (b *Bundles) assetURL(name string) string { return b.baseURL + "/v" + b.version + "/" + name }
 
-func (b *Bundles) prepareRelease(todo []*bundleItem) {
+func (b *Bundles) prepareRelease(base context.Context, todo []*bundleItem) {
 	defer b.wg.Done()
 	defer func() {
 		b.mu.Lock()
 		b.running = false
 		b.mu.Unlock()
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), prepareTimeout)
+	ctx, cancel := context.WithTimeout(base, prepareTimeout)
 	defer cancel()
 	b.log.Info("installer bundles: preparing", "version", b.version, "source", redact(b.baseURL), "platforms", len(todo))
 

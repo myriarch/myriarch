@@ -1300,3 +1300,39 @@ func TestBundleStateIsJSON(t *testing.T) {
 	assert.Equal(t, fmt.Sprint(len(e.rel.archives[first["filename"].(string)])), fmt.Sprint(first["size"]))
 	assert.NotContains(t, first, "error")
 }
+
+// The end of the server stops a preparation that is under way and waits for it: it writes into the cache directory, which
+// must not change under a process that is gone.
+func TestBundlesRunStopsAPreparationWithTheServer(t *testing.T) {
+	e := newBundlesEnv(t, func(e *bundlesEnv, d *BundleDeps) { d.startDelay = 10 * time.Millisecond })
+	started := make(chan struct{}, 8)
+	inner := e.src.srv.Config.Handler
+	e.src.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, brandUpdater) {
+			started <- struct{}{}
+			<-r.Context().Done() // the archive never arrives; the client gives up with the server
+			return
+		}
+		inner.ServeHTTP(w, r)
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- e.b.Run(ctx) }()
+	select {
+	case <-started:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the preparation did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("Run did not wait for the preparation, or the preparation did not stop")
+	}
+	for _, it := range e.b.State().Items {
+		assert.NotEqual(t, BundlePreparing, it.Status, "nothing is left under way")
+		assert.NotEqual(t, BundleReady, it.Status)
+	}
+	assert.Empty(t, e.tmpFiles())
+}

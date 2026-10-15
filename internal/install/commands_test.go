@@ -771,7 +771,7 @@ func TestCommandsWaitForTheBundles(t *testing.T) {
 	// a request for the platforms that are ready does not wait for the others
 	c = e.mustRender(site(func(r *CommandsRequest) { r.Platforms = []string{"linux/amd64", "windows/amd64"} }))
 	assert.Len(t, c.Commands, 2)
-	assert.Equal(t, 1, e.bundles.prepared)
+	assert.Equal(t, 2, e.bundles.prepared, "every request lets the server look at its bundles")
 
 	e.bundles.set("linux", "arm64", BundlePending)
 	_, err = e.render(site())
@@ -786,7 +786,7 @@ func TestCommandsSayWhenABundleFailed(t *testing.T) {
 	assert.Equal(t, retryBundleFailed, r.RetryAfter)
 	assert.Contains(t, r.Detail, "windows/amd64")
 	assert.Contains(t, r.Detail, "the last attempt failed")
-	assert.Equal(t, 1, e.bundles.prepared)
+	assert.Equal(t, 1, e.bundles.prepared, "and starts the next attempt when it is due")
 	// failed wins over preparing: it needs the attention of an operator
 	e.bundles.set("linux", "amd64", BundlePreparing)
 	_, err = e.render(site())
