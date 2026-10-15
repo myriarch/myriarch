@@ -17,8 +17,14 @@
 #
 # Writes DIR/govulncheck-binaries.sarif. The release is --tag, else VULNCHECK_RELEASE_TAG, else the latest stable release of the
 # repository in ci/release/identity.env (the one that https://github.com/<repository>/releases/latest leads to; a pre-release is scanned
-# only when it is named). A repository without a stable release has nothing to scan: the report holds no result and the status is 0. Any
-# other answer to the lookup is [release_lookup]: an empty report would close the alerts of the earlier scans.
+# only when it is named). The lookup is one request without credentials that follows no redirect. A repository without a stable release
+# has nothing to scan: GitHub answers with a redirect to the list of releases, and then the report holds no result and the status is 0.
+# Every other outcome of the lookup is an error, because an empty report would close the alerts of the earlier scans:
+#   - an HTTP error (404 and 5xx included) or a failed connection is [download_failed]; the retry policy of every download below applies
+#     (a timeout, a failed connection and HTTP 408, 429, 500, 502, 503 and 504 are retried until the retry window is used up, a 404 is not);
+#   - an answer that is no redirect (HTTP 200, for example), or a redirect to a location other than the list of releases or the page of
+#     a release of this repository, is [release_lookup];
+#   - a release page whose tag does not have the form of a release tag is [tag_invalid].
 #
 # Nothing is scanned before the files are verified, and every step fails closed (the codes in brackets are the stable interface):
 #   1. checksums.txt and its keyless bundle are downloaded over https, without credentials [download_failed];
@@ -138,7 +144,9 @@ if [ -z "${tag}" ]; then
   code="${answer%% *}"
   location="${answer#* }"
   # Only GitHub's own answer for a repository without a stable release (the redirect to the list of releases) means "nothing to scan".
-  # Any other answer, a 404 included (curl -f fails on it), is an error: an empty report would close the alerts of the earlier scans.
+  # Any other outcome is an error, because an empty report would close the alerts of the earlier scans: an HTTP error (curl -f fails on
+  # it, a 404 included) has ended in retry_curl as [download_failed] already; what gets here and is no redirect, or leads elsewhere, is
+  # [release_lookup].
   case "${code}" in
     301 | 302 | 303 | 307 | 308) ;;
     *) err release_lookup "the lookup of the latest release answered HTTP ${code}" ;;
