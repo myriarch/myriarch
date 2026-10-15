@@ -149,6 +149,10 @@ func TestOpenAPIContract(t *testing.T) {
 		"InstallPlanOpAMP":           tof[install.PlanOpAMP](),
 		"InstallPlanArtifact":        tof[install.PlanArtifact](),
 		"InstallPlanUpdater":         tof[install.PlanUpdater](),
+		"InstallBundle":              tof[install.Bundle](),
+		"InstallBundleList":          tof[install.BundleList](),
+		"InstallCommands":            tof[install.Commands](),
+		"InstallCommand":             tof[install.Command](),
 	}
 	requestTypes := map[string]reflect.Type{
 		"CreateSavedFilterRequest":          tof[dto.CreateSavedFilterRequest](),
@@ -165,6 +169,8 @@ func TestOpenAPIContract(t *testing.T) {
 		"SelectFleetVersionRequest":         tof[dto.SelectFleetVersionRequest](),
 		"ClearFleetVersionSelectionRequest": tof[dto.ClearFleetVersionSelectionRequest](),
 		"InstallPlanRequest":                tof[install.PlanRequest](),
+		"InstallCommandsRequest":            tof[install.CommandsRequest](),
+		"InstallTokenFiles":                 tof[install.TokenFiles](),
 	}
 
 	for name, typ := range responseTypes {

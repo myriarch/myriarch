@@ -63,7 +63,7 @@ var auditedOperations = map[string][]string{
 }
 
 // readOnlyPosts are POST operations without a state change (computations, permission read).
-var readOnlyPosts = map[string]bool{"matchFleets": true, "renderBlueprint": true}
+var readOnlyPosts = map[string]bool{"matchFleets": true, "renderBlueprint": true, "renderInstallCommands": true}
 
 // tokenPosts are POST operations that a host calls with its enrollment token and that compute an answer without
 // changing configuration, rollouts or the inventory: the plan for installing a host from the server. They have no

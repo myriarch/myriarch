@@ -49,7 +49,7 @@ Every operation names the permission that it needs. The table shows the lowest r
 
 | Permission | Lowest role | Operations |
 |---|---|---|
-| `read` | viewer | 36 |
+| `read` | viewer | 38 |
 | `saved_filters:write` | viewer | 2 |
 | `agents:delete` | operator | 1 |
 | `agents:operate` | operator | 2 |
@@ -64,7 +64,7 @@ Every operation names the permission that it needs. The table shows the lowest r
 | `tokens:manage` | admin | 3 |
 | `users:manage` | admin | 2 |
 | `public` | none, no login | 5 |
-| `custom` | none, the operation checks its own credential | 3 |
+| `custom` | none, the operation checks its own credential | 4 |
 
 ## Errors
 
@@ -153,7 +153,7 @@ metrics listener), `/licenses` (`LICENSE` and `THIRD_PARTY_NOTICES` as `text/pla
 | [GitOps](gitops.md) | GitOps sync status, history, manual sync, webhook | 5 |
 | [Artifacts](artifacts.md) | Artifact cache for collector binaries | 5 |
 | [Notifications](notifications.md) | Notification channels | 2 |
-| [Install](install.md) | Installation of hosts from the server - plan, install grants, installer bundles and rendered commands (available from v0.2.0) | 1 |
+| [Install](install.md) | Installation of hosts from the server - plan, install grants, installer bundles and rendered commands (available from v0.2.0) | 4 |
 
 The schemas that the operations use are on the page [Data types](data-types.md).
 

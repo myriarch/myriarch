@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -29,19 +30,36 @@ type InstallAuthenticator interface {
 }
 
 // maxPlanRequestBytes bounds the body of a plan request: a platform, up to eight attributes of at most 253
-// characters, a fleet and a version.
-const maxPlanRequestBytes = 16 << 10
+// characters, a fleet and a version. The request for install commands is of the same size.
+const (
+	maxPlanRequestBytes     = 16 << 10
+	maxCommandsRequestBytes = 16 << 10
+)
 
 func (s *service) installRoutes() []api.Route {
 	plan := route(http.MethodPost, "/install/plan", "getInstallPlan", "custom", s.getInstallPlan)
 	plan.MaxBodyBytes = maxPlanRequestBytes
-	return []api.Route{plan}
+	list := route(http.MethodGet, "/install/bundles", "listInstallBundles", "read", s.listInstallBundles)
+	commands := route(http.MethodPost, "/install/commands", "renderInstallCommands", "read", s.renderInstallCommands)
+	commands.MaxBodyBytes = maxCommandsRequestBytes
+	// an archive of some megabytes to a host on a slow link: no handler deadline, the idle write timeout applies
+	download := route(http.MethodGet, "/install/bundles/{filename}", "downloadInstallBundle", "custom", s.downloadInstallBundle)
+	download.LongTransfer = true
+	return []api.Route{plan, list, commands, download}
 }
 
 // installEnabled reports whether the routes of the installation do anything. Otherwise they answer 404, before any
 // authentication, so that a server that does not offer the installation reveals nothing about tokens.
 func (s *service) installEnabled() bool {
 	return s.d.Install != nil && s.d.InstallAuth != nil && s.d.Install.Enabled()
+}
+
+// bundles returns the installer bundles, or nil when the routes are off or the server has none to offer.
+func (s *service) bundles() install.BundleStore {
+	if !s.installEnabled() {
+		return nil
+	}
+	return s.d.Install.Bundles()
 }
 
 func notEnabled(w http.ResponseWriter, r *http.Request) {
@@ -183,4 +201,119 @@ func newInstallMetrics(reg prometheus.Registerer) *prometheus.CounterVec {
 	return metrics.Register(reg, prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "myriarch_install_plans_total", Help: "Requests for an install plan by result (ok, a refusal reason such as fleet_mismatch or preparing, unauthorized, rate_limited, invalid_request).",
 	}, []string{"result"}))
+}
+
+// newBundleMetrics creates the counter of the downloads of installer bundles: myriarch_install_bundle_downloads_total{result}.
+// The result is ok, disabled, unauthorized, rate_limited, not_found, preparing, failed, unavailable or error; a token
+// never appears as a label.
+func newBundleMetrics(reg prometheus.Registerer) *prometheus.CounterVec {
+	return metrics.Register(reg, prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "myriarch_install_bundle_downloads_total", Help: "Requests for an installer bundle by result (ok, unauthorized, rate_limited, not_found, preparing, failed, unavailable, disabled, error).",
+	}, []string{"result"}))
+}
+
+// ------------------------------------------------------------- bundles and commands ----
+
+// listInstallBundles answers with the state of the installer bundles (operation listInstallBundles, permission read).
+// It changes nothing: the preparation starts with the server and when commands or a bundle are asked for.
+func (s *service) listInstallBundles(w http.ResponseWriter, r *http.Request) {
+	b := s.bundles()
+	if b == nil {
+		notEnabled(w, r)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, b.State())
+}
+
+// renderInstallCommands renders the install commands (operation renderInstallCommands, permission read). The request
+// holds no secret and the answer holds none: the token is a placeholder that the web UI replaces in the browser.
+func (s *service) renderInstallCommands(w http.ResponseWriter, r *http.Request) {
+	if s.bundles() == nil {
+		notEnabled(w, r)
+		return
+	}
+	var req install.CommandsRequest
+	if err := api.DecodeJSON(r, &req); err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	out, err := s.d.Install.RenderCommands(req)
+	if err != nil {
+		s.installRefused(w, r, err)
+		return
+	}
+	by := "unknown"
+	if p := principalOf(r); p != nil {
+		by = p.String()
+	}
+	platforms := make([]string, 0, len(out.Commands))
+	for _, c := range out.Commands {
+		platforms = append(platforms, c.Platform)
+	}
+	s.log.Info("install commands rendered", "by", by, "variant", out.Variant, "platforms", strings.Join(platforms, ","), "version", out.Version,
+		"request_id", r.Header.Get(api.RequestIDHeader))
+	w.Header().Set("Cache-Control", "no-store")
+	api.WriteJSON(w, http.StatusOK, out)
+}
+
+// downloadInstallBundle delivers an installer bundle to a host (operation downloadInstallBundle, api.AuthCustom): the
+// enrollment token is checked first, like for the plan, and then the archive is hashed again and sent. The token is
+// read from the header only; it is not logged, not a label and not part of any answer. Only its ID is logged.
+func (s *service) downloadInstallBundle(w http.ResponseWriter, r *http.Request) {
+	result := "error"
+	defer func() { s.installBundleDownloads.WithLabelValues(result).Inc() }()
+
+	b := s.bundles()
+	if b == nil {
+		result = "disabled"
+		notEnabled(w, r)
+		return
+	}
+	cred, err := s.d.InstallAuth.AuthenticateInstall(r)
+	if err == nil && cred.EnrollmentTokenID == nil {
+		err = domain.ErrUnauthorized
+	}
+	if err != nil {
+		result = s.installAuthFailed(w, r, err)
+		return
+	}
+	name := r.PathValue("filename")
+	notFound := func() {
+		result = "not_found"
+		// the problem names the route, not the path of the request: a token that a caller put there by mistake is not repeated
+		api.WriteProblem(w, r, api.Problem{Status: http.StatusNotFound, Code: api.ErrorCodeNotFound, Detail: "not found: there is no such installer bundle",
+			Instance: api.BasePath + "/install/bundles"})
+	}
+	if !install.ValidBundleFilename(name) {
+		notFound()
+		return
+	}
+	f, bundle, err := b.Open(name)
+	switch {
+	case errors.Is(err, install.ErrBundleNotFound):
+		notFound()
+		return
+	case err != nil:
+		// a bundle that is not ready, or failed, or was found changed on the disk: a refusal with Retry-After
+		result = strings.TrimPrefix(s.installRefused(w, r, err), "bundle_")
+		return
+	}
+	defer f.Close()
+
+	contentType := "application/gzip"
+	if strings.HasSuffix(name, ".zip") {
+		contentType = "application/zip"
+	}
+	h := w.Header()
+	h.Set("Content-Type", contentType)
+	h.Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	h.Set("Cache-Control", "private, no-store")
+	h.Set("ETag", `"sha256-`+bundle.SHA256+`"`)
+	h.Set("X-Content-Type-Options", "nosniff")
+	result = "ok"
+	if r.Header.Get("Range") == "" {
+		// only the ID of the enrollment token is logged, never the token
+		s.log.Info("installer bundle served", "token_id", cred.EnrollmentTokenID.String(), "file", name, "sha256", bundle.SHA256, "request_id", r.Header.Get(api.RequestIDHeader))
+	}
+	http.ServeContent(w, r, name, time.Time{}, f)
 }

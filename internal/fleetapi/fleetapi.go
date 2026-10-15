@@ -90,7 +90,8 @@ type service struct {
 	issuesAll    domain.Issues
 	issuesValid  bool
 
-	installPlans *prometheus.CounterVec
+	installPlans           *prometheus.CounterVec
+	installBundleDownloads *prometheus.CounterVec
 }
 
 // New returns the fleet modules, one per OpenAPI tag (module name = tag); the
@@ -110,6 +111,7 @@ func newService(deps Deps) *service {
 		s.d.Notifier = notify.Nop{}
 	}
 	s.installPlans = newInstallMetrics(deps.Registerer)
+	s.installBundleDownloads = newBundleMetrics(deps.Registerer)
 	return s
 }
 

@@ -32,6 +32,7 @@ This page is generated from the metric definitions in the Go sources by `make do
 | `myriarch_housekeeping_last_run_timestamp_seconds` | gauge |  | `housekeeping` | Unix time of the last completed housekeeping run. |
 | `myriarch_http_request_duration_seconds` | histogram | `route`, `method` | `httpserver` | HTTP request duration by route and method. Buckets: 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30. Series: `_bucket`, `_sum`, `_count`. |
 | `myriarch_http_requests_total` | counter | `route`, `method`, `code` | `httpserver` | HTTP requests by route, method and status code. |
+| `myriarch_install_bundle_downloads_total` | counter | `result` | `fleetapi` | Requests for an installer bundle by result (ok, unauthorized, rate\_limited, not\_found, preparing, failed, unavailable, disabled, error). |
 | `myriarch_install_plans_total` | counter | `result` | `fleetapi` | Requests for an install plan by result (ok, a refusal reason such as fleet\_mismatch or preparing, unauthorized, rate\_limited, invalid\_request). |
 | `myriarch_job_cycle_duration_seconds` | histogram | `job` | `metrics` | Duration of one cycle of a leader job (rollout tick/plan, GitOps sync, release poll, artifact prefetch). Buckets: 0.05, 0.25, 1, 5, 15, 30, 60, 120, 300, 600. Series: `_bucket`, `_sum`, `_count`. |
 | `myriarch_leader` | gauge |  | `leader/pglock` | 1 while this replica holds the leader lock, else 0. |

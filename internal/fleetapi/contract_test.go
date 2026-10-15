@@ -78,7 +78,7 @@ func TestTaggedOperationsMatchTheOpenAPIContract(t *testing.T) {
 	sort.Strings(wantIDs)
 	sort.Strings(gotIDs)
 	assert.Equal(t, wantIDs, gotIDs, "exactly the operationIds of the fleet tags")
-	assert.Len(t, wantIDs, 40)
+	assert.Len(t, wantIDs, 43)
 }
 
 func TestRoutesAreMountableWithoutConflicts(t *testing.T) {
@@ -98,6 +98,22 @@ func TestRoutesAreMountableWithoutConflicts(t *testing.T) {
 	assert.Equal(t, int64(16<<10), plan.MaxBodyBytes)
 	assert.False(t, plan.Streaming)
 	assert.False(t, plan.LongTransfer)
+	// the commands are rendered for people with a session: they are small and need the permission to read
+	commands := e.routes["renderInstallCommands"]
+	assert.Equal(t, api.AuthRequired, commands.Auth)
+	assert.Equal(t, authz.PermRead, commands.Permission)
+	assert.Equal(t, http.MethodPost, commands.Method)
+	assert.Equal(t, "/install/commands", commands.Pattern)
+	assert.Equal(t, int64(16<<10), commands.MaxBodyBytes)
+	assert.Equal(t, authz.PermRead, e.routes["listInstallBundles"].Permission)
+	assert.Equal(t, http.MethodGet, e.routes["listInstallBundles"].Method)
+	// a bundle goes to a host with an enrollment token and may take a while on a slow link
+	dl := e.routes["downloadInstallBundle"]
+	assert.Equal(t, api.AuthCustom, dl.Auth)
+	assert.Equal(t, http.MethodGet, dl.Method)
+	assert.Equal(t, "/install/bundles/{filename}", dl.Pattern)
+	assert.True(t, dl.LongTransfer)
+	assert.False(t, dl.Streaming)
 }
 
 func TestAuthenticationAndPermissions(t *testing.T) {
