@@ -54,6 +54,7 @@ SPDX-License-Identifier = "Apache-2.0"
 [[annotations]]
 path = [
   "internal/blueprint/testdata/**",
+  "internal/install/testdata/**",
   "internal/testdata/**",
 ]
 precedence = "override"
