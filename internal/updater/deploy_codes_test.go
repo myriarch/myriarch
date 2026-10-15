@@ -357,3 +357,47 @@ func TestInstallWindowsReadmeDocumentsEveryErrorCode(t *testing.T) {
 	}
 	assert.Empty(t, missing, "codes missing from the README 'Error codes' section")
 }
+
+// tableRow returns the line of a Markdown table that starts with the given first cell, within one section.
+func tableRow(section, firstCell string) string {
+	for _, line := range strings.Split(section, "\n") {
+		if strings.HasPrefix(line, "| "+firstCell) {
+			return line
+		}
+	}
+	return ""
+}
+
+// markdownSection returns the text from a heading to the next heading of the same level.
+func markdownSection(t *testing.T, doc, heading string) string {
+	t.Helper()
+	i := strings.Index(doc, "\n"+heading+"\n")
+	require.GreaterOrEqual(t, i, 0, "the document has the section %q", heading)
+	section := doc[i+1:]
+	if j := strings.Index(section[len(heading):], "\n## "); j >= 0 {
+		section = section[:len(heading)+j]
+	}
+	return section
+}
+
+// The codes that v0.2.0 adds are in the table "When the installer stops" of the guide and in the table of the Windows README,
+// both marked as new: the guide and the README also describe the installers of v0.1.0, which do not raise them.
+func TestPreflightCodesAreDocumentedAsNewInV020(t *testing.T) {
+	guide := markdownSection(t, readLF(t, "../../docs/tasks/connect-a-host.md"), "## When the installer stops")
+	readme := markdownSection(t, readLF(t, deployDir+"/windows/README.md"), "## Error codes")
+	for _, code := range []string{"conflicting_install", "supervisor_missing", "language_mode_unsupported"} {
+		row := tableRow(guide, "`"+code+"`")
+		if assert.NotEmpty(t, row, "the guide has a row for %s", code) {
+			assert.Contains(t, row, "from v0.2.0", "the row of %s in the guide says that the code is new", code)
+		}
+		row = tableRow(readme, "`"+code+"`")
+		if assert.NotEmpty(t, row, "the Windows README has a row for %s", code) {
+			assert.Contains(t, row, "from v0.2.0", "the row of %s in the Windows README says that the code is new", code)
+		}
+	}
+	// the rows that describe changed behaviour say so as well
+	assert.Contains(t, tableRow(readme, "`unsupported_platform`"), "From v0.2.0")
+	assert.Contains(t, tableRow(readme, "`service_not_running`"), "From v0.2.0")
+	assert.Contains(t, tableRow(guide, "`unsupported_platform`"), "From v0.2.0")
+	assert.Contains(t, tableRow(guide, "`service_not_running`"), "From v0.2.0")
+}

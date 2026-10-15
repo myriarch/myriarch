@@ -26,7 +26,13 @@ Installer errors carry stable codes (for example `ERROR [checksum_mismatch] ...`
 
 Three components run on every host: the **supervisor** (service `otelcol-supervisor`), the **collector** it starts, and
 optionally the **myriarch-updater**, which applies binary updates offered over OpAMP packages. The install scripts use
-neither deb/rpm nor the contrib MSI (both start a service of their own immediately).
+neither deb/rpm nor the contrib MSI (both start a service of their own immediately). From v0.2.0 they stop with
+`conflicting_install` when such a package is present (a Windows service `opampsupervisor` or `otelcol-contrib`; on Linux the
+unit `otelcol-contrib.service` or `opampsupervisor.service` active or enabled), before they change anything and without
+removing it. They also check that the supervisor file is there once its installation step is over (`supervisor_missing`), and
+`install-windows.ps1` first checks that PowerShell runs it in the full language mode (`language_mode_unsupported`) and stops
+on ARM64 without `-Arch amd64`. [Connect a host](../docs/tasks/connect-a-host.md#when-the-installer-stops) lists the causes
+and the next steps.
 
 ### Linux (systemd)
 
