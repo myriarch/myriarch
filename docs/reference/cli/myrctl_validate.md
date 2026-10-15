@@ -1,6 +1,6 @@
 ---
 title: "myrctl validate"
-weight: 130
+weight: 140
 description: "Validate all objects of a GitOps repository (default dir: .)."
 ---
 

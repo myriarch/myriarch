@@ -1,6 +1,6 @@
 ---
 title: "myriarch-updater licenses"
-weight: 190
+weight: 200
 description: "Print the license of myriarch, or with --third-party the notices of the included software."
 ---
 

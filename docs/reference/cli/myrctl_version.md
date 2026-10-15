@@ -1,6 +1,6 @@
 ---
 title: "myrctl version"
-weight: 140
+weight: 150
 description: "Print the version."
 ---
 

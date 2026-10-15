@@ -30,7 +30,8 @@ changed in the configuration unless stated otherwise.
 - `myriarchd config validate` runs the same checks, optionally also reading the referenced files, so a configuration can
   be verified in CI before it is deployed.
 - Modes: `myriarchd serve` (production), `myriarchd dev` (embedded database, development login and token), `myriarchd migrate`
-  (the database settings only, see [Start, migrations and schema compatibility](#start-migrations-and-schema-compatibility)).
+  (the database settings only, see [Start, migrations and schema compatibility](#start-migrations-and-schema-compatibility)) and
+  `myriarchd healthcheck` (a client of a running server, see [Health check](#health-check)).
 
 ## Start, migrations and schema compatibility
 
@@ -112,6 +113,69 @@ compatibility level allows it (with the warning), and is refused otherwise. v0.1
 migration library accepts a database with higher versions, so it starts on any later schema without a check. A rollback to
 v0.1.0 is not supported ([ADR-0036](../adr/0036-database-schema-compatibility-and-rollback.md)): back up the database before an
 upgrade, and go back by restoring the backup.
+
+## Health check
+
+**Available from v0.2.0.** `myriarchd healthcheck` asks a running server whether it is ready and whether its OpAMP endpoint is in
+place, and tells the result by its exit code. The release image has neither a shell nor curl, so this command is the health check of a
+container (`["CMD", "/usr/local/bin/myriarchd", "healthcheck"]`) and the program of the Pod that `helm test` runs. It is a client of
+the server: it reads no configuration, opens no database connection and needs no loopback address.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--url` | `http://127.0.0.1:8080` | Base URL of the server: `http` or `https`, a host and an optional port. A path, a query, a fragment and credentials are refused. |
+| `--opamp-path` | `/v1/opamp` | Path of the OpAMP endpoint (`opamp.path` of the server). |
+| `--token-file` | none | File with an enrollment token. |
+| `--ca-file` | none | PEM file with the CAs that may have signed the certificate of an `https` server, and no others. Without it the system roots apply. |
+| `--timeout` | `10s` | Time allowed for both requests together. |
+
+**Requests.** Two requests, in this order; the second is made only when the first succeeded.
+
+1. `GET /readyz` must be answered with 200. The server answers 503 while its database does not answer, the schema does not fit or
+   its event bus is not connected.
+2. A WebSocket upgrade at `--opamp-path`: the request of an OpAMP agent, without its first message. With `--token-file` it carries
+   `Authorization: Bearer <token>` and must be answered with 101. Without it the server must answer 401, which shows that the route and
+   the authentication are in place. A server that takes connections without a token (the development mode,
+   `opamp.requireEnrollmentToken: false`) answers 101, which is accepted as well. After 101 the command sends the normal WebSocket
+   close message (code 1000), waits at most two seconds for the answer and ends the connection.
+
+**What the command does not do.**
+
+- It sends no `AgentToServer` message. No session is created, no agent is registered and nothing is written to the database. What
+  the server records belongs to the connection: the gauge and counters of the OpAMP connections, the use of the token (its usage
+  statistics) and the access log at debug level. Because the command ends the connection with the normal close message, the server
+  logs at most a debug line about it, and no warning.
+- It sends no token to another host. It follows no redirect (a 3xx answer is a failure) and uses no proxy, whatever the proxy
+  variables say, and it checks the certificate of an `https` server (there is no switch that skips the check).
+- It does not take the token from an argument, from the environment or from standard input, and it never prints it. The file must be a
+  regular file of at most 4 KiB that holds one enrollment token (`myre_`, then 32 to 120 letters, digits, `_` or `-`; white space around
+  it is ignored). Anything else, such as the database DSN or the token of the bootstrap admin, is refused with exit code 2 before a
+  request is made.
+
+**Metrics.** A check without a token is an unauthorized connect: `myriarch_opamp_connect_rejected_total{reason="unauthorized"}` and
+`myriarch_auth_agent_requests_total{result="unauthorized"}` rise by one for each check. The alert `MyriarchUnauthorizedConnects` of the
+[example rules](../../deploy/examples/production/monitoring/prometheusrule.yaml), which the Helm chart renders with
+`prometheusRule.enabled`, compares the rate of the first over ten minutes with one per second, so a check every ten seconds (0.1 per
+second) stays far below it. A check with a token counts as an authenticated connect and as a use of the token.
+
+**Output.** One line per request that succeeded goes to stdout, with `<url>` standing for the address of the server:
+
+```text
+readyz ok: GET <url>/readyz answered 200
+opamp ok: the upgrade at /v1/opamp was refused with 401 (no token given, as expected)
+opamp ok: the upgrade at /v1/opamp was accepted with 101 (the server accepts the token)
+opamp ok: the upgrade at /v1/opamp was accepted with 101 (no token given; the server takes connections without one)
+```
+
+The first line is followed by one of the other three. The reason for a failure goes to stderr as one line `myriarchd: <request> failed: <reason>`,
+for example `myriarchd: readyz failed: GET <url>/readyz answered 503, want 200: the server is not ready, its log names the cause`.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Healthy: `/readyz` answered 200 and the OpAMP endpoint answered as expected. |
+| 1 | Not healthy: the server answered, but not as expected (`/readyz` is not 200, the upgrade was refused although a token was given, or it was answered with something other than 101 or 401). |
+| 2 | Wrong usage: a flag or value is invalid, or the token file or the CA file cannot be used. No request has been made. |
+| 3 | No answer: the connection was refused or reset, the name was not resolved, the certificate was not trusted, or `--timeout` ran out. |
 
 ## Persistence
 

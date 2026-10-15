@@ -1,6 +1,6 @@
 ---
 title: "myriarch-updater status"
-weight: 220
+weight: 230
 description: "Show the service state (and, with --config, the installed collector version)."
 ---
 

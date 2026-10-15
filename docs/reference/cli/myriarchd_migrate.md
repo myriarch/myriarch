@@ -1,6 +1,6 @@
 ---
 title: "myriarchd migrate"
-weight: 80
+weight: 90
 description: "Apply database migrations and exit."
 ---
 

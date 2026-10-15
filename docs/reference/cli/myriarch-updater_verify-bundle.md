@@ -1,6 +1,6 @@
 ---
 title: "myriarch-updater verify-bundle"
-weight: 250
+weight: 260
 description: "Verify an artifact against a Sigstore bundle offline (diagnostics)."
 ---
 

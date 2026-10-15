@@ -351,8 +351,10 @@ depend on it, and so do operators who write `$(myriarch-updater status)`.
   (`myriarch-sim: ...`). A command can print results on stdout before it fails (`myriarch-updater status` prints the service
   status first and then the error of a missing configuration).
 - **Exit codes:** `myrctl` and the `auth` and `config` commands of `myriarchd` use 2 for a usage error and 1 for invalid input or
-  findings. Every other command uses 0 for success and 1 for an error. The exception is `myriarchd migrate`: it also returns 4 for a
+  findings. Every other command uses 0 for success and 1 for an error. There are two exceptions. `myriarchd migrate` also returns 4 for a
   schema that is incompatible with the binary, and with `--check` 3 for pending migrations (the code 2 stays unused).
+  `myriarchd healthcheck` returns 1 for a server that is not healthy, 2 for a usage error and 3 when the server gives no answer
+  ([Server behaviour](design/opamp-server.md#health-check)).
 
 Write results with `fmt.Fprint*(cmd.OutOrStdout(), ...)`, never with cobra's `cmd.Print`, `cmd.Println` or `cmd.Printf`: those
 write to stderr unless the program called `SetOut`, which is how `myriarch-sim version` printed nothing on stdout in the image

@@ -15,6 +15,8 @@
 //	myriarchd config validate --config F       check a configuration without starting
 //	                                        (--skip-files: do not read referenced files)
 //	myriarchd config print    --config F       print the effective configuration, secrets redacted
+//	myriarchd healthcheck [--url URL]          check a running server: /readyz and the OpAMP endpoint, result by exit code
+//	                                        (the health check of the container image and of "helm test")
 //	myriarchd auth hash-password [--cost N]    bcrypt hash of a password read from stdin
 //	                                        (password file of the bootstrap admin)
 //	myriarchd version
@@ -136,6 +138,7 @@ func newRootCommand() *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout(), version.Get().String())
 		},
 	})
+	root.AddCommand(newHealthcheckCommand())
 	return root
 }
 
