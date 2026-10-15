@@ -1,0 +1,37 @@
+# Blueprint of the host end-to-end test (scripts/host-e2e/linux.sh): a real otelcol-contrib on a CI runner, installed by
+# deploy/scripts/install-linux.sh and managed by the supervisor. It collects nothing from the outside: OTLP on loopback, the
+# debug exporter and the health_check extension on localhost:13133, which the myriarch-updater (collector.healthUrl of its
+# configuration) and the supervisor ask for the health check after a binary swap.
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: host-e2e
+  description: host end-to-end test collector (OTLP on loopback, debug exporter, health_check on localhost:13133)
+spec:
+  config:
+    extensions:
+      health_check:
+        endpoint: localhost:13133
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 127.0.0.1:4317
+          http:
+            endpoint: 127.0.0.1:4318
+    processors:
+      batch:
+        timeout: 5s
+    exporters:
+      debug:
+        verbosity: basic
+    service:
+      extensions: [health_check]
+      telemetry:
+        metrics:
+          level: none      # no Prometheus endpoint (port 8888)
+      pipelines:
+        logs:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug]

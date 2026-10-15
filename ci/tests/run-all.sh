@@ -27,7 +27,9 @@
 #                      of ci/release/smoke-windows.ps1 with pwsh),
 #                      release-workflow-test.sh (shape of .github/workflows/release.yml: frozen identity, job graph, artifact
 #                      protocol, order of the registry writes, tool resolution through TOOLS_BIN; with one-change copies that prove the
-#                      checks bite)
+#                      checks bite),
+#                      host-e2e-test.sh (the harness of the host end-to-end test, scripts/host-e2e: the guard, the scrubber and the
+#                      allow-list of the artifacts, the throwaway CA, the https file server, the GitOps fixture; no host is changed)
 #   installers         installer-verify.sh (bundle verification in install-linux.sh/.ps1), install-tools-test.sh (stamps of
 #                      ci/install-tools.sh), verify-testenv-test.sh, release-guard-test.sh (tag-on-release-branch guard of ci/lib.sh,
 #                      snapshot mode of ci/build-release.sh), windows-hook-test.sh (Windows stages, signing hook and acceptance
@@ -49,7 +51,7 @@ run() { printf '\n===== %s =====\n' "$*"; "$@" || rc=1; }
 mirror_tests="${ROOT}/contrib/enterprise-mirror/tests"
 for g in "${groups[@]}"; do
   case "${g}" in
-    static)            run "${CI_DIR}/check.sh"; run "${CI_DIR}/tests/check-language-test.sh"; run "${CI_DIR}/tests/check-docs-test.sh"; run "${CI_DIR}/tests/image-crane-test.sh"; run "${CI_DIR}/tests/helm-messages-test.sh"; run "${CI_DIR}/tests/license-headers-test.sh"; run "${CI_DIR}/tests/third-party-notices-test.sh"; run "${CI_DIR}/tests/license-allowlist-test.sh"; run "${CI_DIR}/tests/vulncheck-test.sh"; run "${CI_DIR}/tests/secrets-scan-test.sh"; run "${CI_DIR}/tests/dockerignore-test.sh"; run "${CI_DIR}/tests/website-test.sh"; run "${CI_DIR}/tests/check-workflows-test.sh"; run "${CI_DIR}/tests/lint-workflows-test.sh"; run "${CI_DIR}/tests/versions-test.sh"; run "${CI_DIR}/tests/e2e-real-download-test.sh"; run "${CI_DIR}/tests/tool-downloads-test.sh"; run "${CI_DIR}/tests/release-sbom-test.sh"; run "${CI_DIR}/tests/release-scripts-test.sh"; run "${CI_DIR}/tests/release-smoke-test.sh"; run "${CI_DIR}/tests/release-workflow-test.sh" ;;
+    static)            run "${CI_DIR}/check.sh"; run "${CI_DIR}/tests/check-language-test.sh"; run "${CI_DIR}/tests/check-docs-test.sh"; run "${CI_DIR}/tests/image-crane-test.sh"; run "${CI_DIR}/tests/helm-messages-test.sh"; run "${CI_DIR}/tests/license-headers-test.sh"; run "${CI_DIR}/tests/third-party-notices-test.sh"; run "${CI_DIR}/tests/license-allowlist-test.sh"; run "${CI_DIR}/tests/vulncheck-test.sh"; run "${CI_DIR}/tests/secrets-scan-test.sh"; run "${CI_DIR}/tests/dockerignore-test.sh"; run "${CI_DIR}/tests/website-test.sh"; run "${CI_DIR}/tests/check-workflows-test.sh"; run "${CI_DIR}/tests/lint-workflows-test.sh"; run "${CI_DIR}/tests/versions-test.sh"; run "${CI_DIR}/tests/e2e-real-download-test.sh"; run "${CI_DIR}/tests/tool-downloads-test.sh"; run "${CI_DIR}/tests/release-sbom-test.sh"; run "${CI_DIR}/tests/release-scripts-test.sh"; run "${CI_DIR}/tests/release-smoke-test.sh"; run "${CI_DIR}/tests/release-workflow-test.sh"; run "${CI_DIR}/tests/host-e2e-test.sh" ;;
     installers)        run "${CI_DIR}/tests/installer-verify.sh"; run "${CI_DIR}/tests/install-tools-test.sh"; run "${CI_DIR}/tests/verify-testenv-test.sh"; run "${CI_DIR}/tests/release-guard-test.sh"; run "${CI_DIR}/tests/windows-hook-test.sh"; run "${CI_DIR}/tests/download-retry-test.sh" ;;
     enterprise-mirror) run "${mirror_tests}/sign-blob-test.sh"; run "${mirror_tests}/publish-mirror-test.sh"; run "${mirror_tests}/verify-release-test.sh"; run "${mirror_tests}/ca-env-test.sh" ;;
     pwsh)              work="$(mktemp -d)"
