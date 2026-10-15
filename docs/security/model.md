@@ -483,6 +483,30 @@ guidance after each item names what to do.
   and `security-events: write`; a compromised release could request tokens for the identity of that workflow or change
   code-scanning alerts. That identity (`scorecard.yml` on `refs/heads/main`) is not the release identity and is never
   accepted where the release identity is required. The pin is changed only by a reviewed update.
+- **Dependency review of pull requests.** The job `dependency-review` of `.github/workflows/ci.yml`, a member of `ci-ok`
+  ([ADR-0038](../adr/0038-dependency-license-policy.md)), compares the dependency graph of a pull request or merge group with its
+  base and fails when a dependency that the change adds or updates, in the runtime scope, carries a license outside the CNCF
+  allowlist and Apache-2.0 (`ci/license-allowlist.txt`, `.github/dependency-review-config.yml`) or has a known advisory of high or
+  critical severity. The review checks what the dependency graph of GitHub reports for the change with the scope runtime; which
+  ecosystems (Go, npm, Python, GitHub Actions) that covers follows the dependency graph and is to be confirmed by the first runs.
+  Controls: a GitHub-owned action pinned to a commit, the read-only token of the workflow (no `permissions` key,
+  no secret, no comment in the pull request), no request to a third party (the OpenSSF Scorecard lookup of the action is off) and a
+  license expression that is not valid SPDX fails. The job never counts as skipped: on a pull request or merge group its steps run
+  (a skipped job fails `ci-ok`, so a pull request cannot pass without the review), and on every other event a step says that
+  there is nothing to compare. `ci/tests/license-allowlist-test.sh` pins the inputs, the place in `ci-ok` and the
+  equality of the configuration with the license file, and refuses an exception with a version or without a reason. The binding
+  license check of the release builds (`ci/check-release-licenses.sh`) allows fewer licenses (the list `release` of the same file)
+  and is as strict as before for the Go packages it sees (`go-licenses` reads Go packages): a license that only the pull request
+  check allows fails it when a release build links the Go package. Residual risks: the npm packages that the web UI bundle carries
+  into `myriarchd` are compared with no license list when a release is built, the pull request check is the only check against a
+  list that they get (`tslib`, 0BSD, a license that only that check allows, ships in the bundle today; ADR-0038, decision 6); the
+  license data comes from ClearlyDefined through the
+  dependency graph and can be wrong or missing (a missing license is only listed); the check looks at the dependencies a change adds
+  or updates, not at the whole tree; an exception names a package and covers all its later versions; the configuration is read from
+  the checkout of the pull request, so a pull request that changes the policy and a dependency together depends on the review of the
+  policy change (the maintainer owns every file in `.github/CODEOWNERS`); and `pkg:npm/elkjs` (EPL-2.0, a dependency of Mermaid that
+  the website serves) has no exception until the question of its notice is decided, so a change that adds it or changes its resolved
+  version fails the review.
 - **Static analysis in CI: CodeQL, Scorecard and zizmor.** Three controls look at the code and the pipeline, none replaces review:
   - *CodeQL* (`.github/workflows/codeql.yml`) analyses the Go code (built for Linux with and without the `embedui` and `devpg`
     build tags, for Windows with and without them and for macOS, so that the Windows-only code of the updater, which runs as
@@ -524,6 +548,44 @@ guidance after each item names what to do.
     gate (`--strict-collection`) instead of being skipped with a warning. It reads the files of the repository, so it does not
     see settings of the organization or the repository (allowed actions, environments, rulesets), secrets, or what a pinned
     action does at run time.
+- **Known vulnerabilities in CI: govulncheck as a gate and in code scanning.** The gate `vulncheck` (job `compliance` of `ci.yml`,
+  `ci/vulncheck.sh`) fails when the code calls a vulnerable symbol that `ci/vulncheck-allowlist.txt` does not accept (ID, review date,
+  reason). `.github/workflows/vulncheck.yml` (pushes to `main`, a daily run and manual runs, never a pull request) reports the same
+  analysis to code scanning as SARIF, in the categories `govulncheck/source-release`, `govulncheck/source-devpg`,
+  `govulncheck/binaries` (the latest stable release) and `govulncheck/binaries-manual` (the release that a manual run names, so that
+  such a run does not replace the analysis of the latest stable release), and blocks nothing. Controls: the one job that holds
+  `security-events: write` (`upload`, the only line of the workflow in `ci/workflow-permissions.txt`) runs no code of the repository: it
+  checks out without credentials, downloads the reports that the two scan jobs of the same run made and uploads them; the scan jobs hold
+  `contents: read`; the workflow has no secret, and `ci/tests/vulncheck-test.sh` fails when another job gets a write scope, when `upload`
+  runs a script or another action, when a pull request can start the workflow, or when the upload of the latest stable release can run
+  for a run that names a release (or the upload of a named release for a run that names none). The scan of the released binaries
+  (`ci/vulncheck-binaries.sh`) starts only after the keyless signature of `checksums.txt` was verified with the identity of `release.yml`
+  at the tag of the version (`ci/release/verify-blob.sh`, mode bound) and after the SHA-256 of every archive matched that signed list; it
+  reads out only the member that is named like the program, as a regular file of at most 512 MiB, never runs a downloaded program, takes
+  the tag only in the form of a release tag, limits every download (`curl --max-filesize`: 1 MiB for the signed list and its bundle,
+  200 MiB for an archive) and the signed list (64 archives), and fails closed on a download that fails or exceeds its limit, a signature
+  that does not verify, an archive that does not match, a list with too many archives, a missing, irregular or oversized member and a
+  failing tool (`ci/tests/vulncheck-test.sh` covers each; its curl double records and enforces `--max-filesize`, and the test lowers the
+  limit of a program and of the archives through `VULNCHECK_MAX_BINARY` and `VULNCHECK_MAX_ARCHIVES`, which can never raise a limit). The
+  reports leave out a finding only while its allowlist entry is in force: an entry accepts until its review date has passed, and from
+  the day after the finding is reported again, so a lapsed acceptance is visible where the alerts are read (the gate itself only warns
+  and passes).
+  Limits:
+  - govulncheck knows the Go vulnerability database, not other ecosystems (the dependency review and Dependabot cover the advisories of
+    npm, pip and the actions).
+  - The scan of the released binaries works at module level. The release binaries are built with `-s -w`, govulncheck cannot read the
+    symbols of a stripped program, and at its default level it reports every vulnerable symbol of an affected module as called, also in
+    packages that the program does not link. The scan therefore runs with `-scan module`, the merge of the reports
+    (`ci/vulncheck-sarif.py`) refuses a report of another mode or level, and each result is a warning. A result means that a release was
+    built with a module version or a Go version that an advisory affects, not that the binary contains or calls the vulnerable code; the
+    source analysis tells whether the code calls it.
+  - A finding that only the binary report has is closed by a release that is built with the fixed version, or dismissed in code
+    scanning with a reason (GitHub records who and when). It is not added to `ci/vulncheck-allowlist.txt`: that file belongs to the gate,
+    and an entry would also let a later call of the same vulnerability pass the gate.
+  - A binary without Go build information cannot be scanned and fails the run; the results about binaries are anchored at `go.mod`
+    because a binary has no file or line; the binaries are the archives of the latest stable release unless a manual run names another,
+    which is reported in its own category and stays there until the next manual run replaces it;
+    and a run that cannot reach GitHub or the vulnerability database fails visibly and leaves the earlier alerts as they are.
 - **Rules for the release workflow (R13).** `ci/check-workflows.py` requires of
   `.github/workflows/release.yml`: a trigger for pushed `v*` tags only, no caches and no local actions, the literal environment
   `release`, a `guard` job that every other job needs, no Node.js, Go, pnpm, npm, goreleaser, make or similar build tool

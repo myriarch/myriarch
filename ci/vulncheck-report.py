@@ -10,7 +10,8 @@ exit status 1. Findings at module or package level are printed. The allowlist ha
 
     GO-2026-0000 | review 2027-01-31 | reason
 
-Empty lines and lines that start with # are ignored. An entry whose review date has passed is a warning.
+Empty lines and lines that start with # are ignored. An entry whose review date has passed is a warning here, and ci/vulncheck-sarif.py
+stops leaving its finding out of the reports for code scanning (past_review is the one definition of "has passed").
 """
 import datetime
 import json
@@ -46,6 +47,11 @@ def read_allowlist(path):
     return entries
 
 
+def past_review(review, today):
+    """True from the day after the review date of an allowlist entry: on the review date itself the acceptance still holds."""
+    return review < today
+
+
 def main():
     allow = read_allowlist(sys.argv[1])
     called, other = {}, {}
@@ -79,7 +85,7 @@ def main():
         note = allow[key][1] if key in allow else "not in the allowlist"
         print(f"vulncheck: {key} affects the required module {module}; the code does not call it ({note})")
     for key, (review, reason) in sorted(allow.items()):
-        if review < today:
+        if past_review(review, today):
             print(f"vulncheck: WARNING the allowlist entry {key} is past its review date {review}: {reason}", file=sys.stderr)
         if key not in called and key not in other:
             print(f"vulncheck: note: the allowlist entry {key} matches no finding any more; remove it")
@@ -88,4 +94,5 @@ def main():
     print(f"vulncheck: no called vulnerabilities ({len(other)} module-level finding(s))")
 
 
-main()
+if __name__ == "__main__":
+    main()

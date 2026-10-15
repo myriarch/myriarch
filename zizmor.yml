@@ -12,16 +12,17 @@
 # .github/actions/setup/action.yml, each with its reason); a finding in a local action can only be ignored that way.
 rules:
   # `uses: ./...` should be `uses: $/...` for a local action or a reusable workflow (ci.yml uses ./.github/actions/setup and calls
-  # ./.github/workflows/e2e.yml, e2e.yml uses the action too). GitHub supports the second form since 2026-07-30 (GitHub changelog,
+  # ./.github/workflows/e2e.yml, e2e.yml and vulncheck.yml use the action too). GitHub supports the second form since 2026-07-30 (GitHub changelog,
   # "Reference same-repository actions with self-repository syntax"; it cannot load an action that an earlier step cloned at run
   # time), but actionlint (v1.7.12, ci/versions.env) rejects it as an invalid action reference, so the workflows gate would fail,
   # and ci/check-workflows.py (R1, R8, R13) reads the local form. Move to `$/` when actionlint accepts it and rule R1 is extended,
-  # and drop these entries then. The audit only ever reports this one construct, so the entries cover nothing else in the two
+  # and drop these entries then. The audit only ever reports this one construct, so the entries cover nothing else in the three
   # files; every other workflow uses no local action or workflow.
   self-repository:
     ignore:
       - ci.yml
       - e2e.yml
+      - vulncheck.yml
   # The workflow has no concurrency group: rule R12 of ci/check-workflows.py allows only the keys name, on, permissions and jobs at
   # the top of scorecard.yml. That is stricter than the Scorecard API, which checks top-level env, defaults and write permissions
   # but not concurrency (ADR-0033). The workflow runs on a push to main and weekly, writes nothing but the findings, and a second

@@ -13,7 +13,7 @@
 #   carries the reported license. If a build links a package of the prefix that is not in the list, the notices generator
 #   and ci/check-release-licenses.sh fail until the package is reviewed and the entry is changed.
 # - The entry applies only to packages for which go-licenses reports exactly the second field.
-# - The declared license must be on the allowlist of ci/check-release-licenses.sh.
+# - The declared license must be on the list "release" of ci/license-allowlist.txt, the allowlist of ci/check-release-licenses.sh.
 # - The license file is relative to the module root. "-" keeps the file that go-licenses reports (its whole directory
 #   is reproduced in THIRD_PARTY_NOTICES).
 # - An entry that matches no package of the linked builds is stale and makes the notices generator fail.

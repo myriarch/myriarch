@@ -18,6 +18,17 @@
 # repository anyway.
 codeql.yml analyze security-events
 
+# govulncheck in code scanning (.github/workflows/vulncheck.yml). Only the job `upload` holds a write scope: security-events: write, to upload
+# the SARIF reports of the jobs `source` and `binaries` with github/codeql-action/upload-sarif. contents is read-only, and the repository
+# is public, so the job needs no actions: read. The workflow runs on pushes to main, on a schedule and by hand, never for a pull request,
+# and has no secret. `upload` runs no code of the repository and no tool built from it: its steps are a checkout without credentials, the
+# download of the two artifacts that the earlier jobs of the same run made and the upload action. The jobs that do run code (govulncheck,
+# built from ci/tools, over the code of main, and over release files that ci/vulncheck-binaries.sh verified first) hold contents: read.
+# The scope lets the job create alerts of the categories govulncheck/* and close them when a later report no longer has them; it also
+# allows dismissing alerts. It gives no access to contents, packages, releases or deployments. Whoever can start the workflow by hand
+# already has write access to the repository.
+vulncheck.yml upload security-events
+
 # OpenSSF Scorecard (ADR-0033; .github/workflows/scorecard.yml, the shape is fixed by rule R12). The job `analysis` runs on pushes
 # to main and on a schedule, never on a pull request, and has no secret. security-events: write uploads the findings to code
 # scanning; id-token: write gives ossf/scorecard-action the OIDC token that authenticates the published result at the Scorecard API.

@@ -137,7 +137,7 @@ gate_go_test() {
   fi
 }
 
-# Not ci/test-web.sh: it may run corepack or a global npm install, which changes the system.
+# pnpm comes from corepack (the packageManager field of web/package.json); the gate installs no package manager itself.
 gate_web() {
   export CI=true
   tmp="$(mktemp)"   # global on purpose: the EXIT trap runs after the function returned

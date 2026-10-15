@@ -1,0 +1,46 @@
+# The licenses that dependencies may carry: the source of two lists (ADR-0038).
+#
+# Read by ci/check-release-licenses.sh (the "release" entries) and compared by ci/tests/license-allowlist-test.sh with the
+# allow-licenses of .github/dependency-review-config.yml (all entries). Change this file and that configuration together; the
+# test fails when they differ.
+#
+# Format: one entry per line, three non-empty fields separated by "|"; "#" starts a comment line, empty lines are ignored.
+#
+#   <license identifier>|<list>|<note>
+#
+# - The identifier is an SPDX license identifier, as go-licenses reports it for the release builds and as the dependency graph of
+#   GitHub reports it for the dependency review. One entry is the one identifier LicenseRef-scancode-google-patent-license-golang,
+#   the way the dependency graph names the PATENTS file of the Go modules.
+# - The list "release" is the binding allowlist of the release builds: a Go package that a release build links must carry one of these
+#   licenses, or have an entry in ci/license-overrides.txt that was checked by reading its license file (ci/check-release-licenses.sh),
+#   and the license that an override declares must be on this list. That check runs go-licenses and so sees Go packages only. The npm
+#   packages that the web UI bundle carries into myriarchd are compared with no list when a release is built (the generator of the
+#   notices only needs an identifier and a text for each): the dependency review of a pull request is the one check against a list that
+#   they get, with all entries of this file (tslib, 0BSD, a license of the list "review", ships in the bundle today; ADR-0038, decision
+#   6). The dependency review allows the licenses of this list as well.
+# - The list "review" is the rest of the CNCF allowlist (https://github.com/cncf/foundation/blob/main/policies-guidance/allowed-third-party-license-policy.md,
+#   adopted by the CNCF Governing Board on 2018-05-01, read on 2026-10-15). Only the dependency review of a pull request allows these
+#   licenses, as a tripwire. A release build that links such a Go package still fails the release license check, which stays binding for
+#   Go packages, until someone has reviewed the package and either added the license to the list "release" in a decision record or
+#   recorded an exception in ci/license-overrides.txt.
+#
+# Apache-2.0 is the license of the project (ADR-0018). The CNCF policy needs no review for it and does not list it.
+Apache-2.0|release|The license of the project (ADR-0018); the CNCF policy needs no review for it
+BSD-2-Clause|release|CNCF allowlist
+BSD-3-Clause|release|CNCF allowlist
+ISC|release|CNCF allowlist
+MIT|release|CNCF allowlist
+Zlib|release|CNCF allowlist
+0BSD|review|CNCF allowlist
+BSD-2-Clause-FreeBSD|review|CNCF allowlist; the deprecated SPDX identifier that the CNCF policy still names
+MIT-0|review|CNCF allowlist
+OpenSSL|review|CNCF allowlist
+OpenSSL-standalone|review|CNCF allowlist
+PSF-2.0|review|CNCF allowlist
+Python-2.0|review|CNCF allowlist
+Python-2.0.1|review|CNCF allowlist
+PostgreSQL|review|CNCF allowlist
+SSLeay-standalone|review|CNCF allowlist
+UPL-1.0|review|CNCF allowlist
+X11|review|CNCF allowlist
+LicenseRef-scancode-google-patent-license-golang|review|CNCF allowlist: the Google patent license for Golang (the PATENTS file of the golang.org/x modules)
