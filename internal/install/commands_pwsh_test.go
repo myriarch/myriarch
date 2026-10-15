@@ -32,6 +32,9 @@ import (
 // findPwsh finds PowerShell 7: MYRIARCH_PWSH, the pinned tool of the repository (make tools), then the PATH.
 func findPwsh(t *testing.T) string {
 	t.Helper()
+	if os.PathSeparator == '\\' {
+		t.Skip("the stand-ins of the test are for a Unix host with PowerShell 7; the command runs on Windows in the end-to-end test of the hosts")
+	}
 	if p := os.Getenv("MYRIARCH_PWSH"); p != "" {
 		return p
 	}

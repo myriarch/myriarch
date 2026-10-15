@@ -31,9 +31,6 @@ import (
 // bundle writes down how it was called. They check what the command does and what it leaves behind, and that the token
 // is in no argument vector, no environment and no file once the command has ended.
 
-// testToken has the form of an enrollment token and is made up, so that a secret scanner finds nothing in the source.
-var testToken = "myre_" + strings.Repeat("Ab1x", 8)
-
 // shellCase is a host with a bundle, and the means to render the command for that bundle.
 type shellCase struct {
 	t      *testing.T

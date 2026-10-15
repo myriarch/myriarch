@@ -454,7 +454,9 @@ func TestBundlesPrepareTheBundlesOfTheRelease(t *testing.T) {
 		path := filepath.Join(e.dir, artifact.InstallDir, "sha256", it.SHA256)
 		info, err := os.Stat(path)
 		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+		if runtime.GOOS != "windows" { // a Windows file has no mode bits
+			assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+		}
 		assert.Equal(t, e.rel.archives[name], readFile(t, path))
 	}
 	assert.Len(t, e.storeFiles(), 3)
@@ -885,6 +887,9 @@ func TestBundlesHashTheArchiveAgainBeforeEveryDelivery(t *testing.T) {
 }
 
 func TestBundleOpenedForDeliveryCannotBeSwappedUnderTheReader(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not remove a file that is open")
+	}
 	// the file that is returned is the one that was hashed: a replacement of the path afterwards does not change it
 	e := newBundlesEnv(t)
 	e.prepare()
@@ -1090,7 +1095,9 @@ func TestBundlesFromADirectory(t *testing.T) {
 		// the copy in the store is private to the server: it has the mode of the others
 		info, err := os.Stat(filepath.Join(cache, artifact.InstallDir, "sha256", it.SHA256))
 		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+		if runtime.GOOS != "windows" {
+			assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+		}
 	}
 	_, _, err := b.Open("myriarch-updater_0.2.0_linux_amd64.tar.gz")
 	assert.ErrorIs(t, err, ErrBundleNotFound, "only the bundles of the version in use")

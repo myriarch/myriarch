@@ -23,6 +23,9 @@ import (
 
 // ------------------------------------------------------------------- fixtures ----
 
+// testToken has the form of an enrollment token and is made up, so that a secret scanner finds nothing in the source.
+var testToken = "myre_" + strings.Repeat("Ab1x", 8)
+
 // stubBundles is a BundleStore with the state that a test gives it.
 type stubBundles struct {
 	mu       sync.Mutex
