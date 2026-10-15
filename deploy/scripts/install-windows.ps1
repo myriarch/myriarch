@@ -60,10 +60,19 @@
   codes listed below the parameter block here.
 
 .EXAMPLE
-  .\install-windows.ps1 -OpampEndpoint wss://fleet.example.com/v1/opamp -TokenFile C:\Temp\enrollment-token.txt `
+  # In an elevated Windows PowerShell, from the unpacked release archive that you verified (docs/tasks/connect-a-host.md has the
+  # steps: $Base, $Version and $Arch are the variables of its step 2). The token file lies in a setup folder that only SYSTEM and
+  # the administrators can read and is deleted after the run. The script starts in a new PowerShell process with the execution
+  # policy for that process only (never Bypass, never a change of the machine), after Unblock-File on the verified copy. The
+  # verifier is a cosign.exe 3.0.4 or newer in a folder that only administrators can write, or the myriarch-updater.exe of the
+  # verified archive:
+  Unblock-File .\deploy\scripts\install-windows.ps1
+  powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\deploy\scripts\install-windows.ps1 `
+      -OpampEndpoint wss://fleet.example.com/v1/opamp -TokenFile 'C:\Program Files\myriarch-setup\enrollment-token.txt' `
       -SiteType datacenter -SiteId dc-01 -SiteName "Data center 1" -SiteCountry NL -SiteRegion north `
-      -SiteTimezone Europe/Amsterdam -CollectorVersion 0.162.0 -WithUpdater `
-      -UpdaterUrl https://fleet.example.com/downloads/myriarch-updater_windows_amd64.exe -UpdaterSha256 <hex>
+      -SiteTimezone Europe/Amsterdam -CollectorVersion 0.162.0 -Verifier 'C:\Program Files\cosign\cosign.exe' -WithUpdater `
+      -UpdaterUrl "$Base/myriarch-updater_${Version}_windows_${Arch}.exe" -UpdaterChecksumsUrl "$Base/checksums.txt"
+  Remove-Item 'C:\Program Files\myriarch-setup\enrollment-token.txt'
 #>
 [CmdletBinding()]
 param(

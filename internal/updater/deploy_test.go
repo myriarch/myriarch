@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -1317,4 +1318,24 @@ func TestInstallLinuxScriptChecksTheSupervisorRightAfterItInstallsIt(t *testing.
 	iCheck := strings.Index(main, "check_supervisor_binary")
 	iConfig := strings.Index(main, "install_config")
 	require.True(t, iInstall > 0 && iCheck > iInstall && iConfig > iCheck, "install_supervisor_binary, check_supervisor_binary, install_config")
+}
+
+// The example in the header of install-linux.sh shows the start that the guide documents: a root shell, the script from the
+// unpacked archive, the token in a file and a verifier. Every option that it names exists.
+func TestInstallLinuxScriptExampleShowsTheDocumentedStart(t *testing.T) {
+	linux := string(readDeploy(t, "scripts/install-linux.sh"))
+	i := strings.Index(linux, "# Example")
+	require.GreaterOrEqual(t, i, 0)
+	j := strings.Index(linux[i:], "# The templates live under")
+	require.Greater(t, j, 0)
+	example := linux[i : i+j]
+	for _, want := range []string{"root shell", "./deploy/scripts/install-linux.sh", "--token-file ./enrollment-token", "--verifier ", "--collector-version ", "--opamp-endpoint ", "rm -f enrollment-token"} {
+		assert.Contains(t, example, want)
+	}
+	assert.NotRegexp(t, `--token[ \t]`, example, "the token never goes into the argument list")
+	assert.NotContains(t, example, "myre_")
+	assert.NotRegexp(t, `sudo +\./`, example, "sudo from a directory of the user would let that user change what root runs")
+	for _, m := range regexp.MustCompile(`\s(--[a-z][a-z-]+)`).FindAllStringSubmatch(example, -1) {
+		assert.Regexp(t, `(?m)^\s+`+regexp.QuoteMeta(m[1])+`\)`, linux, "the example names %s, which the script does not accept", m[1])
+	}
 }

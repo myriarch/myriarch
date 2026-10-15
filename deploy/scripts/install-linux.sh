@@ -21,12 +21,17 @@
 # pre-populated: persistent_state.yaml holds the instance UID. Golden images must empty it BEFORE
 # cloning (otherwise all clones share one identity).
 #
-# Example:
-#   sudo ./install-linux.sh --opamp-endpoint wss://fleet.example.com/v1/opamp \
-#       --token myre_xxx --site-type datacenter --site-id dc-01 --site-name 'Data center 1' \
+# Example, in a root shell (sudo -i), from the unpacked release archive that you verified, in a directory that only root can
+# write (docs/tasks/connect-a-host.md has the steps: BASE, VERSION and ARCH are the variables of its step 2). The file
+# enrollment-token holds the token, so that it appears in no argument list, and is deleted after the run. The verifier is a
+# cosign 3.0.4 or newer that only root can replace, or the myriarch-updater of the verified archive:
+#   ./deploy/scripts/install-linux.sh --opamp-endpoint wss://fleet.example.com/v1/opamp \
+#       --token-file ./enrollment-token --site-type datacenter --site-id dc-01 --site-name 'Data center 1' \
 #       --site-country NL --site-timezone Europe/Amsterdam --environment prod \
-#       --collector-version 0.162.0 --with-updater \
-#       --updater-url https://fleet.example.com/downloads/myriarch-updater_linux_amd64
+#       --collector-version 0.162.0 --verifier /usr/local/bin/cosign --with-updater \
+#       --updater-url "${BASE}/myriarch-updater_${VERSION}_linux_${ARCH}" \
+#       --updater-checksums-url "${BASE}/checksums.txt"
+#   rm -f enrollment-token
 #
 # The templates live under deploy/ (--templates-dir, default: the directory above this script).
 #

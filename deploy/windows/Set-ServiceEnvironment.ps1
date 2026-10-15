@@ -18,10 +18,20 @@
   end up in process logs and the PowerShell history.
 
 .EXAMPLE
-  .\Set-ServiceEnvironment.ps1 -EnvFile C:\Temp\secrets.env
+  # In an elevated Windows PowerShell, from the unpacked release archive that you verified. The file with NAME=VALUE lines lies in
+  # the setup folder that only SYSTEM and the administrators can read (docs/tasks/connect-a-host.md, step 2) and is deleted
+  # afterwards. The script starts in a new PowerShell process with the execution policy for that process only; -File passes
+  # strings, so use -EnvFile (and -Remove, -List) there, not -Set, which takes a hashtable.
+  Unblock-File .\deploy\windows\Set-ServiceEnvironment.ps1
+  powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\deploy\windows\Set-ServiceEnvironment.ps1 `
+      -EnvFile 'C:\Program Files\myriarch-setup\secrets.env'
+  Remove-Item 'C:\Program Files\myriarch-setup\secrets.env'
+  powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\deploy\windows\Set-ServiceEnvironment.ps1 -List     # shows only the names, never the values
+
+.EXAMPLE
+  # In a session that already runs the script (the value of -Set ends up in the process logs and the history of the session)
   .\Set-ServiceEnvironment.ps1 -Set @{ OTEL_GATEWAY_TOKEN = 'xyz' }
   .\Set-ServiceEnvironment.ps1 -Remove OTEL_GATEWAY_TOKEN
-  .\Set-ServiceEnvironment.ps1 -List     # shows only the names, never the values
 #>
 [CmdletBinding()]
 param(

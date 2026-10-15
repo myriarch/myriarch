@@ -236,6 +236,38 @@ func TestInstallWindowsScriptChecksThePlatformBeforeItDoesAnything(t *testing.T)
 	assert.Contains(t, psFunctionBody(t, script, "Assert-SupervisorPlatform"), "-Arch amd64")
 }
 
+// The usage examples in the headers of the Windows scripts show the start that the guide documents: a new PowerShell process with
+// the execution policy for that process only, the script unblocked after the checks, a token file in the protected setup folder
+// and, for the installer, a verifier. Every parameter that an example names exists.
+func TestWindowsScriptExamplesShowTheDocumentedStart(t *testing.T) {
+	skip := map[string]bool{"NoProfile": true, "ExecutionPolicy": true, "File": true} // parameters of powershell.exe
+	for _, f := range []string{"scripts/install-windows.ps1", "windows/Set-ServiceEnvironment.ps1"} {
+		t.Run(f, func(t *testing.T) {
+			script := readLF(t, deployDir+"/"+f)
+			i := strings.Index(script, ".EXAMPLE")
+			require.GreaterOrEqual(t, i, 0)
+			j := strings.Index(script[i:], "\n#>")
+			require.Greater(t, j, 0)
+			examples := script[i : i+j]
+			assert.Contains(t, examples, "powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\\")
+			assert.Contains(t, examples, "Unblock-File .\\")
+			assert.Contains(t, examples, `'C:\Program Files\myriarch-setup\`, "the files with the secrets lie in the protected setup folder")
+			assert.NotRegexp(t, `(?i)bypass|set-executionpolicy|C:\\Temp|\\Users\\`, psWithoutComments(examples), "the commands of the examples")
+			for _, m := range regexp.MustCompile(`\s-([A-Z][A-Za-z]+)\b`).FindAllStringSubmatch(examples, -1) {
+				if !skip[m[1]] {
+					assert.Regexp(t, `(?m)^\s*\[.+\]\$`+m[1]+`,?\s*$`, script, "%s names -%s, which the script does not have", f, m[1])
+				}
+			}
+			if strings.HasSuffix(f, "install-windows.ps1") {
+				for _, want := range []string{"-TokenFile 'C:\\Program Files\\myriarch-setup\\", "-Verifier ", "-CollectorVersion ", "-OpampEndpoint "} {
+					assert.Contains(t, examples, want)
+				}
+				assert.NotContains(t, examples, "-Token ", "the token never goes into the command line")
+			}
+		})
+	}
+}
+
 // With a checksums.txt the verifier exists before the updater is downloaded, the file is checked through the same
 // function as the upstream bundles, and the removed key options fail before anything else happens.
 func TestInstallWindowsScriptKeylessChecksumsFlow(t *testing.T) {
