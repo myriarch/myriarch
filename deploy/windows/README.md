@@ -1,9 +1,82 @@
 # Windows: services, paths, troubleshooting
 
 Applies to point-of-service devices, workstations and other Windows hosts. Installation uses
-[`../scripts/install-windows.ps1`](../scripts/install-windows.ps1) (PowerShell 5.1+, as Administrator).
+[`../scripts/install-windows.ps1`](../scripts/install-windows.ps1) (PowerShell 5.1+, as Administrator), which you start as
+described in [Start the installer](#start-the-installer).
 Do **not** use the contrib MSI: it installs a service of its own, `otelcol-contrib`, which starts immediately
-with its own config (two collectors on one host).
+with its own config (two collectors on one host). The supervisor MSI is no substitute either
+([Packages of the upstream project](#packages-of-the-upstream-project)).
+
+## Start the installer
+
+The script is part of the zip archive `myriarch-updater_<version>_windows_<arch>.zip` of a release, next to the templates that it
+renders. It reads them from the directory above its own (`deploy\`), so run it from the unpacked archive; a script that was
+copied out of the archive stops with `template_missing`.
+
+1. Create a folder that only SYSTEM and the administrators can read and write, and download the archive,
+   `checksums.txt` and `checksums.txt.sigstore.json` of the release into it. Verify them as
+   [Verify releases](../../docs/security/verify-releases.md) describes, then unpack the archive into its subfolder `package`.
+   The download, the checks (which end at the first failure) and the unpack are in step 2 of
+   [Connect a host](../../docs/tasks/connect-a-host.md#2-download-and-verify-the-installer). The folder gets a DACL of its own.
+   Without it, every local user can read what you put into a new folder below `C:\Program Files`, the token included, and
+   unprivileged accounts can write `C:\Temp`, a user profile and a download folder and replace a checked file before the run.
+
+   ```powershell
+   New-Item -ItemType Directory -Path 'C:\Program Files\myriarch-setup' -Force | Out-Null
+   icacls.exe 'C:\Program Files\myriarch-setup' /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F'
+   if ($LASTEXITCODE -ne 0) { throw 'icacls could not restrict the setup folder' }
+   ```
+
+2. Write the enrollment token into a file in that folder (it inherits the DACL) and delete the file after the run. Open an
+   elevated Windows PowerShell in the unpacked archive, remove the Mark of the Web from the script **only after** the checks of
+   step 1 passed, and start the script in a new PowerShell process with the execution policy for that process only:
+
+   ```powershell
+   Unblock-File .\deploy\scripts\install-windows.ps1
+   powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\deploy\scripts\install-windows.ps1 `
+     -OpampEndpoint wss://fleet.example.com/v1/opamp -TokenFile 'C:\Program Files\myriarch-setup\enrollment-token.txt' `
+     -SiteType edge -SiteId 1001 -CollectorVersion 0.162.0 `
+     -Verifier 'C:\Program Files\cosign\cosign.exe'
+   ```
+
+The inputs that the installer needs are `-OpampEndpoint`, `-TokenFile` (or `-Token`), `-SiteType`, `-SiteId`, `-CollectorVersion`
+(without it the installer stops with `option_missing`) and a Sigstore verifier: `-Verifier` (`cosign.exe` 3.0.4 or newer, or the
+`myriarch-updater.exe` of the verified archive, in a folder that only administrators can write), or `-WithUpdater` with
+`-UpdaterSha256` (without one: `sigstore_verifier_missing`). [Connect a host](../../docs/tasks/connect-a-host.md) lists every
+input and the commands for the download and the verification.
+
+What the start does and what it avoids:
+
+- `-ExecutionPolicy RemoteSigned` on the command line applies to this one PowerShell process (scope *Process*) and is gone
+  when it ends. A Windows client defaults to `Restricted`, which refuses every script, and Windows Server to `RemoteSigned`,
+  which refuses a script that carries the Mark of the Web. `RemoteSigned` runs a script that is local and unblocked, and a file
+  that was not unblocked stays blocked. The Windows files of v0.1.0 are not Authenticode-signed.
+- `-NoProfile` keeps the profile scripts of the account out of the elevated process.
+- Do not use `-ExecutionPolicy Bypass`, which switches the check off, and no `Set-ExecutionPolicy` for the machine or the user,
+  which stays after the installation and weakens the host for everyone.
+- A policy set by Group Policy wins over the parameter. `Get-ExecutionPolicy -List` shows it: a value other than `Undefined` for
+  `MachinePolicy` or `UserPolicy` decides. If that policy forbids the script (`Restricted`, or `AllSigned`, which also refuses
+  unsigned files), the installer cannot start; ask the owner of the policy for an exception.
+- App Control for Business with script enforcement is a separate limit: see "Known limitation" below.
+- `Set-ServiceEnvironment.ps1` is a script too. Start it the same way. `-File` passes strings only, so use `-EnvFile` with it, not
+  `-Set`, which takes a hashtable.
+
+## Packages of the upstream project
+
+Install neither MSI of the upstream project on a host that myriarch manages. The contrib MSI installs a service `otelcol-contrib`,
+which starts at once with its own configuration. The supervisor MSI installs a service `opampsupervisor` with manual start, in a
+folder of its own. myriarch manages neither: the installer creates the service `otelcol-supervisor` and puts the supervisor into
+`C:\Program Files\Myriarch\supervisor\`. The installer of v0.1.0 does not look for the upstream services and does not remove
+them. To see what a host has:
+
+```powershell
+Get-Service otelcol-supervisor, opampsupervisor, otelcol-contrib -ErrorAction SilentlyContinue
+Test-Path 'C:\Program Files\Myriarch\supervisor\opampsupervisor.exe'
+```
+
+If `opampsupervisor` or `otelcol-contrib` is listed, remove the MSI (*Settings*, *Apps*, or `msiexec /x` with the MSI file) and run
+the installer again. If `otelcol-supervisor` is missing or the file does not exist, the installer stopped before it got that far:
+read its last `ERROR [<code>]` line ([Error codes](#error-codes)).
 
 ## Services
 
@@ -46,12 +119,18 @@ verifier from `-Verifier` (in a directory that only Administrators can write), a
 only from a directory that only Administrators can write); the updater that it downloads in the same run is never the
 verifier of the `checksums.txt` that carries its own hash. It creates its working directory with a protected DACL, hashes verified files again after they
 were copied, and copies a `-CaFile` bundle to `C:\ProgramData\Myriarch\config\ca.pem`. Collector secrets (for example
-`OTEL_GATEWAY_TOKEN`) are set with [`Set-ServiceEnvironment.ps1`](Set-ServiceEnvironment.ps1):
+`OTEL_GATEWAY_TOKEN`) are set with [`Set-ServiceEnvironment.ps1`](Set-ServiceEnvironment.ps1). Start it like the installer
+([Start the installer](#start-the-installer)), in the unpacked archive. `-EnvFile` reads one `NAME=VALUE` per line, which keeps
+the secrets out of the process logs and the command history. Write that file into the setup folder of
+[Start the installer](#start-the-installer) (step 1 creates it, and only SYSTEM and the administrators can read it) and delete it
+afterwards:
 
 ```powershell
-.\Set-ServiceEnvironment.ps1 -EnvFile C:\Temp\secrets.env   # NAME=VALUE per line, delete the file afterwards (keeps secrets out of process logs)
-.\Set-ServiceEnvironment.ps1 -Set @{ OTEL_GATEWAY_TOKEN = '...' }
-.\Set-ServiceEnvironment.ps1 -List        # names only
+Unblock-File .\deploy\windows\Set-ServiceEnvironment.ps1        # only after the checks of the download passed
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\deploy\windows\Set-ServiceEnvironment.ps1 `
+  -EnvFile 'C:\Program Files\myriarch-setup\secrets.env'
+Remove-Item 'C:\Program Files\myriarch-setup\secrets.env'
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\deploy\windows\Set-ServiceEnvironment.ps1 -List     # names only
 ```
 
 Crash or power loss during an update: when the service starts, the updater compares the active binary with the
@@ -86,14 +165,16 @@ already installed `myriarch-updater.exe`, or `cosign.exe` from `PATH` if its dir
 administrators. A `cosign.exe` must be version 3.0.4 or newer; an older one stops the installation with
 `sigstore_verifier_outdated`. The updater that is being installed is never used for this, because its hash comes from the
 file that the verifier has to check. A re-run of the installer therefore verifies a new release with the updater that is
-already installed. A host with neither a verifier nor an installed updater verifies `checksums.txt` on an admin host (see
-[Verify releases](../../docs/security/verify-releases.md)) and passes `-UpdaterSha256`; the updater that was checked by
-that hash then also verifies the collector and supervisor bundles.
+already installed. A host with neither a verifier nor an installed updater passes the `myriarch-updater.exe` of the verified
+archive as `-Verifier` (the file in the root of the unpacked zip, not the updater that is being installed), or verifies
+`checksums.txt` on an admin host (see [Verify releases](../../docs/security/verify-releases.md)) and passes `-UpdaterSha256`;
+the updater that was checked by that hash then also verifies the collector and supervisor bundles.
 
 Example (mirror `myriarch-releases` with anonymous read access from the site network):
 
 ```powershell
-.\deploy\scripts\install-windows.ps1 -OpampEndpoint wss://fleet.example.com/v1/opamp -TokenFile C:\Temp\enrollment-token.txt `
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\deploy\scripts\install-windows.ps1 `
+  -OpampEndpoint wss://fleet.example.com/v1/opamp -TokenFile 'C:\Program Files\myriarch-setup\enrollment-token.txt' `
   -SiteType edge -SiteId 1001 -CollectorVersion 0.161.0 -WithUpdater `
   -UpdaterUrl https://mirror.example.com/myriarch-releases/v<ver>/myriarch-updater_<ver>_windows_amd64.exe `
   -UpdaterChecksumsUrl https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt -Verifier 'C:\Program Files\cosign\cosign.exe'
@@ -106,7 +187,8 @@ replacement. For a mirror that re-signs with its own key, see
 [`../../contrib/enterprise-mirror/README.md`](../../contrib/enterprise-mirror/README.md).
 
 Typical errors are `sigstore_verification_failed` (modified `checksums.txt`, another release tag, another workflow or
-repository, or a bundle that does not belong to the file), `sigstore_verifier_missing` and `sigstore_verifier_outdated`,
+repository, a bundle that does not belong to the file, or a host that cannot reach the Sigstore TUF repository
+`tuf-repo-cdn.sigstore.dev` and got no `-TrustedRoot`), `sigstore_verifier_missing` and `sigstore_verifier_outdated`,
 `checksum_entry_count` with 0 lines (`-UpdaterUrl` does not match the release) and `checksum_conflict` (`-UpdaterSha256`
 differs from the verified checksum). The internal CA of a mirror must be in the Windows certificate store (`-CaFile` only
 applies to the connection to myriarchd).
@@ -188,5 +270,8 @@ name) and `group_membership_failed` (the service account could not be added to a
 7. **Update fails**: `INSTALL_FAILED` + text in the UI (agent -> packages). Common causes: URL outside
    `allowedUrlPrefixes`, SHA-256/Sigstore mismatch, the new binary rejects the current `effective.yaml`
    (preflight), health check (supervisor/collector) not green after the restart -> automatic rollback.
-8. **Uninstall**: `install-windows.ps1 -Uninstall` (data under `C:\ProgramData\Myriarch` is kept; `-Purge`
-   also removes identity and queue).
+8. **Uninstall**: `install-windows.ps1 -Uninstall`, started like the installer ([Start the installer](#start-the-installer));
+   data under `C:\ProgramData\Myriarch` is kept, `-Purge` also removes identity and queue.
+9. **No `otelcol-supervisor` service after the installer ran**: it stopped before it created the service. Read its last
+   `ERROR [<code>]` line ([Error codes](#error-codes)), and check whether an MSI of the upstream project is installed
+   ([Packages of the upstream project](#packages-of-the-upstream-project)).

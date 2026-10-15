@@ -1,6 +1,6 @@
 # 0012. Agent access through enrollment tokens
 
-- Status: Accepted
+- Status: Accepted, refined by [ADR-0046](0046-host-installation-from-the-server.md)
 - Date: 2026-10-07
 - Related: [ADR-0025](0025-login-without-enterprise-idp.md), [ADR-0006](0006-version-updates-via-exchangeable-executors.md), [Security model](../security/model.md#agent-authentication)
 

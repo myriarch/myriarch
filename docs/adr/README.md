@@ -29,13 +29,13 @@ Some early operational decisions were not kept as separate records. They are des
 | [0004](0004-server-side-rendering-to-one-content-addressed-config.md) | Server-side rendering to one content-addressed configuration per agent | Accepted |
 | [0005](0005-templating-with-double-brackets-and-typed-evaluation.md) | Templating with double brackets and typed whole-expression evaluation | Accepted |
 | [0006](0006-version-updates-via-exchangeable-executors.md) | Version updates through exchangeable executors | Accepted |
-| [0007](0007-package-offers-in-upstream-format-with-sigstore-bundles.md) | Package offers in the upstream draft format with Sigstore bundles | Accepted |
+| [0007](0007-package-offers-in-upstream-format-with-sigstore-bundles.md) | Package offers in the upstream draft format with Sigstore bundles | Accepted, refined by [0046](0046-host-installation-from-the-server.md) |
 | [0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) | Kubernetes: supervisor and collector in one pod | Accepted, superseded in part by [0024](0024-container-registry-and-image-set.md) (own combined image) and refined by [0026](0026-collector-version-updates-on-kubernetes.md) |
 | [0009](0009-server-sent-events-for-live-ui-updates.md) | Server-sent events for live UI updates | Accepted |
 | [0010](0010-standard-servemux-and-hand-written-dtos.md) | Standard ServeMux and hand-written DTOs with a contract test | Accepted |
 | [0011](0011-no-containers-for-local-development-and-tests.md) | No containers for local development and tests | Accepted |
-| [0012](0012-agent-access-via-enrollment-tokens.md) | Agent access through enrollment tokens | Accepted |
-| [0013](0013-target-version-from-the-ui-within-the-git-frame.md) | Target version from the UI within the Git frame | Accepted |
+| [0012](0012-agent-access-via-enrollment-tokens.md) | Agent access through enrollment tokens | Accepted, refined by [0046](0046-host-installation-from-the-server.md) |
+| [0013](0013-target-version-from-the-ui-within-the-git-frame.md) | Target version from the UI within the Git frame | Accepted, refined by [0046](0046-host-installation-from-the-server.md) |
 | [0014](0014-binary-updates-in-the-pod-via-container-mode.md) | Binary updates in the pod through container mode | Accepted, refined by [0026](0026-collector-version-updates-on-kubernetes.md) |
 | [0015](0015-project-name-and-naming-scheme.md) | Project name "myriarch" and naming scheme | Accepted, superseded in part by [0029](0029-host-under-the-myriarch-organization.md) |
 | [0016](0016-trademark-usage-and-name-protection.md) | Trademark usage and protection of the project name | Accepted |
@@ -59,5 +59,6 @@ Some early operational decisions were not kept as separate records. They are des
 | [0034](0034-authenticode-signing-of-windows-release-artifacts.md) | Authenticode signing of Windows release artifacts by the SignPath Foundation, with a defined fallback and an exception for v0.1.0 | Accepted |
 | [0035](0035-release-workflow-with-keyless-signing-and-verification-before-publication.md) | Release workflow: tag-only, isolated jobs, keyless signing and provenance, verification before an immutable publication, and a frozen signing identity | Accepted |
 | [0036](0036-database-schema-compatibility-and-rollback.md) | Database schema compatibility and rollback | Accepted |
+| [0046](0046-host-installation-from-the-server.md) | Host installation from the server: versions, artifacts and the installer bundle as data, integrity anchored on the host | Accepted |
 
 Two later records change earlier decisions: [ADR-0024](0024-container-registry-and-image-set.md) supersedes the "own combined image" aspect of [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) for published artifacts, and [ADR-0026](0026-collector-version-updates-on-kubernetes.md) refines [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) and [ADR-0014](0014-binary-updates-in-the-pod-via-container-mode.md) (gitops-pr as the Kubernetes default, container mode as an opt-in).
