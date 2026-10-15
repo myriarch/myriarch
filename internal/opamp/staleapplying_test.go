@@ -473,6 +473,237 @@ func TestStaleApplyingOverHTTPPolling(t *testing.T) {
 	})
 }
 
+// ---------------------------------------------------------------------------
+// HTTP polls of one agent spread over the replicas (several replicas behind a
+// load balancer without session affinity). Each replica has its own pooled
+// session, and none of them hears of a status that another one stores.
+
+// staleHTTPAgent is an agent that polls over HTTP. The test names the replica
+// that gets each poll.
+type staleHTTPAgent struct {
+	t   *testing.T
+	id  domain.AgentID
+	seq uint64
+}
+
+func (h *staleHTTPAgent) poll(r *rig, m *protobufs.AgentToServer) *protobufs.ServerToAgent {
+	h.t.Helper()
+	m.InstanceUid, m.SequenceNum = h.id[:], h.seq
+	h.seq++
+	return r.httpPoll(h.t, m, "")
+}
+
+// beat is a poll without content, as the heartbeat of a supervisor.
+func (h *staleHTTPAgent) beat(r *rig) *protobufs.ServerToAgent {
+	h.t.Helper()
+	return h.poll(r, &protobufs.AgentToServer{})
+}
+
+// report is a poll that reports a remote config status.
+func (h *staleHTTPAgent) report(r *rig, status protobufs.RemoteConfigStatuses, hash []byte) *protobufs.ServerToAgent {
+	h.t.Helper()
+	return h.poll(r, statusMsg(hash, status, ""))
+}
+
+// staleHTTPRegister registers an agent on r. The pooled session of r offers the
+// bootstrap config, which is the first desired config.
+func staleHTTPRegister(t *testing.T, r *rig, host string) (*staleHTTPAgent, []byte) {
+	t.Helper()
+	h := &staleHTTPAgent{t: t, id: newAgentID()}
+	first := firstMessage(h.id, descOpts{host: host, version: "0.162.0"})
+	first.Capabilities = capsCollector
+	hash, _ := remoteBody(t, h.poll(r, first))
+	return h, hash
+}
+
+func staleNoOffer(t *testing.T, m *protobufs.ServerToAgent, what string) {
+	t.Helper()
+	if m.RemoteConfig != nil {
+		t.Fatalf("%s: unexpected offer %x", what, m.RemoteConfig.ConfigHash)
+	}
+}
+
+// staleRollbackRoundTrip moves the desired config of the agent to a second
+// config and back to the first, as a rollback or a revert in Git does. Replica
+// a is the only one that polls meanwhile: it offers each config and stores what
+// the agent reports. The clock moves past the cache lifetime of the pooled
+// sessions (viewRefreshAfter), so that a session reads the new desired state
+// with its next poll. It returns after a has offered the first config again.
+func staleRollbackRoundTrip(t *testing.T, clk *staleClock, a *rig, ag *staleHTTPAgent, first []byte) {
+	t.Helper()
+	rendered, err := a.db.Configs().GetRendered(context.Background(), domain.Hash(first))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := newDesired(t, a, ag.id, "service:\n  pipelines: {}\n# v2\n")
+	clk.Advance(6 * time.Minute)
+	if got, _ := remoteBody(t, ag.beat(a)); string(got) != string(second) {
+		t.Fatalf("replica a offers the second config, got %x", got)
+	}
+	ag.report(a, rcsApplying, second)
+	ag.report(a, rcsApplied, second)
+	newDesired(t, a, ag.id, string(rendered.Body))
+	clk.Advance(6 * time.Minute)
+	if got, _ := remoteBody(t, ag.beat(a)); string(got) != string(first) {
+		t.Fatalf("replica a offers the first config again, got %x", got)
+	}
+}
+
+// The window belongs to an episode. A pooled session that did not see the status
+// that ended an earlier episode (it reached another replica) must not reuse its
+// old window when the agent applies the same hash again, as after a rollback: it
+// would offer the config at once, while the supervisor has only just started to
+// apply it.
+func TestStaleApplyingPollsSpreadOverReplicasStartAWindowPerEpisode(t *testing.T) {
+	clk := newStaleClock()
+	pool := pgtest.NewPool(t)
+	a := staleRig(t, clk, staleAfter, rigOpts{pool: pool, replica: "replica-a"})
+	b := staleRig(t, clk, staleAfter, rigOpts{pool: pool, replica: "replica-b"})
+	ag, h1 := staleHTTPRegister(t, a, "http-agent")
+
+	// first episode: a offered h1, the report that the agent applies it reached
+	// b, which opened a window, and the report that it is done reached a
+	clk.Advance(5 * time.Second)
+	staleNoOffer(t, ag.report(b, rcsApplying, h1), "first episode, b")
+	clk.Advance(5 * time.Second)
+	staleNoOffer(t, ag.report(a, rcsApplied, h1), "first episode, a")
+
+	staleRollbackRoundTrip(t, clk, a, ag, h1)
+
+	// second episode of h1: now the report reaches b, long after its window opened
+	staleNoOffer(t, ag.report(b, rcsApplying, h1), "second episode, b, at once")
+	if staleReoffers(t, b) != 0 {
+		t.Fatal("b offered at once")
+	}
+	clk.Advance(staleAfter - time.Nanosecond)
+	staleNoOffer(t, ag.beat(b), "second episode, b, one nanosecond below the threshold")
+
+	// the window of the second episode starts with its report
+	clk.Advance(time.Nanosecond)
+	if got, _ := remoteBody(t, ag.beat(b)); string(got) != string(h1) {
+		t.Fatal("b offers h1 once the status stayed APPLYING for the threshold")
+	}
+	if staleReoffers(t, b) != 1 || staleReoffers(t, a) != 0 {
+		t.Fatalf("re-offers: replica b %v, replica a %v", staleReoffers(t, b), staleReoffers(t, a))
+	}
+	staleNoOffer(t, ag.beat(b), "once per session")
+}
+
+// The cache of a pooled session is not told when another replica stores a
+// status. A window that is open on the cached APPLYING must not lead to an
+// offer when the stored status is APPLIED.
+func TestStaleApplyingOfAPooledSessionRestsOnTheStoredStatus(t *testing.T) {
+	clk := newStaleClock()
+	pool := pgtest.NewPool(t)
+	a := staleRig(t, clk, staleAfter, rigOpts{pool: pool, replica: "replica-a"})
+	b := staleRig(t, clk, staleAfter, rigOpts{pool: pool, replica: "replica-b"})
+	ag, h1 := staleHTTPRegister(t, a, "http-agent")
+
+	clk.Advance(5 * time.Second)
+	staleNoOffer(t, ag.report(b, rcsApplying, h1), "APPLYING reaches b")
+	clk.Advance(5 * time.Second)
+	staleNoOffer(t, ag.report(a, rcsApplied, h1), "APPLIED reaches a")
+	eventually(t, "in sync", 5*time.Second, func() bool { return a.agent(ag.id).ConfigSyncState() == domain.ConfigSyncInSync })
+
+	// b still caches APPLYING, and its window is older than the threshold
+	for _, d := range []time.Duration{staleAfter, time.Minute, time.Minute, time.Minute} {
+		clk.Advance(d)
+		staleNoOffer(t, ag.beat(b), "b, "+d.String()+" later")
+		staleNoOffer(t, ag.beat(a), "a, "+d.String()+" later")
+	}
+	if staleReoffers(t, a) != 0 || staleReoffers(t, b) != 0 {
+		t.Fatalf("re-offers: replica a %v, replica b %v", staleReoffers(t, a), staleReoffers(t, b))
+	}
+	staleOfferEvents(t, a, ag.id, 1) // the ordinary offer of the registration, nothing else
+}
+
+// A session that learns the status by a read (the cache of a pooled session is
+// refreshed with the next poll after a desired-state event, and every five
+// minutes) must not start from an older window: another replica stored the new
+// APPLYING after the session opened its window for an earlier episode of the
+// same hash. The window cannot be older than the stored status.
+func TestStaleApplyingWindowDoesNotPredateTheStoredStatus(t *testing.T) {
+	clk := newStaleClock()
+	pool := pgtest.NewPool(t)
+	a := staleRig(t, clk, staleAfter, rigOpts{pool: pool, replica: "replica-a"})
+	b := staleRig(t, clk, staleAfter, rigOpts{pool: pool, replica: "replica-b"})
+	ag, h1 := staleHTTPRegister(t, a, "http-agent")
+
+	clk.Advance(5 * time.Second)
+	staleNoOffer(t, ag.report(b, rcsApplying, h1), "first episode, b") // b opens a window it never sees end
+	clk.Advance(5 * time.Second)
+	staleNoOffer(t, ag.report(a, rcsApplied, h1), "first episode, a")
+	staleRollbackRoundTrip(t, clk, a, ag, h1)
+
+	// the second episode of h1 is reported to a, b reads it with its next poll
+	staleNoOffer(t, ag.report(a, rcsApplying, h1), "second episode, a")
+	clk.Advance(10 * time.Second)
+	staleNoOffer(t, ag.beat(b), "b reads a status that is 10 seconds old")
+	clk.Advance(staleAfter - 10*time.Second - time.Nanosecond)
+	staleNoOffer(t, ag.beat(b), "one nanosecond below the threshold counted from the stored status")
+	clk.Advance(time.Nanosecond)
+	if got, _ := remoteBody(t, ag.beat(b)); string(got) != string(h1) {
+		t.Fatal("b offers h1 once the stored status has been APPLYING for the threshold")
+	}
+	if staleReoffers(t, b) != 1 || staleReoffers(t, a) != 0 {
+		t.Fatalf("re-offers: replica b %v, replica a %v", staleReoffers(t, b), staleReoffers(t, a))
+	}
+}
+
+// Heartbeats of a pooled session are answered from its cache, also while a
+// window is open. The agent is read once when an offer is due.
+func TestStaleApplyingPooledSessionReadsTheAgentOnlyWhenAnOfferIsDue(t *testing.T) {
+	base := pgtest.NewPool(t)
+	cfg := base.Config().Copy()
+	rec := &queryRecorder{}
+	cfg.ConnConfig.Tracer = rec
+	traced, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(traced.Close)
+	clk := newStaleClock()
+	a := staleRig(t, clk, staleAfter, rigOpts{pool: base, replica: "replica-a"})
+	b := staleRig(t, clk, staleAfter, rigOpts{pool: traced, replica: "replica-b"})
+	ag, h1 := staleHTTPRegister(t, a, "http-agent")
+	clk.Advance(5 * time.Second)
+	staleNoOffer(t, ag.report(b, rcsApplying, h1), "APPLYING reaches b")
+	time.Sleep(1500 * time.Millisecond) // let the asynchronous writers settle
+	rec.reset()
+
+	agentReads := func() int {
+		n := 0
+		for _, q := range rec.relevant() {
+			if strings.Contains(q, "FROM agents a") {
+				n++
+			}
+		}
+		return n
+	}
+	for i := 0; i < 20; i++ {
+		clk.Advance(4 * time.Second)
+		staleNoOffer(t, ag.beat(b), fmt.Sprintf("heartbeat %d", i))
+	}
+	if n := agentReads(); n != 0 {
+		t.Fatalf("%d heartbeats below the threshold read the agent %d times, want 0", 20, n)
+	}
+
+	clk.Advance(10 * time.Second) // 90 seconds since the report
+	if got, _ := remoteBody(t, ag.beat(b)); string(got) != string(h1) {
+		t.Fatal("the offer is due")
+	}
+	if n := agentReads(); n != 1 {
+		t.Fatalf("the due offer read the agent %d times, want 1", n)
+	}
+	for i := 0; i < 5; i++ {
+		clk.Advance(4 * time.Second)
+		staleNoOffer(t, ag.beat(b), fmt.Sprintf("heartbeat %d after the offer", i))
+	}
+	if n := agentReads(); n != 1 {
+		t.Fatalf("the heartbeats after the offer read the agent: %d reads in total, want 1", n)
+	}
+}
+
 // A flapping agent is not offered the same config on every connection: a
 // connection has to see the unchanged status for the whole threshold. Agents
 // that stall together each get exactly one offer.
