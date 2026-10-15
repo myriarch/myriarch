@@ -12,6 +12,18 @@
 # go.sum (go_tool_stamp in ci/lib.sh) prevents rebuilds from the cache: a changed module file rebuilds the tool, also when an
 # older tool cache was restored. Debian packages (apt:<package>) come from the package sources configured in the image or the
 # environment (apt honors http_proxy/https_proxy).
+#
+# Retries: a short outage of a download host or of the module proxy must not fail a job. A download that fails transiently is
+# retried, a failure that is not transient (a 404, a certificate error, a checksum that differs from the pin) ends the script at
+# once, and every check after the download is unchanged.
+#   - A release download (kubectl, shellcheck, pwsh, hugo, sass, lychee, syft, zizmor, osslsigncode): a timeout, a failed connection
+#     or HTTP 408, 429, 500, 502, 503 or 504 is retried with pauses of 1, 2, 4, ... s; no attempt starts later than 120 s after the
+#     first one. This is the policy of deploy/scripts/install-linux.sh and ci/release/smoke.sh.
+#   - A Go tool (kind, helm and the others, built from ci/tools/<tool>): `go build` fetches the modules, and it is tried again, up
+#     to 4 attempts with pauses of 5, 10 and 20 s, only when its output names a network error (timeout, reset connection, DNS, a 5xx
+#     or 429 answer of the proxy). A checksum mismatch, a missing version or an error of the compiler is never retried.
+#   TOOLS_RETRY_SECONDS (window of the downloads, default 120) and TOOLS_RETRY_PAUSE (first pause: 1 s for downloads, 5 s for builds)
+#   exist for the tests.
 set -euo pipefail
 # shellcheck source=ci/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -19,6 +31,70 @@ load_versions
 
 [ "$#" -gt 0 ] || die "usage: ci/install-tools.sh <tool>... (goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee actionlint syft gh go-winres zizmor osslsigncode apt:<package>)"
 mkdir -p "${TOOLS_BIN}"
+
+# ---- Retries (see the header) ------------------------------------------------------------------------------------------
+# curl_transient CURL-EXIT STATUS: succeeds when a failed curl attempt is worth another one (the classification of the installers:
+# a timeout, a failed connection, or the HTTP status 408, 429, 500, 502, 503 or 504).
+curl_transient() {
+  case "$1" in
+    5 | 6 | 7 | 16 | 18 | 28 | 52 | 55 | 92) return 0 ;;
+    22 | 56) case "$2" in 408 | 429 | 500 | 502 | 503 | 504) return 0 ;; 000) [ "$1" = 56 ] && return 0 ;; esac ;;
+  esac
+  return 1
+}
+
+# fetch_file TOOL URL FILE: curl -fsSL into FILE with the retry policy of the downloads; dies with the reason when the download fails
+# for good. The checks of the callers (SHA-256 against the pin) come after it and are not retried.
+fetch_file() {
+  local tool="$1" url="$2" file="$3" cargs=() a
+  local attempt=0 pause="${TOOLS_RETRY_PAUSE:-1}" window="${TOOLS_RETRY_SECONDS:-120}" start="${SECONDS}"
+  local rc status elapsed reason noun
+  while IFS= read -r a; do if [ -n "${a}" ]; then cargs+=("${a}"); fi; done < <(curl_ca_args)
+  while :; do
+    attempt=$((attempt + 1))
+    noun=attempts
+    [ "${attempt}" = 1 ] && noun=attempt
+    rc=0
+    status="$(curl -fsSL ${cargs[@]+"${cargs[@]}"} --write-out '%{http_code}' -o "${file}" "${url}")" || rc=$?
+    [ "${rc}" = 0 ] && return 0
+    status="${status:-000}"
+    if [ "${rc}" = 22 ]; then reason="HTTP ${status}"; else reason="curl exit code ${rc}"; fi
+    curl_transient "${rc}" "${status}" || die "${tool}: download of ${url} failed (${reason}; not retried, ${attempt} ${noun}; HTTPS_PROXY set?)"
+    elapsed=$((SECONDS - start))
+    [ "${elapsed}" -lt "${window}" ] || die "${tool}: download of ${url} failed (${reason}; retry window of ${window} s used up, ${attempt} ${noun})"
+    # the last pause ends exactly at the end of the window
+    [ $((elapsed + pause)) -le "${window}" ] || pause=$((window - elapsed))
+    warn "${tool}: attempt ${attempt} for ${url} failed (${reason}), next attempt in ${pause} s"
+    sleep "${pause}"
+    pause=$((pause * 2))
+  done
+}
+
+# go_output_transient FILE: succeeds when the output of a failed `go build` names a network error of the module download. Anything
+# that looks like a verification problem is never transient, whatever else the output says.
+go_output_transient() {
+  if grep -Eqi 'SECURITY ERROR|checksum mismatch|mismatch' "$1"; then return 1; fi
+  grep -Eqi 'i/o timeout|TLS handshake timeout|connection reset by peer|connection refused|no such host|temporary failure in name resolution|server misbehaving|unexpected EOF|context deadline exceeded|Client\.Timeout exceeded|request canceled|(429|500|502|503|504) (Too Many Requests|Internal Server Error|Bad Gateway|Service Unavailable|Gateway Time-?out)' "$1"
+}
+
+# go_build_retry DIR TOOLCHAIN OUT MODULE [go build flags...]: `go build` in the module directory of a tool, tried again (4 attempts)
+# when it fails with a network error. Returns the status of the last attempt.
+go_build_retry() {
+  local dir="$1" toolchain="$2" out="$3" module="$4" attempt=0 pause="${TOOLS_RETRY_PAUSE:-5}" rc buildlog
+  shift 4
+  buildlog="$(mktemp)"
+  while :; do
+    attempt=$((attempt + 1))
+    rc=0
+    ( cd "${dir}" && GOBIN="" GOFLAGS=-mod=readonly GOTOOLCHAIN="${toolchain}" CGO_ENABLED=0 go build "$@" -o "${out}" "${module}" ) > "${buildlog}" 2>&1 || rc=$?
+    cat "${buildlog}" >&2
+    if [ "${rc}" = 0 ]; then rm -f "${buildlog}"; return 0; fi
+    if [ "${attempt}" -ge 4 ] || ! go_output_transient "${buildlog}"; then rm -f "${buildlog}"; return "${rc}"; fi
+    warn "go build ${module} failed with a network error (attempt ${attempt} of 4), next attempt in ${pause} s"
+    sleep "${pause}"
+    pause=$((pause * 2))
+  done
+}
 
 # Built from ci/tools/<tool>/ (a separate Go module per tool with go.mod AND go.sum in the repository): the hashes of all
 # dependencies are therefore in the repository and enforced with -mod=readonly - even if GOPROXY is a proxy and
@@ -45,7 +121,7 @@ go_install() { # tool module-with-cmd version-var binary-name [no-trimpath] [mai
   fi
   need_cmd go
   log "building ${tool} ${version} (ci/tools/${tool}, go build -mod=readonly)"
-  ( cd "${CI_DIR}/tools/${tool}" && GOBIN="" GOFLAGS=-mod=readonly GOTOOLCHAIN="${toolchain}" CGO_ENABLED=0 go build ${trim} -o "${TOOLS_BIN}/${bin}" "${module}" ) \
+  go_build_retry "${CI_DIR}/tools/${tool}" "${toolchain}" "${TOOLS_BIN}/${bin}" "${module}" ${trim:+"${trim}"} \
     || die "go build ${module} (ci/tools/${tool}) failed (GOPROXY/HTTPS_PROXY set? go.sum up to date?)"
   rm -f "${TOOLS_BIN}/.stamp-${tool}-"*
   : > "${stamp}"
@@ -126,12 +202,11 @@ release_install_shellcheck() {
   need_cmd curl tar
   local asset="shellcheck-${version}.${os}.${asset_arch}.tar.gz"
   local url="${SHELLCHECK_BASE_URL:-https://github.com/koalaman/shellcheck/releases/download}/${version}/${asset}"
-  local tmp cargs=() a got
+  local tmp got
   tmp="$(mktemp -d)"
   trap 'rm -rf "${tmp}"' EXIT   # die exits the script, so the temp dir (and a file that failed the check) is removed there
-  while IFS= read -r a; do if [ -n "${a}" ]; then cargs+=("${a}"); fi; done < <(curl_ca_args)
   log "downloading shellcheck ${version} (${os}/${asset_arch})"
-  curl -fsSL ${cargs[@]+"${cargs[@]}"} -o "${tmp}/${asset}" "${url}" || die "shellcheck: download of ${url} failed (HTTPS_PROXY set?)"
+  fetch_file shellcheck "${url}" "${tmp}/${asset}"
   got="$(sha256_of "${tmp}/${asset}")"
   [ "${got}" = "${want}" ] || die "shellcheck: SHA-256 mismatch for ${asset} (expected ${want}, got ${got})"
   tar -xzf "${tmp}/${asset}" -C "${tmp}" "shellcheck-${version}/shellcheck" || die "shellcheck: cannot extract ${asset}"
@@ -176,12 +251,11 @@ release_install_pwsh() {
   need_cmd curl tar
   local asset="powershell-${version}-${asset_os}-${asset_arch}.tar.gz"
   local url="${POWERSHELL_BASE_URL:-https://github.com/PowerShell/PowerShell/releases/download}/v${version}/${asset}"
-  local tmp cargs=() a got
+  local tmp got
   tmp="$(mktemp -d)"
   trap 'rm -rf "${tmp}"' EXIT
-  while IFS= read -r a; do if [ -n "${a}" ]; then cargs+=("${a}"); fi; done < <(curl_ca_args)
   log "downloading pwsh ${version} (${os}/${asset_arch})"
-  curl -fsSL ${cargs[@]+"${cargs[@]}"} -o "${tmp}/${asset}" "${url}" || die "pwsh: download of ${url} failed (HTTPS_PROXY set?)"
+  fetch_file pwsh "${url}" "${tmp}/${asset}"
   got="$(sha256_of "${tmp}/${asset}")"
   [ "${got}" = "${want}" ] || die "pwsh: SHA-256 mismatch for ${asset} (expected ${want}, got ${got})"
   rm -rf "${base}"
@@ -226,12 +300,11 @@ release_install_kubectl() {
   printf '%s' "${want}" | grep -Eq '^[0-9a-f]{64}$' || die "kubectl: ${key} in ci/versions.env is missing or not a SHA-256"
   need_cmd curl
   local url="${KUBECTL_BASE_URL:-https://dl.k8s.io/release}/${version}/bin/${os}/${arch}/kubectl"
-  local tmp cargs=() a got
+  local tmp got
   tmp="$(mktemp -d)"
   trap 'rm -rf "${tmp}"' EXIT
-  while IFS= read -r a; do if [ -n "${a}" ]; then cargs+=("${a}"); fi; done < <(curl_ca_args)
   log "downloading kubectl ${version} (${os}/${arch})"
-  curl -fsSL ${cargs[@]+"${cargs[@]}"} -o "${tmp}/kubectl" "${url}" || die "kubectl: download of ${url} failed (HTTPS_PROXY set?)"
+  fetch_file kubectl "${url}" "${tmp}/kubectl"
   got="$(sha256_of "${tmp}/kubectl")"
   [ "${got}" = "${want}" ] || die "kubectl: SHA-256 mismatch for ${url} (expected ${want}, got ${got})"
   install -m 755 "${tmp}/kubectl" "${bin}"
@@ -254,9 +327,8 @@ website_pin() { # tool KEY-PREFIX os-var arch-var - sets PIN_SHA from the file o
   printf '%s' "${PIN_SHA}" | grep -Eq '^[0-9a-f]{64}$' || die "${tool}: ${key} in ci/versions.env is missing or not a SHA-256"
 }
 website_download() { # tool url file sha - downloads and verifies
-  local tool="$1" url="$2" file="$3" want="$4" cargs=() a got
-  while IFS= read -r a; do if [ -n "${a}" ]; then cargs+=("${a}"); fi; done < <(curl_ca_args)
-  curl -fsSL ${cargs[@]+"${cargs[@]}"} -o "${file}" "${url}" || die "${tool}: download of ${url} failed (HTTPS_PROXY set?)"
+  local tool="$1" url="$2" file="$3" want="$4" got
+  fetch_file "${tool}" "${url}" "${file}"
   got="$(sha256_of "${file}")"
   [ "${got}" = "${want}" ] || die "${tool}: SHA-256 mismatch for $(basename "${file}") (expected ${want}, got ${got})"
 }
