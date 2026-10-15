@@ -1,6 +1,6 @@
 # 0002. PostgreSQL for state, event bus and leader election
 
-- Status: Accepted
+- Status: Accepted, refined by [ADR-0036](0036-database-schema-compatibility-and-rollback.md)
 - Date: 2026-10-07
 - Related: [ADR-0001](0001-single-server-binary.md), [ADR-0011](0011-no-containers-for-local-development-and-tests.md)
 

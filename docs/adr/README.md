@@ -24,7 +24,7 @@ Some early operational decisions were not kept as separate records. They are des
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-single-server-binary.md) | A single server binary carries all server functions | Accepted |
-| [0002](0002-postgresql-for-state-event-bus-and-leader-election.md) | PostgreSQL for state, event bus and leader election | Accepted |
+| [0002](0002-postgresql-for-state-event-bus-and-leader-election.md) | PostgreSQL for state, event bus and leader election | Accepted, refined by [0036](0036-database-schema-compatibility-and-rollback.md) |
 | [0003](0003-gitops-as-source-of-truth.md) | GitOps is the source of truth; the UI operates within the Git frame | Accepted |
 | [0004](0004-server-side-rendering-to-one-content-addressed-config.md) | Server-side rendering to one content-addressed configuration per agent | Accepted |
 | [0005](0005-templating-with-double-brackets-and-typed-evaluation.md) | Templating with double brackets and typed whole-expression evaluation | Accepted |
@@ -58,5 +58,6 @@ Some early operational decisions were not kept as separate records. They are des
 | [0033](0033-openssf-scorecard-as-the-only-third-party-action.md) | OpenSSF Scorecard as the only third-party action, and policy rules for the Scorecard and release workflows | Accepted |
 | [0034](0034-authenticode-signing-of-windows-release-artifacts.md) | Authenticode signing of Windows release artifacts by the SignPath Foundation, with a defined fallback and an exception for v0.1.0 | Accepted |
 | [0035](0035-release-workflow-with-keyless-signing-and-verification-before-publication.md) | Release workflow: tag-only, isolated jobs, keyless signing and provenance, verification before an immutable publication, and a frozen signing identity | Accepted |
+| [0036](0036-database-schema-compatibility-and-rollback.md) | Database schema compatibility and rollback | Accepted |
 
 Two later records change earlier decisions: [ADR-0024](0024-container-registry-and-image-set.md) supersedes the "own combined image" aspect of [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) for published artifacts, and [ADR-0026](0026-collector-version-updates-on-kubernetes.md) refines [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) and [ADR-0014](0014-binary-updates-in-the-pod-via-container-mode.md) (gitops-pr as the Kubernetes default, container mode as an opt-in).
