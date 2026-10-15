@@ -3,8 +3,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Builds and pushes the MIRROR image WITHOUT a container runtime (crane): busybox httpd plus the verified release files of
-# the OpenTelemetry Collector (contrib) in the layout of the GitHub releases. It is an in-cluster mirror for myriarchd's artifact
-# cache (artifacts.sourceBaseUrl, e.g. http://<mirror-service>:8080) for clusters without egress to GitHub.
+# the OpenTelemetry Collector (contrib, optionally the OpAMP Supervisor) in the layout of the GitHub releases. It is an in-cluster
+# mirror for myriarchd's artifact cache (artifacts.sourceBaseUrl, e.g. http://<mirror-service>:8080) for clusters without egress to
+# GitHub. The same directory is a mirror for the installers (--release-base-url) and for the host end-to-end test
+# (scripts/host-e2e, docs/development.md).
 #
 #   IMAGE_REPO=registry.example.com/<org>/myriarch-mirror scripts/build-mirror-image-crane.sh
 #                                                                build + push  <IMAGE_REPO>:contrib-0.161.0-0.162.0
@@ -15,22 +17,29 @@
 #                                                                no IMAGE_REPO needed): serve it with
 #                                                                `python3 -m http.server --directory <OUT_DIR>/srv/mirror`
 #   VERSIONS="0.161.0 0.162.0" PLATFORMS="darwin/arm64" OUT_DIR=... scripts/build-mirror-image-crane.sh      local end-to-end test on a Mac
+#   COMPONENTS="contrib supervisor" OUT_DIR=... scripts/build-mirror-image-crane.sh                         also the supervisor binaries
 #   IMAGE_REPO=localhost:5000/myriarch-mirror scripts/build-mirror-image-crane.sh                          local registry (crane registry serve)
 #   IMAGE_REPO=<registry>/<path> scripts/build-mirror-image-crane.sh login USER
 #                                                                one-time registry login (same as scripts/build-image-crane.sh login)
 #
 # What it does
-#   1. for every VERSION x PLATFORM: downloads  <SOURCE_BASE>/v<ver>/otelcol-contrib_<ver>_<os>_<arch>.tar.gz  and its  .sha256  and
-#      .sigstore.json  (https, curl; cached in DOWNLOAD_CACHE and checked again on every run);
+#   1. for every VERSION x PLATFORM x COMPONENT: downloads the asset and its  .sha256  and  .sigstore.json  (https, curl; cached in
+#      DOWNLOAD_CACHE and checked again on every run). The layout is that of the upstream releases:
+#        contrib      <SOURCE_BASE>/v<ver>/otelcol-contrib_<ver>_<os>_<arch>.tar.gz
+#        supervisor   <SOURCE_BASE>/cmd/opampsupervisor/v<ver>/opampsupervisor_<ver>_<os>_<arch>[.exe]   (a bare binary)
+#      Upstream publishes the supervisor for linux/amd64, linux/arm64, linux/ppc64le, darwin/amd64, darwin/arm64 and windows/amd64
+#      only: for another platform the supervisor is skipped with a warning and the contrib archive is still mirrored;
 #   2. checks every file BEFORE it is packed, and aborts on the first problem:
-#        - SHA-256 of the archive against the published .sha256,
+#        - SHA-256 of the file against the published .sha256,
 #        - the Sigstore bundle OFFLINE with `myriarch-updater verify-bundle --trusted-root` (same code, same identity policy as myriarchd and the
-#          updater: release workflow of open-telemetry/opentelemetry-collector-releases for exactly the tag v<ver>);
+#          updater: the release workflow of open-telemetry/opentelemetry-collector-releases for exactly the tag v<ver>: base-release.yaml
+#          for the contrib archive, base-binary-release.yaml for the supervisor);
 #   3. gets trusted_root.json: TRUSTED_ROOT=<file>, or fetched via TUF (`myriarch-updater fetch-trusted-root`, cache .cache/mirror/tuf) and
 #      used for step 2; it is part of the image (/srv/mirror/trusted_root.json); put the same file into a ConfigMap of your
 #      deployment, so that myriarchd and the collectors' updaters verify offline with it;
 #   4. packs everything into ONE deterministic layer on top of busybox (pinned by digest, must have the httpd applet) with
 #        /srv/mirror/v<ver>/<asset>{,.sha256,.sigstore.json}   0444 root:root
+#        /srv/mirror/cmd/opampsupervisor/v<ver>/<asset>{,.sha256,.sigstore.json}   (COMPONENTS with supervisor)
 #        /srv/mirror/trusted_root.json, /srv/mirror/SHA256SUMS
 #      and pushes it with `crane mutate` (ENTRYPOINT busybox httpd -f -v -p 8080 -h /srv/mirror, user 10001:0, port 8080);
 #   5. reads the pushed config back (contract check), runs `crane validate --remote` and prints the digest. Lines starting with MIRROR_ or
@@ -44,12 +53,16 @@
 # Environment (all optional)
 #   VERSIONS          space separated collector versions       default "0.161.0 0.162.0"
 #   PLATFORMS         space separated os/arch                  default "linux/amd64" (linux|darwin|windows / amd64|arm64)
+#   COMPONENTS        space separated: contrib, supervisor     default "contrib" (the image and the directory of earlier versions)
 #   SOURCE_BASE       release download base                    default https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download
 #   IMAGE_REPO        target repository (required unless OUT_DIR is set, no default): <registry>[:port]/<path> without tag or digest
-#   TAG               image tag                                default contrib-<versions joined with ->, e.g. contrib-0.161.0-0.162.0
+#   TAG               image tag                                default <components joined with ->-<versions joined with ->, e.g. contrib-0.161.0-0.162.0
 #   BASE_IMAGE        busybox base with the httpd applet, must be pinned by digest: <registry>/<image>:<tag>@sha256:<digest>
 #                                                              default: the public index docker.io/library/busybox:1.37 (digest in the script)
 #   TRUSTED_ROOT      trusted_root.json to use                 default: fetched via TUF
+#   VERIFIER_BIN      a built myriarch-updater to verify with  default: built from this repository (go build ./cmd/myriarch-updater). It
+#                     must offer `verify-bundle` and, without TRUSTED_ROOT, `fetch-trusted-root`; the host end-to-end test passes the one
+#                     it has built, a test passes a stand-in
 #   OUT_DIR           write <OUT_DIR>/srv/mirror only          default: build the image
 #   DOWNLOAD_CACHE    cache of the downloads                   default .cache/mirror/downloads
 #   DRY_RUN           1 = build the layer, push nothing        default 0
@@ -75,6 +88,8 @@ TOOLS_BIN="${TOOLS_BIN:-${ROOT}/.cache/bin}"
 
 VERSIONS="${VERSIONS:-0.161.0 0.162.0}"
 PLATFORMS="${PLATFORMS:-linux/amd64}"
+COMPONENTS="${COMPONENTS:-contrib}"
+VERIFIER_BIN="${VERIFIER_BIN:-}"
 SOURCE_BASE="${SOURCE_BASE:-https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download}"
 IMAGE_REPO="${IMAGE_REPO:-}"
 # public busybox index, pinned by digest (determined 2026-10-08 with `crane digest docker.io/library/busybox:1.37`; its linux/amd64
@@ -134,7 +149,7 @@ resolve_crane() {
 
 # ---- inputs -------------------------------------------------------------------------------------------------------
 check_inputs() {
-  local v p os arch
+  local v p c os arch
   # the image is named and based before anything is downloaded; OUT_DIR mode writes a directory only and needs neither
   if [ -z "${OUT_DIR}" ]; then
     image_require_repo scripts/build-mirror-image-crane.sh "registry.example.com/<org>/myriarch-mirror"
@@ -145,6 +160,10 @@ check_inputs() {
   for v in ${VERSIONS}; do
     [[ "${v}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid version '${v}' in VERSIONS (expected X.Y.Z without v)"
   done
+  [ -n "${COMPONENTS// /}" ] || die "COMPONENTS is empty (contrib, supervisor)"
+  for c in ${COMPONENTS}; do
+    case "${c}" in contrib | supervisor) ;; *) die "invalid component '${c}' in COMPONENTS (contrib or supervisor)" ;; esac
+  done
   for p in ${PLATFORMS}; do
     os="${p%%/*}"; arch="${p#*/}"
     case "${os}" in linux|darwin|windows) ;; *) die "invalid platform '${p}' (os must be linux, darwin or windows)" ;; esac
@@ -153,15 +172,25 @@ check_inputs() {
   [[ "${EPOCH}" =~ ^[0-9]+$ ]] || die "invalid SOURCE_DATE_EPOCH '${EPOCH}'"
   have curl || die "curl not found"
   have python3 || die "python3 not found (computes hashes, builds the deterministic layer)"
-  have "${GO}" || die "go not found: myriarch-updater (verify-bundle) is built from this repository"
-  TAG="${TAG:-contrib-$(printf '%s' "${VERSIONS}" | tr -s ' ' '-' | sed -e 's/^-//' -e 's/-$//')}"
+  if [ -n "${VERIFIER_BIN}" ]; then
+    [ -f "${VERIFIER_BIN}" ] && [ -x "${VERIFIER_BIN}" ] || die "VERIFIER_BIN=${VERIFIER_BIN} is not an executable file"
+  else
+    have "${GO}" || die "go not found: myriarch-updater (verify-bundle) is built from this repository (or set VERIFIER_BIN)"
+  fi
+  TAG="${TAG:-$(printf '%s-%s' "${COMPONENTS}" "${VERSIONS}" | tr -s ' ' '-' | sed -e 's/^-//' -e 's/-$//')}"
   [[ "${TAG}" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]] || die "invalid image tag '${TAG}'"
 }
 
-# myriarch-updater of this repository (host platform): verify-bundle + fetch-trusted-root
+# myriarch-updater (host platform): verify-bundle + fetch-trusted-root. Sets UPDATER.
 build_verifier() {
+  if [ -n "${VERIFIER_BIN}" ]; then
+    UPDATER="${VERIFIER_BIN}"
+    log "verifier: ${UPDATER} (VERIFIER_BIN)"
+    return 0
+  fi
+  UPDATER="${WORK}/myriarch-updater"
   log "building myriarch-updater (verify-bundle, fetch-trusted-root)"
-  ( cd "${ROOT}" && "${GO}" build -trimpath -o "${WORK}/myriarch-updater" ./cmd/myriarch-updater ) || die "go build ./cmd/myriarch-updater failed"
+  ( cd "${ROOT}" && "${GO}" build -trimpath -o "${UPDATER}" ./cmd/myriarch-updater ) || die "go build ./cmd/myriarch-updater failed"
 }
 
 # trusted root: TRUSTED_ROOT or fetched via TUF. Sets ROOT_FILE.
@@ -174,7 +203,7 @@ get_trusted_root() {
     mkdir -p "${ROOT}/.cache/mirror/tuf"
     ROOT_FILE="${WORK}/trusted_root.json"
     log "trusted root: fetching via TUF (cache ${ROOT}/.cache/mirror/tuf)"
-    "${WORK}/myriarch-updater" fetch-trusted-root --out "${ROOT_FILE}" --tuf-cache "${ROOT}/.cache/mirror/tuf" >&2 \
+    "${UPDATER}" fetch-trusted-root --out "${ROOT_FILE}" --tuf-cache "${ROOT}/.cache/mirror/tuf" >&2 \
       || die "cannot fetch the Sigstore trusted root via TUF (no network? set TRUSTED_ROOT=<file>)"
   fi
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert "tlogs" in d and "certificateAuthorities" in d' "${ROOT_FILE}" \
@@ -183,15 +212,44 @@ get_trusted_root() {
   log "trusted_root.json sha256:${ROOT_SHA}"
 }
 
-# download + verify one file set; arguments: version os arch. Sets nothing, copies into ${STAGE}.
-fetch_one() {
-  local ver="$1" os="$2" arch="$3" asset dir url want got
-  asset="otelcol-contrib_${ver}_${os}_${arch}.tar.gz"
-  dir="${DOWNLOAD_CACHE}/v${ver}"
-  url="${SOURCE_BASE%/}/v${ver}/${asset}"
+# Names of one asset: sets ASSET (file name), TAGDIR (directory below the base: the release tag of the upstream layout) and
+# IDENTITY (certificate identity regexp of its Sigstore bundle; empty = the default of verify-bundle, the contrib workflow).
+# The supervisor has its own release tag cmd/opampsupervisor/v<ver>, but the workflow that signs it runs on the plain tag v<ver>
+# (docs/design/upstream-notes.md, Release assets and signatures), so the identity ends in refs/tags/v<ver>.
+asset_names() { # component version os arch
+  local comp="$1" ver="$2" os="$3" arch="$4" esc
+  IDENTITY=""
+  esc="$(printf '%s' "${ver}" | sed -e 's/\./\\./g')"
+  case "${comp}" in
+    contrib)
+      ASSET="otelcol-contrib_${ver}_${os}_${arch}.tar.gz"
+      TAGDIR="v${ver}"
+      ;;
+    supervisor)
+      ASSET="opampsupervisor_${ver}_${os}_${arch}"
+      if [ "${os}" = windows ]; then ASSET="${ASSET}.exe"; fi
+      TAGDIR="cmd/opampsupervisor/v${ver}"
+      IDENTITY="^https://github\\.com/open-telemetry/opentelemetry-collector-releases/\\.github/workflows/base-binary-release\\.yaml@refs/tags/v${esc}\$"
+      ;;
+  esac
+}
+
+# Platforms of the supervisor binaries upstream publishes (cmd/opampsupervisor/.goreleaser.yaml).
+supervisor_platform() { # os arch
+  case "$1/$2" in
+    linux/amd64 | linux/arm64 | linux/ppc64le | darwin/amd64 | darwin/arm64 | windows/amd64) return 0 ;;
+  esac
+  return 1
+}
+
+# download + verify one file set; arguments: component version os arch. Copies into ${STAGE}, adds to SUMS.
+fetch_asset() {
+  local comp="$1" ver="$2" os="$3" arch="$4" dir url want got f
+  asset_names "${comp}" "${ver}" "${os}" "${arch}"
+  dir="${DOWNLOAD_CACHE}/${TAGDIR}"
+  url="${SOURCE_BASE%/}/${TAGDIR}/${ASSET}"
   mkdir -p "${dir}"
-  local f
-  for f in "${asset}" "${asset}.sha256" "${asset}.sigstore.json"; do
+  for f in "${ASSET}" "${ASSET}.sha256" "${ASSET}.sigstore.json"; do
     if [ ! -s "${dir}/${f}" ]; then
       log "download ${url%/*}/${f}"
       curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 -o "${dir}/${f}.part" "${url%/*}/${f}" \
@@ -201,35 +259,46 @@ fetch_one() {
       log "cached   ${dir}/${f}"
     fi
   done
-  # 1. SHA-256 against the published checksum file ("<hex>  <name>")
-  want="$(awk 'NR==1 {print $1}' "${dir}/${asset}.sha256" | tr 'A-F' 'a-f')"
-  [[ "${want}" =~ ^[0-9a-f]{64}$ ]] || die "${dir}/${asset}.sha256 does not start with a SHA-256 hex digest"
-  got="$(sha256_of "${dir}/${asset}")"
+  # 1. SHA-256 against the published checksum file (64 hex digits, optionally followed by the file name)
+  want="$(awk 'NR==1 {print $1}' "${dir}/${ASSET}.sha256" | tr 'A-F' 'a-f')"
+  [[ "${want}" =~ ^[0-9a-f]{64}$ ]] || die "${dir}/${ASSET}.sha256 does not start with a SHA-256 hex digest"
+  got="$(sha256_of "${dir}/${ASSET}")"
   if [ "${got}" != "${want}" ]; then
-    die "SHA-256 mismatch for ${asset}: published ${want}, downloaded ${got} (delete ${dir} and retry; if it persists the release file changed)"
+    die "SHA-256 mismatch for ${ASSET}: published ${want}, downloaded ${got} (delete ${dir} and retry; if it persists the release file changed)"
   fi
   # 2. Sigstore bundle, offline against the trusted root, bound to the release tag v<ver>
-  "${WORK}/myriarch-updater" verify-bundle --bundle "${dir}/${asset}.sigstore.json" --artifact "${dir}/${asset}" \
-    --version "v${ver}" --trusted-root "${ROOT_FILE}" >&2 \
-    || die "Sigstore verification of ${asset} failed (offline, trusted root ${ROOT_FILE}); nothing was packed"
-  log "verified ${asset}: sha256:${got} + Sigstore bundle (offline)"
-  # stage with the layout of the release server: v<ver>/<asset>{,.sha256,.sigstore.json}
-  mkdir -p "${STAGE}/v${ver}"
-  for f in "${asset}" "${asset}.sha256" "${asset}.sigstore.json"; do cp "${dir}/${f}" "${STAGE}/v${ver}/${f}"; done
-  SUMS+=("${got}  v${ver}/${asset}")
+  local args=(verify-bundle --bundle "${dir}/${ASSET}.sigstore.json" --artifact "${dir}/${ASSET}" --version "v${ver}" --trusted-root "${ROOT_FILE}")
+  if [ -n "${IDENTITY}" ]; then args+=(--identity-regexp "${IDENTITY}"); fi
+  "${UPDATER}" "${args[@]}" >&2 \
+    || die "Sigstore verification of ${ASSET} failed (offline, trusted root ${ROOT_FILE}); nothing was packed"
+  log "verified ${ASSET}: sha256:${got} + Sigstore bundle (offline)"
+  # stage with the layout of the release server: <tag>/<asset>{,.sha256,.sigstore.json}
+  mkdir -p "${STAGE}/${TAGDIR}"
+  for f in "${ASSET}" "${ASSET}.sha256" "${ASSET}.sigstore.json"; do cp "${dir}/${f}" "${STAGE}/${TAGDIR}/${f}"; done
+  SUMS+=("${got}  ${TAGDIR}/${ASSET}")
 }
 
 fetch_all() {
-  local v p
+  local v p c os arch
   STAGE="${WORK}/srv/mirror"
   mkdir -p "${STAGE}"
   SUMS=()
   for v in ${VERSIONS}; do
-    for p in ${PLATFORMS}; do fetch_one "${v}" "${p%%/*}" "${p#*/}"; done
+    for p in ${PLATFORMS}; do
+      os="${p%%/*}"; arch="${p#*/}"
+      for c in ${COMPONENTS}; do
+        if [ "${c}" = supervisor ] && ! supervisor_platform "${os}" "${arch}"; then
+          warn "upstream publishes no OpAMP supervisor for ${os}/${arch}: skipped (the contrib archive is mirrored)"
+          continue
+        fi
+        fetch_asset "${c}" "${v}" "${os}" "${arch}"
+      done
+    done
   done
+  [ "${#SUMS[@]}" -gt 0 ] || die "nothing to mirror: no component has a file for the platforms ${PLATFORMS}"
   cp "${ROOT_FILE}" "${STAGE}/trusted_root.json"
   printf '%s\n' "${SUMS[@]}" | sort -k2 > "${STAGE}/SHA256SUMS"
-  log "SHA256SUMS: ${#SUMS[@]} archive(s)"
+  log "SHA256SUMS: ${#SUMS[@]} file(s)"
 }
 
 # ---- layer --------------------------------------------------------------------------------------------------------
@@ -295,15 +364,16 @@ pin_base() {
 # ---- push + verification ------------------------------------------------------------------------------------------
 push_image() {
   local ref="${IMAGE_REPO}:${TAG}" out
-  local first_version="${VERSIONS%% *}" source_url
+  local first_version="${VERSIONS%% *}" source_url what="otelcol-contrib"
   source_url="$(image_source_url "${ROOT}")"
+  case " ${COMPONENTS} " in *" supervisor "*) what="otelcol-contrib and opampsupervisor" ;; esac
   local labels=(
     "org.opencontainers.image.title=${LABEL_TITLE_MIRROR}"
     "org.opencontainers.image.vendor=${LABEL_VENDOR}"
     "org.opencontainers.image.licenses=${LABEL_LICENSES_MIRROR}"
-    "org.opencontainers.image.description=busybox httpd serving verified otelcol-contrib release files for myriarchd without egress"
+    "org.opencontainers.image.description=busybox httpd serving verified ${what} release files for myriarchd without egress"
     "org.opencontainers.image.base.name=${BASE_PINNED%@*}" "org.opencontainers.image.base.digest=${BASE_PINNED##*@}"
-    "dev.myriarch.mirror.versions=${VERSIONS// /,}" "dev.myriarch.mirror.platforms=${PLATFORMS// /,}"
+    "dev.myriarch.mirror.versions=${VERSIONS// /,}" "dev.myriarch.mirror.platforms=${PLATFORMS// /,}" "dev.myriarch.mirror.components=${COMPONENTS// /,}"
     "dev.myriarch.mirror.trusted-root.sha256=${ROOT_SHA}" "dev.myriarch.mirror.layer.sha256=${LAYER_SHA}"
     "io.k8s.display-name=${LABEL_TITLE_MIRROR} ${first_version}" "vendor=${LABEL_VENDOR}"
   )
@@ -371,6 +441,7 @@ cmd_build() {
     cp -R "${STAGE}" "${OUT_DIR}/srv/mirror"
     log "mirror directory written: ${OUT_DIR}/srv/mirror"
     printf 'MIRROR_DIR=%s\n' "${OUT_DIR}/srv/mirror"
+    printf 'MIRROR_COMPONENTS=%s\n' "${COMPONENTS// /,}"
     printf 'MIRROR_TRUSTED_ROOT=%s\n' "${OUT_DIR}/srv/mirror/trusted_root.json"
     printf 'MIRROR_TRUSTED_ROOT_SHA256=%s\n' "${ROOT_SHA}"
     return 0
@@ -384,6 +455,7 @@ cmd_build() {
   if [ "${DRY_RUN}" = 1 ]; then
     log "DRY_RUN=1: nothing was pushed (layer: ${WORK}/layer.tar; would push ${IMAGE_REPO}:${TAG})"
     printf 'MIRROR_VERSIONS=%s\n' "${VERSIONS// /,}"
+    printf 'MIRROR_COMPONENTS=%s\n' "${COMPONENTS// /,}"
     printf 'MIRROR_TRUSTED_ROOT=%s\n' "${ROOT}/.cache/mirror/out/trusted_root.json"
     printf 'MIRROR_TRUSTED_ROOT_SHA256=%s\n' "${ROOT_SHA}"
     printf 'IMAGE_BASE=%s\n' "${BASE_PINNED}"
@@ -397,6 +469,7 @@ cmd_build() {
   log "digest ${DIGEST}"
   log "pin the digest in your deployment, e.g. kustomize images: newName/digest or Helm image.digest"
   printf 'MIRROR_VERSIONS=%s\n' "${VERSIONS// /,}"
+  printf 'MIRROR_COMPONENTS=%s\n' "${COMPONENTS// /,}"
   printf 'MIRROR_TRUSTED_ROOT=%s\n' "${ROOT}/.cache/mirror/out/trusted_root.json"
   printf 'MIRROR_TRUSTED_ROOT_SHA256=%s\n' "${ROOT_SHA}"
   printf 'IMAGE_REF=%s:%s\n' "${IMAGE_REPO}" "${TAG}"
