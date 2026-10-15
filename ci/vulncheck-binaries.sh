@@ -10,7 +10,8 @@
 #
 # Writes DIR/govulncheck-binaries.sarif. The release is --tag, else VULNCHECK_RELEASE_TAG, else the latest stable release of the
 # repository in ci/release/identity.env (the one that https://github.com/<repository>/releases/latest leads to; a pre-release is scanned
-# only when it is named). A repository without a published release has nothing to scan: the report holds no result and the status is 0.
+# only when it is named). A repository without a stable release has nothing to scan: the report holds no result and the status is 0. Any
+# other answer to the lookup is [release_lookup]: an empty report would close the alerts of the earlier scans.
 #
 # Nothing is scanned before the files are verified, and every step fails closed (the codes in brackets are the stable interface):
 #   1. checksums.txt and its keyless bundle are downloaded over https, without credentials [download_failed];
@@ -124,12 +125,13 @@ empty_report() { # reason: a report without a result, so that code scanning clos
 repo_url="https://github.com/${RELEASE_REPOSITORY}"
 if [ -z "${tag}" ]; then
   # one request without credentials: a published, non-draft, non-pre-release release redirects to its tag page
-  answer="$(retry_curl "the lookup of the latest release" -o /dev/null -w '%{http_code} %{redirect_url}' "${repo_url}/releases/latest")"
+  answer="$(retry_curl "the lookup of the latest release" -f -o /dev/null -w '%{http_code} %{redirect_url}' "${repo_url}/releases/latest")"
   code="${answer%% *}"
   location="${answer#* }"
+  # Only GitHub's own answer for a repository without a stable release (the redirect to the list of releases) means "nothing to scan".
+  # Any other answer, a 404 included (curl -f fails on it), is an error: an empty report would close the alerts of the earlier scans.
   case "${code}" in
     301 | 302 | 303 | 307 | 308) ;;
-    404) empty_report "${repo_url} has no published release: nothing to scan"; exit 0 ;;
     *) err release_lookup "the lookup of the latest release answered HTTP ${code}" ;;
   esac
   case "${location}" in

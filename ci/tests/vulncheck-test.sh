@@ -260,7 +260,10 @@ echo "${url}" >> "${STUB_CALLS}/curl.log"
 if [ -f "${STUB_STATE}/curl.fail" ]; then echo "curl: (6) Could not resolve host: github.com" >&2; exit "$(cat "${STUB_STATE}/curl.fail")"; fi
 case "${url}" in
   */releases/latest)
-    if [ -f "${STUB_STATE}/latest" ]; then cat "${STUB_STATE}/latest"; else printf '404 '; fi
+    line="404 "; [ -f "${STUB_STATE}/latest" ] && line="$(cat "${STUB_STATE}/latest")"
+    printf '%s' "${line}"
+    # like curl -f: an answer of 400 or more is a failure with exit code 22
+    if [ "${line%% *}" -ge 400 ]; then echo "curl: (22) The requested URL returned error: ${line%% *}" >&2; exit 22; fi
     exit 0 ;;
 esac
 name="${url##*/}"
@@ -436,14 +439,16 @@ reset_world; rm -rf "${SERVE}"; mkdir -p "${SERVE}"
 RETRY=30 expect_fail "binaries: a release that does not exist is not retried (HTTP 404)" 'ERROR \[download_failed\].*not retried, 1 attempt\)' binaries --tag v9.9.9
 
 # which release
-reset_world; mkrelease ok; printf '404 ' > "${STATE}/latest"
-expect_ok "binaries: a repository without a release has nothing to scan" binaries
-report_query 'd["runs"][0]["results"] == []' && [ "$(wc -l < "${CALLS}/curl.log" | tr -d ' ')" = 1 ] && ok "binaries: ... the report is empty and nothing is downloaded" || fail "binaries: a missing release is not handled"
 reset_world; mkrelease ok; printf '302 https://github.com/myriarch/myriarch/releases' > "${STATE}/latest"
 expect_ok "binaries: a repository whose latest page leads to the release list has no stable release" binaries
-report_query 'd["runs"][0]["results"] == []' && ok "binaries: ... the report is empty" || fail "binaries: the release list is not handled"
+report_query 'd["runs"][0]["results"] == []' && [ "$(wc -l < "${CALLS}/curl.log" | tr -d ' ')" = 1 ] && ok "binaries: ... the report is empty and nothing is downloaded" || fail "binaries: a missing release is not handled"
+reset_world; mkrelease ok; printf '404 ' > "${STATE}/latest"
+expect_fail "binaries: a 404 is an error, not an empty report (it would close the alerts of the earlier scans)" 'ERROR \[download_failed\] the lookup of the latest release failed \(curl exit code 22, HTTP 404; not retried' binaries
+[ ! -e "${W}/out/govulncheck-binaries.sarif" ] && ok "binaries: ... and no report is written" || fail "binaries: a report was written after a failed lookup"
 reset_world; mkrelease ok; printf '302 https://example.test/elsewhere' > "${STATE}/latest"
 expect_fail "binaries: a latest release that leads elsewhere is refused" 'ERROR \[release_lookup\]' binaries
+reset_world; mkrelease ok; printf '503 ' > "${STATE}/latest"
+expect_fail "binaries: a failing GitHub is an error after the retries, not an empty report" 'ERROR \[download_failed\] the lookup of the latest release failed \(curl exit code 22, HTTP 503; the retry window' binaries
 reset_world; mkrelease ok; printf '200 ' > "${STATE}/latest"
 expect_fail "binaries: an answer that is no redirect is refused" 'ERROR \[release_lookup\] the lookup of the latest release answered HTTP 200' binaries
 reset_world; mkrelease ok; printf '302 https://github.com/myriarch/myriarch/releases/tag/not-a-version' > "${STATE}/latest"
