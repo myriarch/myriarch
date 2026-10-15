@@ -55,7 +55,9 @@ Restart=always
 RestartSec=10
 TimeoutStopSec=300
 LimitNOFILE=4096
-NoNewPrivileges=true
+# No NoNewPrivileges: the preflight starts the new collector as the account of the supervisor (setuid), and with
+# NoNewPrivileges that switch fails ("operation not permitted"), so every update stopped in the preflight. The
+# capability bounding set below, RestrictSUIDSGID and ProtectSystem=strict limit what a started program can gain.
 PrivateTmp=true
 ProtectHome=true
 # Sandbox: the updater parses network data (OpAMP, archives, Sigstore) and runs as root; it may only write the
