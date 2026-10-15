@@ -104,10 +104,13 @@ workflow has to run it, `ci/check-release-licenses.sh` and `scripts/gen-third-pa
 
 `ci/check-release-licenses.sh` runs `go-licenses` (pinned in `ci/versions.env`, installed with
 `ci/install-tools.sh go-licenses`) over the release builds of all four commands for linux, windows and darwin, without the
-`devpg` tag. It fails when a linked package has a license outside the allowlist: the entries of the list `release` in
+`devpg` tag. It fails when a linked Go package has a license outside the allowlist: the entries of the list `release` in
 `ci/license-allowlist.txt` (Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MIT, Zlib). The same file lists the rest of the CNCF
 allowlist under `review`, which only the [dependency review](#dependency-review) of a pull request allows; widening the list `release`
-is a decision record ([ADR-0038](adr/0038-dependency-license-policy.md)). `make check-local` runs the check as part of the `go` gate.
+is a decision record ([ADR-0038](adr/0038-dependency-license-policy.md)). `go-licenses` reads Go packages: the check does not see the
+npm packages that the web UI bundle carries into `myriarchd`. No list is applied to them when a release is built, and the dependency
+review is their only license check (`tslib`, under 0BSD, a license of the list `review`, ships in the bundle today). `make check-local`
+runs the check as part of the `go` gate.
 Documented exceptions live in `ci/license-overrides.txt`, which the notices generator reads too (see
 [Licenses, headers and third-party notices](#licenses-headers-and-third-party-notices)); the license that an entry declares must be on
 the list `release`. The entries are:
@@ -543,9 +546,12 @@ needs the dependency graph of the repository and runs only in CI; `ci/tests/lice
 **The lists.** `ci/license-allowlist.txt` is the source of both: the entries of the list `release` are the allowlist of the release
 builds (`ci/check-release-licenses.sh`, [License check of the release builds](#license-check-of-the-release-builds)), and all entries
 together, the CNCF allowlist and Apache-2.0, are the `allow-licenses` of the review. The review is a tripwire, and the release check
-stays binding: a license that only the list `review` allows passes the pull request and fails the release check as soon as a release
-build links it. The test `ci/tests/license-allowlist-test.sh` fails when the configuration and the file differ, so change both. A
-change of the list `release` is a decision record.
+stays binding for the Go packages of the release builds: a Go package whose license only the list `review` allows passes the pull
+request and fails the release check as soon as a release build links it. The release check does not see the npm packages that the web
+UI bundle carries into `myriarchd`: the review is the only check of their licenses against a list, and `tslib` (0BSD, a license of the
+list `review`) ships in the bundle today ([ADR-0038](adr/0038-dependency-license-policy.md), decision 6). The test
+`ci/tests/license-allowlist-test.sh` fails when the configuration and the file differ, so change both. A change of the list `release`
+is a decision record.
 
 **When the review fails.** Do not add the dependency, or take the license to the maintainer, when the package really carries a license
 outside the list. When the dependency graph reports a license wrongly or as a combination (a documentation license next to the code

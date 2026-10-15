@@ -9,7 +9,9 @@
 #
 # Needs go-licenses (ci/install-tools.sh go-licenses) and the module cache (go mod download).
 # Allowlist: the "release" entries of ci/license-allowlist.txt (ADR-0038), which also lists the wider CNCF allowlist that only the
-# dependency review of a pull request applies. Exceptions: ci/license-overrides.txt.
+# dependency review of a pull request applies. Exceptions: ci/license-overrides.txt. The check sees the Go packages that go-licenses
+# reports; the npm packages of the web UI bundle are checked against a license list by the dependency review of a pull request alone
+# (ADR-0038, decision 6).
 # Exit status: 0 = clean, non-zero = at least one finding (all findings are printed) or an environment error.
 set -euo pipefail
 # shellcheck source=ci/lib.sh

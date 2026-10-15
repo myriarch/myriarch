@@ -15,8 +15,12 @@ a linked Go package carries a license outside an allowlist of six (Apache-2.0, B
 
 That check is binding and runs for every pull request in the gate `go`, but it sees only the Go packages that a release build links. A
 pull request that adds an npm package of the web UI, a Python tool or a Go tool module under a license that the CNCF would not admit
-passes it, and the problem is found by a reader of the lockfile diff or at the release. The CNCF publishes the licenses that a project may use for
-third-party components without a review by its Governing Board (the CNCF Allowlist License Policy, adopted on 2018-05-01); a
+passes it, and the problem is found by a reader of the lockfile diff. The release does not catch it either for the npm packages that the
+web UI bundle carries into `myriarchd` (the `embedui` build): the license report that Vite writes (`build.license` in
+`web/vite.config.ts`) feeds `THIRD_PARTY_NOTICES`, and the generator needs a license identifier and a license text for every bundled
+package but compares the identifier with no list. One bundled package already carries a license that is not on the release allowlist:
+`tslib` 2.8.1 (0BSD, listed in `THIRD_PARTY_NOTICES` as used by `myriarchd (web UI)`). The CNCF publishes the licenses that a project may
+use for third-party components without a review by its Governing Board (the CNCF Allowlist License Policy, adopted on 2018-05-01); a
 dependency outside that list is a problem for a project on the path to a foundation, and it is cheaper to notice it in the pull request.
 
 GitHub offers the comparison as a service: the dependency graph knows the manifests and lockfiles of the pull request and of its
@@ -36,8 +40,9 @@ the web UI with combined permissive licenses.
 ## Decision
 
 1. **One source file, two lists.** `ci/license-allowlist.txt` names every license that dependencies may carry, each with the list it
-   belongs to. The list `release` (Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MIT and Zlib) is the binding allowlist of the release
-   builds; `ci/check-release-licenses.sh` reads it from the file instead of carrying it in the script. The list `review` holds the rest
+   belongs to. The list `release` (Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MIT and Zlib) is the binding allowlist of the Go packages
+   that the release builds link (decision 6 says what it does not cover); `ci/check-release-licenses.sh` reads it from the file instead
+   of carrying it in the script. The list `review` holds the rest
    of the CNCF allowlist (0BSD, BSD-2-Clause-FreeBSD, MIT-0, OpenSSL, OpenSSL-standalone, PSF-2.0, Python-2.0, Python-2.0.1,
    PostgreSQL, SSLeay-standalone, UPL-1.0, X11 and the Google patent license for Golang, under the identifier
    `LicenseRef-scancode-google-patent-license-golang` that the dependency graph uses for the PATENTS file of the Go modules). Apache-2.0
@@ -49,8 +54,9 @@ the web UI with combined permissive licenses.
    runtime`. It fails when a dependency that the change adds or updates carries a license outside the list or a known vulnerability of
    high or critical severity in the runtime scope. For every other event (a push to `main`, the nightly run, a manual run) a step says
    that there is nothing to compare, so the job succeeds instead of being skipped, because a skipped job fails `ci-ok`. A license that
-   only the list `review` allows passes the pull request and fails the release license check until someone decides about it: the
-   decision to widen the list `release` is a new decision record; a single package gets an entry in `ci/license-overrides.txt`.
+   only the list `review` allows passes the pull request and, for a Go package that a release build links, fails the release license
+   check until someone decides about it: the decision to widen the list `release` is a new decision record; a single package gets an
+   entry in `ci/license-overrides.txt`. The release check does not see the npm packages of the web UI bundle (decision 6).
 3. **The job holds the read-only token and asks no third party.** It has no `permissions` key of its own and no secret; it writes no
    comment to the pull request (`comment-summary-in-pr: never`; the result is in the log and in the job summary); and it switches off
    the OpenSSF Scorecard lookup of the action (`show-openssf-scorecard: false`), which would send the repositories and names of the
@@ -71,6 +77,14 @@ the web UI with combined permissive licenses.
    chunks that the website serves include the ELK layout. The notices page of the website (`website/data/third_party.yaml`) lists Mermaid
    only. Whether the website owes a notice for `elkjs` is a question for the maintainer, not for a pipeline exception, so the first
    pull request that updates Mermaid will fail the review until it is answered.
+6. **The binding list covers Go packages; the npm packages of the web UI bundle get the review only.** `ci/check-release-licenses.sh`
+   runs `go-licenses`, which reads Go packages. The npm packages that the web UI bundle carries into `myriarchd` are checked for their
+   license by the dependency review of the pull request alone, against all entries of the file, and the generator of
+   `THIRD_PARTY_NOTICES` only requires a license identifier and a license text for each of them. One bundled package carries a license
+   of the list `review` today: `tslib` 2.8.1 (0BSD) ships in `myriarchd`. Whether the list `release` should bind the web UI bundle as
+   well is not decided here. It would need a check of the license report that Vite writes against the entries of the list `release`,
+   and a decision for 0BSD first: widen the list `release` in a new decision record, or record an exception for `tslib`. Until then, a
+   license of the list `review` in the bundle passes the pull request and the release.
 
 ## Consequences
 
@@ -95,10 +109,15 @@ the web UI with combined permissive licenses.
 - The action reads the dependency graph of GitHub. When GitHub cannot return the data for a revision range (a merge group that is not
   processed yet, for example), the job fails with a message and runs again.
 - `elkjs` stays an open item (decision 5).
+- The binding list does not reach the npm packages of the web UI bundle: a license of the list `review` in the bundle passes both
+  checks, and `tslib` (0BSD) ships in `myriarchd` today (decision 6).
 
 ## Alternatives considered
 
-- **Only the release license check**: binding, but Go-only and late. The feedback for an npm or Python dependency arrives after the merge.
+- **Only the release license check**: binding, but Go-only and late. An npm or Python dependency is not covered at all.
+- **Binding the web UI bundle with the list `release` now**: a check of the license report that Vite writes would make the list binding
+  for the npm packages of the bundle too, but `tslib` (0BSD) is bundled and not on that list. Widening the list or recording an
+  exception is a license decision for the maintainer, in its own record (decision 6).
 - **A deny list (`deny-licenses`)**: a license that nobody thought of passes. The option is also deprecated in the action.
 - **The release list as the allowlist of the review**: it would also trip on licenses that the CNCF admits and that the tool trees
   contain (Python-2.0 of `argparse`, 0BSD, MIT-0). That makes the tripwire noisier without protecting a release, because the release

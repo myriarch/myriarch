@@ -7,7 +7,9 @@
 #
 # A dependency whose license the dependency graph of GitHub does not know is only listed in the job summary. The check looks at the
 # dependencies a change adds or updates, not at the whole tree, and it is a tripwire: the binding license check of a release is
-# ci/check-release-licenses.sh, which allows fewer licenses (the list "release" of ci/license-allowlist.txt).
+# ci/check-release-licenses.sh, which allows fewer licenses (the list "release" of ci/license-allowlist.txt) but sees Go packages only.
+# The npm packages of the web UI bundle are compared with no list when a release is built: this review is the only check against a list
+# that they get (ADR-0038, decision 6).
 #
 # allow-licenses is the CNCF allowlist and Apache-2.0: exactly the identifiers of ci/license-allowlist.txt, which is the source.
 # ci/tests/license-allowlist-test.sh fails when the two differ, so change them together.

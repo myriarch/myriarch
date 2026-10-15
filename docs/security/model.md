@@ -494,13 +494,16 @@ guidance after each item names what to do.
   there is nothing to compare. `ci/tests/license-allowlist-test.sh` pins the inputs, the place in `ci-ok` and the
   equality of the configuration with the license file, and refuses an exception with a version or without a reason. The binding
   license check of the release builds (`ci/check-release-licenses.sh`) allows fewer licenses (the list `release` of the same file)
-  and is as strict as before: a license that only the pull request check allows fails it when a release build links the package.
-  Residual risks: the license data comes from ClearlyDefined through the dependency graph and can be wrong or missing (a missing
-  license is only listed); the check looks at the dependencies a change adds or updates, not at the whole tree; an exception names a
-  package and covers all its later versions; the configuration is read from the checkout of the pull request, so a pull request that
-  changes the policy and a dependency together depends on the review of the policy change (the maintainer owns every file in
-  `.github/CODEOWNERS`); and `pkg:npm/elkjs` (EPL-2.0, a dependency of Mermaid that the website serves) has no exception until the
-  question of its notice is decided.
+  and is as strict as before for the Go packages it sees (`go-licenses` reads Go packages): a license that only the pull request
+  check allows fails it when a release build links the Go package. Residual risks: the npm packages that the web UI bundle carries
+  into `myriarchd` are compared with no license list when a release is built, the pull request check is the only check against a
+  list that they get (`tslib`, 0BSD, a license that only that check allows, ships in the bundle today; ADR-0038, decision 6); the
+  license data comes from ClearlyDefined through the
+  dependency graph and can be wrong or missing (a missing license is only listed); the check looks at the dependencies a change adds
+  or updates, not at the whole tree; an exception names a package and covers all its later versions; the configuration is read from
+  the checkout of the pull request, so a pull request that changes the policy and a dependency together depends on the review of the
+  policy change (the maintainer owns every file in `.github/CODEOWNERS`); and `pkg:npm/elkjs` (EPL-2.0, a dependency of Mermaid that
+  the website serves) has no exception until the question of its notice is decided.
 - **Static analysis in CI: CodeQL, Scorecard and zizmor.** Three controls look at the code and the pipeline, none replaces review:
   - *CodeQL* (`.github/workflows/codeql.yml`) analyses the Go code (built for Linux with and without the `embedui` and `devpg`
     build tags, for Windows with and without them and for macOS, so that the Windows-only code of the updater, which runs as
