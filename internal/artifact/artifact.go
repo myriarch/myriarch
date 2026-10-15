@@ -227,12 +227,20 @@ func NewCache(cfg config.ArtifactsConfig, deps Deps) (*Cache, error) {
 
 // redirectPolicy is the CheckRedirect of the upstream clients.
 func (c *Cache) redirectPolicy() func(*http.Request, []*http.Request) error {
-	hosts := append([]string(nil), c.cfg.AllowedRedirectHosts...)
+	return RedirectPolicy(c.cfg.AllowedRedirectHosts, c.baseURL)
+}
+
+// RedirectPolicy is the CheckRedirect of a client that downloads release assets from sourceBaseURL: at most five hops,
+// https targets only, and only the hosts of allowedHosts (artifacts.allowedRedirectHosts; the GitHub asset hosts when it
+// is empty) and the host of sourceBaseURL itself. A plain-http source may redirect within itself (lab setups). The
+// artifact cache and the installer bundles use it, so both follow the same rule.
+func RedirectPolicy(allowedHosts []string, sourceBaseURL string) func(*http.Request, []*http.Request) error {
+	hosts := append([]string(nil), allowedHosts...)
 	if len(hosts) == 0 {
 		hosts = append(hosts, defaultRedirectHosts...)
 	}
 	var base *url.URL
-	if u, err := url.Parse(c.baseURL); err == nil {
+	if u, err := url.Parse(sourceBaseURL); err == nil {
 		base = u
 		hosts = append(hosts, u.Hostname())
 	}
@@ -245,6 +253,10 @@ func (c *Cache) redirectPolicy() func(*http.Request, []*http.Request) error {
 		return httpsOnly(req, via)
 	}
 }
+
+// OpenNoFollow opens a file of the cache directory for reading without following a symbolic link at the final path
+// element (on Windows a link is refused after the open).
+func OpenNoFollow(path string) (*os.File, error) { return openNoFollow(path) }
 
 // SignatureRequired reports whether artifacts must carry a verified sigstore
 // bundle (artifacts.verify.requireSignature).
