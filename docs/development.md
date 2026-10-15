@@ -1370,7 +1370,8 @@ The project website (myriarch.dev, [ADR-0031](adr/0031-website-with-hugo-and-doc
 Docsy theme from the sources in `website/` and from the Markdown files of the repository that it mounts. It is a static
 site: the output is the directory `website/public`. `.github/workflows/website.yml` deploys it to production on pushes to
 `main` and builds protected previews for pull requests (see `website/README.md`, "Deployment"); the make targets below never
-deploy anything. The release status on the landing page comes from `website/data/release.yaml` ([Releasing](releasing.md#after-every-publication)).
+deploy anything. The release status on the landing page and the version in the structured data of the home page come from
+`website/data/release.yaml` ([Releasing](releasing.md#after-every-publication)).
 
 ### Commands
 
@@ -1407,7 +1408,7 @@ allowed in `website/content`; a link to a page that does not exist fails the bui
 image that cannot be resolved fails the build, because an image from another host would be a third-party request.
 
 Some files of the theme are replaced by modified copies in `website/layouts` and `website/assets` (the head with the
-self-hosted search script, the favicons, the "edit this page" links, Mermaid, the footer, the 404 page, and
+self-hosted search script, the canonical link and the structured data, the favicons, the "edit this page" links, Mermaid, the footer, the 404 page, and
 `assets/js/offline-search.js`, which loads the search index on the first use of a search box instead of on every page load).
 `website/overrides.txt` pins the SHA-256 of the upstream file of each one; after a Docsy update
 `website/scripts/check-overrides.py` shows which upstream file changed, and it fails when a file of `website/layouts` or
@@ -1445,7 +1446,9 @@ fragments; the config is `website/lychee.toml`); markdownlint (`website/.markdow
 root files and `website/content`; `scripts/check-docs.py front-matter --site`; every `website/scripts/check-*.py` over the built
 site (`check-third-party.py`: no resource from another host in any page, style sheet or script; `check-local-paths.py`: no local
 path of the build machine; `check-repo-links.py`: every link into the GitHub repository (blob, tree, edit) names an existing path; `check-overrides.py`; `check-placeholders.py`; `check-notices.py`: every shipped dependency has a
-notice in `website/data/third_party.yaml` and a published license text under `/licenses/`); and the unit tests of those checks
+notice in `website/data/third_party.yaml` and a published license text under `/licenses/`; `check-seo.py`: the canonical links, the structured data
+(JSON-LD), `llms.txt`, the crawler policy of `robots.txt` and the 404 page, in production and in a preview, see `website/README.md`, "SEO and
+GEO"); and the unit tests of those checks
 (`python3 -I -m unittest discover -s website/scripts -p 'test_*.py'`, also part of `make ci-test` as `ci/tests/website-test.sh`).
 Add a check by adding `website/scripts/check-<name>.py`; the runner picks it up. A check receives the built site as its argument
 and prints paths and counts only.

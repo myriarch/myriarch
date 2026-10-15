@@ -327,7 +327,8 @@ the archives, so they can follow the release:
 1. **`website/data/release.yaml`**, the single source of the release status. After a candidate set `candidate: "vX.Y.Z-rc.N"` (and
    `final: ""`); after a final release set `final: "vX.Y.Z"` and `candidate: ""`. The status chip of the landing page
    (`website/layouts/_partials/landing/hero.html`) is derived from it, and `website/scripts/check-landing.py` fails when the
-   chip and the file differ. A candidate of a later version does not replace a final release in the chip. The release workflow
+   chip and the file differ. So is the `version` in the structured data of the home page (`website/layouts/_partials/seo/`), which
+   `website/scripts/check-seo.py` compares with the file. A candidate of a later version does not replace a final release in the chip. The release workflow
    never writes this file (it has no write access to the repository), and `README.md` and `docs/` cannot read it: they are plain
    Markdown, which is why they describe the process.
 2. **The pages that say whether images exist or name a release:** `docs/getting-started/_index.md`,
