@@ -1,6 +1,6 @@
 # 0013. Target version from the UI within the Git frame
 
-- Status: Accepted
+- Status: Accepted, refined by [ADR-0046](0046-host-installation-from-the-server.md)
 - Date: 2026-10-07
 - Related: [ADR-0003](0003-gitops-as-source-of-truth.md), [ADR-0006](0006-version-updates-via-exchangeable-executors.md), [ADR-0014](0014-binary-updates-in-the-pod-via-container-mode.md), [ADR-0026](0026-collector-version-updates-on-kubernetes.md), [Version selection](../design/version-selection.md)
 

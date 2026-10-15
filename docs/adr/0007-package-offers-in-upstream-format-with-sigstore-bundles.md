@@ -1,6 +1,6 @@
 # 0007. Package offers in the upstream draft format with Sigstore bundles
 
-- Status: Accepted
+- Status: Accepted, refined by [ADR-0046](0046-host-installation-from-the-server.md)
 - Date: 2026-10-07
 - Related: [ADR-0006](0006-version-updates-via-exchangeable-executors.md), [ADR-0023](0023-keyless-release-signing.md), [Updater protocol](../design/updater-protocol.md)
 
