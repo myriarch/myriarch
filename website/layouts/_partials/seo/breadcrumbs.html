@@ -1,0 +1,24 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Structured data of a page that shows a breadcrumb: schema.org BreadcrumbList (JSON-LD). The list equals the visible breadcrumb: the trail
+  that Docsy's breadcrumb.html draws (the parents of the page up to, but not including, the home page, then the page itself), with the home
+  page added as the first item, because Docsy's trail starts below it. Every item names its URL, the current page included.
+  Docsy hides a trail of one item (the class td-breadcrumbs--single, set when the parent of the page is the home page): the pages at the
+  first level, /docs/, /project/ and /legal/, show no breadcrumb, so they get no list. scripts/check-seo.py compares the list with the
+  visible breadcrumb and expects none for a navigation with that class.
+  Call: partial "seo/breadcrumbs.html" .
+*/ -}}
+{{ $items := slice (dict "@type" "ListItem" "position" 1 "name" "Home" "item" (printf "%s/" (partial "seo/canonical-base.html" .))) -}}
+{{ range .Ancestors.Reverse -}}
+  {{ if not .IsHome -}}
+    {{ $items = $items | append (dict "@type" "ListItem" "position" (add (len $items) 1) "name" .LinkTitle "item" (partial "seo/canonical-url.html" .)) -}}
+  {{ end -}}
+{{ end -}}
+{{ if gt (len $items) 1 -}}
+  {{ $items = $items | append (dict "@type" "ListItem" "position" (add (len $items) 1) "name" .LinkTitle "item" (partial "seo/canonical-url.html" .)) -}}
+  {{ $data := dict "@context" "https://schema.org" "@type" "BreadcrumbList" "itemListElement" $items -}}
+<script type="application/ld+json">{{ $data | jsonify | safeJS }}</script>
+{{ end -}}

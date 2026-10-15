@@ -37,8 +37,9 @@ config/_default/            hugo.yaml (site), module.yaml (mounts), params.yaml,
 content/                    pages that exist only on the website, content adapters (_content.gotmpl)
 data/repo_pages.yaml        repository files that adapters render (the root files)
 data/third_party.yaml       the notices of /legal/third-party/
-data/release.yaml           the release status (latest final release or newest candidate): the one value behind the status chip of the landing page; set by hand after a publication (docs/releasing.md)
-layouts/                    render hooks (_markup), partials (repo/*, csp.html), shortcodes, overrides of Docsy files, 404.html, robots.txt
+data/release.yaml           the release status (latest final release or newest candidate): the one value behind the status chip of the landing page and the version in the structured data of the home page; set by hand after a publication (docs/releasing.md)
+data/llms.yaml              the content of /llms.txt (see SEO and GEO)
+layouts/                    render hooks (_markup), partials (repo/*, seo/*, csp.html), shortcodes, overrides of Docsy files, 404.html, robots.txt, home.llms.txt (the template of /llms.txt)
 assets/scss/                brand tokens (_variables_project.scss) and project styles
 assets/js/                  landing-mark.js: the loop of the mark on the landing page and its click-to-pause behaviour (the site's own script; the rest comes with the theme);
                             offline-search.js: the override of the search script of the theme, the index loads on first use (see Search)
@@ -141,10 +142,112 @@ what happens when that fails:
   (through the Fetch domain of the DevTools protocol, not by the server) and expects the retry with the next query, the hint for a query that
   waited for the failed load, and one console error per failed load (see [Checks](#checks)).
 
+## SEO and GEO
+
+The site tells search engines and AI assistants what it is, which URL is the original of a page and what they may read (SEO is search
+engine optimization; GEO is the same for generative engines, which means making the site easy for AI assistants to read and cite). All of it
+is part of the build and uses no third party. `scripts/check-seo.py` fails the website gate when a page or a file leaves the rules below.
+
+| What | Where it comes from | What the build writes |
+|---|---|---|
+| Canonical link | `layouts/_partials/seo/canonical-*.html`, `params.seo.canonicalBase` | One absolute `<link rel="canonical">` per page, always below the production origin. The origin is fixed: a preview is built with `WEBSITE_BASEURL=/` and still names the production page as the original. `canonicalBase` is an origin (`https://host[:port]/`, no path: the site is served at the root of its host) and must equal `baseURL` of `hugo.yaml`. The 404 page has none |
+| Title of the home page | `params.seo.homeTitle` | The `<title>` of `/`; every other page is titled `<page title> \| myriarch`. The Open Graph and Twitter titles of the home page stay `myriarch`, which the description completes |
+| Structured data | `layouts/_partials/seo/` | JSON-LD for schema.org, see [Structured data](#structured-data) |
+| `llms.txt` | `data/llms.yaml`, `layouts/home.llms.txt` | `/llms.txt`, announced by a `<link rel="describedby">` in the head and by a visually hidden line at the start of the body of every page (`llms-directive.html` of Docsy), see [llms.txt](#llmstxt) |
+| `robots.txt` | `layouts/robots.txt` | Production allows every crawler and names the sitemap; a preview disallows everything |
+| 404 page | `layouts/404.html`, `layouts/_partials/head.html` | `noindex`, no canonical link and no structured data, see [The 404 page](#the-404-page) |
+
+`layouts/_partials/seo/head.html` is the one partial that `head.html` calls; it writes the canonical link and chooses the structured data.
+
+**Spelling.** [ADR-0015](../docs/adr/0015-project-name-and-naming-scheme.md) decides it: `myriarch` in identifiers and in the middle of a
+sentence, `Myriarch` at the start of a sentence or a title. The home title and the text of `data/llms.yaml` follow it, and `check-seo.py`
+lints both, the heading of `llms.txt` excepted. The spelling of the site title, `site.Title` (`title` in `hugo.yaml`), is left to a later
+change. The suffix of every other page title, the heading of `llms.txt` and the `name` in the structured data follow `site.Title`, so they
+follow that change; `check-seo.py` compares the heading and the `name` with it and has no spelling rule for them. Names of programs, hosts
+and paths (`myriarchd`, `myriarch-updater`, `myriarch.dev`) are identifiers and always lower case.
+
+### Structured data
+
+- **The home page** has one `SoftwareSourceCode` (name, description, `codeRepository`, license Apache-2.0, `programmingLanguage`, keywords,
+  author and copyright holder "The Myriarch Authors", and `version`) and one `WebSite`. The version is the latest release of
+  `data/release.yaml` without the leading `v` (`0.1.0`, or `0.2.0-rc.1` while only a candidate exists); it is left out while no release
+  exists. It is the property `version`: `softwareVersion` is defined for `SoftwareApplication`, not for `SoftwareSourceCode`. The home page
+  does not use `SoftwareApplication` on purpose, because Google's Rich Results Test reports errors for it without ratings, and ratings are
+  never made up. The `WebSite` has no `SearchAction`: the search runs in the browser and has no URL that takes a query.
+- **A page with a visible breadcrumb** (the documentation layout below `/docs/`, `/project/` and `/legal/`) has one `BreadcrumbList` that
+  equals it: the home page, which Docsy's trail leaves out, then the items of the visible breadcrumb with their absolute URLs, the current
+  page included. Docsy hides a trail of one item (the class `td-breadcrumbs--single`), as on `/docs/`, `/project/` and `/legal/` themselves;
+  such a page shows no breadcrumb and has no `BreadcrumbList`, and `check-seo.py` expects none for a navigation with that class.
+- **Every other page** has no structured data.
+
+The facts are in `config/_default/params.yaml` (the block `seo`: license, languages, keywords; and `description`, `repo.url`, `copyright`)
+and in `data/release.yaml`; no template repeats them. `jsonify` writes `<`, `>` and `&` as escapes, so no value can end the script element.
+`check-seo.py` parses every block, compares it with these sources and with the visible breadcrumb, and rejects a property that its type does
+not define on schema.org (`PROPERTIES` in the script lists the ones the site uses; look a new property up on schema.org before you add it).
+
+### llms.txt
+
+`/llms.txt` follows [llmstxt.org](https://llmstxt.org/): the name of the site as the heading, a one-paragraph summary in a block quote,
+free-form content (paragraphs of background, then the key terms as a list after the paragraph "Key terms:"), then sections of links; the
+section "Optional" holds what a reader may skip. The format allows free-form content, lists included but no headings, only before the
+first level-2 heading and keeps the sections below a heading for lists of links, so the key terms are not a section of their own. It is
+curated, not generated from the pages: `data/llms.yaml` holds the summary, what the project does, for whom, its license and its
+independence, the key terms and the links, and explains its keys. A link names a page by its path, and the build fails when the page does
+not exist. The URL written is the canonical one, so the file is the same in a preview. Docsy's own template (`all.llms.txt`, a listing of
+the main menu and the sections of the documentation) is replaced for the home page by `layouts/home.llms.txt`; `outputs.home` in
+`hugo.yaml` switches the output format `LLMS` on.
+
+`check-seo.py` enforces: links lead only to pages of the site and to the repository, never to a placeholder page, and no link appears
+twice; every list item below a level-2 heading is a link, `- [name](url)` with optional `: notes`; the file is Markdown without HTML tags
+and at most 64 KiB, and it is spelled as described above. Write only what the documentation backs, and name neither the release status
+nor the support levels, which change. A note carries the caveat of its page: a tutorial that runs the server in development mode says so,
+because a reader of `llms.txt` does not open the page.
+
+### Crawler policy
+
+Every crawler may read the whole site, those of search engines and those of AI assistants alike. In production `robots.txt` blocks no path
+(an empty `Disallow:`) and says so in a comment. The reasons are that the documentation is public on GitHub too, that the site holds nothing that is
+not meant to be read, and that people ask assistants about the documentation. The firewall of the host runs Bot Protection and the AI-bot
+rule in log mode only ([Setup](#setup-once-by-a-maintainer), step 6): it records bot traffic and never blocks or challenges it. A crawler
+that harms the site is handled as an incident ([Firewall incidents](#firewall-incidents)), not by a rule in `robots.txt`, which
+`check-seo.py` would reject. Evaluating crawler requests, for example the logs of the host, is not part of this: the
+[privacy page](content/legal/privacy.md#server-logs) says in its section "Server logs" that the project does not receive these logs, so it
+would need a decision record first.
+
+### The 404 page
+
+The host answers a path without a file with status 404 and the content of `404.html`. The file also exists under its own address, which a
+static host may answer with status 200, so the page carries `noindex` in production too (`check-indexing.py` exempts it for that reason). It
+has no canonical link and no structured data, and its content links back to the home page, the documentation and the project.
+`check-seo.py` checks all of it.
+
+### Runbook
+
+The steps of the maintainer. None of them needs a file in the repository.
+
+1. **Search Console** (after the first production deployment, and when the domain changes). Add `myriarch.dev` as a *Domain* property and
+   verify it with the DNS TXT record that Search Console shows, at the registrar; a verification file or meta tag would need a change in
+   the repository. Submit `https://myriarch.dev/sitemap.xml` under *Sitemaps*. Inspect `https://myriarch.dev/` with *URL inspection*: the
+   user-declared canonical must be the page itself.
+2. **Bing Webmaster Tools.** Import the site from Search Console (*Import your sites from Google Search Console*); the sitemap comes with it.
+3. **Structured data.** Test `https://myriarch.dev/` with the [Schema Markup Validator](https://validator.schema.org/): `WebSite` and
+   `SoftwareSourceCode` without errors. Test a page of the documentation below the first level, for example
+   `https://myriarch.dev/docs/concepts/gitops/`, with the
+   [Rich Results Test](https://search.google.com/test/rich-results): the `BreadcrumbList` is valid. `SoftwareSourceCode` is not a rich
+   result type of Google, and the test reports errors for `SoftwareApplication` without ratings, which is why the home page uses the
+   first.
+4. **The live site.** `curl -sI https://myriarch.dev/llms.txt` answers 200 with `text/plain`; `curl -s https://myriarch.dev/robots.txt`
+   shows an empty `Disallow:` and the sitemap line; `curl -sI https://myriarch.dev/no-such-page/` answers 404, and the body is the page of
+   `404.html`.
+5. **The GitHub repository,** before the announcement: the description "GitOps-governed fleet manager for OpenTelemetry Collectors, built
+   on OpAMP", and the topics `opentelemetry`, `opamp`, `fleet-management`, `gitops` and `observability`.
+6. **Lighthouse** on the production build, as in the [development guide](../docs/development.md#website).
+
 ## Overrides of Docsy files
 
 Files in `layouts/` and `assets/` with the same path as a file of the theme replace it. They are few and each starts with a comment that
-names the upstream file: `head.html` (self-hosted lunr, brand colors, the CSP first), `favicons.html`, `page-meta-links.html` (edit links
+names the upstream file: `head.html` (self-hosted lunr, brand colors, the CSP first, the home title, `noindex` on the 404 page, and the canonical link and
+structured data through the partial `seo/head.html`; see [SEO and GEO](#seo-and-geo)), `favicons.html`, `page-meta-links.html` (edit links
 from the repository path), `scripts/plugins/mermaid.html` (self-hosted Mermaid), `footer/copyright.html`, `404.html` and
 `assets/js/offline-search.js` (the search index loads on first use, see [Search](#search); the changed parts are marked "Changed from
 upstream"). `overrides.txt` pins the SHA-256 of the upstream file of each. `REUSE.toml` (annotation n) adds "Copyright The Docsy Authors"
@@ -240,6 +343,7 @@ paragraph as the reason.
 | `check-api-spec.py` | a missing API reference page, a download that is not exactly one fingerprinted copy of `api/openapi.yaml`, a page that loads a script of an API viewer, or a number of operation sections that differs from the contract |
 | `check-landing.py` | a missing or malformed screenshot, a section or the mark of the landing page that is broken, an image without size or alt text, or a status chip that differs from `data/release.yaml` (or a malformed `release.yaml`) |
 | `check-notices.py` | a shipped dependency without a notice, with another version in `data/third_party.yaml`, or without a published license text |
+| `check-seo.py` | metadata for search engines and AI crawlers that differs from the configuration or breaks a rule of [SEO and GEO](#seo-and-geo): a page without exactly one canonical link to its own production URL, JSON-LD that is invalid, has a property its type does not define, names another version than `data/release.yaml` or a breadcrumb that differs from the visible one, a home title that is the bare site title, an image without alt text, an `llms.txt` that is missing, malformed, misspelled or links outside the site and the repository, a 404 page that can be indexed, a production `robots.txt` that blocks a crawler, a sitemap that differs from the canonical links; the mode comes from `WEBSITE_ENV` |
 
 A new check is a file `scripts/check-<name>.py` that takes the built site as its argument; the runner finds it. Outside the gate:
 
@@ -289,7 +393,9 @@ to `<meta name="robots" content="noindex, nofollow">`. The Hugo environment `pre
 except `production` as development and would ship unminified assets and a source map with the path of the build machine, so such a
 preview would not be the bytes that production ships. A preview has no known host name at build time (the URL of a Vercel
 deployment exists only after the upload), so it is built with `WEBSITE_BASEURL=/` and root-relative URLs. `check-indexing.py`
-verifies the mode on the built site.
+verifies the mode on the built site. The canonical links, the structured data and `llms.txt` of a preview name the production origin all the
+same (`params.seo.canonicalBase`, [SEO and GEO](#seo-and-geo)), so a preview never names itself as the original; `check-seo.py` runs in both modes. A build for the root of another host (`WEBSITE_BASEURL`) is
+checked against that host for the sitemap and for the link to `llms.txt`; its canonical links stay on the production origin.
 
 ## Deployment
 

@@ -4,12 +4,18 @@ SPDX-License-Identifier: Apache-2.0
 */ -}}
 {{- /*
 robots.txt. Production allows everything and names the sitemap; a preview (deployment for review, built with WEBSITE_ENV=preview, which sets
-params.preview) disallows everything.
+params.preview) disallows everything. The comment of the production file states the policy for AI crawlers (website/README.md, "SEO and
+GEO"); scripts/check-seo.py fails when a production robots.txt blocks a crawler.
 */ -}}
-User-agent: *
 {{ if eq (string site.Params.preview) "true" -}}
+# Preview: not for search engines or any other crawler.
+User-agent: *
 Disallow: /
 {{ else -}}
+# Crawler policy: every crawler may read the whole site, the crawlers of search engines and of AI assistants alike. The documentation is
+# public on GitHub as well. The firewall of the host only records bot traffic (log mode); it neither blocks nor challenges a crawler.
+# /llms.txt summarizes the project for language models.
+User-agent: *
 Disallow:
 
 Sitemap: {{ "sitemap.xml" | absURL }}

@@ -576,6 +576,27 @@ class IndexingTest(TempCase):
         self.assertEqual(rc, 1)
         self.assertIn("hidden/index.html", out)
 
+    def test_the_404_page_may_be_noindex_in_production_but_not_a_content_page(self):
+        self.site(self.PROD_ROBOTS, "index, follow")
+        write(self.path("public", "404.html"), self.PAGE % "noindex, nofollow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("3 pages scanned, 0 findings", out)
+        # The exemption is for the error page only: the same markup in a page of the site is a finding.
+        write(self.path("public", "404", "index.html"), self.PAGE % "noindex, nofollow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 1)
+        self.assertIn("404/index.html: the production page carries a robots meta tag with noindex", out)
+        self.assertNotIn("\n404.html:", "\n" + out)
+
+    def test_the_404_page_is_still_noindex_in_a_preview(self):
+        os.environ["WEBSITE_ENV"] = "preview"
+        self.site(self.PREVIEW_ROBOTS, "noindex, nofollow")
+        write(self.path("public", "404.html"), self.PAGE % "index, follow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 1)
+        self.assertIn("404.html: the preview page has no robots meta tag with noindex", out)
+
     def test_the_sitemap_must_use_the_base_url(self):
         self.site("User-agent: *\nDisallow:\n\nSitemap: https://other.test/sitemap.xml\n", "index, follow")
         rc, out, _ = run_main(self.mod, [self.path("public")])

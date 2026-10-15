@@ -1,0 +1,11 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Returns the canonical URL of a page: the fixed production origin (seo/canonical-base.html) plus the path of the page. The site is served at
+  the root of its host (canonicalBase holds an origin and no path, and scripts/check-seo.py checks only a build for the root of a host), so
+  the path of a page is its RelPermalink. A build whose base URL has a path would name its pages below that path, and the check fails.
+  Call: partial "seo/canonical-url.html" $page
+*/ -}}
+{{ return (printf "%s%s" (partial "seo/canonical-base.html" .) .RelPermalink) -}}

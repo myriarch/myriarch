@@ -1,0 +1,126 @@
+# The content of /llms.txt, the summary of the site for language models and AI assistants (https://llmstxt.org/). layouts/home.llms.txt
+# renders it with the title of the site as the heading. The text is curated here, not generated from the pages.
+#
+#   summary     the one-paragraph summary (the blockquote under the heading)
+#   details     paragraphs of background: what it does, who it is for, license, independence
+#   terms       key terms with a definition (term, text); the list that follows the paragraph "Key terms:" before the first section
+#               (llmstxt.org allows free-form lists only there; a list below a heading holds links)
+#   sections    groups of links (title, links); a section titled "Optional" holds what a reader may skip
+#                 page   the path of a page of the site (/docs/concepts/gitops/); the build fails when it does not exist. The title of the
+#                        link is the title of the page unless `title` is set
+#                 url    a link that leaves the site: only the GitHub repository of the project (params.repo.url) is allowed
+#                 note   one sentence about the target (required)
+#
+# scripts/check-seo.py checks the built file: links only to pages of the site and to the repository, no placeholder page, no duplicate
+# link, only links in the lists below a heading, and one spelling of the name. Spelling (ADR-0015): "myriarch" in identifiers and in the
+# middle of a sentence, "Myriarch" at the start of a sentence. Write only what the documentation backs; the support levels and the release
+# status change, so name neither. A note carries the caveat of its page: a tutorial that runs the server in development mode says so,
+# because a reader of llms.txt does not open the page.
+summary: "Myriarch is an open-source fleet manager for OpenTelemetry Collectors, built on OpAMP. Git is the source of truth for blueprints, fleets, rollout policies and the allowed collector versions; the web UI and the REST API operate within that frame, and every operator action is audited."
+
+details:
+  - "What it does: collectors keep running under the upstream OpAMP Supervisor. The server myriarchd renders one configuration per collector from layered blueprints, offers it over OpAMP, rolls changes out in waves with approvals, health gates and rollback, and starts collector version updates through exchangeable executors, because the Supervisor cannot replace the collector binary."
+  - "Who it is for: operators who run many OpenTelemetry Collectors on Linux and Windows hosts, in containers and on Kubernetes, at edge sites, in data centers and in the cloud. It is designed for around 1,000 collectors, with headroom up to 5,000."
+  - "License: the code is licensed under Apache-2.0 and the documentation under CC BY 4.0."
+  - "Independence: myriarch is an independent project. OpenTelemetry, Kubernetes and CNCF are trademarks of The Linux Foundation, and myriarch is not affiliated with or endorsed by The Linux Foundation or the OpenTelemetry project. The names are used only to describe compatibility."
+
+terms:
+  - term: OpAMP
+    text: "The Open Agent Management Protocol of the OpenTelemetry project, a network protocol with which a server manages a fleet of telemetry agents: status reporting, remote configuration and package offers."
+  - term: OpAMP Supervisor
+    text: "The upstream process that starts and monitors a collector and speaks OpAMP for it. It manages configuration, health and restarts, but it cannot replace the collector binary."
+  - term: GitOps frame
+    text: "What a Git repository declares: blueprints, fleets, rollout policies and the allowed collector versions. The web UI chooses inside this frame, for example a target version from the allowed range, and never edits the declared state."
+  - term: Blueprint
+    text: "A layered, parameterized collector configuration. The server renders it into one content-addressed configuration per agent."
+  - term: Fleet
+    text: "A group of agents selected by their attributes. It decides which blueprint, which parameter values and which collector version the agents get, and which rollout policies apply."
+  - term: Rollout
+    text: "A controlled change of the configuration or the collector version of a fleet: in waves, with approvals, health gates, failure thresholds, pause, abort and rollback."
+  - term: Executor
+    text: "The way a collector version update is started: the host agent myriarch-updater, a webhook, an AWX job, or by hand. The server learns the result from the version that the collector itself reports."
+  - term: Programs
+    text: "myriarchd is the server (OpAMP endpoint, REST API, web UI, GitOps syncer and rollout engine). myrctl validates and renders a GitOps repository. myriarch-updater is the host agent for collector binary updates. myriarch-sim is the load simulator."
+
+sections:
+  - title: Start here
+    links:
+      - page: /docs/getting-started/
+        note: "Tutorials that start a complete system on your own machine, from source or with Docker Compose; both run the server in development mode, which is not a production setup."
+      - page: /docs/getting-started/local-dev/
+        note: "Build from source and run the server in development mode with an embedded database, the example GitOps repository and simulated collectors."
+      - page: /docs/getting-started/first-fleet-and-rollout/
+        note: "Write a fleet and a rollout policy, enroll simulated collectors and roll out a change in waves, from source on a server in development mode."
+      - page: /docs/getting-started/docker-compose/
+        note: "Evaluate the system on one machine from the release images, with the server in development mode (well-known logins, no TLS), PostgreSQL and simulated collectors; not a production setup."
+
+  - title: Concepts
+    links:
+      - page: /docs/concepts/gitops/
+        note: "How a Git repository describes blueprints, fleets, policies and executors, and how the server applies it."
+      - page: /docs/concepts/agents/
+        note: "Collectors and updaters as the server sees them, and how an agent is identified."
+      - page: /docs/concepts/blueprints/
+        note: "Layered collector configurations and how the server renders them."
+      - page: /docs/concepts/fleets/
+        note: "How fleets select agents and how the target collector version is chosen."
+      - page: /docs/concepts/rollouts/
+        note: "Rollout policies, waves, approvals, maintenance windows and failure handling."
+      - page: /docs/concepts/executors/
+        note: "How collector version updates are started, with the updater, a webhook or AWX."
+      - page: /docs/architecture/
+        note: "Components, data flows, high availability, scaling and observability."
+
+  - title: How-to guides
+    links:
+      - page: /docs/tasks/connect-a-host/
+        note: "Enroll a Linux or Windows host with the installation scripts."
+      - page: /docs/tasks/roll-out-a-collector-version/
+        note: "Update the collector version of a fleet and choose the version in the web UI within the frame that Git sets."
+      - page: /docs/tasks/roll-out-a-config-change/
+        note: "Change a blueprint in Git and watch the rollout engine apply it in waves."
+      - page: /docs/tasks/validate-a-gitops-repository/
+        note: "Check a GitOps repository and render collector configurations with myrctl, locally and in CI."
+
+  - title: Reference
+    links:
+      - page: /docs/reference/gitops-schema/
+        note: "Every field of every GitOps object kind, with type and default."
+      - page: /docs/reference/api/
+        note: "The OpenAPI contract of the management API: authentication, roles, error format and every operation with its permission."
+      - page: /docs/reference/cli/
+        note: "The command-line tools myriarchd, myrctl, myriarch-updater and myriarch-sim."
+      - page: /docs/reference/configuration/
+        note: "Every key of the server configuration file, with type, default and effect."
+
+  - title: Operations and security
+    links:
+      - page: /docs/operations/install-helm/
+        note: "Install the server on Kubernetes with the Helm chart."
+      - page: /docs/operations/production-checklist/
+        note: "The settings that matter for security and what the server refuses at startup."
+      - page: /docs/operations/authentication/
+        note: "How people and agents authenticate: OpenID Connect, the bootstrap admin and enrollment tokens."
+      - page: /docs/security/model/
+        note: "Trust boundaries and security controls of the server, its agents and the updater."
+      - page: /docs/security/verify-releases/
+        note: "Check a release before you run it: checksums, keyless Sigstore signature and build provenance."
+
+  - title: Optional
+    links:
+      - page: /project/faq/
+        note: "Short answers about the relation to OpenTelemetry, the support levels and the license."
+      - page: /project/roadmap/
+        note: "What the first release contains, what comes next, what is intended for later and what is deliberately not planned."
+      - page: /project/changelog/
+        note: "Notable changes of every release."
+      - page: /docs/adr/
+        note: "The decision records: why the system is built the way it is."
+      - page: /project/contributing/
+        note: "Report a problem, propose a change, send a contribution."
+      - title: Source code
+        url: https://github.com/myriarch/myriarch
+        note: "The repository with the code, the documentation sources and the issue tracker."
+      - title: Releases
+        url: https://github.com/myriarch/myriarch/releases
+        note: "Release notes and signed release files."

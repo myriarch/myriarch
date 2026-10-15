@@ -11,6 +11,10 @@ Changes against the upstream file:
   3. The Content Security Policy (layouts/_partials/csp.html) is emitted first, so that it covers every resource of the page.
   4. A preview (site parameter preview, set by ci/website.sh with WEBSITE_ENV=preview) always gets the robots meta "noindex, nofollow".
      A preview is built with the production environment, so that it ships the same assets as production.
+  5. The 404 page gets the robots meta "noindex, nofollow" as well: a static host may serve the file under its own address with status 200.
+  6. The title of the home page is params.seo.homeTitle instead of the bare site title.
+  7. partial seo/head.html adds the canonical link (fixed production origin, also in a preview) and the structured data (JSON-LD), after
+     the description (website/README.md, "SEO and GEO"; website/scripts/check-seo.py checks the result).
 Re-check this file against the upstream one whenever Docsy is updated (website/scripts/check-overrides.py).
 */ -}}
 {{/* cSpell:ignore docsearch opengraph outputformat */ -}}
@@ -64,7 +68,7 @@ Re-check this file against the upstream one whenever Docsy is updated (website/s
 {{ end -}}
 
 {{ $outputFormat := partial "outputformat.html" . -}}
-{{ if and hugo.IsProduction (ne (string .Site.Params.preview) "true") (ne $outputFormat "print") (ne .Site.Language.Name "xx") -}}
+{{ if and hugo.IsProduction (ne (string .Site.Params.preview) "true") (ne .Kind "404") (ne $outputFormat "print") (ne .Site.Language.Name "xx") -}}
 <meta name="robots" content="index, follow">
 {{ else -}}
 <meta name="robots" content="noindex, nofollow">
@@ -73,13 +77,14 @@ Re-check this file against the upstream one whenever Docsy is updated (website/s
 {{ partialCached "favicons.html" . }}
 <title>
   {{- if .IsHome -}}
-    {{ .Site.Title -}}
+    {{ .Site.Params.seo.homeTitle | default .Site.Title -}}
   {{ else -}}
     {{ with .Title }}{{ . }} | {{ end -}}
     {{ .Site.Title -}}
   {{ end -}}
 </title>
 <meta name="description" content="{{ partial "page-description.html" . }}">
+{{ partial "seo/head.html" . -}}
 {{ partial "opengraph.html" . -}}
 {{ partial "schema.html" . -}}
 {{ partial "twitter_cards.html" . -}}
