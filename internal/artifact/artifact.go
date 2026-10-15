@@ -116,6 +116,11 @@ type Cache struct {
 	touchMu   sync.Mutex
 	lastTouch map[string]time.Time
 
+	// downloads started by Prepare that have not finished yet, by spec key (prepare.go)
+	prepMu    sync.Mutex
+	preparing map[string]struct{}
+	prepWG    sync.WaitGroup
+
 	downloads *prometheus.CounterVec
 }
 
