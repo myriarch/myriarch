@@ -916,6 +916,27 @@ func TestHelmTestPodTemplate(t *testing.T) {
 	assert.Contains(t, np, `include "myriarch.testSelectorLabels"`)
 }
 
+// Every refusal of the templates for the test Pod names a value path, and the table "Misconfiguration messages" in the README of the
+// chart, which calls itself the complete list, has a row for each of them.
+func TestReadmeListsTheMessagesOfTheTestPod(t *testing.T) {
+	failPath := regexp.MustCompile(`fail (?:\(printf )?"(tests\.[A-Za-z.]+): `)
+	paths := map[string]bool{}
+	for _, f := range chartTemplateFiles(t) {
+		b, err := os.ReadFile(f)
+		require.NoError(t, err)
+		for _, m := range failPath.FindAllStringSubmatch(string(b), -1) {
+			paths[m[1]] = true
+		}
+	}
+	for _, want := range []string{"tests.token.key", "tests.token.existingSecret", "tests.podAnnotations"} {
+		assert.True(t, paths[want], "%s: the templates refuse it", want)
+	}
+	readme := string(readDeploy(t, "helm/myriarch/README.md"))
+	for path := range paths {
+		assert.Contains(t, readme, "| `"+path+"` |", "the table of messages in the README of the chart lists %s", path)
+	}
+}
+
 // "helm upgrade --reuse-values" renders a release of v0.1.0 with the values of that release in place of the defaults of the chart. They
 // have neither the map tests nor the map prometheusRule, and a template that reads .Values.tests.enabled or
 // .Values.prometheusRule.enabled then stops with "nil pointer evaluating interface {}.enabled". The switches are read through the

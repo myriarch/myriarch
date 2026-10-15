@@ -377,6 +377,8 @@ that starts with the value path, followed by what is wrong and how to fix it, fo
 | `bootstrapAdmin.passwordHashKey` | set without `existingSecret` |
 | `bootstrapAdmin.username` | not 1 to 64 characters of letters, digits, `.`, `_`, `@`, `-` |
 | `enrollmentTokens[<i>].name` | not a DNS label, or duplicate |
+| `tests.token.key` | empty while `tests.token.existingSecret` is set |
+| `tests.token.existingSecret` | a Secret of the server itself: `existingSecret` or the bootstrap Secret (generated, or `bootstrapAdmin.existingSecret`) |
 | `tests.podAnnotations` | a key that starts with `helm.sh/hook` (the schema names the key; the template repeats the check) |
 
 ## Helm test
