@@ -42,6 +42,7 @@ import (
 	"github.com/myriarch/myriarch/internal/gitops"
 	"github.com/myriarch/myriarch/internal/housekeeping"
 	"github.com/myriarch/myriarch/internal/httpserver"
+	"github.com/myriarch/myriarch/internal/install"
 	"github.com/myriarch/myriarch/internal/leader/pglock"
 	"github.com/myriarch/myriarch/internal/licenses"
 	"github.com/myriarch/myriarch/internal/live"
@@ -254,6 +255,7 @@ func run(ctx context.Context, cfg config.Config, opts runOptions) error {
 	artifacts, err := artifact.NewCache(cfg.Artifacts, artifact.Deps{
 		Store: st, Bus: bus, HTTPClient: httpClient, PublicURL: cfg.Server.PublicURL,
 		DownloadSecret: downloadSecret, Logger: logger, Registerer: reg, Policy: policy,
+		InstallGrantTTL: cfg.Install.GrantTTL,
 	})
 	if err != nil {
 		return fmt.Errorf("artifact cache: %w", err)
@@ -327,9 +329,22 @@ func run(ctx context.Context, cfg config.Config, opts runOptions) error {
 		ReplicaID: replicaID, DevMode: opts.dev, Logger: logger,
 		SchemaInfo: db.SchemaInfo, FleetCounts: db.FleetCounts, LocalConnections: opampSrv.Connections,
 	})...)
+	// The installation of hosts from the server (ADR-0046): the plan that a host asks for with its enrollment token.
+	// A disabled feature is not built, and its routes answer 404.
+	var installer *install.Planner
+	if cfg.Install.Enabled {
+		installer, err = install.NewPlanner(install.Deps{
+			Store: st, Assigner: assigner, Artifacts: artifacts, Config: cfg.Install,
+			PublicURL: cfg.Server.PublicURL, OpAMPPath: cfg.OpAMP.Path, Logger: logger,
+		})
+		if err != nil {
+			return fmt.Errorf("install: %w", err)
+		}
+	}
 	modules = append(modules, fleetapi.New(fleetapi.Deps{
 		Store: st, Syncer: syncer, Assigner: assigner, Renderer: renderer, Engine: engine,
 		Tracker: tracker, Artifacts: artifacts, Notifier: notifier, Audit: auditRec, Bus: bus, Config: cfg, Logger: logger,
+		Install: installer, InstallAuth: authSvc, Registerer: reg,
 	})...)
 
 	var metricsHandler http.Handler
