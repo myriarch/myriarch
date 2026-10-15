@@ -133,6 +133,18 @@ type OpAMPConfig struct {
 	// OfflineAfter marks an agent offline when it sent no message for this
 	// long (default 90s = 3 x the supervisor default heartbeat of 30s).
 	OfflineAfter time.Duration `yaml:"offlineAfter"`
+	// StaleApplyingAfter is how long one connection of an agent may keep
+	// reporting APPLYING for the desired config, unchanged, before the server
+	// offers the config once more (once per connection; default 90s, 3 x the
+	// supervisor default heartbeat of 30s; 0 turns it off). A supervisor that
+	// restarts while it applies a config reports the stored APPLYING again
+	// after it reconnects, and nothing ends it; without this setting a rollout
+	// waits for the `applyTimeout` of its policy. The time counts from the
+	// first report on the connection, so short connections never cause an
+	// offer. Keep it above the `config_apply_timeout` of the supervisors (30s
+	// in the shipped templates) and below the `applyTimeout` of the rollout
+	// policies (10 minutes for configuration by default).
+	StaleApplyingAfter time.Duration `yaml:"staleApplyingAfter"`
 	// LastSeenFlushInterval is the batch interval for the `last_seen_at`
 	// writes (default 15s).
 	LastSeenFlushInterval time.Duration `yaml:"lastSeenFlushInterval"`
@@ -803,6 +815,7 @@ func Default() Config {
 			Path:                     "/v1/opamp",
 			RequireEnrollmentToken:   true,
 			OfflineAfter:             90 * time.Second,
+			StaleApplyingAfter:       90 * time.Second,
 			LastSeenFlushInterval:    15 * time.Second,
 			MaxMessageSize:           4 << 20,
 			MaxEffectiveConfigBytes:  1 << 20,

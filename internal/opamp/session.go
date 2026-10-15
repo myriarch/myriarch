@@ -94,6 +94,15 @@ type session struct {
 	offeredPkgs     domain.Hash
 	offeredPkgsAt   time.Time
 
+	// Stale APPLYING (docs/design/opamp-server.md, "Stale APPLYING after a
+	// reconnect"). applyingHash is the config hash this connection saw the
+	// agent report APPLYING for without having offered it itself, since
+	// applyingSince. staleOffered is the hash this connection offered again
+	// for that reason (at most once per connection and hash).
+	applyingHash  domain.Hash
+	applyingSince time.Time
+	staleOffered  domain.Hash
+
 	// asynchronous requests from the bus (set without holding mu)
 	stale       atomic.Bool
 	pushPending atomic.Bool

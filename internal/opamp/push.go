@@ -214,7 +214,7 @@ func (s *Server) push(sess *session) {
 			sess.forceFullState = true
 		}
 		// forget the offer so that the next message offers it again
-		sess.offeredConfig, sess.offeredPkgs = nil, nil
+		sess.offeredConfig, sess.offeredPkgs, sess.staleOffered = nil, nil, nil
 		return
 	}
 	s.m.messages.WithLabelValues("out").Inc()

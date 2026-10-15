@@ -132,6 +132,8 @@ type rigOpts struct {
 	elector leader.Elector
 	// heartbeat replaces the replica heartbeat interval (200 ms by default)
 	heartbeat time.Duration
+	// now replaces the clock of the server (Deps.Now)
+	now func() time.Time
 }
 
 type rig struct {
@@ -214,7 +216,7 @@ func newRig(t *testing.T, o rigOpts) *rig {
 	srv, err := opamp.New(cfg, opamp.Deps{
 		Store: r.db, Bus: bus, Assigner: assigner, Auth: auth, Logger: quiet, Registerer: r.reg, ReplicaID: r.replica,
 		Elector: elector, HA: config.HAConfig{HeartbeatInterval: heartbeat}, Hostname: "testhost", Version: "test",
-		Audit: audit.NewRecorder(r.db.Audit(), quiet), Downloads: o.downloads,
+		Audit: audit.NewRecorder(r.db.Audit(), quiet), Downloads: o.downloads, Now: o.now,
 	})
 	if err != nil {
 		t.Fatal(err)

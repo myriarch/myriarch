@@ -50,6 +50,7 @@ ordered by area. Issue codes of the GitOps repository, such as `blueprint_not_fo
 
 | Symptom | Cause and fix |
 |---|---|
+| A configuration target stays `in_progress` and the agent reports `applying` after it restarted | A supervisor that restarts while it applies a configuration reports the stored `applying` again, and nothing ends it. After `opamp.staleApplyingAfter` (90 seconds by default) on the connection, the server offers the configuration once more (agent event `config_offered` with the reason `stale_applying`, counter `myriarch_opamp_config_reoffers_total`), and the supervisor answers `applied`. If it does not, the target waits for the `applyTimeout` of its policy. With `opamp.staleApplyingAfter: 0` the server never offers it again. |
 | A rollout waits forever in `waiting_approval` | A wave with `requireApproval` needs an approval (UI, or `.../actions/approve` with the `wave`). Waves with no targets are skipped. |
 | A rollout is `paused` with errors | The failure threshold was reached. Read `lastError` of the failed targets, then `retry-failed`, `resume`, `rollback`, or fix Git (a fix replaces the paused rollout). |
 | A rollout `failed` with "fleet ... was removed from the GitOps repository" | The fleet was removed from Git. The rollout needs your confirmation: `.../actions/abort`. |

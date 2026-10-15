@@ -117,6 +117,7 @@ Every setting of the [server configuration](configuration.md) except lists of ob
 | `MYRIARCH_OPAMP_REQUIRECLIENTCERT` | [`opamp.requireClientCert`](configuration.md#opamp) | boolean |
 | `MYRIARCH_OPAMP_REQUIREENROLLMENTTOKEN` | [`opamp.requireEnrollmentToken`](configuration.md#opamp) | boolean |
 | `MYRIARCH_OPAMP_SENDTIMEOUT` | [`opamp.sendTimeout`](configuration.md#opamp) | duration |
+| `MYRIARCH_OPAMP_STALEAPPLYINGAFTER` | [`opamp.staleApplyingAfter`](configuration.md#opamp) | duration |
 | `MYRIARCH_OUTBOUND_ALLOWEDCIDRS` | [`outbound.allowedCidrs`](configuration.md#outbound) | list of strings |
 | `MYRIARCH_OUTBOUND_CAFILE` | [`outbound.caFile`](configuration.md#outbound) | string |
 | `MYRIARCH_RELEASES_CONTRIBREPO` | [`releases.contribRepo`](configuration.md#releases) | string |

@@ -100,6 +100,9 @@ func ValidateOptions(c *config.Config, opts Options) error {
 		v.add("opamp.path", "must not collide with the REST API or the UI root")
 	}
 	v.positive("opamp.offlineAfter", c.OpAMP.OfflineAfter)
+	if c.OpAMP.StaleApplyingAfter < 0 {
+		v.add("opamp.staleApplyingAfter", "must not be negative (0 turns the re-offer of a stale APPLYING off)")
+	}
 	v.positive("opamp.lastSeenFlushInterval", c.OpAMP.LastSeenFlushInterval)
 	v.positive("opamp.sendTimeout", c.OpAMP.SendTimeout)
 	if c.OpAMP.OfflineAfter > 0 && c.OpAMP.LastSeenFlushInterval > 0 && c.OpAMP.OfflineAfter < 2*c.OpAMP.LastSeenFlushInterval {
