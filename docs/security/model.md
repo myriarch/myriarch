@@ -558,7 +558,9 @@ guidance after each item names what to do.
   and a failing tool (`ci/tests/vulncheck-test.sh` covers each). Reports leave out the findings that the allowlist accepts. Limits: govulncheck knows the Go vulnerability database, not
   other ecosystems (the dependency review and Dependabot cover the advisories of npm, pip and the actions); the binary mode lists the
   vulnerable symbols that a binary contains and cannot tell whether the program reaches them, so it reports more than the source
-  analysis; the results about binaries are anchored at `go.mod` because a binary has no file or line; the binaries are the archives of
+  analysis; the release binaries are built with `-s -w` and are scanned without a problem, because govulncheck reads the build
+  information and the function table that the Go runtime keeps, but a binary without Go build information cannot be scanned and fails
+  the run; the results about binaries are anchored at `go.mod` because a binary has no file or line; the binaries are the archives of
   the latest stable release unless a manual run names another; and a run that cannot reach GitHub or the vulnerability database fails
   visibly and leaves the earlier alerts as they are.
 - **Rules for the release workflow (R13).** `ci/check-workflows.py` requires of
