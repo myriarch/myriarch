@@ -1,0 +1,171 @@
+# Configuration of the dependency review of pull requests: the job dependency-review in .github/workflows/ci.yml, which is part of
+# ci-ok (ADR-0038, docs/development.md "Dependency review").
+#
+# The job compares the dependencies of a pull request (or of a merge group) with those of its base and fails when a dependency that
+# the change adds or updates carries a license outside allow-licenses or a known vulnerability of high or critical severity, in the
+# runtime scope. The thresholds (fail-on-severity, fail-on-scopes) are set in the workflow; this file holds what is allowed.
+#
+# A dependency whose license the dependency graph of GitHub does not know is only listed in the job summary. The check looks at the
+# dependencies a change adds or updates, not at the whole tree, and it is a tripwire: the binding license check of a release is
+# ci/check-release-licenses.sh, which allows fewer licenses (the list "release" of ci/license-allowlist.txt).
+#
+# allow-licenses is the CNCF allowlist and Apache-2.0: exactly the identifiers of ci/license-allowlist.txt, which is the source.
+# ci/tests/license-allowlist-test.sh fails when the two differ, so change them together.
+allow-licenses:
+  - Apache-2.0
+  - BSD-2-Clause
+  - BSD-3-Clause
+  - ISC
+  - MIT
+  - Zlib
+  - 0BSD
+  - BSD-2-Clause-FreeBSD
+  - MIT-0
+  - OpenSSL
+  - OpenSSL-standalone
+  - PSF-2.0
+  - Python-2.0
+  - Python-2.0.1
+  - PostgreSQL
+  - SSLeay-standalone
+  - UPL-1.0
+  - X11
+  - LicenseRef-scancode-google-patent-license-golang
+
+# Advisories of the GitHub Advisory Database (GHSA-xxxx-xxxx-xxxx) that were reviewed and accepted, each under a comment that says why.
+# Empty. govulncheck (ci/vulncheck.sh) decides what the code calls; this check reports the advisories of the dependencies that a
+# change adds or updates, whether the code calls the vulnerable symbols or not.
+allow-ghsas: []
+
+# Exceptions: packages that may carry any license in this check, each group under the reason. An entry names a package, not a version:
+# the action ignores the version of a package URL, so the exception also covers the license of every later version of the package.
+# Look at the license of a package of this list again when its version changes. A package without an entry that carries a license
+# outside the list fails the check; adding it here needs a reason and a review like a change of policy (ADR-0038).
+#
+# Not listed on purpose: pkg:npm/elkjs (EPL-2.0, weak copyleft), a dependency of Mermaid, whose chunks the website serves. Whether the
+# website needs a notice for it has to be decided before an exception is recorded.
+allow-dependencies-licenses:
+  # github.com/cyphar/filepath-securejoin (BSD-3-Clause AND MPL-2.0), linked through go-git: the module has two licenses. The release builds
+  # link only the packages under BSD-3-Clause (LICENSE.BSD); the exception with this scope in ci/license-overrides.txt makes the release
+  # license check fail when a dependency update links another package of the module.
+  - 'pkg:golang/github.com/cyphar/filepath-securejoin'
+
+  # github.com/opencontainers/go-digest (Apache-2.0 AND CC-BY-SA-4.0): the code of the module is Apache-2.0, and LICENSE.docs
+  # (CC-BY-SA-4.0) covers its documentation, which is not part of a binary (ci/license-overrides.txt).
+  - 'pkg:golang/github.com/opencontainers/go-digest'
+
+  # github.com/emirpasic/gods (BSD-2-Clause with ISC), linked through go-git: its LICENSE holds the BSD-2-Clause text and, for the AVL
+  # tree, the ISC text. Both licenses are on the release list.
+  - 'pkg:golang/github.com/emirpasic/gods'
+
+  # github.com/xi2/xz (public domain dedication), required by embedded-postgres: linked into the development build only (build tag devpg).
+  # ci/check-release-deps.sh keeps it out of every release build.
+  - 'pkg:golang/github.com/xi2/xz'
+
+  # MPL-2.0, a file-level copyleft: HashiCorp libraries and github.com/letsencrypt/boulder, required only by the Go modules of the CI
+  # tools (ci/tools). No release binary links them (ci/check-release-licenses.sh would fail), and the tools run on the build machine only.
+  - 'pkg:golang/github.com/hashicorp/errwrap'
+  - 'pkg:golang/github.com/hashicorp/go-cleanhttp'
+  - 'pkg:golang/github.com/hashicorp/go-multierror'
+  - 'pkg:golang/github.com/hashicorp/go-retryablehttp'
+  - 'pkg:golang/github.com/hashicorp/go-rootcerts'
+  - 'pkg:golang/github.com/hashicorp/go-secure-stdlib/parseutil'
+  - 'pkg:golang/github.com/hashicorp/go-secure-stdlib/strutil'
+  - 'pkg:golang/github.com/hashicorp/go-sockaddr'
+  - 'pkg:golang/github.com/hashicorp/go-version'
+  - 'pkg:golang/github.com/hashicorp/golang-lru'
+  - 'pkg:golang/github.com/hashicorp/golang-lru/v2'
+  - 'pkg:golang/github.com/hashicorp/hcl'
+  - 'pkg:golang/github.com/hashicorp/hcl/v2'
+  - 'pkg:golang/github.com/hashicorp/vault/api'
+  - 'pkg:golang/github.com/letsencrypt/boulder'
+
+  # More Go modules of the CI tools (ci/tools) with several licenses in the report of the dependency graph, which scans every file of a
+  # module: chroma (MIT; the OFL-1.1 font of its SVG formatter), go-licenses (the licenses of its test data), image-spec (Apache-2.0 and
+  # the DCO text), opa (Apache-2.0, with code of other projects under other licenses), gitlab client-go (Apache-2.0), go-metrics
+  # (BSD-2-Clause-Views), therootcompany/xz (CC0-1.0) and go-timezone-local (Unlicense and Apache-2.0). No release binary links them.
+  - 'pkg:golang/github.com/alecthomas/chroma/v2'
+  - 'pkg:golang/github.com/google/go-licenses/v2'
+  - 'pkg:golang/github.com/opencontainers/image-spec'
+  - 'pkg:golang/github.com/open-policy-agent/opa'
+  - 'pkg:golang/github.com/rcrowley/go-metrics'
+  - 'pkg:golang/github.com/therootcompany/xz'
+  - 'pkg:golang/github.com/thlib/go-timezone-local'
+  - 'pkg:golang/gitlab.com/gitlab-org/api/client-go'
+
+  # The REUSE checker and two of its dependencies (ci/tools/reuse/requirements.txt): reuse has several licenses, GPL-3.0 among them,
+  # python-debian is GPL-2.0-or-later and chardet is LGPL-2.1-or-later. They run as a separate program in a virtual environment
+  # (ci/install-tools.sh reuse), are no part of any artifact, and the license of a file that reuse checks does not depend on them.
+  - 'pkg:pypi/chardet'
+  - 'pkg:pypi/python-debian'
+  - 'pkg:pypi/reuse'
+
+  # pillow (MIT-CMU, a permissive license) in the requirements of the generator of the brand artwork (assets/brand/source).
+  - 'pkg:pypi/pillow'
+
+  # Build and lint tools of the web UI (devDependencies of web/package.json): lightningcss, the CSS minifier of Vite, and its platform
+  # packages (MPL-2.0), the browser data of caniuse-lite (CC-BY-4.0) and mdn-data (CC0-1.0). They are not bundled into the UI; the notices
+  # of the bundle come from the license report of Vite (scripts/gen-third-party-notices.sh).
+  - 'pkg:npm/caniuse-lite'
+  - 'pkg:npm/lightningcss'
+  - 'pkg:npm/lightningcss-android-arm64'
+  - 'pkg:npm/lightningcss-darwin-arm64'
+  - 'pkg:npm/lightningcss-darwin-x64'
+  - 'pkg:npm/lightningcss-freebsd-x64'
+  - 'pkg:npm/lightningcss-linux-arm-gnueabihf'
+  - 'pkg:npm/lightningcss-linux-arm64-gnu'
+  - 'pkg:npm/lightningcss-linux-arm64-musl'
+  - 'pkg:npm/lightningcss-linux-x64-gnu'
+  - 'pkg:npm/lightningcss-linux-x64-musl'
+  - 'pkg:npm/lightningcss-win32-arm64-msvc'
+  - 'pkg:npm/lightningcss-win32-x64-msvc'
+  - 'pkg:npm/mdn-data'
+
+  # Tools of the website that are not shipped (devDependencies of website/package.json, the Vercel CLI): edge-runtime (MPL-2.0) and tar,
+  # glob, minipass, path-scurry and chownr (BlueOak-1.0.0, a permissive license).
+  - 'pkg:npm/%40edge-runtime/format'
+  - 'pkg:npm/%40edge-runtime/node-utils'
+  - 'pkg:npm/%40edge-runtime/ponyfill'
+  - 'pkg:npm/%40edge-runtime/primitives'
+  - 'pkg:npm/%40edge-runtime/vm'
+  - 'pkg:npm/chownr'
+  - 'pkg:npm/edge-runtime'
+  - 'pkg:npm/glob'
+  - 'pkg:npm/minipass'
+  - 'pkg:npm/path-scurry'
+  - 'pkg:npm/tar'
+
+  # lru-cache, minimatch, yallist (BlueOak-1.0.0, permissive) and uri-js (BSD-2-Clause and BSD-2-Clause-Views, permissive) in the tool trees
+  # of both web/ and website/.
+  - 'pkg:npm/lru-cache'
+  - 'pkg:npm/minimatch'
+  - 'pkg:npm/uri-js'
+  - 'pkg:npm/yallist'
+
+  # The generator of the brand artwork (assets/brand/source): @resvg/resvg-js with its platform packages (MPL-2.0) and sax (BlueOak-1.0.0,
+  # through svgo). A developer tool that no gate and no release runs; the files it makes are committed.
+  - 'pkg:npm/%40resvg/resvg-js'
+  - 'pkg:npm/%40resvg/resvg-js-android-arm-eabi'
+  - 'pkg:npm/%40resvg/resvg-js-android-arm64'
+  - 'pkg:npm/%40resvg/resvg-js-darwin-arm64'
+  - 'pkg:npm/%40resvg/resvg-js-darwin-x64'
+  - 'pkg:npm/%40resvg/resvg-js-linux-arm-gnueabihf'
+  - 'pkg:npm/%40resvg/resvg-js-linux-arm64-gnu'
+  - 'pkg:npm/%40resvg/resvg-js-linux-arm64-musl'
+  - 'pkg:npm/%40resvg/resvg-js-linux-x64-gnu'
+  - 'pkg:npm/%40resvg/resvg-js-linux-x64-musl'
+  - 'pkg:npm/%40resvg/resvg-js-win32-arm64-msvc'
+  - 'pkg:npm/%40resvg/resvg-js-win32-ia32-msvc'
+  - 'pkg:npm/%40resvg/resvg-js-win32-x64-msvc'
+  - 'pkg:npm/sax'
+
+  # Packages of the web UI and of the website that the dependency graph reports with a combination of permissive or public-domain
+  # licenses: bootstrap and @fortawesome/fontawesome-free (website/data/third_party.yaml lists them with their license texts), lodash-es
+  # and robust-predicates (MIT and Unlicense, through Mermaid), victory-vendor (through recharts; MIT AND ISC in its package.json, with its
+  # notice in THIRD_PARTY_NOTICES) and type-fest (type declarations, MIT OR CC0-1.0).
+  - 'pkg:npm/%40fortawesome/fontawesome-free'
+  - 'pkg:npm/bootstrap'
+  - 'pkg:npm/lodash-es'
+  - 'pkg:npm/robust-predicates'
+  - 'pkg:npm/type-fest'
+  - 'pkg:npm/victory-vendor'

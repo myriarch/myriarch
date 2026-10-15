@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Continuous integration (ADR-0032). The jobs run the gates of ci/check-local.sh (one source of commands, local and in CI),
-# plus what only a runner can prove: the platform matrix of the Go tests, the release rehearsal, the commit range scan and the
-# end-to-end test. "ci-ok" is the only required check of the branch ruleset.
+# plus what only a runner can prove: the platform matrix of the Go tests, the release rehearsal, the commit range scan, the
+# dependency review (ADR-0038) and the end-to-end test. "ci-ok" is the only required check of the branch ruleset.
 #
 # Policy (enforced by ci/check-workflows.py): only GitHub-owned actions pinned to a commit SHA, a read-only token, no
 # pull_request_target or workflow_run, no persisted checkout credentials, a timeout on every job, no secrets (only the deployment
@@ -381,6 +381,35 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  # ---- dependency review: the licenses and known vulnerabilities of the dependencies that a pull request adds or updates -------------------
+  # The action compares the dependency graph of the base with that of the head of a pull request or of a merge group (ADR-0038;
+  # .github/dependency-review-config.yml, ci/license-allowlist.txt). Any other event (a push to main, the nightly run, a manual run) has
+  # nothing to compare, and a skipped job would fail ci-ok, so the job succeeds there with a note. The token is the read-only token of the
+  # run: no comment is written to the pull request, the result is in the log and in the job summary. The action asks no third party:
+  # the OpenSSF Scorecard summary of its dependencies is off.
+  dependency-review:
+    name: dependency-review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Review the dependency changes
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          config-file: ./.github/dependency-review-config.yml
+          fail-on-severity: high
+          fail-on-scopes: runtime
+          comment-summary-in-pr: never
+          show-openssf-scorecard: false
+      - name: Nothing to review
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        run: echo "The dependency review compares a pull request or a merge group with its base; there is nothing to compare for the event ${GITHUB_EVENT_NAME}."
+
   # ---- the workflows themselves: actionlint, zizmor and the policy check ----------------------------------------------------------------
   workflows:
     name: workflows
@@ -439,7 +468,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [go, go-test-linux, go-test-native, web, build, shell-helm, docs, website, compliance, workflows, scripts, e2e]
+    needs: [go, go-test-linux, go-test-native, web, build, shell-helm, docs, website, compliance, dependency-review, workflows, scripts, e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
