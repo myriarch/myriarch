@@ -561,7 +561,7 @@ cleanup() { rm -rf "$d"; }
 trap cleanup EXIT
 trap "exit 1" HUP INT TERM
 if [ -n "$tf" ]; then
-  [ -f "$tf" ] && [ -r "$tf" ] || die file_unreadable "the token file $tf is not a readable file"
+  if [ ! -f "$tf" ] || [ ! -r "$tf" ]; then die file_unreadable "the token file $tf is not a readable file"; fi
   tok=$(tr -d "\r\n[:space:]" <"$tf")
   own=
 else
