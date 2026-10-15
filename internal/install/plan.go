@@ -45,6 +45,7 @@ const (
 	CodeUnknownAttribute     = "unknown_attribute"
 	CodePlatformNotSupported = "platform_not_supported"
 	CodeVersionNotAllowed    = "version_not_allowed"
+	CodeVariantNotAvailable  = "variant_not_available"
 	// 503
 	CodePreparing = "preparing"
 )
@@ -139,6 +140,10 @@ type Deps struct {
 	PublicURL string
 	OpAMPPath string
 	Logger    *slog.Logger
+	// Bundles are the installer bundles of this server, behind the commands that the web UI renders (nil: none).
+	Bundles BundleStore
+	// DevMode lets the commands have the variant lab, which lowers the checks of the installer.
+	DevMode bool
 }
 
 // Planner answers a host's request for its plan.
@@ -166,6 +171,9 @@ func NewPlanner(d Deps) (*Planner, error) {
 
 // Enabled reports install.enabled.
 func (p *Planner) Enabled() bool { return p.d.Config.Enabled }
+
+// Bundles returns the installer bundles of this server, or nil.
+func (p *Planner) Bundles() BundleStore { return p.d.Bundles }
 
 // Plan decides what a host installs, following ADR-0046 and docs/design/opamp-server.md ("Installation from the
 // server"):

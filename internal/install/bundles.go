@@ -853,3 +853,5 @@ func bundleFailedRefusal(b Bundle) *Refusal {
 	r.RetryAfter = retryBundleFailed
 	return r
 }
+
+var _ BundleStore = (*Bundles)(nil)

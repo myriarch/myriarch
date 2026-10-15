@@ -1,0 +1,61 @@
+& {
+  param([hashtable]$P)
+  $ErrorActionPreference = 'Stop'
+  $ProgressPreference = 'SilentlyContinue'
+  $Server = $P.Server; $File = $P.File; $Sha256 = $P.Sha256
+  $Token = $P.Token; $TokenFile = $P.TokenFile; $InstallerArgs = $P.InstallerArgs
+  if (-not (whoami.exe /groups | Select-String -SimpleMatch 'S-1-16-12288' -Quiet)) {
+    throw '[myriarch-install] ERROR [privilege_required] this command has to run in an elevated Windows PowerShell (Run as administrator)'
+  }
+  $blocked = @(Get-ExecutionPolicy -List | Where-Object { ($_.Scope -eq 'MachinePolicy' -or $_.Scope -eq 'UserPolicy') -and ($_.ExecutionPolicy -eq 'AllSigned' -or $_.ExecutionPolicy -eq 'Restricted') })
+  if ($blocked.Count -gt 0) {
+    throw '[myriarch-install] ERROR [execution_policy_blocked] Group Policy sets the execution policy to AllSigned or Restricted. It wins over -ExecutionPolicy, so the unsigned installer cannot run on this host'
+  }
+  if ($TokenFile) {
+    if (-not (Test-Path -LiteralPath $TokenFile -PathType Leaf)) {
+      throw "[myriarch-install] ERROR [file_unreadable] the token file $TokenFile is not a readable file"
+    }
+    $Token = (Get-Content -LiteralPath $TokenFile -Raw) -replace '\s', ''
+  }
+  if (-not $Token) { throw '[myriarch-install] ERROR [option_missing] the enrollment token is empty' }
+  if ($Token -match '@@') { throw '[myriarch-install] ERROR [option_missing] the placeholder of the enrollment token was not replaced' }
+  if ($Token -notmatch '^[A-Za-z0-9_.~+/=-]+\z') { throw '[myriarch-install] ERROR [option_invalid] the enrollment token contains characters that a token cannot have' }
+  $d = Join-Path $env:ProgramData ('myriarch-setup-' + (New-Guid).Guid)
+  New-Item -ItemType Directory -Path $d | Out-Null
+  try {
+    icacls.exe $d /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw '[myriarch-install] ERROR [acl_failed] icacls could not restrict the working directory to SYSTEM and the administrators' }
+    if (@(Get-ChildItem -LiteralPath $d -Force).Count -ne 0) { throw '[myriarch-install] ERROR [directory_unsafe] the new working directory is not empty' }
+    if (-not $TokenFile) {
+      $TokenFile = Join-Path $d 'enrollment-token.txt'
+      Set-Content -LiteralPath $TokenFile -Value $Token -NoNewline
+    }
+    $zip = Join-Path $d $File
+    Write-Host "[myriarch-install] downloading the installer bundle $File from $Server"
+    try {
+      Invoke-WebRequest -UseBasicParsing -Uri "$Server/api/v1/install/bundles/$File" -Headers @{ Authorization = "Bearer $Token" } -OutFile $zip
+    } catch {
+      throw "[myriarch-install] ERROR [download_failed] the installer bundle could not be downloaded from $Server ($($_.Exception.Message))"
+    }
+    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash -ne $Sha256) {
+      throw '[myriarch-install] ERROR [checksum_mismatch] the installer bundle does not have the SHA-256 given in the command; nothing was unpacked'
+    }
+    Write-Host '[myriarch-install] the SHA-256 of the installer bundle is the one in the command; unpacking it'
+    Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $d 'package')
+    $installer = Join-Path $d 'package\deploy\scripts\install-windows.ps1'
+    Unblock-File -LiteralPath $installer
+    $run = @('-NoProfile', '-ExecutionPolicy', 'RemoteSigned', '-File', $installer, '-Server', $Server, '-TokenFile', $TokenFile) + $InstallerArgs
+    & powershell.exe @run
+    if ($LASTEXITCODE -ne 0) { throw "[myriarch-install] ERROR [installer_failed] the installer ended with exit code $LASTEXITCODE; its message is above" }
+  } finally {
+    Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $d) { Write-Warning "[myriarch-install] the working directory $d could not be removed: delete it by hand, it holds the installer bundle and may hold the enrollment token" }
+  }
+} @{
+  Server = 'http://localhost:8080'
+  File = 'myriarch-updater_0.2.0_windows_amd64.zip'
+  Sha256 = '7936914761a18d268d181df07f2de9bc546ee1ebb4b6bafd6452cd86101078be'
+  Token = '@@MYRIARCH_ENROLLMENT_TOKEN@@'
+  TokenFile = ''
+  InstallerArgs = @('-Fleet', 'linux-hosts', '-CollectorVersion', '0.162.0', '-SiteType', 'edge', '-SiteId', '042', '-SiteName', 'Edge site 42 (north)', '-SiteCountry', 'NL', '-SiteRegion', 'north', '-SiteTimezone', 'Europe/Amsterdam', '-Environment', 'prod', '-Insecure')
+}

@@ -47,7 +47,7 @@ func goldenFile(t *testing.T, name, got string) {
 	t.Helper()
 	path := filepath.Join("testdata", name)
 	if os.Getenv("INSTALL_GOLDEN_UPDATE") == "1" {
-		require.NoError(t, os.MkdirAll("testdata", 0o755))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, []byte(got), 0o644))
 	}
 	want, err := os.ReadFile(path)

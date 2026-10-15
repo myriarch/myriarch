@@ -1,0 +1,44 @@
+sudo sh -c '
+set -eu
+umask 077
+die() { printf "[myriarch-install] ERROR [%s] %s\n" "$1" "$2" >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || die privilege_required "this command has to run as root (sudo)"
+srv=$1 proto=$2 ca=$3 tf=$4 file=$5 sum=$6
+shift 6
+for t in curl tar gzip sha256sum mktemp; do
+  command -v "$t" >/dev/null 2>&1 || die tool_missing "$t is required and was not found"
+done
+d=$(mktemp -d /root/myriarch-setup.XXXXXX) || die directory_unsafe "cannot create a private working directory below /root"
+cleanup() { rm -rf "$d"; }
+trap cleanup EXIT
+trap "exit 1" HUP INT TERM
+if [ -n "$tf" ]; then
+  [ -f "$tf" ] && [ -r "$tf" ] || die file_unreadable "the token file $tf is not a readable file"
+  tok=$(tr -d "\r\n[:space:]" <"$tf")
+  own=
+else
+  IFS= read -r tok || :
+  own=1
+fi
+case $tok in
+  "") die option_missing "the enrollment token is empty" ;;
+  *@@*) die option_missing "the placeholder of the enrollment token was not replaced" ;;
+  *[!A-Za-z0-9_.~+/=-]*) die option_invalid "the enrollment token contains characters that a token cannot have" ;;
+esac
+if [ -n "$own" ]; then
+  tf=$d/enrollment-token
+  printf "%s\n" "$tok" >"$tf"
+fi
+printf "[myriarch-install] downloading the installer bundle %s from %s\n" "$file" "$srv"
+printf "header = \042Authorization: Bearer %s\042\n" "$tok" |
+  curl -fsSg --retry 3 --proto "$proto" --tlsv1.2 ${ca:+--cacert "$ca"} -K - -o "$d/$file" "$srv/api/v1/install/bundles/$file" ||
+  die download_failed "the installer bundle could not be downloaded from $srv (check the address, the certificate of the server and the enrollment token)"
+printf "%s  %s\n" "$sum" "$file" >"$d/SHA256SUMS"
+(cd "$d" && sha256sum -c SHA256SUMS >/dev/null 2>&1) ||
+  die checksum_mismatch "the installer bundle does not have the SHA-256 given in the command; nothing was unpacked"
+printf "[myriarch-install] the SHA-256 of the installer bundle is the one in the command; unpacking it\n"
+tar -xzf "$d/$file" -C "$d" || die archive_invalid "the installer bundle could not be unpacked"
+bash "$d/deploy/scripts/install-linux.sh" --server "$srv" --token-file "$tf" ${ca:+--ca-file "$ca"} "$@" </dev/null
+' sh 'http://localhost:8080' '=http,https' '/etc/ssl/myriarch-ca.pem' '' 'myriarch-updater_0.2.0_linux_arm64.tar.gz' 'ba118b1b0c7998d4cb2f5ab308abc5ee7311798e647dd41f107c410a55f669ad' '--fleet' 'linux-hosts' '--collector-version' '0.162.0' '--site-type' 'edge' '--site-id' '042' '--site-name' 'Edge site 42 (north)' '--site-country' 'NL' '--site-region' 'north' '--site-timezone' 'Europe/Amsterdam' '--environment' 'prod' '--insecure' <<'MYRIARCH_TOKEN_END'
+@@MYRIARCH_ENROLLMENT_TOKEN@@
+MYRIARCH_TOKEN_END
