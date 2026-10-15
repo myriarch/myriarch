@@ -149,6 +149,143 @@ func TestInstallWindowsScriptDoesNotTrustUserControllableLocations(t *testing.T)
 	assert.Contains(t, psFunctionBody(t, script, "Grant-ServiceAccountAccess"), "ca.pem")
 }
 
+// psUsesDotNet matches what a restricted language mode refuses in PowerShell code: a static member (::), a method call
+// (.Name( ) and a cmdlet that creates objects of any type.
+var psUsesDotNet = regexp.MustCompile(`::|\.[A-Za-z]+\(|New-Object|Add-Type`)
+
+// psWithoutComments drops the lines of a function body that are comments.
+func psWithoutComments(body string) string {
+	var kept []string
+	for _, l := range strings.Split(body, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(l), "#") {
+			kept = append(kept, l)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
+// The language mode is the first action of Invoke-Main, before the first .NET method call, which App Control for Business
+// makes fail with an error that does not name the cause. The check, the error that it raises and the way the error is printed
+// use properties, cmdlets and a throw only; a method call on the host is replaced by Write-Host in the restricted modes.
+func TestInstallWindowsScriptChecksTheLanguageModeBeforeAnythingElse(t *testing.T) {
+	script := string(readDeploy(t, "scripts/install-windows.ps1"))
+	main := psFunctionBody(t, script, "Invoke-Main")
+	var statements []string
+	for _, l := range strings.Split(main, "\n")[1:] {
+		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
+			statements = append(statements, l)
+		}
+	}
+	require.NotEmpty(t, statements)
+	assert.Equal(t, "Assert-FullLanguageMode", statements[0], "the language mode check is the first action of Invoke-Main")
+	iFirstMethod := psUsesDotNet.FindStringIndex(main)
+	require.NotNil(t, iFirstMethod, "Invoke-Main calls methods")
+	assert.Less(t, strings.Index(main, "Assert-FullLanguageMode"), iFirstMethod[0], "the check comes before the first .NET use")
+
+	check := psFunctionBody(t, script, "Assert-FullLanguageMode")
+	assert.Contains(t, check, "$ExecutionContext.SessionState.LanguageMode")
+	assert.Contains(t, check, "Stop-Install 'language_mode_unsupported'")
+	assert.NotRegexp(t, psUsesDotNet, psWithoutComments(check), "the check itself must work in Constrained Language Mode")
+	stop := strings.SplitN(psFunctionBody(t, script, "Stop-Install"), "\n", 2)[0] // a one-line function
+	assert.NotRegexp(t, psUsesDotNet, stop, "the error that it raises must work in Constrained Language Mode")
+
+	// the top-level handler: the method call on the host stays in FullLanguage, the other modes print with Write-Host
+	tail := script[strings.Index(script, "# Do not run when the script is dot-sourced"):]
+	iMode := strings.Index(tail, "$ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage'")
+	iHost := strings.Index(tail, `$Host.UI.WriteErrorLine("[myriarch-install] ERROR $msg")`)
+	iWrite := strings.Index(tail, `Write-Host "[myriarch-install] ERROR $msg"`)
+	iExit := strings.Index(tail, "exit 1")
+	require.True(t, iMode > 0 && iHost > iMode && iWrite > iHost && iExit > iWrite,
+		"FullLanguage: the host prints the error; any other mode: Write-Host does; then exit 1")
+}
+
+// The supervisor has to be a regular file with the verified hash at the path of the service when its installation step is over,
+// whichever way the step ends, and a service that is not running is explained by its file first. The VERSION marker, which lets
+// the next run take the file as it is, is removed before the file is replaced and written after the check: a step that stops at
+// the check must not leave a marker that makes the next run accept the file.
+func TestInstallWindowsScriptChecksTheSupervisorFile(t *testing.T) {
+	script := string(readDeploy(t, "scripts/install-windows.ps1"))
+	body := psFunctionBody(t, script, "Install-SupervisorBinary")
+	iSkip := strings.Index(body, "Assert-SupervisorBinary -Path $target\n    return $false")
+	iStop := strings.Index(body, "Stop-ServiceAndWait")
+	iDrop := strings.Index(body, "Remove-Item -LiteralPath $verFile")
+	iCopy := strings.Index(body, "Copy-VerifiedFile")
+	iCheck := strings.Index(body, "Assert-SupervisorBinary -Path $target -ExpectedHash $hash")
+	iMark := strings.Index(body, "Set-FileText -Path $verFile")
+	iDone := strings.Index(body, `Write-Log "Supervisor v$version installed"`)
+	assert.True(t, iSkip > 0, "an installed supervisor is checked too (the early return)")
+	require.True(t, iStop > 0 && iDrop > iStop && iCopy > iDrop && iCheck > iCopy && iMark > iCheck && iDone > iMark,
+		"the marker is removed after the stop of the service and before the copy, and written after the check and before the success message")
+	assert.Equal(t, 1, strings.Count(body, "Set-FileText -Path $verFile"), "the marker is written in one place")
+
+	// a directory or a link at the path ends the step before anything is fetched, and every check goes through the same function
+	iUsable := strings.Index(body, "Assert-SupervisorPathUsable -Path $target")
+	iFetch := strings.Index(body, "Get-VerifiedAsset")
+	require.True(t, iUsable > iSkip && iFetch > iUsable, "the kind of the item at the path is checked after the early return and before the download")
+	assert.Contains(t, psFunctionBody(t, script, "Assert-SupervisorBinary"), "Assert-SupervisorPathUsable -Path $Path")
+	// the next step differs by case: a missing or changed file is fetched again, a directory or a link has to be removed
+	assert.Contains(t, psFunctionBody(t, script, "Assert-SupervisorPathUsable"), "Get-SupervisorNotRegularHint")
+	assert.Contains(t, psFunctionBody(t, script, "Get-SupervisorNotRegularHint"), "remove the item at $Path yourself")
+	assert.NotContains(t, psFunctionBody(t, script, "Get-SupervisorNotRegularHint"), "fetches")
+	assert.Contains(t, psFunctionBody(t, script, "Get-SupervisorMissingHint"), "it fetches and verifies the file again")
+
+	main := psFunctionBody(t, script, "Invoke-Main")
+	iIf := strings.Index(main, "if ($svc.Status -ne 'Running') {")
+	iBinary := strings.Index(main, "Assert-ServiceBinaryPresent")
+	iWarn := strings.Index(main, "Write-Warn 'service_not_running'")
+	require.True(t, iIf > 0 && iBinary > iIf && iWarn > iBinary, "the file of the binPath is checked before service_not_running is reported")
+}
+
+// The architecture check of the supervisor comes as soon as the architecture is known, before the first step that changes or
+// fetches anything: the work directory, the updater download, the verifier, the stop of a service and the collector.
+func TestInstallWindowsScriptChecksThePlatformBeforeItDoesAnything(t *testing.T) {
+	script := string(readDeploy(t, "scripts/install-windows.ps1"))
+	main := psFunctionBody(t, script, "Invoke-Main")
+	iArch := strings.Index(main, "$arch = Resolve-Arch")
+	iCheck := strings.Index(main, "Assert-SupervisorPlatform -Arch $arch")
+	require.True(t, iArch > 0 && iCheck > iArch, "the check follows Resolve-Arch")
+	for _, step := range []string{"New-WorkDirectory", "Get-UpdaterDownload", "Resolve-Verifier", "Stop-ServiceAndWait", "Install-Collector"} {
+		at := strings.Index(main, step)
+		require.GreaterOrEqual(t, at, 0, step)
+		assert.Greater(t, at, iCheck, "%s comes after the platform check", step)
+	}
+	// the step that installs the supervisor keeps its own check, through the same function and the same message
+	assert.Contains(t, psFunctionBody(t, script, "Install-SupervisorBinary"), "Assert-SupervisorPlatform -Arch $Arch")
+	assert.Contains(t, psFunctionBody(t, script, "Assert-SupervisorPlatform"), "-Arch amd64")
+}
+
+// The usage examples in the headers of the Windows scripts show the start that the guide documents: a new PowerShell process with
+// the execution policy for that process only, the script unblocked after the checks, a token file in the protected setup folder
+// and, for the installer, a verifier. Every parameter that an example names exists.
+func TestWindowsScriptExamplesShowTheDocumentedStart(t *testing.T) {
+	skip := map[string]bool{"NoProfile": true, "ExecutionPolicy": true, "File": true} // parameters of powershell.exe
+	for _, f := range []string{"scripts/install-windows.ps1", "windows/Set-ServiceEnvironment.ps1"} {
+		t.Run(f, func(t *testing.T) {
+			script := readLF(t, deployDir+"/"+f)
+			i := strings.Index(script, ".EXAMPLE")
+			require.GreaterOrEqual(t, i, 0)
+			j := strings.Index(script[i:], "\n#>")
+			require.Greater(t, j, 0)
+			examples := script[i : i+j]
+			assert.Contains(t, examples, "powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\\")
+			assert.Contains(t, examples, "Unblock-File .\\")
+			assert.Contains(t, examples, `'C:\Program Files\myriarch-setup\`, "the files with the secrets lie in the protected setup folder")
+			assert.NotRegexp(t, `(?i)bypass|set-executionpolicy|C:\\Temp|\\Users\\`, psWithoutComments(examples), "the commands of the examples")
+			for _, m := range regexp.MustCompile(`\s-([A-Z][A-Za-z]+)\b`).FindAllStringSubmatch(examples, -1) {
+				if !skip[m[1]] {
+					assert.Regexp(t, `(?m)^\s*\[.+\]\$`+m[1]+`,?\s*$`, script, "%s names -%s, which the script does not have", f, m[1])
+				}
+			}
+			if strings.HasSuffix(f, "install-windows.ps1") {
+				for _, want := range []string{"-TokenFile 'C:\\Program Files\\myriarch-setup\\", "-Verifier ", "-CollectorVersion ", "-OpampEndpoint "} {
+					assert.Contains(t, examples, want)
+				}
+				assert.NotContains(t, examples, "-Token ", "the token never goes into the command line")
+			}
+		})
+	}
+}
+
 // With a checksums.txt the verifier exists before the updater is downloaded, the file is checked through the same
 // function as the upstream bundles, and the removed key options fail before anything else happens.
 func TestInstallWindowsScriptKeylessChecksumsFlow(t *testing.T) {

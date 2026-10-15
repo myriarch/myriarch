@@ -47,7 +47,9 @@
   SYSTEM/Administrators or is a reparse point, the installation aborts; otherwise the ACL of the whole tree is
   reset and verified.
 
-  Do NOT use the contrib MSI: it installs a service of its own, "otelcol-contrib", which starts immediately.
+  Do NOT use the contrib MSI: it installs a service of its own, "otelcol-contrib", which starts immediately. The supervisor
+  MSI installs a service "opampsupervisor". When one of these services exists the installer stops with conflicting_install
+  before it stops a service, downloads or writes anything, names the service and removes nothing.
   The supervisor storage directory (C:\ProgramData\Myriarch\supervisor) is only created empty:
   persistent_state.yaml holds the instance UID - golden images must empty it before cloning.
 
@@ -58,10 +60,19 @@
   codes listed below the parameter block here.
 
 .EXAMPLE
-  .\install-windows.ps1 -OpampEndpoint wss://fleet.example.com/v1/opamp -TokenFile C:\Temp\enrollment-token.txt `
+  # In an elevated Windows PowerShell, from the unpacked release archive that you verified (docs/tasks/connect-a-host.md has the
+  # steps: $Base, $Version and $Arch are the variables of its step 2). The token file lies in a setup folder that only SYSTEM and
+  # the administrators can read and is deleted after the run. The script starts in a new PowerShell process with the execution
+  # policy for that process only (never Bypass, never a change of the machine), after Unblock-File on the verified copy. The
+  # verifier is a cosign.exe 3.0.4 or newer in a folder that only administrators can write, or the myriarch-updater.exe of the
+  # verified archive:
+  Unblock-File .\deploy\scripts\install-windows.ps1
+  powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\deploy\scripts\install-windows.ps1 `
+      -OpampEndpoint wss://fleet.example.com/v1/opamp -TokenFile 'C:\Program Files\myriarch-setup\enrollment-token.txt' `
       -SiteType datacenter -SiteId dc-01 -SiteName "Data center 1" -SiteCountry NL -SiteRegion north `
-      -SiteTimezone Europe/Amsterdam -CollectorVersion 0.162.0 -WithUpdater `
-      -UpdaterUrl https://fleet.example.com/downloads/myriarch-updater_windows_amd64.exe -UpdaterSha256 <hex>
+      -SiteTimezone Europe/Amsterdam -CollectorVersion 0.162.0 -Verifier 'C:\Program Files\cosign\cosign.exe' -WithUpdater `
+      -UpdaterUrl "$Base/myriarch-updater_${Version}_windows_${Arch}.exe" -UpdaterChecksumsUrl "$Base/checksums.txt"
+  Remove-Item 'C:\Program Files\myriarch-setup\enrollment-token.txt'
 #>
 [CmdletBinding()]
 param(
@@ -133,20 +144,23 @@ $script:MinCosignVersion = [Version]'3.0.4'
 # The full catalog with the shared codes (usage_error, option_missing, option_invalid, option_conflict,
 # updater_hash_source_missing, insecure_required, https_required, file_unreadable, tool_missing,
 # sigstore_verifier_missing, sigstore_verifier_outdated, option_removed, privilege_required,
-# unsupported_platform, download_failed, template_missing, template_placeholder, checksum_invalid,
+# unsupported_platform, conflicting_install, download_failed, template_missing, template_placeholder, checksum_invalid,
 # checksum_mismatch, checksum_entry_count, checksum_conflict, sigstore_verification_failed, archive_invalid,
-# collector_start_failed, collector_version_mismatch, service_not_running, token_on_command_line,
+# collector_start_failed, collector_version_mismatch, supervisor_missing, service_not_running, token_on_command_line,
 # updater_unauthenticated) is at the top of install-linux.sh.
 # Windows-only codes:
-#   authenticode_invalid      the Authenticode signature of the updater is invalid or from another certificate
-#   directory_unsafe          reparse point, wrong owner, unexpected ACE, or not a directory; also a -Verifier in a directory
-#                             that unprivileged accounts can change
-#   acl_failed                icacls failed
-#   service_config_failed     sc.exe failed
-#   updater_install_failed    "myriarch-updater install" failed
-#   group_membership_failed   WARNING: the service account could not be added to a local group
-#   unexpected_error          a failure that is not classified above (the original message follows the code)
-# service_not_running is fatal here (a warning on Linux).
+#   authenticode_invalid       the Authenticode signature of the updater is invalid or from another certificate
+#   directory_unsafe           reparse point, wrong owner, unexpected ACE, or not a directory; also a -Verifier in a directory
+#                              that unprivileged accounts can change
+#   acl_failed                 icacls failed
+#   service_config_failed      sc.exe failed
+#   updater_install_failed     "myriarch-updater install" failed
+#   group_membership_failed    WARNING: the service account could not be added to a local group
+#   language_mode_unsupported  PowerShell runs the script in Constrained Language Mode (App Control for Business) or another
+#                              mode below FullLanguage; it is the first check of the run, before anything else happens
+#   unexpected_error           a failure that is not classified above (the original message follows the code)
+# service_not_running is fatal here (a warning on Linux). When the service is not running because the file of its binPath is gone,
+# supervisor_missing is raised in its place.
 # Every fatal error goes through Stop-Install; the top-level catch prints
 #   [myriarch-install] ERROR [<code>] <message>
 
@@ -156,6 +170,19 @@ function Write-Warn { param([string]$Code, [string]$Message) Write-Warning "[myr
 
 # Stop-Install <code> <message>: the only way to raise a fatal error (see the error code catalog above).
 function Stop-Install { param([string]$Code, [string]$Message) throw "[$Code] $Message" }
+
+# The installer needs the FullLanguage mode: it calls .NET methods for hashes, ACLs, the registry and services. App Control for
+# Business with script enforcement runs a script that no rule allows, an unsigned one among them, in Constrained Language Mode,
+# where the first method call fails with a PowerShell error that does not name the cause. This is the first action of Invoke-Main
+# (a test pins the order) and it uses a property, cmdlets and a throw only, nothing that a restricted mode refuses. It changes
+# nothing; the message names the file and the rule that lets it run.
+function Assert-FullLanguageMode {
+  $mode = $ExecutionContext.SessionState.LanguageMode
+  if ($mode -eq 'FullLanguage') { return }
+  $file = Get-Variable -Name PSCommandPath -ValueOnly -ErrorAction SilentlyContinue
+  if (-not $file) { $file = 'install-windows.ps1' }
+  Stop-Install 'language_mode_unsupported' "PowerShell runs $file in the language mode $mode instead of FullLanguage. App Control for Business with script enforcement does that to a script that no rule allows, and the installer cannot work in this mode; it changed nothing. Allow the file with a hash rule (create the rule from the copy that you verified, one rule per release; a publisher rule works once the Windows files are Authenticode-signed), then start the installer again; deploy\windows\README.md, section Language mode and App Control, has the details"
+}
 
 function Test-Administrator {
   $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -662,6 +689,23 @@ function Stop-ServiceAndWait {
   }
 }
 
+# The MSI packages of the upstream project register services of their own: the contrib MSI installs "otelcol-contrib" and starts it
+# at once, the supervisor MSI installs "opampsupervisor" with manual start (docs/design/upstream-notes.md, "Packages and what they
+# install"). This installer uses neither package: it creates "otelcol-supervisor" with the supervisor in a folder of its own, so
+# each of those services would be a second collector on the host that myriarch does not manage. The run stops before it stops a
+# service, downloads or writes anything, and removes nothing: which package goes is the decision of the operator. Staging mode
+# (-Root) touches no service and reads none.
+function Assert-NoConflictingInstall {
+  if ($script:StagingMode) { return }
+  $found = @()
+  foreach ($name in @('opampsupervisor', 'otelcol-contrib')) {
+    $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+    if ($svc) { $found += "service $name ($($svc.Status))" }
+  }
+  if ($found.Count -eq 0) { return }
+  Stop-Install 'conflicting_install' "an installation of the upstream project is present: $($found -join ', '); it provides a second collector next to the one that myriarch manages, and the installer removes nothing - uninstall its MSI (Settings, Apps, or msiexec /x with the MSI file, or sc.exe delete for a service that you created yourself) and run the installer again"
+}
+
 # Working directory for downloads and staging. It is created with a protected DACL (SYSTEM and Administrators only,
 # owner Administrators) before anything is written into it: the installer runs elevated, and a directory that
 # inherits the ACL of the invoking account's temporary directory could be changed by a non-elevated process of that
@@ -774,6 +818,16 @@ function Resolve-Arch {
   return $a
 }
 
+# The upstream project publishes the supervisor for Windows amd64 only (opampsupervisor_<v>_windows_amd64.exe). On ARM64 the x64
+# build runs under emulation, which -Arch amd64 asks for. Invoke-Main checks it as soon as the architecture is known, before a
+# service is stopped or a file is fetched; Install-SupervisorBinary keeps the check for the case that it is called on its own.
+function Assert-SupervisorPlatform {
+  param([string]$Arch)
+  if ($Arch -ne 'amd64') {
+    Stop-Install 'unsupported_platform' 'upstream publishes only opampsupervisor_<v>_windows_amd64.exe for Windows; on ARM64 install with -Arch amd64 (x64 emulation)'
+  }
+}
+
 function Install-Collector {
   param($L, [string]$Arch, [string]$TmpDir)
   $version = $script:CollectorVersion
@@ -859,11 +913,73 @@ function Enable-CollectorVersion {
   return $true
 }
 
+# What to do when the supervisor file is gone or is not the one that was verified: security software removes or quarantines an
+# unsigned binary after it was written, and the service then fails to start with an error (1053) that names neither the file nor
+# the cause. The promise at the end holds because Install-SupervisorBinary writes its VERSION marker only after the check: the run
+# that stops with this hint leaves no marker, so the next run fetches and verifies the file again.
+function Get-SupervisorMissingHint {
+  param([string]$Path)
+  return "look at the protection history of your antivirus or endpoint protection for a quarantined opampsupervisor.exe (Microsoft Defender: Windows Security, Protection history, or Get-MpThreatDetection), allow the folder $(Split-Path -Parent $Path), then run the installer again (it fetches and verifies the file again)"
+}
+
+# What to do when a directory or a link lies where the supervisor file belongs. The installer never replaces or removes either of
+# them, so the next run would stop at the same item without a download: the item has to go first.
+function Get-SupervisorNotRegularHint {
+  param([string]$Path)
+  return "remove the item at $Path yourself (the installer does not replace a directory or a link), then run the installer again"
+}
+
+# What may lie at the path of the supervisor: nothing, or a regular file. A directory or a link (a reparse point: a symbolic link or
+# a junction) is neither replaced by the installer nor accepted as the supervisor, so the run stops here with the way out, before
+# a file is copied into the directory or through the link and before the run goes on with an item that it did not install.
+function Assert-SupervisorPathUsable {
+  param([string]$Path)
+  $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+  if ($item -and ($item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+    Stop-Install 'supervisor_missing' "the supervisor binary is not a regular file: $Path; $(Get-SupervisorNotRegularHint -Path $Path)"
+  }
+}
+
+# After the installation step the supervisor must be a regular file at the path of the service and, when the file was just
+# copied, the file whose SHA-256 was verified. The copy itself was hashed again (Copy-VerifiedFile); this check catches what
+# happens after it, and an old file in a state that a re-run would not repair. The message names the path and the next step,
+# which depends on the case: a file that is gone or changed is fetched again by the next run, a directory or a link is not.
+function Assert-SupervisorBinary {
+  param([string]$Path, [string]$ExpectedHash)
+  Assert-SupervisorPathUsable -Path $Path
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    Stop-Install 'supervisor_missing' "the supervisor binary does not exist: $Path; $(Get-SupervisorMissingHint -Path $Path)"
+  }
+  if ($ExpectedHash -and (Get-Sha256 -Path $Path) -ne $ExpectedHash) {
+    Stop-Install 'supervisor_missing' "the supervisor binary is not the file that was verified (its SHA-256 differs): $Path; $(Get-SupervisorMissingHint -Path $Path)"
+  }
+}
+
+# The executable of a service from its registry entry (ImagePath): the quoted path at the start, or the unquoted path up to ".exe".
+function Get-ServiceBinaryPath {
+  param([string]$Name, [string]$Default)
+  $props = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$Name" -Name ImagePath -ErrorAction SilentlyContinue
+  if (-not $props -or -not $props.PSObject.Properties['ImagePath']) { return $Default }
+  $raw = [string]$props.ImagePath
+  if ($raw -match '^\s*"([^"]+)"') { return $Matches[1] }
+  if ($raw -match '(?i)^\s*(.+?\.exe)(\s|$)') { return $Matches[1] }
+  return $Default
+}
+
+# For a service that is not running: the file of its binPath has to exist, otherwise that is the reason and the error says so
+# (supervisor_missing) in place of the status. Returns the path that was checked.
+function Assert-ServiceBinaryPresent {
+  param([string]$Name, [string]$Default)
+  $path = Get-ServiceBinaryPath -Name $Name -Default $Default
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+    Stop-Install 'supervisor_missing' "the service $Name is not running because the file of its binPath does not exist: $path; $(Get-SupervisorMissingHint -Path $path)"
+  }
+  return $path
+}
+
 function Install-SupervisorBinary {
   param($L, [string]$Arch, [string]$TmpDir)
-  if ($Arch -ne 'amd64') {
-    Stop-Install 'unsupported_platform' 'upstream publishes only opampsupervisor_<v>_windows_amd64.exe for Windows; on ARM64 install with -Arch amd64 (x64 emulation)'
-  }
+  Assert-SupervisorPlatform -Arch $Arch
   $version = $script:SupervisorVersion
   $asset = "opampsupervisor_${version}_windows_amd64.exe"
   $url = "$($script:ReleaseBaseUrl)/cmd/opampsupervisor/v$version/$asset"
@@ -871,14 +987,22 @@ function Install-SupervisorBinary {
   $verFile = Join-Path $L.Supervisor 'VERSION'
   if ((Test-Path -LiteralPath $target) -and (Test-Path -LiteralPath $verFile) -and ((Get-Content -LiteralPath $verFile -Raw).Trim() -eq $version)) {
     Write-Log "Supervisor v$version is already installed"
+    Assert-SupervisorBinary -Path $target
     return $false
   }
+  # A directory or a link at the path ends the run before anything is fetched (nothing is copied into it)
+  Assert-SupervisorPathUsable -Path $target
   $tmp = Join-Path $TmpDir $asset
   $hash = Get-VerifiedAsset -Url $url -Destination $tmp
   Confirm-Signature -File $tmp -BundleUrl "$url.sigstore.json" -IdentityRegexp (Get-CertIdentity -Workflow 'base-binary-release' -Version $version) -Version $version -TmpDir $TmpDir
   New-Item -ItemType Directory -Path $L.Supervisor -Force | Out-Null
   Stop-ServiceAndWait -Name $script:SupervisorService
+  # VERSION says that this version is installed and was checked, and the next run then takes the file as it is, without a hash. It is
+  # removed before the file is replaced and written after the check: a run that stops in between (a file that a security tool
+  # quarantined or changed) leaves no marker, so the next run fetches and verifies the file again instead of accepting it.
+  if (Test-Path -LiteralPath $verFile -PathType Leaf) { Remove-Item -LiteralPath $verFile -Force }
   Copy-VerifiedFile -Source $tmp -Destination $target -ExpectedHash $hash
+  Assert-SupervisorBinary -Path $target -ExpectedHash $hash
   Set-FileText -Path $verFile -Text "$version`n"
   Write-Log "Supervisor v$version installed"
   return $true
@@ -1085,6 +1209,7 @@ function Invoke-Uninstall {
 }
 
 function Invoke-Main {
+  Assert-FullLanguageMode
   if ($script:BoundParameters.ContainsKey('SigningKey')) {
     Stop-Install 'option_removed' '-SigningKey was removed: releases are signed keyless. Pass -UpdaterChecksumsUrl (its Sigstore bundle is verified against the release identity, verifier: cosign 3.0.4 or newer or an installed myriarch-updater) or -UpdaterSha256'
   }
@@ -1100,10 +1225,13 @@ function Invoke-Main {
   $script:OpampEndpoint = $OpampEndpoint
   Test-Inputs
   $arch = Resolve-Arch
+  Assert-SupervisorPlatform -Arch $arch
   $templates = Resolve-TemplatesDir
   if (-not (Test-Path -LiteralPath ([IO.Path]::Combine($templates, 'supervisor', 'windows')))) {
     Stop-Install 'template_missing' "templates not found under $templates (-TemplatesDir)"
   }
+  # Before the work directory, a download, a verifier or the stop of a service
+  Assert-NoConflictingInstall
   $tmpDir = New-WorkDirectory -Staging $staging
   try {
     Write-Log "installing: collector v$($script:CollectorVersion), supervisor v$($script:SupervisorVersion), windows/$arch, site $SiteType/$SiteId"
@@ -1176,7 +1304,9 @@ function Invoke-Main {
     Start-Sleep -Seconds 2
     $svc = Get-Service -Name $script:SupervisorService
     if ($svc.Status -ne 'Running') {
-      Write-Warn 'service_not_running' "otelcol-supervisor is not running (status $($svc.Status)); Event Viewer -> Windows Logs -> Application, source otelcol-supervisor"
+      # a binary that has gone (security software) explains the status better than the status does
+      $binary = Assert-ServiceBinaryPresent -Name $script:SupervisorService -Default (Join-Path $L.Supervisor 'opampsupervisor.exe')
+      Write-Warn 'service_not_running' "otelcol-supervisor is not running (status $($svc.Status), its binary exists: $binary); Event Viewer -> Windows Logs -> Application, source otelcol-supervisor"
       Stop-Install 'service_not_running' 'the service otelcol-supervisor is not running'
     }
     Write-Log "done. The host reports to $OpampEndpoint as an agent"
@@ -1193,9 +1323,15 @@ if ($MyInvocation.InvocationName -ne '.') {
     # Fatal errors carry a code ("[<code>] <message>", see Stop-Install); anything else is unexpected.
     $msg = $_.Exception.Message
     if ($msg -notmatch '^\[[a-z][a-z0-9_]*\] ') { $msg = "[unexpected_error] $msg" }
-    # Through the host (not [Console]::Error): the line also reaches callers in PowerShell remoting and ISE;
-    # in a console host it still goes to stderr.
-    $Host.UI.WriteErrorLine("[myriarch-install] ERROR $msg")
+    if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') {
+      # Through the host (not [Console]::Error): the line also reaches callers in PowerShell remoting and ISE;
+      # in a console host it still goes to stderr.
+      $Host.UI.WriteErrorLine("[myriarch-install] ERROR $msg")
+    } else {
+      # A restricted language mode refuses a method call on the host, and language_mode_unsupported is the error that gets here
+      # in it: Write-Host prints the same line without one (on the console, not on stderr).
+      Write-Host "[myriarch-install] ERROR $msg"
+    }
     exit 1
   }
 }

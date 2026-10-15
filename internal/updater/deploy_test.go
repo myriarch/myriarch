@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -1011,4 +1012,371 @@ func TestInstallersReleaseIdentityMatchesTheRepository(t *testing.T) {
 	assert.Contains(t, string(adr), DefaultCertificateOIDCIssuer)
 	assert.Contains(t, linux, `readonly MIN_COSIGN_VERSION="3.0.4"`)
 	assert.Contains(t, win, `[Version]'3.0.4'`)
+}
+
+// --- packages of the upstream project (conflicting_install) -------------------
+
+// requireBashInstaller skips a test that needs the bash installer where there is no bash (Windows). The tests that prepare a
+// restricted PATH call it first, because that preparation already needs symbolic links and POSIX tools.
+func requireBashInstaller(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("bash installer")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+}
+
+// fakeUnitState answers one query of the systemctl double: the last arguments of the call and what it prints.
+type fakeUnitState struct{ args, output string }
+
+// writeFakeSystemctl writes a systemctl into dir that answers is-active with "inactive" and is-enabled with "disabled" unless
+// states names the call, and records every call (with all its arguments) in the returned log file.
+func writeFakeSystemctl(t *testing.T, dir string, states ...fakeUnitState) (logFile string) {
+	t.Helper()
+	logFile = filepath.Join(t.TempDir(), "systemctl.log")
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\necho \"$*\" >> " + logFile + "\ncase \"$*\" in\n")
+	for _, s := range states {
+		b.WriteString("  *\"" + s.args + "\") echo '" + s.output + "'; exit 0 ;;\n")
+	}
+	b.WriteString("  *\"is-active \"*) echo inactive; exit 3 ;;\n  *\"is-enabled \"*) echo disabled; exit 1 ;;\nesac\nexit 1\n")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "systemctl"), []byte(b.String()), 0o755))
+	return logFile
+}
+
+// stagingInstallArgs returns the arguments of a staging run in the lab mode (file:// mirror, no signature bundles).
+func stagingInstallArgs(rel *fakeRelease) []string {
+	return append([]string{"--insecure", "--verify-signatures", "skip", "--release-base-url", rel.base}, baseArgs()...)
+}
+
+// A staging root has no running manager: the installer asks "systemctl --root=<root> is-enabled" for the two units of the
+// packages of the upstream project, and stops before it creates anything when one of them is enabled.
+func TestInstallLinuxScriptStopsAtAnEnabledUnitOfTheUpstreamPackageAndInstallsNothing(t *testing.T) {
+	requireBashInstaller(t)
+	for _, unit := range []string{"otelcol-contrib.service", "opampsupervisor.service"} {
+		t.Run(unit, func(t *testing.T) {
+			rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+			path := restrictedPath(t)
+			root := t.TempDir()
+			log := writeFakeSystemctl(t, path, fakeUnitState{"is-enabled " + unit, "enabled"})
+			out, err := runInstallEnv(t, root, []string{"PATH=" + path}, stagingInstallArgs(rel)...)
+			require.Error(t, err, out)
+			assert.Regexp(t, `(?m)^\[myriarch-install\] ERROR \[conflicting_install\] \S`, out)
+			assert.Contains(t, out, unit+" (enabled)", "the message names the unit and how it is set up")
+			assert.Contains(t, out, "systemctl disable --now "+unit, "the message names the next step")
+			other := map[string]string{"otelcol-contrib.service": "opampsupervisor.service", "opampsupervisor.service": "otelcol-contrib.service"}[unit]
+			assert.NotContains(t, out, other)
+			assert.NotContains(t, out, "downloading", "nothing is fetched")
+			entries, rerr := os.ReadDir(root)
+			require.NoError(t, rerr)
+			assert.Empty(t, entries, "nothing is installed or created below the root")
+			calls := strings.Join(readCalls(t, log), "\n")
+			assert.Contains(t, calls, "--root="+root+" is-enabled "+unit)
+			assert.NotContains(t, calls, "is-active", "the manager of this host says nothing about a staging root")
+		})
+	}
+}
+
+func TestInstallLinuxScriptNamesBothUnitsOfTheUpstreamPackages(t *testing.T) {
+	requireBashInstaller(t)
+	rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+	path := restrictedPath(t)
+	writeFakeSystemctl(t, path, fakeUnitState{"is-enabled otelcol-contrib.service", "enabled-runtime"}, fakeUnitState{"is-enabled opampsupervisor.service", "enabled"})
+	root := t.TempDir()
+	out, err := runInstallEnv(t, root, []string{"PATH=" + path}, stagingInstallArgs(rel)...)
+	require.Error(t, err, out)
+	assert.Contains(t, out, "otelcol-contrib.service (enabled), opampsupervisor.service (enabled)")
+	assert.Contains(t, out, "systemctl disable --now otelcol-contrib.service opampsupervisor.service")
+	entries, _ := os.ReadDir(root)
+	assert.Empty(t, entries)
+}
+
+// A package whose units are neither running nor enabled (the rpm packages since 0.157.0 start nothing) and a host without
+// systemctl do not stop the installation.
+func TestInstallLinuxScriptIgnoresUnitsThatNeitherRunNorAreEnabled(t *testing.T) {
+	requireBashInstaller(t)
+	rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+	path := restrictedPath(t)
+	log := writeFakeSystemctl(t, path)
+	root := t.TempDir()
+	out, err := runInstallEnv(t, root, []string{"PATH=" + path}, stagingInstallArgs(rel)...)
+	require.NoError(t, err, out)
+	assert.FileExists(t, filepath.Join(root, "opt/myriarch/supervisor/opampsupervisor"))
+	assert.Len(t, readCalls(t, log), 2, "one question per unit")
+
+	// no systemctl at all (an image build on a host without systemd)
+	out, err = runInstallEnv(t, t.TempDir(), []string{"PATH=" + restrictedPath(t)}, stagingInstallArgs(rel)...)
+	require.NoError(t, err, out)
+}
+
+// The installer without a staging root asks the manager of the host: a unit that is active or enabled stops the run. The
+// helper function runs in a shell that loaded the script without its last line "main", with a shell function in place of
+// systemctl.
+func TestInstallLinuxScriptLiveCheckOfTheUnitsOfTheUpstreamPackages(t *testing.T) {
+	const systemctl = `
+systemctl() {
+  echo "systemctl $*" >&2
+  case "$*" in
+    "is-active otelcol-contrib.service") echo "${ACTIVE:-inactive}"; return 0 ;;
+    "is-enabled otelcol-contrib.service") echo "${ENABLED:-disabled}"; return 0 ;;
+    "is-active opampsupervisor.service") echo "${SUP_ACTIVE:-inactive}"; return 0 ;;
+    "is-enabled opampsupervisor.service") echo "${SUP_ENABLED:-disabled}"; return 0 ;;
+  esac
+  return 1
+}
+check_foreign_installations
+echo "no conflict"
+`
+	cases := []struct {
+		name string
+		env  []string
+		want string // "" = no conflict
+	}{
+		{"active", []string{"ACTIVE=active"}, "otelcol-contrib.service (active)"},
+		{"activating (a crash loop)", []string{"ACTIVE=activating"}, "otelcol-contrib.service (active)"},
+		{"enabled", []string{"ENABLED=enabled"}, "otelcol-contrib.service (enabled)"},
+		{"enabled until reboot", []string{"ENABLED=enabled-runtime"}, "otelcol-contrib.service (enabled)"},
+		{"active and enabled", []string{"ACTIVE=active", "ENABLED=enabled"}, "otelcol-contrib.service (active, enabled)"},
+		{"the supervisor unit", []string{"SUP_ENABLED=enabled"}, "opampsupervisor.service (enabled)"},
+		{"both units", []string{"ACTIVE=active", "SUP_ENABLED=enabled"}, "otelcol-contrib.service (active), opampsupervisor.service (enabled)"},
+		{"failed and disabled", []string{"ACTIVE=failed", "ENABLED=disabled"}, ""},
+		{"masked", []string{"ENABLED=masked", "SUP_ENABLED=masked-runtime"}, ""},
+		{"static", []string{"ENABLED=static", "SUP_ENABLED=indirect"}, ""},
+		{"installed but idle", nil, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, err := runInstallerFunction(t, c.env, nil, systemctl)
+			if c.want == "" {
+				require.NoError(t, err, out)
+				assert.Contains(t, out, "no conflict")
+				assert.NotContains(t, out, "conflicting_install")
+				return
+			}
+			require.Error(t, err, out)
+			assert.Regexp(t, `(?m)^\[myriarch-install\] ERROR \[conflicting_install\] \S`, out)
+			assert.Contains(t, out, "present: "+c.want+";")
+			assert.NotContains(t, out, "no conflict")
+			assert.NotContains(t, out, "--root", "the live check does not use a root directory")
+		})
+	}
+
+	// a host without systemctl: nothing to ask
+	out, err := runInstallerFunction(t, nil, nil, "have() { return 1; }\ncheck_foreign_installations\necho 'no conflict'\n")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "no conflict")
+}
+
+// runInstallerFunction loads install-linux.sh, with the given arguments, into a shell without running it, and then runs a shell
+// snippet in the same shell: the arguments are parsed as for a run, and the snippet can define shell functions in place of
+// commands. The installer ends with the line "main", which starts a run; ci/tests/download-retry-test.sh cuts the same line to
+// get at the functions.
+func runInstallerFunction(t *testing.T, env []string, args []string, snippet string) (string, error) {
+	t.Helper()
+	requireBashInstaller(t)
+	script, err := filepath.Abs(filepath.Join(deployDir, "scripts/install-linux.sh"))
+	require.NoError(t, err)
+	raw, err := os.ReadFile(script)
+	require.NoError(t, err)
+	text := string(raw)
+	require.True(t, strings.HasSuffix(text, "\n}\n\nmain\n"), "install-linux.sh ends with the line 'main' after the function main()")
+	loaded := filepath.Join(t.TempDir(), "install-linux-functions.sh")
+	require.NoError(t, os.WriteFile(loaded, []byte(strings.TrimSuffix(text, "main\n")), 0o600))
+	cmd := exec.Command("bash", append([]string{"-c", "script=$1; shift; . \"$script\" \"$@\"; " + snippet, "bash", loaded}, args...)...)
+	cmd.Env = append(os.Environ(), env...)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	err = cmd.Run()
+	return out.String(), err
+}
+
+// A run without a staging root on a host where otelcol-contrib.service is active stops with conflicting_install and changes
+// nothing. The run is main() itself, in a shell that loaded the script, as root on Linux with every command that changes
+// something replaced by a function that fails the run: nothing of this touches the host that runs the test, whatever the
+// script does.
+func TestInstallLinuxScriptLiveRunStopsAtAnActiveUnitBeforeItChangesAnything(t *testing.T) {
+	requireBashInstaller(t)
+	const live = `
+id() { if [ "$*" = "-u" ]; then echo 0; return 0; fi; echo "UNEXPECTED id $*" >&2; exit 99; }
+uname() { if [ "$*" = "-s" ]; then echo Linux; return 0; fi; echo "UNEXPECTED uname $*" >&2; exit 99; }
+systemctl() {
+  case "$*" in
+    "is-active otelcol-contrib.service") echo "${UNIT_ACTIVE:-active}" ;;
+    *) echo inactive; return 3 ;;
+  esac
+}
+for tool in mktemp install useradd adduser tar gzip cmp curl wget mv cp rm mkdir chmod chown ln cat sleep; do
+  eval "$tool() { echo \"UNEXPECTED $tool \$*\" >&2; exit 99; }"
+done
+main
+echo "main returned"
+`
+	rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+	args := append([]string{"--arch", "amd64", "--templates-dir", deployDir, "--insecure", "--verify-signatures", "skip", "--release-base-url", rel.base}, baseArgs()...)
+	out, err := runInstallerFunction(t, nil, args, live)
+	require.Error(t, err, out)
+	assert.Regexp(t, `(?m)^\[myriarch-install\] ERROR \[conflicting_install\] \S`, out)
+	assert.Contains(t, out, "otelcol-contrib.service (active)")
+	assert.NotContains(t, out, "UNEXPECTED", "nothing was created, fetched or changed")
+	assert.NotContains(t, out, "installing: collector", "the run did not get to its first message")
+	assert.NotContains(t, out, "main returned")
+
+	// the check is what stops the run: with the unit idle the run goes on to its next step, which fails the run in the double
+	out, err = runInstallerFunction(t, []string{"UNIT_ACTIVE=inactive"}, args, live)
+	require.Error(t, err, out)
+	assert.NotContains(t, out, "conflicting_install")
+	assert.Contains(t, out, "UNEXPECTED mktemp", "an idle unit lets the run reach the temporary directory")
+}
+
+// The check runs after the inputs and the prerequisites are known to be fine and before the installer creates a temporary
+// directory, downloads a file, creates a user or a directory. An uninstall does not run it.
+func TestInstallLinuxScriptChecksForeignInstallationsBeforeItChangesAnything(t *testing.T) {
+	linux := string(readDeploy(t, "scripts/install-linux.sh"))
+	i := strings.Index(linux, "\nmain() {")
+	require.GreaterOrEqual(t, i, 0)
+	main := linux[i:]
+	main = main[:strings.Index(main, "\n}\n")]
+	order := []string{"do_uninstall", "validate_inputs", "detect_arch", "check_prereqs", "check_foreign_installations"}
+	last := -1
+	for _, step := range order {
+		at := strings.Index(main, step)
+		require.GreaterOrEqual(t, at, 0, "main() calls %s", step)
+		assert.Greater(t, at, last, "%s comes after the step before it in main()", step)
+		last = at
+	}
+	// every step that creates or fetches something (fetch_updater and resolve_verifier appear in both branches of an if)
+	for _, step := range []string{"mktemp -d", "fetch_updater", "resolve_verifier", "ensure_user", "ensure_dirs", "install_collector", "install_supervisor_binary"} {
+		at := strings.Index(main, step)
+		require.GreaterOrEqual(t, at, 0, "main() calls %s", step)
+		assert.Greater(t, at, last, "%s comes after check_foreign_installations", step)
+	}
+}
+
+// --- the supervisor file after the installation step (supervisor_missing) ----------------
+
+// writeShadowingMv replaces the mv of a restricted PATH by one that does what mv does and then runs action on the file that was
+// moved to the supervisor path: a security tool that removes the new binary, or a mount that does not let it run.
+func writeShadowingMv(t *testing.T, dir, action string) {
+	t.Helper()
+	realMv, err := exec.LookPath("mv")
+	require.NoError(t, err)
+	script := "#!/bin/sh\n" + realMv + " \"$@\" || exit $?\nfor last in \"$@\"; do :; done\n" +
+		"case \"$last\" in */supervisor/opampsupervisor) " + action + " ;; esac\n"
+	_ = os.Remove(filepath.Join(dir, "mv"))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "mv"), []byte(script), 0o755))
+}
+
+func TestInstallLinuxScriptStopsWhenTheSupervisorIsMissingAfterTheInstallStep(t *testing.T) {
+	cases := []struct{ name, action, why string }{
+		{"removed after the move", `rm -f "$last"`, "does not exist"},
+		{"not executable", `chmod 0644 "$last"`, "is not executable"},
+	}
+	requireBashInstaller(t)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+			path := restrictedPath(t)
+			writeShadowingMv(t, path, c.action)
+			root := t.TempDir()
+			out, err := runInstallEnv(t, root, []string{"PATH=" + path}, stagingInstallArgs(rel)...)
+			require.Error(t, err, out)
+			assert.Regexp(t, `(?m)^\[myriarch-install\] ERROR \[supervisor_missing\] \S`, out)
+			assert.Contains(t, out, "the supervisor binary "+c.why+": "+filepath.Join(root, "opt/myriarch/supervisor/opampsupervisor"), "the message names the path as it was given")
+			assert.Contains(t, out, "noexec", "the message names the next step")
+			assert.NotContains(t, out, "remove the item", "a file that is gone or cannot run is installed again by the next run")
+			assert.NoFileExists(t, filepath.Join(root, "etc/myriarch/supervisor.yaml"), "the run stops before the configuration is written")
+			assert.NoFileExists(t, filepath.Join(root, "etc/systemd/system/otelcol-supervisor.service"))
+
+			// the next step of the message works: a new run installs the supervisor again
+			out, err = runInstall(t, root, rel, baseArgs()...)
+			require.NoError(t, err, out)
+			assert.Contains(t, out, "Supervisor v0.162.0 installed", "the stopped run is not taken for an installation")
+			assert.NotContains(t, out, "Supervisor v0.162.0 is already installed")
+			info, statErr := os.Stat(filepath.Join(root, "opt/myriarch/supervisor/opampsupervisor"))
+			require.NoError(t, statErr)
+			assert.True(t, info.Mode().IsRegular() && info.Mode().Perm()&0o100 != 0, "an executable file is in place")
+		})
+	}
+}
+
+// A directory at the path of the supervisor passes the test of the step that skips an installed supervisor when the VERSION file
+// names the requested version ("executable" is true for a directory), and the check after the step catches it. The installer does
+// not replace a directory, so a new run would stop at the same item: the message says to remove it, and after that a new run
+// installs the supervisor. With the VERSION file of another version the run downloads first and reaches the same check.
+func TestInstallLinuxScriptStopsAtAnInstalledSupervisorThatIsNoFile(t *testing.T) {
+	requireBashInstaller(t)
+	cases := []struct{ name, version, want string }{
+		{"the version that was requested", "0.162.0", "Supervisor v0.162.0 is already installed"},
+		{"another version", "0.161.0", "Supervisor v0.162.0 installed"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+			root := t.TempDir()
+			dir := filepath.Join(root, "opt/myriarch/supervisor")
+			target := filepath.Join(dir, "opampsupervisor")
+			require.NoError(t, os.MkdirAll(target, 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "VERSION"), []byte(c.version+"\n"), 0o644))
+			out, err := runInstall(t, root, rel, baseArgs()...)
+			require.Error(t, err, out)
+			assert.Regexp(t, `(?m)^\[myriarch-install\] ERROR \[supervisor_missing\] \S`, out)
+			assert.Contains(t, out, "the supervisor binary is not a regular file: "+target)
+			assert.Contains(t, out, c.want)
+			assert.Contains(t, out, "remove the item at "+target+" yourself (the installer does not replace a directory)", "the next step is to remove the item")
+			assert.NotContains(t, out, "noexec", "the hint for a file that is gone or cannot run does not fit")
+			assert.NotContains(t, out, "findmnt")
+			assert.DirExists(t, target, "nothing is removed")
+
+			// a new run does not repair it: it stops at the same item
+			out, err = runInstall(t, root, rel, baseArgs()...)
+			require.Error(t, err, out)
+			assert.Contains(t, out, "the supervisor binary is not a regular file: "+target)
+
+			// the next step of the message works
+			require.NoError(t, os.RemoveAll(target))
+			out, err = runInstall(t, root, rel, baseArgs()...)
+			require.NoError(t, err, out)
+			info, statErr := os.Stat(target)
+			require.NoError(t, statErr)
+			assert.True(t, info.Mode().IsRegular() && info.Mode().Perm()&0o100 != 0, "an executable file is in place")
+			version, readErr := os.ReadFile(filepath.Join(dir, "VERSION"))
+			require.NoError(t, readErr)
+			assert.Equal(t, "0.162.0\n", string(version))
+		})
+	}
+}
+
+// The check follows the install step and precedes everything that uses the supervisor.
+func TestInstallLinuxScriptChecksTheSupervisorRightAfterItInstallsIt(t *testing.T) {
+	linux := string(readDeploy(t, "scripts/install-linux.sh"))
+	i := strings.Index(linux, "\nmain() {")
+	require.GreaterOrEqual(t, i, 0)
+	main := linux[i:]
+	main = main[:strings.Index(main, "\n}\n")]
+	iInstall := strings.Index(main, "install_supervisor_binary")
+	iCheck := strings.Index(main, "check_supervisor_binary")
+	iConfig := strings.Index(main, "install_config")
+	require.True(t, iInstall > 0 && iCheck > iInstall && iConfig > iCheck, "install_supervisor_binary, check_supervisor_binary, install_config")
+}
+
+// The example in the header of install-linux.sh shows the start that the guide documents: a root shell, the script from the
+// unpacked archive, the token in a file and a verifier. Every option that it names exists.
+func TestInstallLinuxScriptExampleShowsTheDocumentedStart(t *testing.T) {
+	linux := string(readDeploy(t, "scripts/install-linux.sh"))
+	i := strings.Index(linux, "# Example")
+	require.GreaterOrEqual(t, i, 0)
+	j := strings.Index(linux[i:], "# The templates live under")
+	require.Greater(t, j, 0)
+	example := linux[i : i+j]
+	for _, want := range []string{"root shell", "./deploy/scripts/install-linux.sh", "--token-file ./enrollment-token", "--verifier ", "--collector-version ", "--opamp-endpoint ", "rm -f enrollment-token"} {
+		assert.Contains(t, example, want)
+	}
+	assert.NotRegexp(t, `--token[ \t]`, example, "the token never goes into the argument list")
+	assert.NotContains(t, example, "myre_")
+	assert.NotRegexp(t, `sudo +\./`, example, "sudo from a directory of the user would let that user change what root runs")
+	for _, m := range regexp.MustCompile(`\s(--[a-z][a-z-]+)`).FindAllStringSubmatch(example, -1) {
+		assert.Regexp(t, `(?m)^\s+`+regexp.QuoteMeta(m[1])+`\)`, linux, "the example names %s, which the script does not accept", m[1])
+	}
 }

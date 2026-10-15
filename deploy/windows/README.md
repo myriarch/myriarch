@@ -57,7 +57,8 @@ What the start does and what it avoids:
 - A policy set by Group Policy wins over the parameter. `Get-ExecutionPolicy -List` shows it: a value other than `Undefined` for
   `MachinePolicy` or `UserPolicy` decides. If that policy forbids the script (`Restricted`, or `AllSigned`, which also refuses
   unsigned files), the installer cannot start; ask the owner of the policy for an exception.
-- App Control for Business with script enforcement is a separate limit: see "Known limitation" below.
+- App Control for Business with script enforcement is a separate limit: see
+  [Language mode and App Control](#language-mode-and-app-control).
 - `Set-ServiceEnvironment.ps1` is a script too. Start it the same way. `-File` passes strings only, so use `-EnvFile` with it, not
   `-Set`, which takes a hashtable.
 
@@ -67,7 +68,10 @@ Install neither MSI of the upstream project on a host that myriarch manages. The
 which starts at once with its own configuration. The supervisor MSI installs a service `opampsupervisor` with manual start, in a
 folder of its own. myriarch manages neither: the installer creates the service `otelcol-supervisor` and puts the supervisor into
 `C:\Program Files\Myriarch\supervisor\`. The installer of v0.1.0 does not look for the upstream services and does not remove
-them. To see what a host has:
+them. From v0.2.0 it looks first: when a service `opampsupervisor` or `otelcol-contrib` exists, in any state, it stops with
+`conflicting_install` before it stops a service, downloads or writes anything. The message names the service and the next step,
+and nothing is removed. A service that you created yourself under one of these names counts too (`sc.exe delete <name>` removes
+it). To see what a host has:
 
 ```powershell
 Get-Service otelcol-supervisor, opampsupervisor, otelcol-contrib -ErrorAction SilentlyContinue
@@ -193,9 +197,19 @@ repository, a bundle that does not belong to the file, or a host that cannot rea
 differs from the verified checksum). The internal CA of a mirror must be in the Windows certificate store (`-CaFile` only
 applies to the connection to myriarchd).
 
-Known limitation: with App Control for Business (WDAC) script enforcement a PowerShell script that is not signed runs in
-Constrained Language Mode, and `install-windows.ps1` fails there. Allow the installer by its hash, and allow the binaries
-by a hash rule for each release until the Windows files are Authenticode-signed (then one publisher rule is enough).
+## Language mode and App Control
+
+With App Control for Business (WDAC) script enforcement a PowerShell script that is not signed runs in Constrained Language
+Mode, and `install-windows.ps1` fails there. Allow the installer by its hash, and allow the binaries by a hash rule for each
+release until the Windows files are Authenticode-signed (then one publisher rule is enough). Create each rule from the copy
+that you verified with the App Control tools: the hash that App Control uses for a script is not the SHA-256 of
+`checksums.txt`. App Control decides this independently of the execution policy, and `-ExecutionPolicy RemoteSigned` does not
+change it. `$ExecutionContext.SessionState.LanguageMode` shows the mode of a session.
+
+From v0.2.0 the installer checks the language mode first, before it reads an input, stops a service or writes a file. In any mode
+other than `FullLanguage` it stops with `language_mode_unsupported`, and the message names the file and the rule that lets it
+run. The installer of v0.1.0 fails on its first method call with the PowerShell error "Cannot invoke method. Method invocation
+is supported only on core types in this language mode", which does not name the cause.
 
 ## Error codes
 
@@ -227,7 +241,9 @@ is at the top of that script.
 | `sigstore_verifier_missing` | no Sigstore verifier (`-Verifier`, an installed updater, or `cosign.exe` from an administrator-only directory) |
 | `sigstore_verifier_outdated` | `cosign.exe` is older than 3.0.4 or reports no usable version |
 | `privilege_required` | not running as Administrator |
-| `unsupported_platform` | unsupported CPU architecture, or the supervisor on Windows ARM64 (install with `-Arch amd64`) |
+| `conflicting_install` | (from v0.2.0) a service `opampsupervisor` (supervisor MSI) or `otelcol-contrib` (contrib MSI) exists, in any state. The check runs before the installer stops a service, downloads or writes anything; the message names the service and the next step, and nothing is removed ([Packages of the upstream project](#packages-of-the-upstream-project)). `install-linux.sh` raises the code for an active or enabled unit `otelcol-contrib.service` or `opampsupervisor.service` of a deb or rpm package |
+| `language_mode_unsupported` | (from v0.2.0) PowerShell runs the script in Constrained Language Mode or another mode below `FullLanguage`, usually because App Control for Business with script enforcement allows no unsigned script. It is the first check of a run and changes nothing. Allow the installer with a hash rule ([Language mode and App Control](#language-mode-and-app-control)) |
+| `unsupported_platform` | unsupported CPU architecture, or the supervisor on Windows ARM64 (install with `-Arch amd64`). From v0.2.0 the installer stops as soon as it knows the architecture, before it stops a service, downloads or writes anything. The installer of v0.1.0 stopped at the supervisor step, after it had stopped the service and installed the ARM64 collector |
 | `download_failed` | a download did not succeed: a permanent error (for example HTTP 404) at once, a transient one (timeout, failed connection, HTTP 408, 429, 500, 502, 503, 504) after the retry window of 2 minutes; the message names the number of attempts. Under PowerShell 7.5 or later behind an `HTTPS_PROXY` that refuses the connection, the status of the proxy decides (`proxy HTTP 503` is retried, `proxy HTTP 407` is not); PowerShell 7.4 retries it like a failed connection |
 | `template_missing` | template directory or template file not found |
 | `template_placeholder` | unreplaced `@@PLACEHOLDER@@` left in a rendered template |
@@ -240,11 +256,12 @@ is at the top of that script.
 | `archive_invalid` | the collector archive has no regular binary in its root |
 | `collector_start_failed` | the new collector binary cannot be started |
 | `collector_version_mismatch` | the collector reports another version than requested |
+| `supervisor_missing` | (from v0.2.0) the supervisor is not there when its installation step is over: `C:\Program Files\Myriarch\supervisor\opampsupervisor.exe` does not exist, is not the file whose SHA-256 was verified, or is not a regular file (a directory, a link). It is also raised in place of `service_not_running` when the service is not running because the file of its binPath is gone. The message names the path and the next step. A file that is gone or changed is usually the work of a security tool that quarantined the unsigned binary: look at its protection history (Microsoft Defender: *Windows Security*, *Protection history*, or `Get-MpThreatDetection`), allow the folder and run the installer again, which fetches and verifies the file again. A directory or a link is not replaced by the installer, and a new run would stop at the same item without a download: remove it yourself, then run the installer again. `install-linux.sh` raises the code for a missing, non-executable or no regular file at `/opt/myriarch/supervisor/opampsupervisor` |
 | `directory_unsafe` | a data directory is a reparse point, has the wrong owner, has an unexpected ACE, or is not a directory; or `-Verifier` is in a directory that unprivileged accounts can change |
 | `acl_failed` | `icacls` failed |
 | `service_config_failed` | `sc.exe` failed |
 | `updater_install_failed` | `myriarch-updater install` failed |
-| `service_not_running` | the supervisor service is not running after the installation (fatal on Windows) |
+| `service_not_running` | the supervisor service is not running after the installation (fatal on Windows). From v0.2.0 the installer first checks the file of the service's binPath and reports `supervisor_missing` when it is gone |
 | `unexpected_error` | a failure that is not classified above; the original message follows the code |
 
 Warning codes: `token_on_command_line` (`-Token` is visible in process logs), `updater_unauthenticated` (updater
@@ -264,8 +281,9 @@ name) and `group_membership_failed` (the service account could not be added to a
    when the service starts: new version healthy = keep it, otherwise roll back to `.previous`).
 5. **Health**: supervisor `http://localhost:13134/health`, collector `http://localhost:13133/`
    (`Invoke-WebRequest -UseBasicParsing`).
-6. **Service does not start** (error 1053/1067): check the paths in `supervisor.yaml` (`agent.executable` must
-   exist), run `otelcol-contrib.exe --version` manually; a missing `MYRIARCH_ENROLLMENT_TOKEN`
+6. **Service does not start** (error 1053/1067): check that `C:\Program Files\Myriarch\supervisor\opampsupervisor.exe` exists
+   (security software quarantines unsigned binaries: look at the protection history), check the paths in `supervisor.yaml`
+   (`agent.executable` must exist), run `otelcol-contrib.exe --version` manually; a missing `MYRIARCH_ENROLLMENT_TOKEN`
    in the service environment leads to `401` at the server (log `agent.log` / myriarchd audit).
 7. **Update fails**: `INSTALL_FAILED` + text in the UI (agent -> packages). Common causes: URL outside
    `allowedUrlPrefixes`, SHA-256/Sigstore mismatch, the new binary rejects the current `effective.yaml`
@@ -273,5 +291,6 @@ name) and `group_membership_failed` (the service account could not be added to a
 8. **Uninstall**: `install-windows.ps1 -Uninstall`, started like the installer ([Start the installer](#start-the-installer));
    data under `C:\ProgramData\Myriarch` is kept, `-Purge` also removes identity and queue.
 9. **No `otelcol-supervisor` service after the installer ran**: it stopped before it created the service. Read its last
-   `ERROR [<code>]` line ([Error codes](#error-codes)), and check whether an MSI of the upstream project is installed
-   ([Packages of the upstream project](#packages-of-the-upstream-project)).
+   `ERROR [<code>]` line ([Error codes](#error-codes)). From v0.2.0 the installer names an MSI of the upstream project
+   (`conflicting_install`) and a supervisor file that is not there (`supervisor_missing`); with the installer of v0.1.0 check
+   whether such an MSI is installed ([Packages of the upstream project](#packages-of-the-upstream-project)).

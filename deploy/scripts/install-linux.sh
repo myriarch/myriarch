@@ -13,18 +13,25 @@
 #   - systemd units otelcol-supervisor (+ optionally myriarch-updater)
 #
 # The collector deb/rpm packages are deliberately NOT used: the contrib package starts a service of
-# its own immediately.
+# its own immediately. A host that has such a package is not touched: when otelcol-contrib.service or
+# opampsupervisor.service of the upstream project is active or enabled, the installer stops with
+# conflicting_install before it creates a user, a directory or a file, and it removes nothing.
 #
 # The supervisor storage directory (/var/lib/otelcol/supervisor) is only created empty, never
 # pre-populated: persistent_state.yaml holds the instance UID. Golden images must empty it BEFORE
 # cloning (otherwise all clones share one identity).
 #
-# Example:
-#   sudo ./install-linux.sh --opamp-endpoint wss://fleet.example.com/v1/opamp \
-#       --token myre_xxx --site-type datacenter --site-id dc-01 --site-name 'Data center 1' \
+# Example, in a root shell (sudo -i), from the unpacked release archive that you verified, in a directory that only root can
+# write (docs/tasks/connect-a-host.md has the steps: BASE, VERSION and ARCH are the variables of its step 2). The file
+# enrollment-token holds the token, so that it appears in no argument list, and is deleted after the run. The verifier is a
+# cosign 3.0.4 or newer that only root can replace, or the myriarch-updater of the verified archive:
+#   ./deploy/scripts/install-linux.sh --opamp-endpoint wss://fleet.example.com/v1/opamp \
+#       --token-file ./enrollment-token --site-type datacenter --site-id dc-01 --site-name 'Data center 1' \
 #       --site-country NL --site-timezone Europe/Amsterdam --environment prod \
-#       --collector-version 0.162.0 --with-updater \
-#       --updater-url https://fleet.example.com/downloads/myriarch-updater_linux_amd64
+#       --collector-version 0.162.0 --verifier /usr/local/bin/cosign --with-updater \
+#       --updater-url "${BASE}/myriarch-updater_${VERSION}_linux_${ARCH}" \
+#       --updater-checksums-url "${BASE}/checksums.txt"
+#   rm -f enrollment-token
 #
 # The templates live under deploy/ (--templates-dir, default: the directory above this script).
 #
@@ -77,6 +84,9 @@
 #   sigstore_verifier_outdated      cosign is older than 3.0.4 or reports no usable version
 #   privilege_required              not running as root
 #   unsupported_platform            not Linux, or unsupported CPU architecture
+#   conflicting_install             otelcol-contrib.service or opampsupervisor.service of a deb or rpm package of the upstream
+#                                   project is active or enabled (Windows: a service otelcol-contrib or opampsupervisor of an
+#                                   MSI exists); the message names the unit or service and the next step, nothing is removed
 #   download_failed                 a download did not succeed (a permanent error at once, a transient one after the
 #                                   retry window of 120 s; the message gives the number of attempts)
 #   template_missing                template directory or template file not found
@@ -89,13 +99,20 @@
 #   archive_invalid                 collector archive has no regular binary in its root
 #   collector_start_failed          the new collector binary cannot be started
 #   collector_version_mismatch      the collector reports another version than requested
+#   supervisor_missing              the supervisor binary is not there when the installation step is over: Linux, a missing,
+#                                   non-executable or no regular file at /opt/myriarch/supervisor/opampsupervisor; Windows, a
+#                                   missing file, a file that differs from the verified one or an item that is no regular file at
+#                                   ...\supervisor\opampsupervisor.exe, and a service that did not start because the file of its
+#                                   binPath is gone (a security tool that quarantined the binary is the usual cause). The message
+#                                   names the path and the next step: a file that is gone or changed is installed again by the next
+#                                   run, a directory (on Windows a link too) is not replaced and has to be removed first
 #   service_not_running             WARNING: otelcol-supervisor is not running after the installation
 #   token_on_command_line           WARNING: --token is visible in the process list and shell history
 #   updater_unauthenticated         WARNING: the updater binary has no trusted hash (--insecure)
 #
 # Windows-only codes (see install-windows.ps1 and deploy/windows/README.md): authenticode_invalid,
 # directory_unsafe, acl_failed, service_config_failed, updater_install_failed, group_membership_failed,
-# unexpected_error; service_not_running is fatal there.
+# language_mode_unsupported, unexpected_error; service_not_running is fatal there.
 # ---- End of error code catalog ---------------------------------------------------------------------
 set -euo pipefail
 
@@ -535,6 +552,59 @@ check_prereqs() {
   [ -d "${TEMPLATES_DIR}/supervisor/linux" ] || die template_missing "templates not found under ${TEMPLATES_DIR} (--templates-dir)"
 }
 
+# ---------------------------------------------------------------- Packages of the upstream project
+# The deb and rpm packages of the upstream project bring units of their own: otelcol-contrib.service (the contrib package
+# enables and starts it at once) and opampsupervisor.service (the supervisor package enables it when its configuration file
+# exists; docs/design/upstream-notes.md, "Packages and what they install"). A unit that runs or is enabled is a second collector
+# next to the one that myriarch manages. The installer stops before it creates a user, a directory or a file, and it removes
+# nothing: which package goes is the decision of the operator. A package whose unit neither runs nor is enabled (the rpm
+# packages since 0.157.0 start nothing) runs no second collector and does not stop the installation.
+FOREIGN_UNITS=(otelcol-contrib.service opampsupervisor.service)
+
+# How a unit of the upstream packages is set up on this host: "active", "enabled", "active, enabled", or nothing.
+# A root directory (--root) has no running manager of its own and the manager of this host says nothing about it, so there only
+# the unit files below the directory tell whether the unit is enabled (systemctl --root).
+foreign_unit_state() { # unit
+  local unit="$1" state found=""
+  have systemctl || return 0
+  if [ "${STAGING_MODE}" = 0 ]; then
+    state="$(systemctl is-active "${unit}" 2>/dev/null || true)"
+    case "${state}" in active | activating | reloading) found="active" ;; esac
+    state="$(systemctl is-enabled "${unit}" 2>/dev/null || true)"
+  else
+    state="$(systemctl --root="${ROOT_PREFIX}" is-enabled "${unit}" 2>/dev/null || true)"
+  fi
+  case "${state}" in enabled | enabled-runtime) found="${found:+${found}, }enabled" ;; esac
+  printf '%s' "${found}"
+}
+
+check_foreign_installations() {
+  local unit state found="" units=""
+  for unit in "${FOREIGN_UNITS[@]}"; do
+    state="$(foreign_unit_state "${unit}")"
+    if [ -n "${state}" ]; then
+      found="${found}${found:+, }${unit} (${state})"
+      units="${units}${units:+ }${unit}"
+    fi
+  done
+  [ -z "${found}" ] || die conflicting_install "an installation of the upstream project is present: ${found}; it provides a second collector next to the one that myriarch manages, and the installer removes nothing - stop and disable it ('systemctl disable --now ${units}'), remove its package with your package manager and run the installer again"
+}
+
+# The supervisor must be an executable file at the path of the unit when the installation step is over. A security tool that
+# removes an unsigned binary, a mount with noexec or a copy that went wrong would otherwise show up only as a service that does
+# not start (status 203/EXEC). The next step depends on the case: a file that is gone or cannot run is installed again by the next
+# run, but a directory is not replaced by it (the test of the step that skips an installed supervisor is true for a directory), so
+# the next run would stop at the same item until it is removed.
+check_supervisor_binary() {
+  local target="${P_SUPERVISOR}/opampsupervisor" why="" next=""
+  local again="look for a cleanup or security tool that removed or changed it and for a noexec mount of its file system (findmnt -T ${target}), then run the installer again"
+  if [ ! -e "${target}" ]; then why="does not exist"; next="${again}"
+  elif [ ! -f "${target}" ]; then why="is not a regular file"; next="remove the item at ${target} yourself (the installer does not replace a directory), then run the installer again"
+  elif [ ! -x "${target}" ]; then why="is not executable"; next="${again}"
+  fi
+  [ -z "${why}" ] || die supervisor_missing "the supervisor binary ${why}: ${target}; ${next}"
+}
+
 # ---------------------------------------------------------------- Signature verification (Sigstore, fail-closed)
 # Verifier: cosign 3.0.4 or newer (PATH or --verifier) or "myriarch-updater verify-bundle" (--verifier, an already
 # installed one, or - only with --updater-sha256 and without --updater-checksums-url - the updater downloaded here and
@@ -892,6 +962,7 @@ main() {
   validate_inputs
   detect_arch
   check_prereqs
+  check_foreign_installations
   TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/myriarch-install.XXXXXX")"
   log "installing: collector v${COLLECTOR_VERSION}, supervisor v${SUPERVISOR_VERSION}, linux/${ARCH}, site ${SITE_TYPE}/${SITE_ID}"
   if [ "${WITH_UPDATER}" = 1 ] && [ -n "${UPDATER_CHECKSUMS_URL}" ]; then
@@ -906,6 +977,7 @@ main() {
   ensure_dirs
   install_collector
   install_supervisor_binary
+  check_supervisor_binary
   install_config
   install_units
   install_updater

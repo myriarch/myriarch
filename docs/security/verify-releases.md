@@ -137,7 +137,12 @@ Unblock-File "$Setup\package\deploy\scripts\install-windows.ps1"
 
 Then start the installer in a new PowerShell process with the execution policy for that process only
 (`powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File ...`) and do not change the policy of the machine; the
-command is in [Connect a host](../tasks/connect-a-host.md#5-install-on-windows).
+command is in [Connect a host](../tasks/connect-a-host.md#5-install-on-windows). A host with App Control for Business and
+script enforcement runs an unsigned script in Constrained Language Mode whatever the execution policy says. Allow the script
+there with a hash rule that you create from the copy you have just verified: the hash that App Control uses for a script is
+not the SHA-256 in `checksums.txt`, so the rule comes from the file, not from the list. From v0.2.0 the installer recognizes the
+mode before it does anything and stops with `language_mode_unsupported`
+([Language mode and App Control](../../deploy/windows/README.md#language-mode-and-app-control)).
 
 ## What the installers verify
 
@@ -150,6 +155,14 @@ You do not need to run these steps for a host that you install with the scripts:
   version in that file name; if both are given, they must agree.
 - The verifier is the file given with `--verifier`, otherwise `cosign` 3.0.4 or newer if it is in `PATH`, otherwise an
   already installed `myriarch-updater`. It is never the updater that is being installed, because that binary is only trusted through the file the verifier has to check.
+- **Checks before the installers change anything** (from v0.2.0). They protect the host from a half installation. They do not
+  replace the verification above, and none of them removes anything. The Windows installer checks first that PowerShell runs it
+  in the full language mode (`language_mode_unsupported`). Both installers stop at a package of the upstream project, whose
+  collector service would run next to the one that myriarch manages (`conflicting_install`), and the Windows installer stops
+  on ARM64 without `-Arch amd64` (`unsupported_platform`), all before they download or write anything. When the installation
+  step of the supervisor is over, they check that the file is there: a regular file at the path of the service, on Windows
+  with the SHA-256 that was verified (`supervisor_missing`). The causes and the next steps are in
+  [Connect a host](../tasks/connect-a-host.md#when-the-installer-stops).
 - **Hosts without a verifier** (no `cosign`, no installed updater): verify `checksums.txt` on an admin host as shown above,
   take the SHA-256 of the updater from it and pass `--updater-sha256` (`-UpdaterSha256`). The installer then checks the
   downloaded updater against that hash and uses it to verify the collector and supervisor bundles.
