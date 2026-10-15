@@ -9,6 +9,11 @@ The chart installs with its defaults, never starts the dev mode and has a login 
 (the bootstrap admin). Single sign-on with any OpenID Connect provider is a configuration change:
 [docs/operations/authentication.md](../../../docs/operations/authentication.md).
 
+> **Available from v0.2.0.** The values are validated against a strict schema, [`values.schema.json`](values.schema.json):
+> `helm install`, `upgrade`, `template` and `lint` refuse a key that the chart does not know, a value of the wrong type and a
+> malformed value, before anything is rendered. The chart of v0.1.0 has no schema and ignores such a key without a message. See
+> [Values schema](#values-schema).
+
 ## Minimal installation
 
 Two things are needed: a Secret with the database DSN and the external URL.
@@ -203,7 +208,8 @@ OpenShift usually demand.
   must stay above `emptyDir.sizeLimit` plus the 256Mi `tmp` volume plus the container logs, otherwise the kubelet evicts
   the pod. With `persistence.enabled` a shared PVC (`persistence.size`, ReadWriteMany) is mounted instead.
 * `replicaCount` defaults to 2. The PodDisruptionBudget is created only while `replicaCount` is greater than 1 (with one
-  replica `minAvailable: 1` would block every node drain).
+  replica `minAvailable: 1` would block every node drain); `podDisruptionBudget.maxUnavailable` replaces `minAvailable` when
+  it is set.
 * `secretChecksum.enabled` (default) adds the annotation `checksum/secret` to the pods: the SHA-256 over the uid and
   resourceVersion of every Secret the pod mounts (`existingSecret`, the bootstrap Secret, the enrollment Secrets) as
   seen through `lookup`, so a changed Secret rolls the pods on `helm upgrade` (no digest of the secret data is stored in
@@ -238,22 +244,107 @@ OpenShift usually demand.
   `executors.secretEnvPrefix` (`MYRIARCH_EXEC_`). `config.auth.sessionTtl` and `sessionMaxAge` limit sessions (2 h idle,
   12 h absolute).
 * TLS: if `config.server.publicUrl` uses https, the Ingress needs `ingress.tls` (`ingress.allowWithoutTls=true` only when
-  TLS terminates outside the ingress); an HTTPRoute needs `httpRoute.tlsTerminatedAtGateway=true`.
+  TLS terminates outside the ingress); an HTTPRoute needs `httpRoute.tlsTerminatedAtGateway=true`. The Route terminates TLS at
+  the router and redirects plain HTTP requests (`openshift.route.tls.insecureEdgeTerminationPolicy: Redirect`); `Allow` serves
+  plain HTTP at the router, and so `ws://`, and `None` serves none.
 * Metrics: port `metrics` (9090); `serviceMonitor.enabled=true` creates a ServiceMonitor.
-* Image: `image.tag` (default: `appVersion`) or, immutable, `image.digest` (`sha256:<64 hex>`; when set, the image is
-  referenced as `repository@digest` and the tag is ignored). Private registry: `imagePullSecrets`.
+* Image: `image.registry` (default `ghcr.io`) and `image.repository` (default `myriarch/myriarch`) give the repository, and
+  `image.tag` (default: `appVersion`) or, immutable, `image.digest` (`sha256:<64 hex>`; when set, the image is referenced as
+  `<repository>@<digest>` and the tag is ignored) the version. Private registry: `imagePullSecrets`. See [Image](#image).
+  **Available from v0.2.0.** `image.registry` and `global.imageRegistry`: the chart of v0.1.0 ignores them without a message, and
+  its `image.repository` holds the registry host as well (`ghcr.io/myriarch/myriarch`).
 * Proxy and internal CA for outbound connections: `extraEnv` (`HTTPS_PROXY`, `NO_PROXY`) and `extraVolumes` /
   `extraVolumeMounts` for a CA ConfigMap, together with `config.outbound.caFile` and `config.outbound.allowedCidrs`.
 
+## Image
+
+> **Available from v0.2.0.** The chart of v0.1.0 has no `image.registry` and no `global.imageRegistry` and ignores them without a
+> message; there the registry host is part of `image.repository` (default `ghcr.io/myriarch/myriarch`). With that chart, a
+> repository without a host is pulled from the default registry of your container runtime.
+
+The image is `<registry>/<repository>:<tag>`, or `<registry>/<repository>@<digest>` with `image.digest`:
+
+| Value | Default | Meaning |
+|---|---|---|
+| `image.registry` | `ghcr.io` | Registry host with an optional port. It applies when the repository has no registry host of its own. Empty means the default registry of the container runtime. |
+| `image.repository` | `myriarch/myriarch` | Repository without the registry host. |
+| `image.tag` | empty | Empty means the `appVersion` of the chart. |
+| `image.digest` | empty | `sha256:` and 64 hexadecimal characters. It replaces the tag. |
+| `global.imageRegistry` | not set | Replaces `image.registry`, for example with the host of a mirror, also when a parent chart passes it. |
+
+A repository that starts with a registry host is used **unchanged**, and neither `image.registry` nor `global.imageRegistry`
+applies to it. The first path segment of the repository is a registry host when it contains a `.` or a `:` or is `localhost`.
+This is the form of the values of v0.1.0 (`image.repository: registry.example.com/myriarch/myriarch`), which therefore render
+the same image as before. A repository without a host now takes `image.registry`; if you pulled such an image through the
+default registry of your container runtime, set `image.registry` to the empty string or put the host into the repository.
+
+```bash
+# the image of a mirror, pinned by digest
+helm install myriarch ... --set image.registry=registry.example.com:5000 --set image.digest=sha256:<64 hex>
+# the v0.1.0 form still works
+helm install myriarch ... --set image.repository=registry.example.com/myriarch/myriarch
+```
+
+## Values schema
+
+> **Available from v0.2.0.** The chart of v0.1.0 has no schema and ignores a key that it does not know.
+
+[`values.schema.json`](values.schema.json) is a JSON Schema (draft 2020-12) that Helm reads for `helm install`, `upgrade`,
+`template` and `lint`. It is **strict**:
+
+* A key that the chart does not read is an error, also inside `config`. Before, Helm ignored such a key and the chart
+  rendered without it, so a misspelled setting went unnoticed.
+* A value has the type that the chart needs: a number for a port, a string for a name, a list for a list, a boolean for a
+  switch. Strings that name something have the syntax of the receiving system: a Kubernetes name, a quantity such as `512Mi`,
+  a registry host, a digest, a duration in Go syntax (`30s`, `1m30s`; not `30` and not `30d`). The type of a switch matters for
+  the TLS checks: a template counts the string `"false"` as true, so `ingress.allowWithoutTls: "false"` used to switch the check
+  of the Ingress off, and the schema refuses it.
+* The block `config` mirrors the configuration file of the server. It is generated from the configuration structure of the
+  server (`internal/config`), with the same keys, types and descriptions as the
+  [configuration reference](../../../docs/reference/configuration.md), so it cannot drift from the server.
+* **Secrets are not values.** The schema has no key for a database DSN, an OIDC client secret, a webhook secret, the URL of a
+  notification channel or an enrollment token: use the matching `*File` settings and the Secret `existingSecret`. A declared
+  enrollment token (`enrollmentTokens[]`) names a Secret or lets the chart generate one, and a Secret reference that has the
+  form of an enrollment token (`myre_...`) is refused. The settings that the chart generates (`config.auth.bootstrapAdmin`,
+  `config.opamp.enrollmentTokens`) and the development mode (`config.dev`, `config.auth.devLogin`) are not offered in `config`.
+* The few places that take a Kubernetes object as it is (`extraVolumes`, `extraVolumeMounts`, `podSecurityContext`,
+  `securityContext`, `topologySpreadConstraints`, `affinity`, the Gateway API references) are open objects; the API server
+  validates them.
+* A parent chart that includes this chart as a dependency can use it: `global` is open (the chart reads only
+  `global.imageRegistry`), and the key `enabled`, which Helm reads for `condition: myriarch.enabled`, is accepted and ignored by
+  the chart. Every other key that the parent passes under `myriarch:` is checked like a key of a standalone installation.
+* `null` removes a value that `values.yaml` defines, as in Helm. For a key that `values.yaml` does not define Helm keeps the
+  null, and the schema accepts it only for the entries of the maps of the chart (annotations, labels, selectors), where the
+  values files of `examples/` use it to switch off an entry of an earlier file, and for `global.imageRegistry`. It refuses it
+  everywhere else, also for the entries of the maps in `config` (`executors.secrets`, `executors.secretEnvHosts`,
+  `executors.secretFileHosts`): the chart would render the null into the ConfigMap, and the server refuses it when it starts.
+
+An error names the path of the value, for example `at '/image/tagg': additional properties 'tagg' not allowed` (the wording
+depends on the Helm version). The schema does not replace the checks of the templates, which relate several values
+(an Ingress needs `trustedProxies` and a source in the network policy) and which also hold when the validation is switched
+off with `--skip-schema-validation`; and it does not replace `myriarchd config validate`, which checks the meaning of the
+configuration ([Verification](#verification)).
+
+`values.schema.json` is generated by `make docs-gen` from [`values.schema.source.yaml`](values.schema.source.yaml), which holds
+the hand-written part, and from `internal/config`; do not edit the JSON file. A new value of the chart goes into `values.yaml`,
+the templates and `values.schema.source.yaml`; the tests fail when `values.yaml` or a template uses a value that the schema does
+not list.
+
 ## Misconfiguration messages
 
-Rendering fails with an `execution error` that starts with the value path, followed by what is wrong and how to fix it,
-for example `config.server.trustedProxies: must not be empty when ingress.enabled is true; ...`. The complete list of
-paths:
+> **Available from v0.2.0.** The schema, the first of the two layers. The chart of v0.1.0 has only the messages of the templates.
+
+Two layers refuse a value, and both name it. The **schema** refuses what one value can get wrong (an unknown key, a wrong type,
+a malformed string) before it renders anything; Helm reports the path of the value as a JSON pointer. The **templates** refuse
+what depends on several values, and they repeat a few checks of the schema (the digest, the OpenShift mode, the names, the keys
+that the chart generates or does not offer) for the case that the validation is off. A template message is an `execution error`
+that starts with the value path, followed by what is wrong and how to fix it, for example
+`config.server.trustedProxies: must not be empty when ingress.enabled is true; ...`. The complete list of paths:
 
 | Path | Cause |
 |---|---|
 | `image.digest` | not of the form `sha256:<64 hex>` |
+| `image.repository` | empty, for example set to `null` |
 | `config.server.trustedProxies` | empty while `ingress.enabled` or `httpRoute.enabled` (unless `allowWithoutTrustedProxies`) |
 | `ingress.tls` | empty with an https `publicUrl` (unless `allowWithoutTls`) |
 | `networkPolicy.ingress.from` | empty while `networkPolicy.enabled` and `ingress.enabled` or `httpRoute.enabled` |

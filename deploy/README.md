@@ -119,7 +119,10 @@ helm install myriarch deploy/helm/myriarch -n myriarch --set config.server.publi
 ```
 
 Notes on PostgreSQL (no PgBouncer in transaction pooling mode), secrets, access paths and the OpenShift profile are in
-[`helm/myriarch/values.yaml`](helm/myriarch/values.yaml) and [`helm/myriarch/README.md`](helm/myriarch/README.md).
+[`helm/myriarch/values.yaml`](helm/myriarch/values.yaml) and [`helm/myriarch/README.md`](helm/myriarch/README.md). The values
+are validated against a strict schema, [`helm/myriarch/values.schema.json`](helm/myriarch/values.schema.json): `helm lint`,
+`template`, `install` and `upgrade` refuse a key that the chart does not know and a value of the wrong type, and secrets cannot be
+set as values. The schema is generated (`make docs-gen`) from `helm/myriarch/values.schema.source.yaml` and `internal/config`.
 
 Login and the settings that matter for a real installation (in production myriarchd refuses insecure or missing
 settings):

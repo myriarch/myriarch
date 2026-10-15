@@ -259,15 +259,16 @@ func (g *configGen) walk(t reflect.Type, def, dev reflect.Value, prefix string, 
 	return nil
 }
 
-// describe returns the description cell of a field: its doc comment (else the comment on its line, else the doc comment of its
-// struct type) with the leading Go name replaced by the YAML key, and the notes about secrets and the environment.
-func (g *configGen) describe(owner string, sf reflect.StructField, yamlKey, path string, element bool) (string, error) {
+// fieldText returns the comment of a field and the Go name that the comment starts with: the comment block above the field,
+// else the comment on the line of the field, else the doc comment of its struct type (for a field of a struct, list or map
+// type). It is an error when none of them has text, so every setting has a description.
+func (g *configGen) fieldText(owner string, sf reflect.StructField, path string) (text, name string, err error) {
 	td := g.doc.types[owner]
 	if td == nil {
-		return "", fmt.Errorf("refdoc: no declaration of the type %s found in %v", owner, g.src.SourceFiles)
+		return "", "", fmt.Errorf("refdoc: no declaration of the type %s found in %v", owner, g.src.SourceFiles)
 	}
 	fd := td.fields[sf.Name]
-	text, name := fd.doc, sf.Name
+	text, name = fd.doc, sf.Name
 	if strings.TrimSpace(text) == "" {
 		text = fd.line
 	}
@@ -279,7 +280,17 @@ func (g *configGen) describe(owner string, sf reflect.StructField, yamlKey, path
 		}
 	}
 	if strings.TrimSpace(text) == "" {
-		return "", fmt.Errorf("refdoc: %s has no description: add a doc comment to the field %s.%s", path, owner, sf.Name)
+		return "", "", fmt.Errorf("refdoc: %s has no description: add a doc comment to the field %s.%s", path, owner, sf.Name)
+	}
+	return text, name, nil
+}
+
+// describe returns the description cell of a field: its comment (see fieldText) with the leading Go name replaced by the YAML
+// key, and the notes about secrets and the environment.
+func (g *configGen) describe(owner string, sf reflect.StructField, yamlKey, path string, element bool) (string, error) {
+	text, name, err := g.fieldText(owner, sf, path)
+	if err != nil {
+		return "", err
 	}
 	out, err := inline(leadingName(text, name, yamlKey))
 	if err != nil {

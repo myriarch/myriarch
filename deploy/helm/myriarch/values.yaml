@@ -1,5 +1,9 @@
 # Helm chart for myriarchd (OpAMP server, REST API and web UI in one binary).
 #
+# The values are validated against values.schema.json: Helm refuses a key that the chart does not know, a value of the wrong type
+# and a malformed value in "helm install", "upgrade", "template" and "lint". The block "config" mirrors the configuration file of
+# the server. Secrets are not values: the chart reads them from Secrets (existingSecret and the keys described below).
+#
 # Minimal installation: the chart installs with its defaults once two things exist:
 #   1. a Secret (existingSecret, default myriarch-secrets) with the key database-dsn, and
 #   2. config.server.publicUrl set to the external URL (--set config.server.publicUrl=https://fleet.example.com).
@@ -20,8 +24,14 @@
 replicaCount: 2
 
 image:
-  # Image repository.
-  repository: ghcr.io/myriarch/myriarch
+  # Registry host (and optional port) of the image. It applies when repository has no registry host of its own;
+  # global.imageRegistry (below) replaces it, for example with the host of a mirror. Empty = the default registry of the
+  # container runtime (usually Docker Hub, where the project publishes no image).
+  registry: ghcr.io
+  # Repository of the image without the registry host. A repository that starts with a registry host (the form of the values
+  # of v0.1.0, for example registry.example.com/myriarch/myriarch) is used unchanged: registry and global.imageRegistry then
+  # do not apply.
+  repository: myriarch/myriarch
   # Image tag. Empty = appVersion of the chart.
   tag: ""
   # Optional image digest (sha256:<64 hex>). When set, the image is referenced as repository@digest
@@ -36,6 +46,16 @@ imagePullSecrets: []
 nameOverride: ""
 # Overrides the complete resource name.
 fullnameOverride: ""
+
+# Values that a parent chart shares with its subcharts. This chart reads only global.imageRegistry: a registry host that
+# replaces image.registry, for example the host of a mirror (global.imageRegistry=mirror.example.com). It does not apply to a
+# repository that has a registry host of its own.
+global: {}
+
+# A parent chart that includes this chart as a dependency can switch it on and off with a dependency condition, for example
+# condition: myriarch.enabled in the Chart.yaml of the parent chart. Helm reads the key enabled of the values that the parent chart
+# passes to this chart. This chart ignores the key, and the schema accepts it for that reason. There is no default here: the
+# condition of the parent chart decides what a missing key means. A standalone installation does not need the key.
 
 serviceAccount:
   # Create a ServiceAccount.
@@ -490,6 +510,7 @@ probes:
   readiness: {path: /readyz, periodSeconds: 5, timeoutSeconds: 3, failureThreshold: 3}
 
 # PodDisruptionBudget (rendered only while replicaCount is greater than 1, otherwise it would block node drains).
+# maxUnavailable (a number or a percentage) replaces minAvailable when it is set.
 podDisruptionBudget:
   enabled: true
   minAvailable: 1

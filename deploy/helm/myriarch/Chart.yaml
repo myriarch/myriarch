@@ -7,7 +7,31 @@ appVersion: "0.1.0"
 kubeVersion: ">=1.30.0-0"
 keywords: [opamp, opentelemetry, fleet-management]
 home: https://myriarch.dev
+icon: https://myriarch.dev/brand/myriarch-icon.svg
 sources:
   - https://github.com/myriarch/myriarch
+maintainers:
+  - name: The Myriarch Authors
+    email: maintainers@myriarch.dev
+    url: https://myriarch.dev
 annotations:
   artifacthub.io/license: Apache-2.0
+  artifacthub.io/category: monitoring-logging
+  artifacthub.io/operator: "false"
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://myriarch.dev/docs/
+    - name: Source code
+      url: https://github.com/myriarch/myriarch
+    - name: Issues
+      url: https://github.com/myriarch/myriarch/issues
+    - name: Security policy
+      url: https://github.com/myriarch/myriarch/security/policy
+  # The images of the chart, for the security reports of Artifact Hub. The entry is a placeholder: the release job completes it with
+  # the digest of the image of the release before it packages the chart.
+  artifacthub.io/images: |
+    - name: myriarch
+      image: ghcr.io/myriarch/myriarch
+      platforms:
+        - linux/amd64
+        - linux/arm64

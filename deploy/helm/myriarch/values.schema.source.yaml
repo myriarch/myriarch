@@ -1,0 +1,959 @@
+# The hand-written part of the values schema of the chart (values.schema.json). `make docs-gen` assembles the schema from this file
+# and from the configuration structure of the server: the placeholder at properties.config is replaced by the block that
+# internal/refdoc derives from internal/config. Edit this file, never values.schema.json, and run `make docs-gen`.
+#
+# The file is JSON Schema (draft 2020-12) written as YAML: comments and regular expressions without a second level of escaping.
+# It may say only what JSON can say (no anchors, no merge keys, no time stamps; quote a string that looks like one).
+#
+# Rules of the schema:
+#  - The schema is strict. Every object that the chart defines is closed (additionalProperties: false), so a key that the chart does
+#    not read is an error instead of being ignored. The few open objects hold Kubernetes API objects that the chart passes through
+#    and the API server validates; each has additionalProperties: true on purpose, and the test
+#    internal/updater/deploy_chart_schema_test.go lists them.
+#  - A value has the type that the template needs. A string pattern is the syntax of the receiving system (a Kubernetes name, a
+#    quantity, a registry host); a rule that relates two values stays in the templates (templates/_helpers.tpl and the files that
+#    fail with a message).
+#  - Secrets are not values. The schema has no key for a database DSN, a client secret, a webhook secret or an enrollment token; the
+#    chart reads them from Secrets, and a reference to a Secret never has the form of an enrollment token.
+#  - Defaults are in values.yaml only.
+#  - null is not a value. Helm removes a null for a key that values.yaml defines before it validates, and the schema refuses the
+#    rest. The exceptions are the entries of the string maps of the chart itself (annotations, labels and selectors), which the
+#    examples switch off with null, and global.imageRegistry, which a parent chart may pass as null. The entries of the maps in the
+#    block config are no exception: Helm keeps such a null, the chart renders it into myriarchd.yaml, and the server refuses it
+#    when it starts.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Values of the myriarch chart
+description: >-
+  Values of the Helm chart myriarch, which runs the myriarch server (myriarchd). The schema is strict: helm install, upgrade,
+  template and lint refuse a key that the chart does not know, a value of the wrong type and a malformed value. The block config
+  mirrors the configuration file of the server and is generated from the configuration structure. Secrets are not values: the
+  chart reads them from Kubernetes Secrets.
+type: object
+additionalProperties: false
+properties:
+  replicaCount:
+    description: >-
+      Number of myriarchd replicas. All replicas serve agents and the API; the singleton jobs run on the leader.
+    type: integer
+    minimum: 0
+
+  image:
+    description: The myriarchd image.
+    type: object
+    additionalProperties: false
+    properties:
+      registry:
+        description: >-
+          Registry host, with an optional port, of the image, for example ghcr.io. It applies when image.repository has no registry
+          host of its own, and global.imageRegistry takes precedence over it. Empty means the default registry of the container
+          runtime.
+        $ref: '#/$defs/registryHost'
+      repository:
+        description: >-
+          Repository of the image without a registry host, for example myriarch/myriarch. A repository that starts with a registry
+          host (registry.example.com/myriarch/myriarch, the form of the values of v0.1.0) is used unchanged and neither
+          image.registry nor global.imageRegistry applies. The first segment is a registry host when it contains a . or a : or is
+          localhost, as for the container runtimes; otherwise it belongs to the repository, which is in lower case.
+        type: string
+        minLength: 1
+        maxLength: 255
+        pattern: '^((localhost|[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)+)(:[0-9]+)?/|[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?:[0-9]+/)?[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)*$'
+      tag:
+        description: Image tag. Empty means the appVersion of the chart.
+        type: string
+        pattern: '^([A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?$'
+      digest:
+        description: >-
+          Image digest, sha256: followed by 64 hexadecimal characters. When set, the image is referenced as repository@digest and the
+          tag is ignored.
+        type: string
+        pattern: '^(sha256:[0-9a-f]{64})?$'
+      pullPolicy:
+        description: Image pull policy.
+        enum: [Always, IfNotPresent, Never]
+  imagePullSecrets:
+    description: Secrets for pulling the image from a private registry.
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          description: Name of the Secret in the release namespace.
+          $ref: '#/$defs/name'
+
+  nameOverride:
+    description: Overrides the chart name in resource names.
+    type: string
+  fullnameOverride:
+    description: Overrides the complete resource name.
+    type: string
+
+  global:
+    description: >-
+      Values that a parent chart shares with its subcharts. This chart reads only global.imageRegistry; other keys belong to other
+      charts and are not checked.
+    type: object
+    additionalProperties: true
+    properties:
+      imageRegistry:
+        description: >-
+          Registry host, with an optional port, that replaces image.registry, for example the host of a mirror. A repository that has
+          a registry host of its own is not affected. A parent chart may pass null for no mirror.
+        anyOf:
+          - $ref: '#/$defs/registryHost'
+          - type: 'null'
+  enabled:
+    description: >-
+      Read by the dependency condition of a parent chart (condition: myriarch.enabled), not by this chart, which ignores it. It has
+      no default and no effect on a standalone installation.
+    type: boolean
+
+  serviceAccount:
+    description: The ServiceAccount of the pods. It has no API access, because its token is not mounted.
+    type: object
+    additionalProperties: false
+    properties:
+      create:
+        description: Create the ServiceAccount.
+        type: boolean
+      name:
+        description: Name of the ServiceAccount. Empty means a name generated from the release name.
+        $ref: '#/$defs/nameOrEmpty'
+      annotations:
+        description: Annotations of the ServiceAccount.
+        $ref: '#/$defs/stringMap'
+
+  config:
+    x-generated: internal/config
+
+  oidcFromEnvironment:
+    description: >-
+      Declares that single sign-on is switched on by environment variables (MYRIARCH_AUTH_OIDC_ENABLED in extraEnv, a ConfigMap or a
+      Secret), which the chart cannot read. The chart then treats OIDC as enabled; the server reads the environment.
+    type: boolean
+
+  bootstrapAdmin:
+    description: >-
+      The bootstrap admin, a break-glass administrator that works without an identity provider. Its credentials come from a Secret
+      that the chart generates or that bootstrapAdmin.existingSecret names.
+    type: object
+    additionalProperties: false
+    properties:
+      enabled:
+        description: Configure the bootstrap admin.
+        type: boolean
+      username:
+        description: User name of the account, 1 to 64 characters from letters, digits, ".", "_", "@" and "-".
+        type: string
+        pattern: '^[A-Za-z0-9._@-]{1,64}$'
+      existingSecret:
+        description: >-
+          Secret that holds the credentials. Empty means that the chart generates the Secret <fullname>-bootstrap with a random
+          one-time token.
+        $ref: '#/$defs/nameOrEmpty'
+      tokenKey:
+        description: >-
+          Key of the one-time token in the Secret. Empty means no token, only a password hash, and needs existingSecret.
+        $ref: '#/$defs/secretKeyOrEmpty'
+      passwordHashKey:
+        description: Key of a bcrypt password hash in existingSecret. Needs existingSecret.
+        $ref: '#/$defs/secretKeyOrEmpty'
+      keepWithOidc:
+        description: Keep the bootstrap admin active next to single sign-on (break-glass).
+        type: boolean
+
+  enrollmentTokens:
+    description: >-
+      Enrollment tokens for agents that exist from the first start. A token is never a value: each entry names a Secret that holds
+      it, or the chart generates the Secret with a random token.
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          description: Name of the token, a DNS label, unique in the list. It is also the name of the mounted file.
+          $ref: '#/$defs/dnsLabel'
+        existingSecret:
+          description: >-
+            Secret that holds the token. Empty means that the chart generates the Secret <fullname>-enrollment-<name> with a random
+            token.
+          $ref: '#/$defs/nameOrEmpty'
+        key:
+          description: Key of the token in the Secret. Empty means token.
+          $ref: '#/$defs/secretKeyOrEmpty'
+        labels:
+          description: Labels that agents get when they enroll with the token.
+          $ref: '#/$defs/stringMap'
+        expiresAt:
+          description: Expiry as an RFC 3339 time stamp. Empty means that the token does not expire.
+          type: string
+          pattern: '^([0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2}))?$'
+
+  existingSecret:
+    description: >-
+      Name of the Secret with the files of the server (database-dsn and the optional keys). It is mounted at /etc/myriarchd/secrets.
+    $ref: '#/$defs/name'
+  secretChecksum:
+    description: Roll the pods when a Secret that they mount changes.
+    type: object
+    additionalProperties: false
+    properties:
+      enabled:
+        description: Add the annotation checksum/secret to the pods.
+        type: boolean
+  secretEnv:
+    description: Environment variables for the executors, each taken from one key of the Secret existingSecret.
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [name, key]
+      properties:
+        name:
+          description: Name of the variable. It must start with config.executors.secretEnvPrefix.
+          type: string
+          pattern: '^[-._a-zA-Z][-._a-zA-Z0-9]*$'
+        key:
+          description: Key of the Secret.
+          $ref: '#/$defs/secretKey'
+        optional:
+          description: Start the pod without the variable when the key is missing.
+          type: boolean
+  extraEnv:
+    description: Additional environment variables of the myriarchd container, in the format of a Kubernetes container.
+    type: array
+    items:
+      $ref: '#/$defs/envVar'
+  extraVolumes:
+    description: Additional volumes of the pod, in the format of a Kubernetes pod.
+    type: array
+    items:
+      type: object
+      additionalProperties: true
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+  extraVolumeMounts:
+    description: Additional volume mounts of the myriarchd container, in the format of a Kubernetes container.
+    type: array
+    items:
+      type: object
+      additionalProperties: true
+      required: [name, mountPath]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        mountPath:
+          type: string
+          minLength: 1
+        readOnly:
+          type: boolean
+        subPath:
+          type: string
+
+  openshift:
+    description: >-
+      The OpenShift profile: no fixed user, group or fsGroup, a Route instead of an Ingress, the router namespace in the network
+      policy and the OpenShift DNS pods.
+    type: object
+    additionalProperties: false
+    properties:
+      enabled:
+        description: >-
+          true selects the OpenShift profile, false the standard profile, and auto the OpenShift profile when the cluster offers
+          the API security.openshift.io/v1. helm template renders the standard profile for auto unless it gets --api-versions
+          security.openshift.io/v1.
+        anyOf:
+          - type: boolean
+          - enum: ['true', 'false', auto]
+      route:
+        description: The Route of the OpenShift profile.
+        type: object
+        additionalProperties: false
+        properties:
+          enabled:
+            description: Create the Route in the OpenShift profile.
+            type: boolean
+          host:
+            description: Host of the Route. Empty means the host of config.server.publicUrl, without the port.
+            type: string
+            maxLength: 253
+            pattern: '^([A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?(\.[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?)*)?$'
+          annotations:
+            description: >-
+              Further annotations of the Route. The router timeout annotations are always set unless this map sets them.
+            $ref: '#/$defs/stringMap'
+          timeout:
+            description: >-
+              Router timeout for the long-lived OpAMP WebSockets, a number with a unit (us, ms, s, m, h or d), for example 3600s.
+            type: string
+            pattern: '^[0-9]+(us|ms|s|m|h|d)$'
+          tls:
+            description: TLS of the Route (edge termination).
+            type: object
+            additionalProperties: false
+            properties:
+              insecureEdgeTerminationPolicy:
+                description: What the router does with plain HTTP requests.
+                enum: [Redirect, Allow, None]
+              externalCertificateSecret:
+                description: >-
+                  Secret (kubernetes.io/tls, same namespace) with a certificate for the host of the Route. Empty means the default
+                  certificate of the router.
+                $ref: '#/$defs/nameOrEmpty'
+      routerNamespaceSelector:
+        description: Namespace selector of the router pods, the source of port 8080 while the Route is rendered.
+        $ref: '#/$defs/labelSelector'
+      dns:
+        description: Destination of the DNS egress rule in the OpenShift profile.
+        type: object
+        additionalProperties: false
+        properties:
+          to:
+            description: Destinations in NetworkPolicy peer format.
+            type: array
+            items:
+              $ref: '#/$defs/networkPolicyPeer'
+          ports:
+            description: Ports of the DNS service, used for UDP and TCP.
+            type: array
+            items:
+              $ref: '#/$defs/port'
+
+  service:
+    description: The Service of the server.
+    type: object
+    additionalProperties: false
+    properties:
+      type:
+        description: Service type.
+        enum: [ClusterIP, NodePort, LoadBalancer]
+      port:
+        description: Port of the HTTP service (UI, REST and OpAMP).
+        $ref: '#/$defs/port'
+      metricsPort:
+        description: Port of the metrics endpoint.
+        $ref: '#/$defs/port'
+      annotations:
+        description: Annotations of the Service.
+        $ref: '#/$defs/stringMap'
+
+  networkPolicy:
+    description: >-
+      Network segmentation. Port 8080 is reachable from the listed sources only, port 9090 from the monitoring instance, and egress
+      is limited to DNS and the listed ports. A CNI with NetworkPolicy support is a prerequisite.
+    type: object
+    additionalProperties: false
+    properties:
+      enabled:
+        description: Render the NetworkPolicy.
+        type: boolean
+      ingress:
+        description: Sources of port 8080 (UI, REST and OpAMP).
+        type: object
+        additionalProperties: false
+        properties:
+          from:
+            description: >-
+              Sources in NetworkPolicy peer format, for example the namespace of the ingress controller or Gateway. Required while
+              ingress or httpRoute is enabled.
+            type: array
+            items:
+              $ref: '#/$defs/networkPolicyPeer'
+          allowSameNamespace:
+            description: >-
+              Allow every pod of the release namespace to reach port 8080. It must be false while config.server.trustedProxies or
+              config.opamp.clientCertHeader is set.
+            type: boolean
+      metrics:
+        description: Sources of port 9090 (/metrics, unauthenticated).
+        type: object
+        additionalProperties: false
+        properties:
+          from:
+            description: Sources in NetworkPolicy peer format. Empty means nobody.
+            type: array
+            items:
+              $ref: '#/$defs/networkPolicyPeer'
+      egress:
+        description: Egress rules.
+        type: object
+        additionalProperties: false
+        properties:
+          enabled:
+            description: Restrict egress to DNS and the ports below.
+            type: boolean
+          ports:
+            description: >-
+              Allowed destination ports (TCP) for all destinations, by default 5432 for PostgreSQL and 443 for HTTPS. The Git SSH
+              port is added automatically while config.gitops is enabled with an SSH URL.
+            type: array
+            items:
+              $ref: '#/$defs/port'
+          extraPorts:
+            description: Further ports (TCP), merged into the rule above.
+            type: array
+            items:
+              $ref: '#/$defs/port'
+          exceptCidrs:
+            description: Destinations that the rule excludes, by default the cloud metadata service.
+            type: array
+            items:
+              $ref: '#/$defs/cidr'
+          dns:
+            description: DNS rule of the standard profile. The OpenShift profile uses openshift.dns.
+            type: object
+            additionalProperties: false
+            properties:
+              to:
+                description: Destinations in NetworkPolicy peer format.
+                type: array
+                items:
+                  $ref: '#/$defs/networkPolicyPeer'
+              ports:
+                description: Ports of the DNS service, used for UDP and TCP.
+                type: array
+                items:
+                  $ref: '#/$defs/port'
+          extraRules:
+            description: Further egress rules in NetworkPolicy format.
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              properties:
+                to:
+                  type: array
+                  items:
+                    $ref: '#/$defs/networkPolicyPeer'
+                ports:
+                  type: array
+                  items:
+                    $ref: '#/$defs/networkPolicyPort'
+
+  ingress:
+    description: >-
+      An Ingress, off by default. The Gateway API (httpRoute) is the recommended way; examples for the ingress controllers are in
+      the directory examples of the chart.
+    type: object
+    additionalProperties: false
+    properties:
+      enabled:
+        description: Create an Ingress.
+        type: boolean
+      className:
+        description: Ingress class. Empty means the default class of the cluster.
+        $ref: '#/$defs/nameOrEmpty'
+      annotations:
+        description: >-
+          Annotations for the controller. OpAMP connections are long-lived WebSockets, so the controller needs long timeouts.
+        $ref: '#/$defs/stringMap'
+      hosts:
+        description: Host names and paths of the Ingress.
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [host]
+          properties:
+            host:
+              $ref: '#/$defs/hostname'
+            paths:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [path]
+                properties:
+                  path:
+                    type: string
+                    pattern: '^/'
+                  pathType:
+                    enum: [Prefix, Exact, ImplementationSpecific]
+      tls:
+        description: >-
+          TLS of the Ingress. Required while config.server.publicUrl is https, unless allowWithoutTls is set.
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          properties:
+            secretName:
+              $ref: '#/$defs/nameOrEmpty'
+            hosts:
+              type: array
+              items:
+                $ref: '#/$defs/hostname'
+      allowWithoutTls:
+        description: Allow an https publicUrl without ingress.tls, because TLS terminates outside the Ingress.
+        type: boolean
+      allowWithoutTrustedProxies:
+        description: >-
+          Allow an empty config.server.trustedProxies, so that all clients appear with the address of the ingress controller.
+        type: boolean
+
+  httpRoute:
+    description: >-
+      A Gateway API HTTPRoute, off by default and recommended for new installations. The chart creates the route, not the Gateway.
+      The same checks apply as for the Ingress: trustedProxies and TLS at the Gateway.
+    type: object
+    additionalProperties: false
+    properties:
+      enabled:
+        description: Create an HTTPRoute.
+        type: boolean
+      parentRefs:
+        description: Gateways that the route is bound to, in the format of the Gateway API. Required while enabled.
+        type: array
+        items:
+          type: object
+          additionalProperties: true
+          required: [name]
+          properties:
+            group:
+              type: string
+            kind:
+              type: string
+            namespace:
+              type: string
+            name:
+              type: string
+              minLength: 1
+            sectionName:
+              type: string
+            port:
+              $ref: '#/$defs/port'
+      hostnames:
+        description: Host names of the route. They must match config.server.publicUrl. Required while enabled.
+        type: array
+        items:
+          $ref: '#/$defs/hostname'
+      annotations:
+        description: Annotations of the HTTPRoute.
+        $ref: '#/$defs/stringMap'
+      tlsTerminatedAtGateway:
+        description: >-
+          Confirms that the Gateway listener terminates TLS. Required with an https publicUrl, because the chart cannot check the
+          Gateway.
+        type: boolean
+      allowWithoutTrustedProxies:
+        description: Allow an empty config.server.trustedProxies.
+        type: boolean
+      timeouts:
+        description: Timeouts of the rule (Gateway API 1.1 and later); support differs per implementation.
+        type: object
+        additionalProperties: true
+        properties:
+          request:
+            $ref: '#/$defs/gatewayDuration'
+          backendRequest:
+            $ref: '#/$defs/gatewayDuration'
+
+  resources:
+    description: >-
+      Resource requests and limits of the myriarchd container. Many clusters require ephemeral-storage. Keep artifacts.maxCacheBytes
+      below emptyDir.sizeLimit, and limits.ephemeral-storage above emptyDir.sizeLimit plus the 256Mi tmp volume plus the logs.
+    type: object
+    additionalProperties: false
+    properties:
+      requests:
+        $ref: '#/$defs/quantityMap'
+      limits:
+        $ref: '#/$defs/quantityMap'
+      claims:
+        type: array
+        items:
+          type: object
+          additionalProperties: true
+
+  preStopSleepSeconds:
+    description: >-
+      Pause before the shutdown, so that the endpoint disappears from the load balancers before the connections are closed.
+    type: integer
+    minimum: 0
+  terminationGracePeriodSeconds:
+    description: Grace period of the pod on termination.
+    type: integer
+    minimum: 0
+
+  probes:
+    description: Startup, liveness and readiness probes of the myriarchd container.
+    type: object
+    additionalProperties: false
+    properties:
+      startup:
+        description: >-
+          Startup probe. The container gets failureThreshold times periodSeconds to start before the liveness probe takes over.
+        type: object
+        additionalProperties: false
+        properties:
+          path: {$ref: '#/$defs/probePath'}
+          failureThreshold: {$ref: '#/$defs/probeCount'}
+          periodSeconds: {$ref: '#/$defs/probeCount'}
+      liveness:
+        description: Liveness probe. The kubelet restarts the container when it fails.
+        type: object
+        additionalProperties: false
+        properties:
+          path: {$ref: '#/$defs/probePath'}
+          periodSeconds: {$ref: '#/$defs/probeCount'}
+          timeoutSeconds: {$ref: '#/$defs/probeCount'}
+          failureThreshold: {$ref: '#/$defs/probeCount'}
+      readiness:
+        description: Readiness probe. A pod that fails it receives no traffic.
+        type: object
+        additionalProperties: false
+        properties:
+          path: {$ref: '#/$defs/probePath'}
+          periodSeconds: {$ref: '#/$defs/probeCount'}
+          timeoutSeconds: {$ref: '#/$defs/probeCount'}
+          failureThreshold: {$ref: '#/$defs/probeCount'}
+
+  podDisruptionBudget:
+    description: >-
+      PodDisruptionBudget. It is rendered only while replicaCount is greater than 1, because a budget of 1 on a single replica
+      would block every node drain.
+    type: object
+    additionalProperties: false
+    properties:
+      enabled:
+        description: Create the PodDisruptionBudget.
+        type: boolean
+      minAvailable:
+        description: Minimum number or percentage of available pods. Ignored while maxUnavailable is set.
+        $ref: '#/$defs/intOrPercent'
+      maxUnavailable:
+        description: Maximum number or percentage of unavailable pods. It replaces minAvailable when set.
+        $ref: '#/$defs/intOrPercent'
+
+  podAnnotations:
+    description: Annotations of the pods.
+    $ref: '#/$defs/stringMap'
+  podLabels:
+    description: Additional labels of the pods.
+    $ref: '#/$defs/stringMap'
+  priorityClassName:
+    description: Priority class of the pods.
+    $ref: '#/$defs/nameOrEmpty'
+
+  podSecurityContext:
+    description: >-
+      Security context of the pod, in the format of a Kubernetes pod. The OpenShift profile drops runAsUser, runAsGroup and
+      fsGroup. Other fields are passed through and validated by the API server.
+    type: object
+    additionalProperties: true
+    properties:
+      runAsNonRoot:
+        type: boolean
+      runAsUser:
+        type: integer
+        minimum: 0
+      runAsGroup:
+        type: integer
+        minimum: 0
+      fsGroup:
+        type: integer
+        minimum: 0
+      seccompProfile:
+        type: object
+        additionalProperties: true
+        properties:
+          type:
+            enum: [RuntimeDefault, Localhost, Unconfined]
+  securityContext:
+    description: >-
+      Security context of the myriarchd container, in the format of a Kubernetes container. Other fields are passed through and
+      validated by the API server.
+    type: object
+    additionalProperties: true
+    properties:
+      allowPrivilegeEscalation:
+        type: boolean
+      readOnlyRootFilesystem:
+        type: boolean
+      privileged:
+        type: boolean
+      runAsNonRoot:
+        type: boolean
+      runAsUser:
+        type: integer
+        minimum: 0
+      runAsGroup:
+        type: integer
+        minimum: 0
+      capabilities:
+        type: object
+        additionalProperties: false
+        properties:
+          add:
+            type: array
+            items:
+              type: string
+          drop:
+            type: array
+            items:
+              type: string
+      seccompProfile:
+        type: object
+        additionalProperties: true
+        properties:
+          type:
+            enum: [RuntimeDefault, Localhost, Unconfined]
+
+  persistence:
+    description: >-
+      Data per replica (the GitOps clone and the artifact cache). By default an emptyDir; with persistence.enabled a shared PVC is
+      mounted, and it needs ReadWriteMany while replicaCount is greater than 1.
+    type: object
+    additionalProperties: false
+    properties:
+      enabled:
+        description: Mount a PersistentVolumeClaim instead of an emptyDir.
+        type: boolean
+      existingClaim:
+        description: Name of an existing claim. Empty means that the chart creates one.
+        $ref: '#/$defs/nameOrEmpty'
+      storageClass:
+        description: Storage class of the created claim. Empty means the default class.
+        $ref: '#/$defs/nameOrEmpty'
+      accessModes:
+        description: Access modes of the created claim.
+        type: array
+        minItems: 1
+        items:
+          enum: [ReadWriteOnce, ReadOnlyMany, ReadWriteMany, ReadWriteOncePod]
+      size:
+        description: Size of the created claim.
+        $ref: '#/$defs/quantity'
+  emptyDir:
+    description: The volume of the data per replica while persistence is disabled.
+    type: object
+    additionalProperties: false
+    properties:
+      sizeLimit:
+        description: Size limit of the emptyDir volume. It must stay above config.artifacts.maxCacheBytes.
+        $ref: '#/$defs/quantity'
+
+  topologySpreadConstraints:
+    description: >-
+      Spreads the replicas, in the format of a Kubernetes pod. The chart adds the label selector of the release to every entry.
+    type: array
+    items:
+      type: object
+      additionalProperties: true
+      properties:
+        maxSkew:
+          type: integer
+          minimum: 1
+        topologyKey:
+          type: string
+          minLength: 1
+        whenUnsatisfiable:
+          enum: [DoNotSchedule, ScheduleAnyway]
+  nodeSelector:
+    description: Node selector of the pods.
+    $ref: '#/$defs/stringMap'
+  tolerations:
+    description: Tolerations of the pods.
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+        operator:
+          enum: [Exists, Equal]
+        value:
+          type: string
+        effect:
+          enum: ['', NoSchedule, PreferNoSchedule, NoExecute]
+        tolerationSeconds:
+          type: integer
+  affinity:
+    description: Affinity of the pods, in the format of a Kubernetes pod.
+    type: object
+    additionalProperties: false
+    properties:
+      nodeAffinity:
+        type: object
+        additionalProperties: true
+      podAffinity:
+        type: object
+        additionalProperties: true
+      podAntiAffinity:
+        type: object
+        additionalProperties: true
+
+  serviceMonitor:
+    description: A Prometheus Operator ServiceMonitor. The cluster needs the CRD monitoring.coreos.com before it is enabled.
+    type: object
+    additionalProperties: false
+    properties:
+      enabled:
+        description: Create the ServiceMonitor.
+        type: boolean
+      interval:
+        description: Scrape interval, for example 30s.
+        type: string
+        pattern: '^([0-9]+(ms|s|m|h|d|w|y))+$'
+      labels:
+        description: Labels of the ServiceMonitor, for example the label that selects it in the Prometheus resource.
+        $ref: '#/$defs/stringMap'
+
+$defs:
+  name:
+    description: The name of a Kubernetes object, a DNS-1123 subdomain.
+    type: string
+    minLength: 1
+    maxLength: 253
+    pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'
+  nameOrEmpty:
+    description: The name of a Kubernetes object, a DNS-1123 subdomain, or empty when the setting is not used.
+    type: string
+    maxLength: 253
+    pattern: '^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$'
+  dnsLabel:
+    description: A DNS label, 1 to 63 characters from lower case letters, digits and "-".
+    type: string
+    pattern: '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'
+  secretKey:
+    description: >-
+      The key of a Secret, from letters, digits, "-", "_" and ".". It names an entry; it is never the value of an enrollment token.
+    type: string
+    minLength: 1
+    maxLength: 253
+    pattern: '^[-._a-zA-Z0-9]+$'
+    not:
+      pattern: '^myre_'
+  secretKeyOrEmpty:
+    description: The key of a Secret, as above, or empty when the setting is not used.
+    type: string
+    maxLength: 253
+    pattern: '^[-._a-zA-Z0-9]*$'
+    not:
+      pattern: '^myre_'
+  hostname:
+    description: A lower case host name, optionally with a leading wildcard label such as *.example.com.
+    type: string
+    maxLength: 253
+    pattern: '^(\*\.)?[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'
+  registryHost:
+    description: A registry host with an optional port, for example ghcr.io or registry.example.com:5000. Empty when not used.
+    type: string
+    maxLength: 261
+    pattern: '^(([A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?(\.[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?)?$'
+  port:
+    description: A TCP or UDP port.
+    type: integer
+    minimum: 1
+    maximum: 65535
+  cidr:
+    description: An IPv4 or IPv6 network in CIDR notation, for example 169.254.0.0/16.
+    type: string
+    pattern: '^([0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}|[0-9A-Fa-f:]*:[0-9A-Fa-f:.]*/[0-9]{1,3})$'
+  quantity:
+    description: A Kubernetes quantity, a number or a string such as 500m, 512Mi or 5Gi.
+    anyOf:
+      - type: number
+        minimum: 0
+      - type: string
+        pattern: '^[+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)(Ki|Mi|Gi|Ti|Pi|Ei|[numkMGTPE]|[eE][+-]?[0-9]+)?$'
+  quantityMap:
+    description: Quantities by resource name, for example cpu, memory and ephemeral-storage.
+    type: object
+    additionalProperties:
+      $ref: '#/$defs/quantity'
+  intOrPercent:
+    description: A number of pods or a percentage of the pods, for example 1 or 50%.
+    anyOf:
+      - type: integer
+        minimum: 0
+      - type: string
+        pattern: '^[0-9]+%$'
+  stringMap:
+    description: >-
+      A map from strings to strings. An entry may be null: the values files of the examples switch off an entry of an earlier
+      values file that way, and Helm keeps such a null for a key that values.yaml does not define.
+    type: object
+    additionalProperties:
+      type: [string, 'null']
+  gatewayDuration:
+    description: A duration in the format of the Gateway API, for example 30s or 1h30m.
+    type: string
+    pattern: '^([0-9]{1,5}(h|m|s|ms)){1,4}$'
+  probePath:
+    description: HTTP path of the probe.
+    type: string
+    pattern: '^/'
+  probeCount:
+    description: A number of seconds or attempts, at least 1.
+    type: integer
+    minimum: 1
+  labelSelector:
+    description: A Kubernetes label selector.
+    type: object
+    additionalProperties: false
+    properties:
+      matchLabels:
+        $ref: '#/$defs/stringMap'
+      matchExpressions:
+        type: array
+        items:
+          type: object
+          additionalProperties: true
+  networkPolicyPeer:
+    description: A source or destination of a NetworkPolicy rule, with exactly one of its selectors.
+    type: object
+    additionalProperties: false
+    properties:
+      podSelector:
+        $ref: '#/$defs/labelSelector'
+      namespaceSelector:
+        $ref: '#/$defs/labelSelector'
+      ipBlock:
+        type: object
+        additionalProperties: false
+        required: [cidr]
+        properties:
+          cidr:
+            $ref: '#/$defs/cidr'
+          except:
+            type: array
+            items:
+              $ref: '#/$defs/cidr'
+  networkPolicyPort:
+    description: A port of a NetworkPolicy rule.
+    type: object
+    additionalProperties: false
+    properties:
+      protocol:
+        enum: [TCP, UDP, SCTP]
+      port:
+        anyOf:
+          - $ref: '#/$defs/port'
+          - type: string
+            minLength: 1
+      endPort:
+        $ref: '#/$defs/port'
+  envVar:
+    description: An environment variable in the format of a Kubernetes container.
+    type: object
+    additionalProperties: false
+    required: [name]
+    properties:
+      name:
+        type: string
+        minLength: 1
+      value:
+        type: string
+      valueFrom:
+        type: object
+        additionalProperties: true

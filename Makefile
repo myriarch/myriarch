@@ -19,7 +19,7 @@
 #   make image-crane  container image WITHOUT a container runtime (crane) and FROM scratch: build and push to IMAGE_REPO (required), print the digest (scripts/build-image-crane.sh; IMAGE_PLATFORM=linux/arm64 builds for arm64)
 #   make collector-image-crane  collector image (upstream opampsupervisor + otelcol-contrib of the same version + myriarch-updater) WITHOUT a container runtime: build and push to IMAGE_REPO (required); OTELCOL_VERSION=0.162.0 (default: ci/versions.env)
 #   make mirror-image-crane  in-cluster mirror of the collector release files (busybox httpd) WITHOUT a container runtime: build and push to IMAGE_REPO (required; scripts/build-mirror-image-crane.sh)
-#   make docs-gen     regenerate the generated references: docs/reference/cli from the cobra command trees (cmd/myriarchd/clidoc_test.go; CLIDOC_UPDATE=1), docs/reference/api from api/openapi.yaml (internal/apidoc; APIDOC_UPDATE=1) and docs/reference/{configuration,environment-variables,metrics}.md from the configuration struct, the loader and the metric definitions (internal/refdoc; REFDOC_UPDATE=1)
+#   make docs-gen     regenerate the generated references: docs/reference/cli from the cobra command trees (cmd/myriarchd/clidoc_test.go; CLIDOC_UPDATE=1), docs/reference/api from api/openapi.yaml (internal/apidoc; APIDOC_UPDATE=1), docs/reference/{configuration,environment-variables,metrics}.md from the configuration struct, the loader and the metric definitions, and deploy/helm/myriarch/values.schema.json from values.schema.source.yaml and the configuration struct (internal/refdoc; REFDOC_UPDATE=1)
 #   make docs-check   documentation checks: internal links, front matter (scripts/check-docs.py) and drift of the generated reference (ci/check-docs-gen.sh)
 #   make license-headers  write the missing SPDX header into the source files (scripts/license-headers.py --fix; check only: python3 -I scripts/license-headers.py --check)
 #   make notices      regenerate THIRD_PARTY_NOTICES from the dependency trees of the binaries and the web UI (scripts/gen-third-party-notices.sh)
@@ -124,12 +124,13 @@ e2e: build
 # Generated references. The command line reference (docs/reference/cli) comes from the cobra trees of the four binaries by a test of
 # cmd/myriarchd; the REST API reference (docs/reference/api) comes from api/openapi.yaml by a test of internal/apidoc; the configuration,
 # environment and metrics references (docs/reference/{configuration,environment-variables,metrics}.md) come from the configuration struct,
-# the loader, the environment reads and the metric definitions by a test of internal/refdoc. The tests also run in the go-test gate as a
-# drift check. PGTEST_SKIP=1: the tests need no database.
+# the loader, the environment reads and the metric definitions by a test of internal/refdoc, and so does the values schema of the Helm
+# chart (deploy/helm/myriarch/values.schema.json), which is assembled from the hand-written values.schema.source.yaml next to it and the
+# configuration struct. The tests also run in the go-test gate as a drift check. PGTEST_SKIP=1: the tests need no database.
 docs-gen:
 	PGTEST_SKIP=1 CLIDOC_UPDATE=1 $(GO) test -count=1 -run '^TestCLIReference$$' ./cmd/myriarchd
 	PGTEST_SKIP=1 APIDOC_UPDATE=1 $(GO) test -count=1 -run '^TestAPIReference$$' ./internal/apidoc
-	PGTEST_SKIP=1 REFDOC_UPDATE=1 $(GO) test -count=1 -run '^TestReferencePages$$' ./internal/refdoc
+	PGTEST_SKIP=1 REFDOC_UPDATE=1 $(GO) test -count=1 -run '^(TestReferencePages|TestChartValuesSchema)$$' ./internal/refdoc
 
 # Documentation checks: relative links and anchors, front matter, and the generated references are up to date (regenerates them and fails on a diff).
 docs-check:
