@@ -2,4 +2,7 @@
 # An entry accepts until its review date has passed. From the day after, the gate reports a warning (it still passes), and the reports
 # for code scanning (.github/workflows/vulncheck.yml) show the finding again, so it becomes an alert. Review the entry and move its date,
 # or remove it as soon as a fixed version is in use.
+# The file belongs to the gate. Do not add the ID of a finding that only the scan of the released binaries reports (it works at module
+# level, because the binaries are stripped): an entry would also let a later call of the same vulnerability pass the gate. Such a finding is
+# closed by a release that is built with the fixed version, or dismissed in code scanning with a reason (docs/development.md).
 GO-2026-5932 | review 2027-01-15 | golang.org/x/crypto is required, but the vulnerable code is not called, and no fixed version has been published; upgrade when one is

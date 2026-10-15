@@ -6,7 +6,8 @@
 #
 #   govulncheck/source-release   the code of main, built the way a release is built
 #   govulncheck/source-devpg     the code of main with the build tag devpg (the development server with an embedded PostgreSQL)
-#   govulncheck/binaries         the programs of the latest stable release, or of the tag that a manual run names
+#   govulncheck/binaries         the programs of the latest stable release, or of the tag that a manual run names, at module level
+#                                (the binaries are stripped: a result says that a release was built with an affected version)
 #
 # This workflow reports and blocks nothing: the check that blocks is the gate vulncheck in the job compliance of ci.yml. A finding that
 # ci/vulncheck-allowlist.txt accepts is left out of the reports until the review date of the entry has passed; from the day after, it is

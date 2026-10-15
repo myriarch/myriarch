@@ -568,7 +568,7 @@ of `ci.yml`. Three categories hold the reports:
 |---|---|---|
 | `govulncheck/source-release` | `source` | the code of `main`, built like a release (`ci/vulncheck.sh --sarif DIR`) |
 | `govulncheck/source-devpg` | `source` | the code of `main` with the build tag `devpg` (`ci/vulncheck.sh --sarif DIR`) |
-| `govulncheck/binaries` | `binaries` | the programs of the latest stable release (`ci/vulncheck-binaries.sh`) |
+| `govulncheck/binaries` | `binaries` | the programs of the latest stable release, at module level (`ci/vulncheck-binaries.sh`) |
 
 The job `upload` is the only one with a write scope. It uploads each report with its category, so a vulnerability that a later run no
 longer finds is closed by that run. A finding that `ci/vulncheck-allowlist.txt` accepts (the file of the gate, with ID, review date
@@ -584,8 +584,8 @@ brackets): it downloads `checksums.txt` and its keyless bundle without credentia
 the frozen identity of `release.yml` at the tag of the version, issued by GitHub Actions (`signature_invalid`); only then it downloads
 every archive of `myriarchd`, `myriarch-updater`, `myrctl` and `myriarch-sim` that the signed list names for the version and compares
 each with its SHA-256 (`checksum_mismatch`); only then it reads the one member that is named like the program out of each archive, as a
-regular file within a size limit, and nothing else (`archive_invalid`), and scans it with `govulncheck -mode binary`. The programs
-are not run. Run it yourself with the pinned tools (it needs network access and downloads the 16 archives of v0.1.0, 120 MB):
+regular file within a size limit, and nothing else (`archive_invalid`), and scans it with `govulncheck -mode binary -scan module`. The
+programs are not run. Run it yourself with the pinned tools (it needs network access and downloads the 16 archives of v0.1.0, 120 MB):
 
 ```bash
 ci/install-tools.sh cosign govulncheck
@@ -593,13 +593,21 @@ ci/vulncheck-binaries.sh --out .cache/vulncheck                   # the latest s
 ci/vulncheck.sh --sarif .cache/vulncheck                          # the source reports
 ```
 
-**What the reports do not say.** The binary mode lists the vulnerable symbols that a binary contains and cannot tell whether the
-program reaches them, so it reports more than the source analysis: a vulnerability that the source analysis rules out but that a
-binary still links is reported until the allowlist accepts its ID, and the same entry covers the source reports. The reports of the
-binaries describe the release, not a branch: code scanning has no file and line for them, so each result is anchored at `go.mod` and
-names the affected binaries in its message. The release binaries are built with `-s -w` and scan without a problem: govulncheck reads
-the build information and the function table that the Go runtime keeps, not the symbol table that `-s` removes. A run that cannot
-reach GitHub or the vulnerability database fails in the Actions list and leaves the earlier alerts as they are.
+**What a result of the binary scan says.** The release binaries are built with `-s -w`, and govulncheck cannot read the symbols of a
+stripped program. At its default level it then takes every vulnerable symbol of every affected module for present and reports each as
+called, also in packages that the program does not link. The scan therefore runs at module level (`-scan module`), `ci/vulncheck-sarif.py`
+refuses a report of another level, and every result is a warning. A result means that a release was built with a module version or a Go
+version that the advisory affects (`stdlib` is the Go version); it does not say that a binary contains or calls the vulnerable code. That
+is what the source analysis, the gate and the two source reports, tells. The results describe the release, not a branch: code scanning has
+no file and line for them, so each result is anchored at `go.mod` and names the affected binaries in its message.
+
+**What to do with a finding of the binary scan.** A vulnerability that only the binary report has (the code of `main` does not report it,
+for example because `main` uses the fixed version already) is fixed by a release that is built with the fixed module or Go version; once
+that release is the latest stable one, the next daily run closes the alert. When the finding does not apply to the release, dismiss the
+alert in the Security tab with a reason that names the release (GitHub records who dismissed it and when). Do not add its ID to
+`ci/vulncheck-allowlist.txt` for that: the file belongs to the gate, and an entry would also let a later call of the same vulnerability
+pass the gate. A run that cannot reach GitHub or the vulnerability database fails in the Actions list and leaves the earlier alerts as
+they are.
 
 ### Add a deployment secret
 

@@ -557,14 +557,22 @@ guidance after each item names what to do.
   fails closed on a download that fails, a signature that does not verify, an archive that does not match, a missing or irregular member
   and a failing tool (`ci/tests/vulncheck-test.sh` covers each). The reports leave out a finding only while its allowlist entry is in
   force: an entry accepts until its review date has passed, and from the day after the finding is reported again, so a lapsed
-  acceptance is visible where the alerts are read (the gate itself only warns and passes). Limits: govulncheck knows the Go vulnerability database, not
-  other ecosystems (the dependency review and Dependabot cover the advisories of npm, pip and the actions); the binary mode lists the
-  vulnerable symbols that a binary contains and cannot tell whether the program reaches them, so it reports more than the source
-  analysis; the release binaries are built with `-s -w` and are scanned without a problem, because govulncheck reads the build
-  information and the function table that the Go runtime keeps, but a binary without Go build information cannot be scanned and fails
-  the run; the results about binaries are anchored at `go.mod` because a binary has no file or line; the binaries are the archives of
-  the latest stable release unless a manual run names another; and a run that cannot reach GitHub or the vulnerability database fails
-  visibly and leaves the earlier alerts as they are.
+  acceptance is visible where the alerts are read (the gate itself only warns and passes).
+  Limits:
+  - govulncheck knows the Go vulnerability database, not other ecosystems (the dependency review and Dependabot cover the advisories of
+    npm, pip and the actions).
+  - The scan of the released binaries works at module level. The release binaries are built with `-s -w`, govulncheck cannot read the
+    symbols of a stripped program, and at its default level it reports every vulnerable symbol of an affected module as called, also in
+    packages that the program does not link. The scan therefore runs with `-scan module`, the merge of the reports
+    (`ci/vulncheck-sarif.py`) refuses a report of another mode or level, and each result is a warning. A result means that a release was
+    built with a module version or a Go version that an advisory affects, not that the binary contains or calls the vulnerable code; the
+    source analysis tells whether the code calls it.
+  - A finding that only the binary report has is closed by a release that is built with the fixed version, or dismissed in code
+    scanning with a reason (GitHub records who and when). It is not added to `ci/vulncheck-allowlist.txt`: that file belongs to the gate,
+    and an entry would also let a later call of the same vulnerability pass the gate.
+  - A binary without Go build information cannot be scanned and fails the run; the results about binaries are anchored at `go.mod`
+    because a binary has no file or line; the binaries are the archives of the latest stable release unless a manual run names another;
+    and a run that cannot reach GitHub or the vulnerability database fails visibly and leaves the earlier alerts as they are.
 - **Rules for the release workflow (R13).** `ci/check-workflows.py` requires of
   `.github/workflows/release.yml`: a trigger for pushed `v*` tags only, no caches and no local actions, the literal environment
   `release`, a `guard` job that every other job needs, no Node.js, Go, pnpm, npm, goreleaser, make or similar build tool
