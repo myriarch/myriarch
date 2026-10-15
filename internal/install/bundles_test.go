@@ -1393,3 +1393,22 @@ func TestBundlesUseTheProxyOfTheArtifacts(t *testing.T) {
 		assert.Equal(t, BundleFailed, it.Status)
 	}
 }
+
+// An operator who empties the cache directory under a running server loses the bundles, not the server: the next request
+// fetches them again.
+func TestBundlesSurviveAnEmptiedCacheDirectory(t *testing.T) {
+	e := newBundlesEnv(t)
+	e.prepare()
+	require.NoError(t, os.RemoveAll(filepath.Join(e.dir, artifact.InstallDir)))
+	name := BundleFilename(testVersion, Platform{"linux", "amd64"})
+	f, _, err := e.b.Open(name)
+	require.Nil(t, f)
+	asRefusal(t, err, domain.ErrUnavailable, CodeBundlePreparing)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	require.NoError(t, e.b.Wait(ctx))
+	f, _, err = e.b.Open(name)
+	require.NoError(t, err)
+	assert.Equal(t, e.rel.archives[name], readAll(t, f))
+	f.Close()
+}

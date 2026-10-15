@@ -601,6 +601,9 @@ func (b *Bundles) fetchArchive(ctx context.Context, name string, lines checksumL
 	if err := os.Chmod(tmp, 0o640); err != nil {
 		return "", 0, fmt.Errorf("chmod the bundle: %w", err)
 	}
+	if err := os.MkdirAll(b.store, 0o750); err != nil { // an operator may have emptied the cache directory under a running server
+		return "", 0, fmt.Errorf("create the bundle directory: %w", err)
+	}
 	if err := os.Rename(tmp, final); err != nil {
 		return "", 0, fmt.Errorf("move the bundle into place: %w", err)
 	}
