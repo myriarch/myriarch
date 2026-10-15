@@ -472,7 +472,9 @@ guidance after each item names what to do.
     units and files below `/etc`, `/opt` and `/var` as root. It stops unless `CI=true` and `HOST_E2E=1` are set (the workflow sets
     the second one on the step that runs a scenario, not for the workflow), on Linux, as a user other than root, with passwordless
     `sudo` and on a host without any trace of an installation (files, user, units, processes, listeners). Every call that changes the
-    host goes through one function that checks the guard again, and a test fails when a script calls `sudo` anywhere else. The
+    host goes through one function that checks the guard again, and a test fails when a script uses the word `sudo` anywhere else
+    than in a comment, in that function and in the probe for passwordless `sudo`; the static check does not try to find out where
+    a command stands, so a call behind `env`, a wrapper function, `bash -c` or an assignment is found too. The
     reset at the end of a scenario runs only after the proof that the host was fresh, so it never removes an installation that
     was there before. `ci/tests/host-e2e-test.sh` covers every refusal.
   - *The test takes the strict path.* The throwaway CA (EC key, valid for two days) stays in a directory of the user and is never

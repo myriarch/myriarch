@@ -1087,6 +1087,13 @@ a scenario runs only after it, so an installation of a developer is never remove
 the workflow to a self-hosted runner that is not recreated for each job. The throwaway CA is trusted only by the process of the
 installer (`CURL_CA_BUNDLE`); the trust store of the host is untouched.
 
+The test for the one function (`ci/tests/host-e2e-test.sh`) is a static check of every shell or Python file and every executable in
+`scripts/host-e2e/`: the word `sudo` may appear on a comment line and in two places of `lib.sh`, the probe for passwordless `sudo`
+and `he_sudo` itself, and nowhere else. It does not try to find out where a command stands, so a call behind `env`, `xargs`, a wrapper
+function of the harness, `bash -c` or an assignment is found like a call at the start of a line, whatever its options are, and a
+message names `he_sudo` instead of `sudo`. A new place that needs root is a reviewed change of that test. The test proves the net by
+planting each of these forms in a copy of the scripts and requiring the report.
+
 **Structure.** `scripts/host-e2e/lib.sh` is the harness: the guard, the results, the CA, the https file server, the mirror, the server
 start (`he_server_start`, which passes extra flags on to `myriarchd dev`), the REST helper (`he_api`), the host reset (`he_reset_host`:
 uninstall and the proof that nothing is left) and the collection of the artifacts. A scenario is a function in a script of its own

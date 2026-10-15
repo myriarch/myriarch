@@ -28,8 +28,9 @@
 #                      release-workflow-test.sh (shape of .github/workflows/release.yml: frozen identity, job graph, artifact
 #                      protocol, order of the registry writes, tool resolution through TOOLS_BIN; with one-change copies that prove the
 #                      checks bite),
-#                      host-e2e-test.sh (the harness of the host end-to-end test, scripts/host-e2e: the guard, the scrubber and the
-#                      allow-list of the artifacts, the throwaway CA, the https file server, the GitOps fixture; no host is changed),
+#                      host-e2e-test.sh (the harness of the host end-to-end test, scripts/host-e2e: the guard and the one gate for sudo
+#                      (a static check of the scripts), the waiting for derived state, the scrubber and the allow-list of the artifacts,
+#                      the throwaway CA, the https file server, the GitOps fixture; no host is changed),
 #                      workflow-artifacts-test.sh (the artifact allow-lists and the shape of host-e2e.yml and e2e-kind.yml, with
 #                      ci/tests/workflow-artifacts-check.py and copies of the workflows that are broken on purpose)
 #   installers         installer-verify.sh (bundle verification in install-linux.sh/.ps1), install-tools-test.sh (stamps of

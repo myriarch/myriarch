@@ -8,7 +8,8 @@
 #   - the guard: no scenario, no sudo and no installation without CI=true, HOST_E2E=1, Linux, a user other than root, passwordless
 #     sudo and a host without a trace of an earlier installation (the commands uname, id, sudo, pgrep, ss and systemctl are stand-ins
 #     on PATH, so the same cases run on macOS and on Linux), that the one gate for host changes (he_sudo) checks it again and that
-#     no script of the harness calls sudo anywhere else;
+#     no script of the harness uses the word sudo anywhere else (a static check, proven with every form of a call planted in a copy
+#     of the scripts);
 #   - the waiting for state that the server derives on its tick (he_settle, he_target_phase, he_package_status), against canned
 #     answers of the REST helper;
 #   - the artifacts: the scrubber removes tokens, credentials, DSNs, cookies and private keys, the upload directory holds the
@@ -111,21 +112,180 @@ expect_fail "he_sudo, the one gate for changes of the host, checks the guard its
 t_sudo_ci() { in_lib CI=true HOST_E2E=1 FAKE_SUDO_LOG="${SUDO_LOG}" -- he_sudo true; }
 expect_ok "he_sudo runs the command through sudo -n when the guard passes" t_sudo_ci
 grep -q '^-n true$' "${SUDO_LOG}" && ok "... without a password prompt (sudo -n)" || fail "sudo was not called with -n: $(cat "${SUDO_LOG}")"
-# no script of the harness calls sudo except through the gate: the direct calls are the probe of he_require_sudo and he_sudo itself
-SUDO_DIRECT="$(grep -hE '(^|[^[:alnum:]_-])sudo[[:space:]]+-n' "${HE}"/*.sh | grep -vE '^[[:space:]]*#' | sed 's/^[[:space:]]*//')"
-SUDO_N=0; SUDO_BAD=""
-while IFS= read -r line; do
-  [ -n "${line}" ] || continue
-  SUDO_N=$((SUDO_N + 1))
-  case "${line}" in
-    'sudo -n true 2>/dev/null || he_die '* | 'sudo -n "$@"') ;;
-    *) SUDO_BAD="${SUDO_BAD} [${line}]" ;;
-  esac
-done <<< "${SUDO_DIRECT}"
-[ "${SUDO_N}" = 2 ] && [ -z "${SUDO_BAD}" ] && ok "sudo is called in two places only: the probe of he_require_sudo and the gate he_sudo" \
-  || fail "unexpected direct calls of sudo (${SUDO_N} lines):${SUDO_BAD}"
 
-# a fresh host: no trace of an installation
+# ---- no script of the harness calls sudo except through the gate -------------------------------------------------------------------
+# Every change of the host goes through he_sudo, which checks the guard again before it calls sudo. A static check keeps it so. In
+# every shell and Python file and every executable below the directory of the harness, the word sudo (standing alone: he_sudo,
+# he_require_sudo, sudoers and FAKE_NO_SUDO are other words) may appear on a comment line and in exactly two places: the probe of
+# he_require_sudo, a line of its own, and the gate he_sudo. The check does not try to find out where a command stands, so a call is
+# found whatever its options are and wherever it comes from: at the start of a line, after a pipe or ; && ||, after env, exec,
+# command, xargs or timeout, behind a wrapper function of the harness (he_retry 3 sudo ...), inside bash -c '...', in a command
+# substitution and in an assignment (S=sudo). A message that names the word is found too (a message names he_sudo), and so is a
+# trailing comment (a # inside a string is no comment). A new place that needs root is a new reviewed entry here, not a quiet
+# addition. This is a net against changes by mistake; whoever hides the word on purpose is a matter for the review.
+SUDO_WORD_RE='(^|[^[:alnum:]_])sudo(edit)?($|[^[:alnum:]_])'
+# sudo_words DIR: "path:line:text" (path relative to DIR, text without its indentation) for every line that has the word and is not a
+# comment line
+sudo_words() {
+  local dir="$1" f rel line
+  find "${dir}" -type f \( -name '*.sh' -o -name '*.bash' -o -name '*.py' -o -perm -100 \) | sort | while IFS= read -r f; do
+    rel="${f#"${dir}"/}"
+    grep -nE "${SUDO_WORD_RE}" "${f}" | grep -vE '^[0-9]+:[[:space:]]*#' | while IFS= read -r line; do
+      printf '%s:%s:%s\n' "${rel}" "${line%%:*}" "$(printf '%s' "${line#*:}" | sed 's/^[[:space:]]*//')"
+    done
+  done
+}
+# sudo_report DIR: one line for each place that is not allowed and one for each of the two places that is missing or there twice;
+# nothing means the directory is as it should be
+sudo_report() {
+  local line file rest text message probe=0 gate=0 out="" words
+  local message_re='^"[^"$`;&|\\]*"$'
+  words="$(sudo_words "$1")"
+  while IFS= read -r line; do
+    [ -n "${line}" ] || continue
+    file="${line%%:*}"; rest="${line#*:}"; text="${rest#*:}"
+    case "${file}:${text}" in
+      'lib.sh:sudo -n true 2>/dev/null || he_die "'*)
+        # the message is one double-quoted string: nothing can follow it on the line
+        message="${text#'sudo -n true 2>/dev/null || he_die '}"
+        if [[ "${message}" =~ ${message_re} ]]; then probe=$((probe + 1)); else out="${out}${line}"$'\n'; fi ;;
+      'lib.sh:sudo -n "$@"') gate=$((gate + 1)) ;;
+      *) out="${out}${line}"$'\n' ;;
+    esac
+  done <<< "${words}"
+  [ "${probe}" = 1 ] || out="${out}expected the probe 'sudo -n true ... || he_die ...' of he_require_sudo once in lib.sh, found ${probe}"$'\n'
+  [ "${gate}" = 1 ] || out="${out}expected the gate 'sudo -n \"\$@\"' of he_sudo once in lib.sh, found ${gate}"$'\n'
+  printf '%s' "${out}"
+}
+sudo_gate_check() { # DIR: fails and names the places when the directory is not as it should be
+  local report
+  report="$(sudo_report "$1")"
+  [ -z "${report}" ] && return 0
+  printf 'the word sudo is used outside of the gate (only the probe of he_require_sudo and he_sudo itself may use it; go through he_sudo, and name he_sudo in a message):\n%s\n' "${report}" >&2
+  return 1
+}
+expect_ok "sudo is called in two places only: the probe of he_require_sudo and the gate he_sudo" sudo_gate_check "${HE}"
+# a copy of the scripts with one line more at the end of a file (lib.sh unless a second argument names another one)
+PLANT="${W}/sudo-plant"
+plant() { # line [file]
+  rm -rf "${PLANT}"
+  mkdir -p "${PLANT}"
+  cp "${HE}"/*.sh "${HE}"/*.py "${PLANT}/"
+  printf '%s\n' "$1" >> "${PLANT}/${2:-lib.sh}"
+}
+plant_check() { plant "$@"; sudo_gate_check "${PLANT}"; }
+LIB_NEXT="$(($(wc -l < "${LIB}") + 1))"
+SCENARIO_NEXT="$(($(wc -l < "${HE}/linux.sh") + 1))"
+expect_fail "a direct call of sudo that a change adds to lib.sh is reported, with file and line" \
+  "lib\\.sh:${LIB_NEXT}:sudo systemctl stop otelcol-supervisor\\.service" plant_check 'sudo systemctl stop otelcol-supervisor.service'
+expect_fail "... also in the scenario script" "linux\\.sh:${SCENARIO_NEXT}:env sudo systemctl stop" \
+  plant_check '  env sudo systemctl stop otelcol-supervisor.service' linux.sh
+expect_fail "... and in the Python file" "httpsd\\.py:[0-9]+:subprocess\\.run" \
+  plant_check 'subprocess.run(["sudo", "systemctl", "stop", "otelcol-supervisor.service"])' httpsd.py
+expect_fail "... also when it is indented with a tab" "lib\\.sh:${LIB_NEXT}:sudo id" plant_check "$(printf '\tsudo id')"
+expect_fail "a second copy of the gate is reported (it exists once)" "gate .* once in lib\\.sh, found 2" plant_check 'sudo -n "$@"'
+expect_fail "the gate in another file is reported" "linux\\.sh:${SCENARIO_NEXT}:sudo -n" plant_check 'sudo -n "$@"' linux.sh
+t_gate_missing() {
+  plant 'true'
+  grep -vxF '  sudo -n "$@"' "${LIB}" > "${PLANT}/lib.sh"
+  sudo_gate_check "${PLANT}"
+}
+expect_fail "a harness without its gate is reported too" "gate .* once in lib\\.sh, found 0" t_gate_missing
+# a call tacked on to one of the two allowed lines is not allowed with it
+t_probe_extended() {
+  plant 'true'
+  sed 's#^\(  sudo -n true 2>/dev/null || he_die ".*"\)$#\1; sudo systemctl stop otelcol-supervisor.service#' "${LIB}" > "${PLANT}/lib.sh"
+  sudo_gate_check "${PLANT}"
+}
+expect_fail "a call tacked on to the probe line is reported" "lib\\.sh:[0-9]+:sudo -n true 2>/dev/null \\|\\| he_die .*; sudo systemctl stop" t_probe_extended
+t_gate_extended() {
+  plant 'true'
+  sed 's#^  sudo -n "\$@"$#  sudo -n "$@"; sudo systemctl stop otelcol-supervisor.service#' "${LIB}" > "${PLANT}/lib.sh"
+  sudo_gate_check "${PLANT}"
+}
+expect_fail "a call tacked on to the gate line is reported" "lib\\.sh:[0-9]+:sudo -n .*; sudo systemctl stop" t_gate_extended
+# a new file is looked at whatever it is called, when it is a script (an extension of a shell or Python file, or executable)
+t_plant_executable() { plant 'true'; printf '#!/bin/sh\nsudo id\n' > "${PLANT}/bundle"; chmod +x "${PLANT}/bundle"; sudo_gate_check "${PLANT}"; }
+expect_fail "sudo in an executable without an extension is reported" "bundle:2:sudo id" t_plant_executable
+expect_fail "... and in a .bash file" "helper\\.bash:1:sudo id" plant_check 'sudo id' helper.bash
+# every way to call sudo that the check is meant to see, one per line, each planted in a copy of the scripts: all of them are reported
+SUDO_FOUND=0; SUDO_MISSED=""
+while IFS= read -r variant; do
+  [ -n "${variant}" ] || continue
+  want="${variant#"${variant%%[![:space:]]*}"}"
+  report="$(plant_check "${variant}" 2>&1)"
+  if printf '%s\n' "${report}" | grep -qxF "lib.sh:${LIB_NEXT}:${want}"; then SUDO_FOUND=$((SUDO_FOUND + 1)); else SUDO_MISSED="${SUDO_MISSED} [${variant}]"; fi
+done <<'VARIANTS'
+sudo systemctl stop otelcol-supervisor.service
+  sudo -n systemctl stop otelcol-supervisor.service
+sudo
+env sudo systemctl stop x
+env -i A=b sudo id
+command sudo -n true
+exec sudo /bin/true
+xargs sudo rm
+timeout 5 sudo id
+nohup sudo sleep 1 &
+he_retry 3 sudo apt-get update
+true && sudo rm -rf /opt/myriarch
+true || sudo rm -rf /opt/myriarch
+true; sudo rm -rf /opt/myriarch
+echo x | sudo tee /etc/x
+echo x |sudo tee /etc/x
+x="$(sudo cat /etc/shadow)"
+x=`sudo id`
+(sudo id)
+{ sudo id; }
+! sudo id
+if sudo -n true; then :; fi
+  then sudo id
+for i in 1; do sudo id; done
+case $1 in a) sudo id ;; esac
+bash -c 'sudo id'
+bash -lc "cd /; sudo id"
+eval "sudo id"
+S=sudo
+SUDO="sudo -n"
+SUDO=(sudo -n)
+FOO=1 sudo id
+/usr/bin/sudo id
+\sudo id
+"sudo" id
+'sudo' id
+sudo -u root id
+sudo "$@"
+sudoedit /etc/myriarch/myriarch.env
+command -v sudo
+he_die "needs sudo"
+echo "run it with sudo"
+sleep 1 # sudo
+VARIANTS
+[ -z "${SUDO_MISSED}" ] && ok "every way to call sudo is reported when it is added to lib.sh (${SUDO_FOUND} variants)" || fail "not reported:${SUDO_MISSED}"
+# what is no use of the word: other words that contain it, and comment lines
+SUDO_QUIET=0; SUDO_LOUD=""
+while IFS= read -r variant; do
+  [ -n "${variant}" ] || continue
+  if [ -z "$(plant_check "${variant}" 2>&1)" ]; then SUDO_QUIET=$((SUDO_QUIET + 1)); else SUDO_LOUD="${SUDO_LOUD} [${variant}]"; fi
+done <<'VARIANTS'
+he_sudo systemctl stop otelcol-supervisor.service
+he_sudo
+he_require_sudo
+# sudo is not called here
+    # env sudo systemctl stop x
+local use_sudo=1
+no_sudo=1
+sudo_calls=0
+FAKE_NO_SUDO=1
+SUDO_ASKPASS=/nonexistent
+cat /etc/sudoers
+ls /etc/sudoers.d
+visudo -c
+echo pseudo
+VARIANTS
+[ -z "${SUDO_LOUD}" ] && ok "other words that contain sudo, and comment lines, are not reported (${SUDO_QUIET} lines)" || fail "reported, but no use of sudo:${SUDO_LOUD}"
+rm -rf "${PLANT}"
+
+# ---- a fresh host: no trace of an installation -----------------------------------------------------------------------------------
 FS="${W}/fs"
 mkdir -p "${FS}"
 t_fresh() { in_lib CI=true HOST_E2E=1 HE_FS_ROOT="${FS}" -- he_require_fresh_host; }

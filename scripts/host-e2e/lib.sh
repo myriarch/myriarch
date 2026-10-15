@@ -19,7 +19,8 @@
 # throwaway CA only for the installer process). They therefore refuse to run unless CI=true and HOST_E2E=1 are set, on Linux,
 # not as root, and on a host without any trace of an installation (he_require_ci, he_require_fresh_host). Every call that
 # changes the host goes through he_sudo, which checks the guard again; ci/tests/host-e2e-test.sh fails when a script of this
-# directory calls sudo anywhere else.
+# directory uses the word sudo anywhere but in a comment, in he_sudo and in the probe of he_require_sudo (so a message names
+# he_sudo, not sudo).
 #
 # Files (below $HOST_E2E_DIR, default .cache/host-e2e of the repository, git-ignored):
 #   tls/                    the throwaway CA and the server certificate (keys 0600; never uploaded)
@@ -146,7 +147,7 @@ he_require_ci() {
     || he_die "refusing to run: HOST_E2E=1 is not set. It confirms that this machine is a throwaway runner (docs/development.md, Host end-to-end test)"
   [ "$(uname -s)" = Linux ] || he_die "refusing to run: this is not Linux ($(uname -s))"
   [ "$(id -u)" != 0 ] \
-    || he_die "refusing to run as root: the embedded PostgreSQL of myriarchd refuses root; the script uses sudo for the calls that change the host"
+    || he_die "refusing to run as root: the embedded PostgreSQL of myriarchd refuses root; the calls that change the host go through he_sudo"
 }
 
 he_require_sudo() {
