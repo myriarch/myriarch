@@ -590,6 +590,7 @@ type InstallConfig struct {
 	// layout `<base>/v<version>/<asset>` with `checksums.txt` and its Sigstore bundle
 	// `checksums.txt.sigstore.json` next to the archives; the server verifies both against the
 	// identity of the release workflow, whichever server they come from. Production requires https.
+	// The value must not be empty while `install.enabled` is on.
 	BundleSourceBaseURL string `yaml:"bundleSourceBaseUrl"`
 	// Platforms lists the platforms that a host can be installed on from the server, as
 	// "os/arch" (default linux/amd64, linux/arm64 and windows/amd64, which is all that is

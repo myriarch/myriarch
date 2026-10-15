@@ -674,7 +674,7 @@
             },
             "bundleSourceBaseUrl": {
               "type": "string",
-              "description": "`bundleSourceBaseUrl` is where the installer bundles of the release that the server runs come from (default \"https://github.com/myriarch/myriarch/releases/download\"). A mirror keeps the layout `<base>/v<version>/<asset>` with `checksums.txt` and its Sigstore bundle `checksums.txt.sigstore.json` next to the archives; the server verifies both against the identity of the release workflow, whichever server they come from. Production requires https."
+              "description": "`bundleSourceBaseUrl` is where the installer bundles of the release that the server runs come from (default \"https://github.com/myriarch/myriarch/releases/download\"). A mirror keeps the layout `<base>/v<version>/<asset>` with `checksums.txt` and its Sigstore bundle `checksums.txt.sigstore.json` next to the archives; the server verifies both against the identity of the release workflow, whichever server they come from. Production requires https. The value must not be empty while `install.enabled` is on."
             },
             "platforms": {
               "type": "array",

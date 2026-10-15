@@ -56,7 +56,11 @@ func (v *validator) checkInstall(c *config.Config, dev bool) {
 	case !dev && c.Artifacts.DownloadTokenTTL > 0 && in.GrantTTL > c.Artifacts.DownloadTokenTTL:
 		v.add("install.grantTtl", fmt.Sprintf("must not exceed artifacts.downloadTokenTtl (%s): an install grant is a download credential like the download token of an updater", c.Artifacts.DownloadTokenTTL))
 	}
-	if raw := in.BundleSourceBaseURL; raw != "" {
+	if raw := in.BundleSourceBaseURL; raw == "" {
+		// the server of a release cannot start without a source for its installer bundles, and an empty value would not
+		// mean "the default" to the operator who wrote it (it could as well mean "none")
+		v.add("install.bundleSourceBaseUrl", "must not be empty: leave the setting out for the default, set a mirror of the releases, or set install.enabled to false")
+	} else {
 		u, err := url.Parse(raw)
 		switch {
 		case err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https"):

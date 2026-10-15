@@ -150,7 +150,8 @@ func TestInstallBundleSourceBaseURL(t *testing.T) {
 		{"default", "https://github.com/myriarch/myriarch/releases/download", false, ""},
 		{"a mirror", "https://mirror.example.com/myriarch/releases", false, ""},
 		{"a mirror with a trailing slash", "https://mirror.example.com/myriarch/", false, ""},
-		{"empty means the default", "", false, ""},
+		{"empty", "", false, "must not be empty"},
+		{"empty in development", "", true, "must not be empty"},
 		{"http in production", "http://mirror.example.com/myriarch", false, "https URL in production"},
 		{"http in development", "http://localhost:9999/mirror", true, ""},
 		{"no scheme", "mirror.example.com/myriarch", true, "absolute http(s) URL"},
@@ -183,6 +184,35 @@ func TestInstallBundleSourceBaseURL(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), "pw@") {
 				t.Errorf("the message repeats the credentials: %v", err)
+			}
+		})
+	}
+}
+
+// An empty source does not mean "the default": `config validate` has to refuse what the start of a release would refuse,
+// whether the empty value comes from the file or from the environment, and a server with the installation off does not
+// care.
+func TestInstallRefusesAnEmptyBundleSourceWhenLoading(t *testing.T) {
+	fromFile := prodMinimal + "install:\n  bundleSourceBaseUrl: \"\"\n"
+	for name, tc := range map[string]struct {
+		yaml    string
+		env     map[string]string
+		wantErr bool
+	}{
+		"empty in the file":             {fromFile, nil, true},
+		"empty in the environment":      {prodMinimal, map[string]string{"MYRIARCH_INSTALL_BUNDLESOURCEBASEURL": ""}, true},
+		"left out":                      {prodMinimal, nil, false},
+		"a mirror in the environment":   {fromFile, map[string]string{"MYRIARCH_INSTALL_BUNDLESOURCEBASEURL": "https://mirror.example.com/myriarch"}, false},
+		"empty with the feature off":    {fromFile + "  enabled: false\n", nil, false},
+		"empty, the feature off by env": {fromFile, map[string]string{"MYRIARCH_INSTALL_ENABLED": "false"}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := load(writeFile(t, "myriarchd.yaml", tc.yaml), false, env(tc.env))
+			if tc.wantErr != (err != nil && strings.Contains(err.Error(), "install.bundleSourceBaseUrl: must not be empty")) {
+				t.Fatalf("wantErr %v, got %v", tc.wantErr, err)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("load: %v", err)
 			}
 		})
 	}
