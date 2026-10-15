@@ -87,7 +87,9 @@ sudo ./deploy/scripts/install-linux.sh \
   -UpdaterChecksumsUrl https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt
 ```
 
-Details, paths, services and troubleshooting (Event Viewer): [`windows/README.md`](windows/README.md).
+Under the default execution policy `Restricted` start the script as [`windows/README.md`](windows/README.md#start-the-installer)
+describes (`powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File ...`, an execution policy for that one process, never a
+change of the machine). Details, paths, services and troubleshooting (Event Viewer): [`windows/README.md`](windows/README.md).
 
 The supervisor runs as the virtual service account `NT SERVICE\otelcol-supervisor` (not LocalSystem), only the
 `myriarch-updater` runs as SYSTEM. Directories under `C:\ProgramData\Myriarch` are never taken over (foreign owner or

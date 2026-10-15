@@ -105,13 +105,19 @@ sha256sum --check --ignore-missing checksums.txt
 tar -xzf myriarch-updater_${VERSION}_linux_amd64.tar.gz
 ```
 
-On Windows, Windows marks files from the internet (the *Mark of the Web*) and refuses to run unsigned scripts under the usual
-execution policy. Run `Unblock-File` **only after** the checks above have passed, never to get past the prompt first:
+On Windows, a browser marks the files it downloads (the *Mark of the Web*), and the usual execution policy of a client
+(`Restricted`) refuses every script. Run `Unblock-File` **only after** the checks above have passed, never to get past the
+prompt first, and unpack the archive into a folder that only administrators can write (a folder below `C:\Program Files`, not
+`C:\Temp`, a user profile or a download folder), so that nobody can replace a file between the check and the run:
 
 ```powershell
-Expand-Archive myriarch-updater_0.1.0_windows_amd64.zip -DestinationPath C:\Temp\myriarch
-Unblock-File C:\Temp\myriarch\deploy\scripts\install-windows.ps1
+Expand-Archive myriarch-updater_0.1.0_windows_amd64.zip -DestinationPath 'C:\Program Files\myriarch-setup\package'
+Unblock-File 'C:\Program Files\myriarch-setup\package\deploy\scripts\install-windows.ps1'
 ```
+
+Then start the installer in a new PowerShell process with the execution policy for that process only
+(`powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File ...`) and do not change the policy of the machine; the
+command is in [Connect a host](../tasks/connect-a-host.md#5-install-on-windows).
 
 ## What the installers verify
 

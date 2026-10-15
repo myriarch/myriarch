@@ -372,6 +372,14 @@ guidance after each item names what to do.
 - **Elevated Windows sessions.** User Account Control is not a security boundary. Run the Windows installer from an
   administrator session on a host where no untrusted process runs under the same account, and pass the verifier
   explicitly (`-Verifier`, from a directory that only administrators can write, for example `C:\Program Files\cosign`).
+- **Execution policy of the Windows installer.** The documented start sets the execution policy for the one PowerShell process
+  that runs the installer (`powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File ...`), after the archive passed the
+  checks and `Unblock-File` ran on the script. It never uses `Bypass` and never changes the policy of the machine or of the
+  user. A policy that Group Policy sets (`MachinePolicy`, `UserPolicy`) takes precedence over the parameter, and the installer
+  does not work around it: `Restricted` and `AllSigned` stop the unsigned installer, and App Control for Business runs it in
+  Constrained Language Mode, where it fails. Download, check and unpack in a folder that only administrators can write
+  ([Connect a host](../tasks/connect-a-host.md#2-download-and-verify-the-installer)); in a folder that the account can write,
+  an unprivileged process of the same account can replace a checked file before the elevated installer runs it.
 - **Trusted root on hosts.** A host with a stale `trusted_root.json` cannot verify new bundles until the file is
   refreshed ([Host-side checks of the updater](#host-side-checks-of-the-updater)).
 
