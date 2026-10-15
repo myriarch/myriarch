@@ -56,6 +56,13 @@ expect_schema() {
   if printf '%s' "${OUT}" | grep -Eq -- "${german}"; then fail "${name} (message is not English)"; printf '%s\n' "${OUT}" | sed 's/^/        /' >&2; fi
 }
 
+# expect_renders <name> <regex> <helm args...>: the chart renders, and a line of the output matches the regular expression
+expect_renders() {
+  local name="$1" want="$2" got; shift 2
+  if ! got="$(render "$@" 2>&1)"; then fail "${name} (does not render)"; printf '%s\n' "${got}" | sed 's/^/        /' >&2; return; fi
+  if printf '%s\n' "${got}" | grep -Eq -- "${want}"; then ok "${name}"; else fail "${name} (no line matches /${want}/)"; fi
+}
+
 # expect_image <name> <image> <helm args...>: the chart renders and the pod runs exactly this image (RENDERER names the function
 # that renders: the chart itself by default, or the parent chart of the case (67))
 expect_image() {
@@ -194,4 +201,13 @@ expect_image "(80) global.imageRegistry does not touch a repository with a host"
 expect_image "(81) an empty registry leaves the repository as it is" "myriarch/myriarch:${APP}" --set image.registry=
 expect_image "(82) a repository of one segment" "ghcr.io/myriarch:${APP}" --set image.repository=myriarch
 expect_path "(83) an empty repository" image.repository --set image.repository=null
+
+# --- TLS at the entry points (docs/security/model.md): the switches are booleans, and the Route redirects plain HTTP ------------------
+# A template counts the string "false" as true, so without the schema --set-string ingress.allowWithoutTls=false skips the TLS check
+expect_schema "(84) the TLS switch of the Ingress is a boolean" /ingress/allowWithoutTls "${TP[@]}" "${ING[@]}" "${FROM[@]}" --set-string ingress.allowWithoutTls=false
+expect_schema "(85) the TLS switch of the Gateway is a boolean" /httpRoute/tlsTerminatedAtGateway "${TP[@]}" "${FROM[@]}" "${RT[@]}" "${REFS[@]}" "${HOSTS[@]}" --set-string httpRoute.tlsTerminatedAtGateway=false
+expect_schema "(86) the policy for plain HTTP at the router is one of three" /openshift/route/tls/insecureEdgeTerminationPolicy --set openshift.enabled=true --set openshift.route.tls.insecureEdgeTerminationPolicy=Never
+expect_renders "(87) the Route terminates TLS at the router" '^ +termination: edge$' --set openshift.enabled=true
+expect_renders "(88) the Route redirects plain HTTP by default" '^ +insecureEdgeTerminationPolicy: Redirect$' --set openshift.enabled=true
+expect_renders "(89) plain HTTP at the router is an explicit opt-in" '^ +insecureEdgeTerminationPolicy: Allow$' --set openshift.enabled=true --set openshift.route.tls.insecureEdgeTerminationPolicy=Allow
 finish_tests "helm-messages-test"

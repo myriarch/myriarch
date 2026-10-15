@@ -324,7 +324,8 @@ The schema refuses:
   [configuration reference](../reference/configuration.md). A misspelled setting used to be ignored without a word.
 - **A value of the wrong type** or in the wrong form: a word for a port, a string for a list, a registry with a scheme, a digest
   without `sha256:`, a Kubernetes name with an underscore, a quantity such as `lots`, or a duration without a Go unit
-  (`shutdownTimeout: 30` and `audit: 30d` are errors; write `30s` and `720h`).
+  (`shutdownTimeout: 30` and `audit: 30d` are errors; write `30s` and `720h`). A switch must be a boolean: a template counts the
+  string `"false"` as true, so `ingress.allowWithoutTls: "false"` used to switch the TLS check of the Ingress off.
 - **A secret as a value.** The schema has no key for a database DSN, an OIDC client secret, a webhook secret, the URL of a
   notification channel or an enrollment token. Put them into the Secret and use the `*File` settings
   (`database.dsnFile`, `auth.oidc.clientSecretFile`, `gitops.webhookSecretFile`, `notifications.channels[].urlFile`); a declared

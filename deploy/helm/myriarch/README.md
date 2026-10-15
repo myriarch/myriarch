@@ -243,7 +243,9 @@ OpenShift usually demand.
   `executors.secretEnvPrefix` (`MYRIARCH_EXEC_`). `config.auth.sessionTtl` and `sessionMaxAge` limit sessions (2 h idle,
   12 h absolute).
 * TLS: if `config.server.publicUrl` uses https, the Ingress needs `ingress.tls` (`ingress.allowWithoutTls=true` only when
-  TLS terminates outside the ingress); an HTTPRoute needs `httpRoute.tlsTerminatedAtGateway=true`.
+  TLS terminates outside the ingress); an HTTPRoute needs `httpRoute.tlsTerminatedAtGateway=true`. The Route terminates TLS at
+  the router and redirects plain HTTP requests (`openshift.route.tls.insecureEdgeTerminationPolicy: Redirect`); `Allow` serves
+  plain HTTP at the router, and so `ws://`, and `None` serves none.
 * Metrics: port `metrics` (9090); `serviceMonitor.enabled=true` creates a ServiceMonitor.
 * Image: `image.registry` (default `ghcr.io`) and `image.repository` (default `myriarch/myriarch`) give the repository, and
   `image.tag` (default: `appVersion`) or, immutable, `image.digest` (`sha256:<64 hex>`; when set, the image is referenced as
@@ -283,9 +285,11 @@ helm install myriarch ... --set image.repository=registry.example.com/myriarch/m
 
 * A key that the chart does not read is an error, also inside `config`. Before, Helm ignored such a key and the chart
   rendered without it, so a misspelled setting went unnoticed.
-* A value has the type that the chart needs: a number for a port, a string for a name, a list for a list. Strings that name
-  something have the syntax of the receiving system: a Kubernetes name, a quantity such as `512Mi`, a registry host, a digest,
-  a duration in Go syntax (`30s`, `1m30s`; not `30` and not `30d`).
+* A value has the type that the chart needs: a number for a port, a string for a name, a list for a list, a boolean for a
+  switch. Strings that name something have the syntax of the receiving system: a Kubernetes name, a quantity such as `512Mi`,
+  a registry host, a digest, a duration in Go syntax (`30s`, `1m30s`; not `30` and not `30d`). The type of a switch matters for
+  the TLS checks: a template counts the string `"false"` as true, so `ingress.allowWithoutTls: "false"` used to switch the check
+  of the Ingress off, and the schema refuses it.
 * The block `config` mirrors the configuration file of the server. It is generated from the configuration structure of the
   server (`internal/config`), with the same keys, types and descriptions as the
   [configuration reference](../../../docs/reference/configuration.md), so it cannot drift from the server.

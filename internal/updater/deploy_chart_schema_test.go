@@ -632,6 +632,9 @@ func TestChartSchemaRefusesInvalidValues(t *testing.T) {
 		{"negative replica count", `replicaCount: -1`, `/replicaCount: -1 is below 0`},
 		{"fractional replica count", `replicaCount: 1.5`, `/replicaCount: is number, want integer`},
 		{"boolean as a word", `ingress: {enabled: "yes"}`, `/ingress/enabled: is string, want boolean`},
+		// a template counts the string "false" as true, which switches the TLS check off: the switches are booleans
+		{"TLS switch of the Ingress as a string", `ingress: {allowWithoutTls: "false"}`, `/ingress/allowWithoutTls: is string, want boolean`},
+		{"TLS switch of the Gateway as a string", `httpRoute: {tlsTerminatedAtGateway: "false"}`, `/httpRoute/tlsTerminatedAtGateway: is string, want boolean`},
 		{"list as a string", `config: {server: {trustedProxies: "10.0.0.0/8"}}`, `/config/server/trustedProxies: is string, want array`},
 		{"number as a string", `config: {opamp: {maxConnectionsPerReplica: many}}`, `/config/opamp/maxConnectionsPerReplica: is string, want integer`},
 		{"fractional integer setting", `config: {opamp: {maxConnectionsPerReplica: 1.5}}`, `/config/opamp/maxConnectionsPerReplica: is number, want integer`},
