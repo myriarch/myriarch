@@ -1,0 +1,17 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Returns the version of the latest release without the leading v ("0.1.0", or "0.2.0-rc.1" while only a candidate exists), or "" while no
+  release has been published. data/release.yaml is the single source of the release status (docs/releasing.md); the status chip of the
+  landing page and the structured data of the home page both read it. The build fails for a tag in another form.
+  Call: partial "seo/release-version.html" .
+*/ -}}
+{{ $release := hugo.Data.release -}}
+{{ $tag := $release.final | default "" -}}
+{{ if eq $tag "" }}{{ $tag = $release.candidate | default "" }}{{ end -}}
+{{ if and (ne $tag "") (not (findRE `^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$` $tag)) -}}
+  {{ errorf "seo: data/release.yaml names the tag %q, which is not vX.Y.Z or vX.Y.Z-rc.N" $tag -}}
+{{ end -}}
+{{ return (strings.TrimPrefix "v" $tag) -}}

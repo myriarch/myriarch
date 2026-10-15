@@ -1,10 +1,12 @@
-# Release status of the project, the single source for the status chip of the landing page (layouts/_partials/landing/hero.html).
+# Release status of the project, the single source for the status chip of the landing page (layouts/_partials/landing/hero.html) and for
+# the version in the structured data of the home page (layouts/_partials/seo/release-version.html).
 # Set it by hand after a release is published (docs/releasing.md, "After every publication"); the release workflow never writes it.
 # Plain Markdown (README, docs/, SECURITY.md) does not read this file, so those texts describe the process, not the current state.
 #
 #   final:      tag of the latest final release (vX.Y.Z), or "" while there is none
 #   candidate:  tag of the newest release candidate (vX.Y.Z-rc.N) while no final release exists, or ""
 #
-# Only one of the two is set. Both empty: "No release has been published yet". scripts/check-landing.py checks the format and the chip.
+# Only one of the two is set. Both empty: "No release has been published yet". scripts/check-landing.py checks the format and the chip,
+# scripts/check-seo.py the version in the structured data.
 final: "v0.1.0"
 candidate: ""

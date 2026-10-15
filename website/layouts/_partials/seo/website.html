@@ -1,0 +1,20 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Structured data of the home page: the site as schema.org WebSite (JSON-LD). It has no SearchAction: the search of the site runs in the
+  browser and has no URL that takes a query. scripts/check-seo.py parses the result and compares it with the site configuration.
+  Call: partial "seo/website.html" .
+*/ -}}
+{{ $base := partial "seo/canonical-base.html" . -}}
+{{ $data := dict
+    "@context" "https://schema.org"
+    "@type" "WebSite"
+    "@id" (printf "%s/#website" $base)
+    "url" (printf "%s/" $base)
+    "name" site.Title
+    "description" site.Params.description
+    "inLanguage" site.Language.Name
+    "publisher" (dict "@type" "Organization" "name" site.Params.copyright "url" (printf "%s/" $base)) -}}
+<script type="application/ld+json">{{ $data | jsonify | safeJS }}</script>

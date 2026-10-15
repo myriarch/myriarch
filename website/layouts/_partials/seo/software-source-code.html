@@ -1,0 +1,31 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Structured data of the home page: the project as schema.org SoftwareSourceCode (JSON-LD). SoftwareApplication is not used on purpose: Google's
+  Rich Results Test reports errors for it without ratings, and ratings must never be made up. The facts come from params.seo (license,
+  languages, keywords), params (description, repository, copyright) and data/release.yaml (version). The version is the CreativeWork property
+  `version`: softwareVersion is defined for SoftwareApplication, not for SoftwareSourceCode. jsonify escapes <, > and &, so no value can end
+  the script element. scripts/check-seo.py parses the result and compares it with these sources.
+  Call: partial "seo/software-source-code.html" .
+*/ -}}
+{{ $base := partial "seo/canonical-base.html" . -}}
+{{ $seo := site.Params.seo -}}
+{{ $holder := dict "@type" "Organization" "name" site.Params.copyright "url" (printf "%s/" $base) -}}
+{{ $data := dict
+    "@context" "https://schema.org"
+    "@type" "SoftwareSourceCode"
+    "@id" (printf "%s/#software" $base)
+    "name" site.Title
+    "description" site.Params.description
+    "url" (printf "%s/" $base)
+    "codeRepository" site.Params.repo.url
+    "license" $seo.license
+    "programmingLanguage" $seo.programmingLanguage
+    "keywords" (delimit $seo.keywords ", ")
+    "isAccessibleForFree" true
+    "author" $holder
+    "copyrightHolder" $holder -}}
+{{ with partial "seo/release-version.html" . }}{{ $data = merge $data (dict "version" .) }}{{ end -}}
+<script type="application/ld+json">{{ $data | jsonify | safeJS }}</script>

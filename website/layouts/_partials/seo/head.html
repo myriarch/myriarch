@@ -1,0 +1,22 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Metadata of a page for search engines and AI crawlers, emitted by the head.html override after the description (website/README.md, "SEO
+  and GEO"; scripts/check-seo.py checks the result):
+    - the canonical link, on every page but the 404 page (an error page has no original). It names the fixed production origin, also in a
+      preview;
+    - structured data (JSON-LD): SoftwareSourceCode and WebSite on the home page, and a BreadcrumbList on every page that shows a breadcrumb
+      (the pages of the documentation layout: /docs/, /project/ and /legal/).
+  Call: partial "seo/head.html" .
+*/ -}}
+{{ if ne .Kind "404" -}}
+<link rel="canonical" href="{{ partial "seo/canonical-url.html" . }}">
+{{ if .IsHome -}}
+{{ partial "seo/software-source-code.html" . -}}
+{{ partial "seo/website.html" . -}}
+{{ else if and (eq .Type "docs") (not (.Param "ui.breadcrumb_disable")) -}}
+{{ partial "seo/breadcrumbs.html" . -}}
+{{ end -}}
+{{ end -}}

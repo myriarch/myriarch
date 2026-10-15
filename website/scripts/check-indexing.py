@@ -15,7 +15,8 @@ direction is a defect: a preview that can be indexed, or a production site that 
   - mode production: robots.txt is missing, has the line "Disallow: /", or lacks the line "Sitemap: <base URL>sitemap.xml"
                      (the base URL is WEBSITE_BASEURL or the baseURL of website/config/_default/hugo.yaml), or an HTML page
                      carries a robots meta tag with noindex (redirect stubs for aliases, which carry a meta refresh and a
-                     canonical link, are exempt).
+                     canonical link, and the 404 page are exempt: an error page is no content, and check-seo.py requires
+                     noindex on it).
 
 Only meta tags are evaluated; the word noindex in the text of a page is no finding. The output names the file and the problem,
 never page content. Exit status 0 = clean, 1 = findings, 2 = usage or environment error. Python 3.9 compatible, standard
@@ -28,6 +29,8 @@ import sys
 from html.parser import HTMLParser
 
 MODES = ("production", "preview")
+# The error page that the host serves for an unknown path. It is not content, so production marks it noindex (check-seo.py requires it).
+ERROR_PAGE = "404.html"
 
 
 class RobotsMeta(HTMLParser):
@@ -130,7 +133,7 @@ def check_pages(root, mode):
             _, noindex = has_noindex(html)
             if mode == "preview" and not noindex:
                 findings.append("%s: the preview page has no robots meta tag with noindex" % rel)
-            if mode == "production" and noindex and not is_redirect_stub(html):
+            if mode == "production" and noindex and not is_redirect_stub(html) and rel != ERROR_PAGE:
                 findings.append("%s: the production page carries a robots meta tag with noindex" % rel)
     return scanned, findings
 

@@ -1,0 +1,13 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Returns the canonical URL of a page: the fixed production origin (seo/canonical-base.html) plus the path of the page. The path of the base
+  URL of the build is taken off first, so that a site on a sub path (a GitHub Pages project site, for example) names its pages once, below
+  the origin that params.seo.canonicalBase gives.
+  Call: partial "seo/canonical-url.html" $page
+*/ -}}
+{{ $base := partial "seo/canonical-base.html" . -}}
+{{ $sitePath := strings.TrimSuffix "/" (urls.Parse site.BaseURL).Path -}}
+{{ return (printf "%s%s" $base (strings.TrimPrefix $sitePath .RelPermalink)) -}}

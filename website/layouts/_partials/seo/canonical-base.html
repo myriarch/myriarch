@@ -1,0 +1,16 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Returns the origin of all canonical URLs without a final slash: params.seo.canonicalBase, a fixed absolute https URL (a preview is built
+  with another base URL and must still name the production page as the original). The build fails when the value is missing or not an
+  absolute https URL. scripts/check-seo.py compares the value with baseURL in config/_default/hugo.yaml.
+  Call: partial "seo/canonical-base.html" .
+*/ -}}
+{{ $base := "" -}}
+{{ with site.Params.seo }}{{ $base = .canonicalBase | default "" }}{{ end -}}
+{{ if not (findRE `^https://[a-z0-9.-]+(:[0-9]+)?(/[^\s?#]*)?$` $base) -}}
+  {{ errorf "seo: params.seo.canonicalBase must be an absolute https URL, got %q" $base -}}
+{{ end -}}
+{{ return (strings.TrimSuffix "/" $base) -}}
