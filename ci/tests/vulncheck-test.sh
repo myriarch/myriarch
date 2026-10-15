@@ -167,8 +167,9 @@ expect_fail "sarif: an unknown option is refused" 'usage: ci/vulncheck.sh' env G
 
 # ---- .github/workflows/vulncheck.yml ---------------------------------------------------------------------------------------------
 # The control is that the one job with a write scope runs no code of the repository, that the workflow never runs for a pull request, and
-# that the upload takes only what the other jobs of the run made. The workflow policy check (R3) only asks that a write scope is listed
-# in ci/workflow-permissions.txt.
+# that the upload takes only what the other jobs of the run made. A manual run that names a release reports the binaries to a category of
+# its own, so that it does not replace the analysis of the daily scan of the latest stable release. The workflow policy check (R3) only
+# asks that a write scope is listed in ci/workflow-permissions.txt.
 VULN_WF="${ROOT}/.github/workflows/vulncheck.yml"
 WF_CHECK="${TEST_TMP}/workflow-shape.py"
 cat > "${WF_CHECK}" <<'PY'
@@ -232,8 +233,21 @@ for job, lines in jobs.items():
         if not used <= {"actions/checkout", "actions/download-artifact", "github/codeql-action/upload-sarif"}:
             errors.append("the job upload uses %s" % sorted(used))
         categories = sorted(re.findall(r"category: (\S+)", block))
-        if categories != ["govulncheck/binaries", "govulncheck/source-devpg", "govulncheck/source-release"]:
+        if categories != ["govulncheck/binaries", "govulncheck/binaries-manual", "govulncheck/source-devpg", "govulncheck/source-release"]:
             errors.append("the categories of the uploads are %s" % categories)
+        # the report of a run that names a release (release_tag) goes to its own category, every other run keeps govulncheck/binaries
+        conditions = {}
+        for step in re.split(r"\n(?=      - )", block):
+            category = re.search(r"^\s+category: (\S+)$", step, re.M)
+            condition = re.search(r"^\s+if: (.*)$", step, re.M)
+            if category:
+                conditions[category.group(1)] = condition.group(1) if condition else None
+        for category, expected in (
+            ("govulncheck/binaries", "${{ needs.binaries.result == 'success' && inputs.release_tag == '' }}"),
+            ("govulncheck/binaries-manual", "${{ needs.binaries.result == 'success' && inputs.release_tag != '' }}"),
+        ):
+            if conditions.get(category) != expected:
+                errors.append("the upload to %s must run on %s, it runs on %s" % (category, expected, conditions.get(category)))
         if "persist-credentials: false" not in block:
             errors.append("the checkout of the job upload must not persist credentials")
     elif scopes or re.search(r"^    permissions:", block, re.M):
@@ -270,8 +284,14 @@ wf_mutate upload-run $'      - name: Download the reports of the source scan\n' 
 expect_fail "workflow: a script in the upload job is refused" 'the job upload must run no script' wf_check "${TEST_TMP}/wf-upload-run.yml"
 wf_mutate upload-action $'      - name: Download the reports of the source scan\n' $'      - name: Another action\n        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0\n      - name: Download the reports of the source scan\n'
 expect_fail "workflow: another action in the upload job is refused" 'the job upload uses' wf_check "${TEST_TMP}/wf-upload-action.yml"
-wf_mutate category 'category: govulncheck/binaries' 'category: binaries'
+wf_mutate category $'category: govulncheck/binaries\n' $'category: binaries\n'
 expect_fail "workflow: the categories of the uploads are fixed" 'the categories of the uploads' wf_check "${TEST_TMP}/wf-category.yml"
+wf_mutate manual-category 'category: govulncheck/binaries-manual' 'category: govulncheck/binaries'
+expect_fail "workflow: a named release cannot be reported to the category of the latest stable release" 'the categories of the uploads' wf_check "${TEST_TMP}/wf-manual-category.yml"
+wf_mutate daily-always "needs.binaries.result == 'success' && inputs.release_tag == ''" "needs.binaries.result == 'success'"
+expect_fail "workflow: the upload to the category of the latest stable release must not run for a run that names a release" 'the upload to govulncheck/binaries must run on' wf_check "${TEST_TMP}/wf-daily-always.yml"
+wf_mutate manual-always "needs.binaries.result == 'success' && inputs.release_tag != ''" "needs.binaries.result == 'success'"
+expect_fail "workflow: the upload to the manual category must not run when no release is named" 'the upload to govulncheck/binaries-manual must run on' wf_check "${TEST_TMP}/wf-manual-always.yml"
 wf_mutate expression 'run: ci/vulncheck.sh --sarif "${RUNNER_TEMP}/sarif"' 'run: ci/vulncheck.sh --sarif "${{ github.workspace }}/sarif"'
 expect_fail "workflow: an expression in a script is refused" 'puts an expression into a script' wf_check "${TEST_TMP}/wf-expression.yml"
 

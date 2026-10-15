@@ -578,13 +578,14 @@ example), nothing runs it again: re-run the job, and queue the pull request agai
 `.github/workflows/vulncheck.yml` reports the results of `govulncheck` to the code scanning alerts of the repository (Security tab,
 tool govulncheck) as SARIF, on every push to `main`, every day at 05:23 UTC (an advisory can appear without a change of the code) and
 by hand. It does not run for pull requests and it blocks nothing: the check that blocks is the gate `vulncheck` in the job `compliance`
-of `ci.yml`. Three categories hold the reports:
+of `ci.yml`. Four categories hold the reports:
 
 | Category | Job | What it looks at |
 |---|---|---|
 | `govulncheck/source-release` | `source` | the code of `main`, built like a release (`ci/vulncheck.sh --sarif DIR`) |
 | `govulncheck/source-devpg` | `source` | the code of `main` with the build tag `devpg` (`ci/vulncheck.sh --sarif DIR`) |
-| `govulncheck/binaries` | `binaries` | the programs of the latest stable release, at module level (`ci/vulncheck-binaries.sh`) |
+| `govulncheck/binaries` | `binaries` | the programs of the latest stable release, at module level (`ci/vulncheck-binaries.sh`); every run that names no release |
+| `govulncheck/binaries-manual` | `binaries` | the programs of the release that a manual run names (`release_tag`), at module level |
 
 The job `upload` is the only one with a write scope. It uploads each report with its category, so a vulnerability that a later run no
 longer finds is closed by that run. A finding that `ci/vulncheck-allowlist.txt` accepts (the file of the gate, with ID, review date
@@ -592,7 +593,11 @@ and reason) is left out of every report while its entry is in force, so code sca
 An entry accepts until its review date has passed: from the day after, the finding is reported again and becomes an alert, while the
 gate only prints a warning and passes. Review the entry and move its date, or remove it. A manual run can name
 another release (`release_tag`, for example `v0.2.0-rc.1`); an empty value means the latest stable release, which
-`https://github.com/<repository>/releases/latest` leads to. The first run on `main` has to show that GitHub accepted the three
+`https://github.com/<repository>/releases/latest` leads to. A run that names a release uploads its binary report to
+`govulncheck/binaries-manual`: a category holds the analysis of the last upload to it, so the same report in `govulncheck/binaries` would
+replace the analysis of the latest stable release until the next push or daily run, and the alerts would close and reopen between the two
+releases. The alerts of `govulncheck/binaries-manual` stay until the next manual run that names a release replaces them (dismiss them in
+the Security tab when the release is of no interest any more). The first run on `main` has to show that GitHub accepted the three
 reports: the step `upload-sarif` waits for the processing and fails when code scanning refuses a file.
 
 **The scan of the released binaries** checks before it scans, and every step fails closed (`ci/vulncheck-binaries.sh`, codes in

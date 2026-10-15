@@ -2,12 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Known vulnerabilities in code scanning (docs/development.md, "Vulnerability reports in code scanning"; docs/security/model.md,
-# "Static analysis in CI"). govulncheck reports go to the code scanning alerts of the repository as SARIF, in three categories:
+# "Static analysis in CI"). govulncheck reports go to the code scanning alerts of the repository as SARIF, in four categories:
 #
 #   govulncheck/source-release   the code of main, built the way a release is built
 #   govulncheck/source-devpg     the code of main with the build tag devpg (the development server with an embedded PostgreSQL)
-#   govulncheck/binaries         the programs of the latest stable release, or of the tag that a manual run names, at module level
-#                                (the binaries are stripped: a result says that a release was built with an affected version)
+#   govulncheck/binaries         the programs of the latest stable release, at module level (the binaries are stripped: a result says
+#                                that a release was built with an affected version)
+#   govulncheck/binaries-manual  the programs of the release that a manual run names (release_tag), at module level
+#
+# A category holds the analysis of the last upload to it: the next upload closes the alerts that it no longer reports. A manual run that
+# names a release (a release candidate, for example) therefore has a category of its own: in govulncheck/binaries it would replace the
+# analysis of the daily scan of the latest stable release until the next push or the next daily run, and the alerts would close and
+# reopen between two releases.
 #
 # This workflow reports and blocks nothing: the check that blocks is the gate vulncheck in the job compliance of ci.yml. A finding that
 # ci/vulncheck-allowlist.txt accepts is left out of the reports until the review date of the entry has passed; from the day after, it is
@@ -33,7 +39,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Scan the programs of this release instead of the latest stable one (vX.Y.Z or vX.Y.Z-rc.N)'
+        description: 'Scan this release instead of the latest stable one (vX.Y.Z or vX.Y.Z-rc.N); reported to govulncheck/binaries-manual'
         required: false
         type: string
         default: ''
@@ -143,9 +149,17 @@ jobs:
         with:
           name: vulncheck-sarif-binaries
           path: ${{ runner.temp }}/sarif/binaries
-      - name: Upload the report of the released binaries
-        if: ${{ needs.binaries.result == 'success' }}
+      # The two uploads are mutually exclusive: a run that names a release reports to its own category and leaves the analysis of the
+      # latest stable release, which the push and daily runs keep up to date, as it is.
+      - name: Upload the report of the latest stable release
+        if: ${{ needs.binaries.result == 'success' && inputs.release_tag == '' }}
         uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: ${{ runner.temp }}/sarif/binaries/govulncheck-binaries.sarif
           category: govulncheck/binaries
+      - name: Upload the report of the release that a manual run names
+        if: ${{ needs.binaries.result == 'success' && inputs.release_tag != '' }}
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: ${{ runner.temp }}/sarif/binaries/govulncheck-binaries.sarif
+          category: govulncheck/binaries-manual

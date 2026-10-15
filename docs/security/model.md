@@ -551,14 +551,17 @@ guidance after each item names what to do.
 - **Known vulnerabilities in CI: govulncheck as a gate and in code scanning.** The gate `vulncheck` (job `compliance` of `ci.yml`,
   `ci/vulncheck.sh`) fails when the code calls a vulnerable symbol that `ci/vulncheck-allowlist.txt` does not accept (ID, review date,
   reason). `.github/workflows/vulncheck.yml` (pushes to `main`, a daily run and manual runs, never a pull request) reports the same
-  analysis to code scanning as SARIF, in the categories `govulncheck/source-release`, `govulncheck/source-devpg` and
-  `govulncheck/binaries`, and blocks nothing. Controls: the one job that holds `security-events: write` (`upload`, the only line of the
-  workflow in `ci/workflow-permissions.txt`) runs no code of the repository: it checks out without credentials, downloads the reports
-  that the two scan jobs of the same run made and uploads them; the scan jobs hold `contents: read`; the workflow has no secret, and
-  `ci/tests/vulncheck-test.sh` fails when another job gets a write scope, when `upload` runs a script or another action, or when a
-  pull request can start the workflow. The scan of the released binaries (`ci/vulncheck-binaries.sh`) starts only after the keyless
-  signature of `checksums.txt` was verified with the identity of `release.yml` at the tag of the version (`ci/release/verify-blob.sh`,
-  mode bound) and after the SHA-256 of every archive matched that signed list; it reads out only the member that is named like the
+  analysis to code scanning as SARIF, in the categories `govulncheck/source-release`, `govulncheck/source-devpg`,
+  `govulncheck/binaries` (the latest stable release) and `govulncheck/binaries-manual` (the release that a manual run names, so that
+  such a run does not replace the analysis of the latest stable release), and blocks nothing. Controls: the one job that holds
+  `security-events: write` (`upload`, the only line of the workflow in `ci/workflow-permissions.txt`) runs no code of the repository: it
+  checks out without credentials, downloads the reports that the two scan jobs of the same run made and uploads them; the scan jobs hold
+  `contents: read`; the workflow has no secret, and `ci/tests/vulncheck-test.sh` fails when another job gets a write scope, when `upload`
+  runs a script or another action, when a pull request can start the workflow, or when the upload of the latest stable release can run
+  for a run that names a release (or the upload of a named release for a run that names none). The scan of the released binaries
+  (`ci/vulncheck-binaries.sh`) starts only after the keyless signature of `checksums.txt` was verified with the identity of `release.yml`
+  at the tag of the version (`ci/release/verify-blob.sh`, mode bound) and after the SHA-256 of every archive matched that signed list; it
+  reads out only the member that is named like the
   program, as a regular file within a size limit, never runs a downloaded program, takes the tag only in the form of a release tag and
   fails closed on a download that fails, a signature that does not verify, an archive that does not match, a missing or irregular member
   and a failing tool (`ci/tests/vulncheck-test.sh` covers each). The reports leave out a finding only while its allowlist entry is in
@@ -577,7 +580,8 @@ guidance after each item names what to do.
     scanning with a reason (GitHub records who and when). It is not added to `ci/vulncheck-allowlist.txt`: that file belongs to the gate,
     and an entry would also let a later call of the same vulnerability pass the gate.
   - A binary without Go build information cannot be scanned and fails the run; the results about binaries are anchored at `go.mod`
-    because a binary has no file or line; the binaries are the archives of the latest stable release unless a manual run names another;
+    because a binary has no file or line; the binaries are the archives of the latest stable release unless a manual run names another,
+    which is reported in its own category and stays there until the next manual run replaces it;
     and a run that cannot reach GitHub or the vulnerability database fails visibly and leaves the earlier alerts as they are.
 - **Rules for the release workflow (R13).** `ci/check-workflows.py` requires of
   `.github/workflows/release.yml`: a trigger for pushed `v*` tags only, no caches and no local actions, the literal environment
