@@ -44,15 +44,40 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 {{- end -}}
 
+{{/*
+Repository of the image with its registry host. A repository whose first path segment is a registry host (it contains a "." or
+a ":", or it is "localhost": the rule of the container runtimes) is used unchanged: that is the form of the values of v0.1.0.
+Otherwise the registry is global.imageRegistry, else image.registry; without either, the repository stays as it is and the
+container runtime applies its default registry.
+*/}}
+{{- define "myriarch.imageRepository" -}}
+{{- $repo := .Values.image.repository | default "" | toString -}}
+{{- if not $repo -}}
+{{- fail "image.repository: must not be empty" -}}
+{{- end -}}
+{{- $first := first (splitList "/" $repo) -}}
+{{- if and (contains "/" $repo) (or (contains "." $first) (contains ":" $first) (eq $first "localhost")) -}}
+{{- $repo -}}
+{{- else -}}
+{{- $registry := (.Values.global | default dict).imageRegistry | default .Values.image.registry | default "" | toString -}}
+{{- if $registry -}}
+{{- printf "%s/%s" (trimSuffix "/" $registry) $repo -}}
+{{- else -}}
+{{- $repo -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{/* Image reference: with image.digest set => repository@digest (the tag is ignored), otherwise repository:tag (default: appVersion) */}}
 {{- define "myriarch.image" -}}
+{{- $repository := include "myriarch.imageRepository" . -}}
 {{- if .Values.image.digest -}}
 {{- if not (regexMatch "^sha256:[0-9a-f]{64}$" .Values.image.digest) -}}
 {{- fail (printf "image.digest: must have the form sha256:<64 hex characters>, got %q" .Values.image.digest) -}}
 {{- end -}}
-{{- printf "%s@%s" .Values.image.repository .Values.image.digest -}}
+{{- printf "%s@%s" $repository .Values.image.digest -}}
 {{- else -}}
-{{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) -}}
+{{- printf "%s:%s" $repository (default .Chart.AppVersion .Values.image.tag) -}}
 {{- end -}}
 {{- end -}}
 

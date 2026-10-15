@@ -264,11 +264,12 @@ func TestPublishedRepositoriesAndLabels(t *testing.T) {
 	assert.Contains(t, crane, `IMAGE_REPO_NAME="ghcr.io/myriarch/myriarch-updater"`)
 	var values struct {
 		Image struct {
+			Registry   string `yaml:"registry"`
 			Repository string `yaml:"repository"`
 		} `yaml:"image"`
 	}
 	require.NoError(t, yaml.Unmarshal(readDeploy(t, "helm/myriarch/values.yaml"), &values))
-	assert.Equal(t, "ghcr.io/myriarch/myriarch", values.Image.Repository, "the chart pulls the published server image")
+	assert.Equal(t, "ghcr.io/myriarch/myriarch", values.Image.Registry+"/"+values.Image.Repository, "the chart pulls the published server image")
 
 	// the labels the release images carry come from ci/image-labels.env; the source links the package to the repository
 	labels := readRepoFile(t, "ci/image-labels.env")
