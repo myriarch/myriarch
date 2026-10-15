@@ -1258,14 +1258,16 @@ export interface paths {
          *     pending, running or waiting for approval it is the version the fleet ran before (`rollout`), so that the new host becomes a straggler of
          *     the last wave. A version that the host asks for is accepted if it is the target, the version the plan would give anyway or inside the
          *     frame `spec.update.selection` in Git (`request`). The supervisor has the version of the collector, and the release tracker must know
-         *     both releases.
+         *     both releases. A target that the rollout planner has not handled yet (a new target in Git or a new selection in the UI, before the leader
+         *     has created the rollout for it) is not handed out, so that a new host cannot skip the waves and approvals: the answer is `preparing`.
          *
          *     A refusal is a problem document. The class is its `code` and the reason is the `code` of `issues[0]`, which the installers show:
          *     `conflict` with `fleet_mismatch`, `no_fleet`, `fleet_ambiguous` or `rollout_blocking`; `precondition_failed` with `no_target_version`,
          *     `unsupported_distribution`, `unknown_version`, `unknown_supervisor_version` or `server_settings`; `validation_failed` with
          *     `invalid_value`, `unknown_attribute`, `platform_not_supported`, `version_not_allowed`, `unknown_version` or `unknown_supervisor_version`;
          *     `unavailable` with `preparing`. The first request for a platform makes the server download about 112 MB, so it can answer
-         *     `preparing` for minutes; the installer asks again after `Retry-After`.
+         *     `preparing` for minutes, and a target that was just changed makes it answer `preparing` for the seconds that the planner needs; the
+         *     installer asks again after `Retry-After`.
          */
         post: operations["getInstallPlan"];
         delete?: never;
@@ -4984,7 +4986,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The artifacts are being prepared (code unavailable, reason preparing, header Retry-After) or the database is not available */
+            /** @description The artifacts are being prepared, or the planner has not handled the new target of the fleet yet (code unavailable, reason preparing, header Retry-After), or the database is not available */
             503: {
                 headers: {
                     [name: string]: unknown;

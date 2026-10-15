@@ -536,6 +536,74 @@ func TestInstallPlanDuringARunningRollout(t *testing.T) {
 	assert.Equal(t, "rollout", got[install.KeyVersionSource])
 }
 
+// gitMoves applies a snapshot in which the fleet has another Git target and lets the replicas load it, as the event of a
+// sync does. The leader has not planned it yet.
+func (e *apiEnv) gitMoves(fleet, version string) {
+	e.t.Helper()
+	ctx := context.Background()
+	snap, err := e.st.GitOps().GetSnapshot(ctx)
+	require.NoError(e.t, err)
+	next := *snap
+	next.Fleets = append([]domain.Fleet(nil), snap.Fleets...)
+	next.Commit = "moved-" + fleet + "-" + version
+	for i := range next.Fleets {
+		if next.Fleets[i].Name == fleet {
+			next.Fleets[i].Collector.Version = version
+		}
+	}
+	_, err = e.st.GitOps().ApplySnapshot(ctx, next, domain.GitOpsSync{Trigger: "poll", Result: "applied", StartedAt: e.clock, FinishedAt: &e.clock, Commit: &domain.GitCommit{SHA: next.Commit, Time: e.clock}})
+	require.NoError(e.t, err)
+	_, err = e.assigner.Reload(ctx)
+	require.NoError(e.t, err)
+}
+
+// A new Git target reaches the replicas before the leader has planned the rollout for it. A host that asks in between
+// waits instead of taking the new version past the waves, and once the real planner has created the rollout, the host
+// takes the version before it, as a straggler of the last wave.
+func TestInstallPlanWaitsForTheRolloutPlannerAfterANewGitTarget(t *testing.T) {
+	e := newAPIEnv(t)
+	ctx := context.Background()
+	secret, _ := e.auth.newToken(nil)
+
+	// the fleet runs 0.161.0 (Git says so, the planner has handled it)
+	e.gitMoves("datacenter", "0.161.0")
+	e.addAgent("dc-north-01", func(a *domain.Agent) { a.Version = "0.161.0" })
+	require.NoError(t, e.engine.Plan(ctx))
+	r := e.readyPlan(secret, datacenterHost())
+	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
+	got, err := install.ParseText(r.Body.String())
+	require.NoError(t, err)
+	require.Equal(t, "0.161.0", got[install.KeyCollectorVersion])
+	require.Equal(t, "git", got[install.KeyVersionSource])
+
+	// Git moves the fleet to 0.162.0; the replica has loaded it, the leader has not planned it
+	e.gitMoves("datacenter", "0.162.0")
+	r = e.planRequest(secret, datacenterHost())
+	require.Equal(t, http.StatusServiceUnavailable, r.Code, r.Body.String())
+	assert.Equal(t, "5", r.Header().Get("Retry-After"))
+	doc := asMap(t, e.expect(r, "getInstallPlan", http.StatusServiceUnavailable))
+	assert.Equal(t, "unavailable", doc["code"])
+	assert.Equal(t, "preparing", asMap(t, doc["issues"].([]any)[0])["code"])
+	assert.Contains(t, doc["detail"], "waves and approvals")
+	assert.NotContains(t, r.Body.String(), "0.162.0_linux", "no artifact of the new version is named")
+	assert.NotContains(t, r.Body.String(), "myrd_", "and no grant is given")
+
+	// the leader plans: it creates the rollout from 0.161.0 to 0.162.0 and records the target
+	require.NoError(t, e.engine.Plan(ctx))
+	rollouts, _, err := e.st.Rollouts().List(ctx, store.RolloutFilter{Fleets: []string{"datacenter"}, Kinds: []domain.RolloutKind{domain.RolloutKindVersion}, ActiveOnly: true})
+	require.NoError(t, err)
+	require.Len(t, rollouts, 1)
+	assert.Equal(t, "0.161.0", rollouts[0].FromRef)
+	assert.Equal(t, "0.162.0", rollouts[0].ToRef)
+
+	r = e.readyPlan(secret, datacenterHost())
+	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
+	got, err = install.ParseText(r.Body.String())
+	require.NoError(t, err)
+	assert.Equal(t, "0.161.0", got[install.KeyCollectorVersion], "the version before the rollout, so that the host joins its last wave")
+	assert.Equal(t, "rollout", got[install.KeyVersionSource])
+}
+
 // The token is read from one header and written nowhere: not into the log, not into a metric, not into an audit
 // entry, not into an answer.
 func TestInstallPlanNeverRecordsTheToken(t *testing.T) {

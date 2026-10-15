@@ -654,6 +654,17 @@ const (
 	KVMarkerRetention = time.Hour
 )
 
+// KVPrefixPlannedTarget is the prefix of the keys under which the rollout planner records, for each fleet, the
+// effective target version that it has handled (PlannedTargetKey). Housekeeping never purges them.
+const KVPrefixPlannedTarget = "rollout/planned-target/"
+
+// PlannedTargetKey is the key of the record of a fleet. The value is the effective target version without "v" (empty for
+// a fleet without a target): the planner (leader) writes it after it created the version rollout for that target, or found
+// that none is needed, and the installation of hosts from the server reads it on every replica. Until the record equals
+// the target, a new host is not given the target, because the target reaches the replicas before the leader has
+// created the rollout that brings the fleet to it.
+func PlannedTargetKey(fleet string) string { return KVPrefixPlannedTarget + fleet }
+
 // KVStore is a small key/value store for component state (release tracker
 // ETags, notifier de-duplication, ...). Keys are namespaced by component:
 // "release/etag/<repo>", "notify/sent/<key>".

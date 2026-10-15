@@ -733,6 +733,14 @@ last wave. With no active rollout a new one is created for all relevant, non-exc
 created. A rollout in `failed` or `rolling_back` is never replaced automatically. A `paused` rollout can be superseded by
 a fix. Creating a rollout writes the audit entry `rollout.create` and the notification `rollout.started`.
 
+After a fleet was planned without an error, the planner records the effective target version of the fleet in the key-value store
+(`rollout/planned-target/<fleet>`; the value is the version without `v`, and empty for a fleet without a target), when the record changes
+and after it created the rollout for that target; for a version chosen in the UI it also sets `plannedAt` of the selection. Both say
+that the planner has handled the target. A target reaches every replica (the event of a Git sync or of a selection) before the leader
+has created the rollout for it, and the installation of hosts from the server reads these marks, so that a new host does not take the
+new version past the waves ([Installation from the server](#installation-from-the-server)). A leader writes the records of all fleets
+again when it starts a term, because another leader may have written them in between. They are not purged.
+
 ### Engine
 
 The engine is stateless between ticks, so leadership can change at any moment and every step is idempotent. A tick runs
@@ -937,10 +945,24 @@ rollout of the fleet is `pending`, `running` or `waiting_approval`, it gives the
 new hosts as well; a rollout that is `paused`, `failed` or `rolling_back`, or whose hosts start from different versions
 (no uniform `fromRef`), is 409 `rollout_blocking`. A `collectorVersion` of the request is accepted if it equals the version
 the plan would give, the target of the fleet or a version inside the frame `spec.update.selection` in Git (`version.source`
-is then `request`); otherwise 422 `version_not_allowed`. The reads are ordered so that a concurrent change cannot send a
-host past the waves: the target comes from the memory of the assignment service, which follows the database and never
-runs ahead of it, and the rollouts are read after it. A rollout that the leader creates for a new target in between is then
-seen with the `fromRef` that belongs to the previous target; "new target, no rollout yet" cannot arise.
+is then `request`); otherwise 422 `version_not_allowed`.
+
+**A target that the planner has not handled.** A target reaches every replica (through the event of a Git sync or of a selection in the
+UI) before the leader has created the rollout that brings the fleet to it. A host that asked in between would find the new target and no
+rollout, take the new version at once and skip the waves and approvals. So the plan does not hand out a target before the rollout planner
+has handled it ([Planner](#planner)): for a version chosen in the UI until the selection has `plannedAt` (a new selection of the fleet,
+also of the same version, clears it), for any other target (the one in Git, also after a selection was cleared) until the record of the
+planner for the fleet equals the target. Until then the answer is 503 `preparing` with `Retry-After` (5 seconds), and nothing is prepared.
+The planner usually needs seconds. A fleet that the planner has never handled has no record, so a new fleet waits for the first run of the
+planner, and so does every fleet right after the start of a leader. Without a leader nothing is planned, and the hosts of a fleet whose target
+changed wait until there is one; the other fleets are not affected. If the planning of a fleet keeps failing, its hosts wait and the log of
+the leader names the reason.
+
+The reads are ordered so that a concurrent change cannot send a host past the waves: the target comes from the memory of the assignment
+service, which follows the database and never runs ahead of it, then the record of the planner, and the rollouts last. The planner writes
+its record after it created the rollout, so whoever sees the record that belongs to the target sees the rollout as well; a rollout that
+the leader creates after the target was read is seen with the `fromRef` that belongs to the previous target, or the target is not handed out
+yet. The combination "new target, no rollout yet" does not reach a host.
 
 **The answer.** A plan of format 1 with the OpAMP endpoint (`wss://` for an https public URL, plus `opamp.path`), the fleet,
 the source of the version, the version, the URL of the artifact on the origin of `server.publicUrl` and an install grant for
@@ -965,7 +987,7 @@ that is not enrolled.
 | 412 | `precondition_failed` | `no_target_version`, `unsupported_distribution`, `unknown_version`, `unknown_supervisor_version`, `server_settings` |
 | 422 | `validation_failed` | `invalid_value`, `unknown_attribute`, `platform_not_supported`, `version_not_allowed`, `unknown_version`, `unknown_supervisor_version` |
 | 429 | `too_many_requests` | none; `Retry-After` |
-| 503 | `unavailable` | `preparing` (with `Retry-After`), or none for a database failure |
+| 503 | `unavailable` | `preparing` (with `Retry-After`: the artifacts are being prepared, or the planner has not handled the new target of the fleet), or none for a database failure |
 
 **Observability.** `myriarch_install_plans_total{result}` counts the requests (`ok`, `disabled`, `unauthorized`,
 `rate_limited`, `bad_request`, `invalid_request`, `unavailable`, `error`, or the reason of a refusal such as `fleet_mismatch`

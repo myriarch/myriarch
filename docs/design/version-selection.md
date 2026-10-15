@@ -149,7 +149,8 @@ Every consumer uses the resolver. No other code reads `spec.collector.version` a
 - the dashboard summary of outdated collectors,
 - the install plan for a host that is not enrolled yet (from v0.2.0; named exception): it gives the effective target of the
   fleet, but the `fromRef` of the version rollout instead while that rollout is pending, running or waiting for approval, so
-  that the new host becomes a straggler of its last wave
+  that the new host becomes a straggler of its last wave, and a target that the planner has not handled yet (a selection
+  without `plannedAt`, or a Git target that differs from the record of the planner) not at all: the plan waits
   ([Installation from the server](opamp-server.md#installation-from-the-server)),
 - artifact prefetch.
 

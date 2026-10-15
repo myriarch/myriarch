@@ -55,6 +55,9 @@ const (
 const (
 	retryPreparing = 10 * time.Second
 	retryFailed    = 30 * time.Second
+	// retryPlanning is the Retry-After of the answer 503 while the rollout planner has not handled the new target of the
+	// fleet. The planner runs at once after a Git sync and after a selection in the UI, so seconds are enough.
+	retryPlanning = 5 * time.Second
 )
 
 // Refusal is a plan request that the server refuses on purpose. Class is the sentinel that decides the HTTP
@@ -185,20 +188,26 @@ func (p *Planner) Bundles() BundleStore { return p.d.Bundles }
 //  1. The request is checked against allowlists (422).
 //  2. The fleet is the one that the assignment service gives the host from the reported attributes and the labels
 //     of the enrollment token; none, several of the same priority, or another than the hint is 409.
-//  3. The version is the effective target of the fleet. While a version rollout of the fleet is pending, running
-//     or waiting for approval, it is the version the fleet ran before (the fromRef of the rollout), so that the
-//     new host becomes a straggler of its last wave; a paused, failed or rolling back rollout, or one without a
-//     single starting version, is 409; a fleet on hold or without a target is 412. A version that the host asks
-//     for is accepted inside the frame of the fleet only (422).
+//  3. The version is the effective target of the fleet, once the rollout planner has handled it (below). While a
+//     version rollout of the fleet is pending, running or waiting for approval, it is the version the fleet ran
+//     before (the fromRef of the rollout), so that the new host becomes a straggler of its last wave; a paused,
+//     failed or rolling back rollout, or one without a single starting version, is 409; a fleet on hold or without
+//     a target is 412. A version that the host asks for is accepted inside the frame of the fleet only (422).
 //  4. The release tracker must know the version for collector and supervisor (412).
 //  5. The artifacts for the platform are prepared in the background; until both are ready the answer is 503 with
 //     Retry-After.
 //
+// A target reaches the replicas (through the event of a Git sync or of a selection in the UI) before the leader has
+// created the rollout that brings the fleet to it. A host that asked in between would find the new target and no
+// rollout, and would take the new version past the waves and approvals. So a new target is not given out before the
+// planner has handled it (targetPlanned): the answer is 503 preparing with Retry-After until then.
+//
 // The reads are ordered so that a concurrent change cannot produce a version that never was one: the effective
 // target is read from the memory of the assignment service, which follows the database and never runs ahead of
-// it, and the rollouts are read after it. A rollout that the leader creates for a new target after the target was
-// read is then seen with the fromRef that belongs to the previous target; the combination "new target, no
-// rollout yet" cannot arise, which would send the host past the waves.
+// it, then the record of the planner, and the rollouts last. The planner writes its record after it created the
+// rollout, so whoever sees the record that belongs to the target sees the rollout as well; a rollout that the
+// leader creates for a new target after the target was read is seen with the fromRef that belongs to the previous
+// target, or the target is not given out yet.
 func (p *Planner) Plan(ctx context.Context, cred Credential, req PlanRequest) (*Plan, error) {
 	if cred.TokenID == uuid.Nil {
 		return nil, errors.New("install: a plan is only given to the holder of an enrollment token")
@@ -259,6 +268,9 @@ func (p *Planner) Plan(ctx context.Context, cred Credential, req PlanRequest) (*
 	target := domain.ResolveVersionTarget(fleet, selections[fleet.Name])
 	if target.Version == "" {
 		return nil, noTarget(fleet.Name, target.Source)
+	}
+	if err := p.targetPlanned(ctx, fleet.Name, target); err != nil {
+		return nil, err
 	}
 	version, source := target.Version, string(target.Source)
 	from, err := p.rolloutBase(ctx, fleet.Name)
@@ -442,6 +454,38 @@ func noTarget(fleet string, source domain.VersionTargetSource) *Refusal {
 	return refuse(domain.ErrPrecondition, CodeNoTargetVersion,
 		"the fleet %s has no target version (spec.collector.version is empty and no version was chosen in the UI); install with an explicit version on the manual path",
 		fleet)
+}
+
+// targetPlanned requires that the rollout planner has handled the effective target of the fleet: the version rollout that
+// brings the fleet to it exists, or none is needed. A target that the planner has not handled is refused with 503
+// preparing and Retry-After, and nothing is prepared for it.
+//
+// A version that was chosen in the UI says so itself: the planner sets plannedAt of the selection after it created the
+// rollout for it, and a new selection of the fleet, also of the same version, clears it. Any other target (the one in Git,
+// also after a selection was cleared) is compared with the record that the planner writes for the fleet
+// (store.PlannedTargetKey). A fleet that the planner has never handled has no record.
+func (p *Planner) targetPlanned(ctx context.Context, fleet string, target domain.VersionTarget) error {
+	planned := false
+	if target.Source == domain.TargetSourceUI {
+		planned = target.Selection != nil && target.Selection.PlannedAt != nil
+	} else {
+		b, err := p.d.Store.KV().Get(ctx, store.PlannedTargetKey(fleet))
+		switch {
+		case err == nil:
+			planned = string(b) == target.Version
+		case !errors.Is(err, domain.ErrNotFound):
+			return fmt.Errorf("%w: read the planned target of the fleet: %v", domain.ErrUnavailable, err)
+		}
+	}
+	if planned {
+		return nil
+	}
+	p.log.Debug("install plan waits for the rollout planner", "fleet", fleet, "target", target.Version, "source", string(target.Source))
+	r := refuse(domain.ErrUnavailable, CodePreparing,
+		"the server is still working out how the fleet %s gets its target version %s (the rollout for it is planned first, so that the waves and approvals of the fleet apply to a new host as well): ask again after the time in Retry-After",
+		fleet, target.Version)
+	r.RetryAfter = retryPlanning
+	return r
 }
 
 // rolloutBase returns the version a new host takes while a version rollout of the fleet is under way: the fromRef

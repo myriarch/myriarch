@@ -177,11 +177,11 @@ func newPlanEnv(t *testing.T, mut ...func(e *planEnv)) *planEnv {
 		require.NoError(t, err)
 	}
 	e.assigner = assignment.New(assignment.Deps{Store: e.st})
-	_, err = e.assigner.Reload(ctx)
-	require.NoError(t, err)
+	e.load()
 	for _, m := range mut {
 		m(e)
 	}
+	e.planned() // a running server has planned the state of Git by the time hosts ask
 	e.rebuild()
 	return e
 }
@@ -193,10 +193,45 @@ func (e *planEnv) rebuild() {
 	e.planner = p
 }
 
-func (e *planEnv) reload() {
+// load makes the assignment service load the GitOps state and the version selections, as the event of a Git sync or of a
+// selection does on every replica. The rollout planner has not run yet.
+func (e *planEnv) load() {
 	e.t.Helper()
 	_, err := e.assigner.Reload(context.Background())
 	require.NoError(e.t, err)
+}
+
+// planned is the rollout planner catching up, which these tests do not run: for each fleet it records the effective target
+// that the planner would have handled (store.PlannedTargetKey, as the engine does after it created the rollout) and marks
+// the selections planned. The replicas load the plannedAt of a selection with the event that follows.
+func (e *planEnv) planned() {
+	e.t.Helper()
+	ctx := context.Background()
+	snap, err := e.st.GitOps().GetSnapshot(ctx)
+	require.NoError(e.t, err)
+	sels, err := e.st.FleetVersions().List(ctx)
+	require.NoError(e.t, err)
+	byFleet := map[string]*domain.FleetVersionSelection{}
+	for i := range sels {
+		byFleet[sels[i].Fleet] = &sels[i]
+	}
+	for i := range snap.Fleets {
+		f := &snap.Fleets[i]
+		sel := byFleet[f.Name]
+		vt := domain.ResolveVersionTarget(f, sel)
+		require.NoError(e.t, e.st.KV().Put(ctx, store.PlannedTargetKey(f.Name), []byte(vt.Version)))
+		if sel != nil && vt.Source == domain.TargetSourceUI && sel.PlannedAt == nil {
+			require.NoError(e.t, e.st.FleetVersions().MarkPlanned(ctx, f.Name, sel.SelectedAt, nil, time.Now()))
+		}
+	}
+	e.load()
+}
+
+// reload loads the state and lets the planner catch up with it, like a running server a moment later.
+func (e *planEnv) reload() {
+	e.t.Helper()
+	e.load()
+	e.planned()
 }
 
 // request is a host at an edge site on Linux.
@@ -905,11 +940,15 @@ func TestPlanUnderConcurrentChanges(t *testing.T) {
 				p, err := e.plan(request())
 				if err != nil {
 					var r *Refusal
-					if !errors.As(err, &r) || r.Code != CodeRolloutBlocking {
+					switch {
+					case errors.As(err, &r) && r.Code == CodeRolloutBlocking:
+						refused.Add(1)
+					case errors.As(err, &r) && r.Code == CodePreparing:
+						// a selection that the planner has not handled yet (the test loads it a moment before it marks it)
+					default:
 						t.Errorf("unexpected error: %v", err)
 						return
 					}
-					refused.Add(1)
 					continue
 				}
 				plans.Add(1)
@@ -967,4 +1006,271 @@ func TestPlanUnderConcurrentChanges(t *testing.T) {
 	wg.Wait()
 	assert.Greater(t, plans.Load(), int64(0))
 	assert.Greater(t, refused.Load(), int64(0), "the paused phases were seen")
+}
+
+// ------------------------------------------------- a target that the planner has not handled ----
+
+// gitMoves applies a snapshot in which the fleet has another Git target. The replicas load it (load), the planner has not run.
+func (e *planEnv) gitMoves(fleet, version string) {
+	e.t.Helper()
+	fleets := standardFleets()
+	for i := range fleets {
+		if fleets[i].Name == fleet {
+			fleets[i].Collector.Version = version
+		}
+	}
+	_, err := e.st.GitOps().ApplySnapshot(context.Background(), domain.GitOpsSnapshot{Commit: "git-" + version, Fleets: fleets}, domain.GitOpsSync{})
+	require.NoError(e.t, err)
+}
+
+func (e *planEnv) complete(rollout uuid.UUID) {
+	e.t.Helper()
+	ok, err := e.st.Rollouts().CompareAndSetStatus(context.Background(), rollout, []domain.RolloutStatus{domain.RolloutRunning}, domain.RolloutCompleted, "")
+	require.NoError(e.t, err)
+	require.True(e.t, ok)
+}
+
+// waits asserts that the plan is refused because the planner has not caught up, and that nothing was prepared for it.
+func (e *planEnv) waits(req PlanRequest) *Refusal {
+	e.t.Helper()
+	before := len(e.arts.prepared())
+	p, err := e.plan(req)
+	require.Nil(e.t, p, "a plan was given for a target that the planner has not handled")
+	r := refusal(e.t, err, domain.ErrUnavailable, CodePreparing)
+	assert.Equal(e.t, retryPlanning, r.RetryAfter)
+	assert.Contains(e.t, r.Detail, "waves and approvals")
+	assert.Len(e.t, e.arts.prepared(), before, "nothing is downloaded for a target that the planner has not handled")
+	return r
+}
+
+// A new Git target reaches the replicas before the leader has created the rollout for it. A host that asks in between
+// must not get the new version, because it would skip the waves and approvals: it waits until the planner has created
+// the rollout and recorded the target, and then it gets the version before the rollout, as a straggler of the last wave.
+func TestPlanWaitsForThePlannerAfterANewGitTarget(t *testing.T) {
+	e := newPlanEnv(t)
+	e.gitMoves("linux-hosts", "0.161.0")
+	e.reload() // the fleet runs 0.161.0 and the planner has handled that
+	p := e.mustPlan(request())
+	require.Equal(t, "0.161.0", p.Collector.Version)
+	require.Equal(t, SourceGit, p.Version.Source)
+
+	// Git moves the fleet to 0.162.0: the event reaches this replica first
+	e.gitMoves("linux-hosts", "0.162.0")
+	e.load()
+	r := e.waits(request())
+	assert.Contains(t, r.Detail, "0.162.0")
+	assert.Contains(t, r.Detail, "linux-hosts")
+	// a host of another fleet is not held up by it
+	assert.Equal(t, "windows-hosts", e.mustPlan(request(func(r *PlanRequest) { r.OS, r.Attributes["site.type"] = "windows", "edge" })).Fleet)
+
+	// the leader creates the rollout; as long as it has not recorded the target, the answer is the same
+	id := e.rollout("linux-hosts", domain.RolloutKindVersion, domain.RolloutRunning, "0.161.0", "0.162.0")
+	e.waits(request())
+
+	// and when it has recorded it, the host joins the last wave of the rollout, on the version before it
+	e.planned()
+	p = e.mustPlan(request())
+	assert.Equal(t, "0.161.0", p.Collector.Version)
+	assert.Equal(t, SourceRollout, p.Version.Source)
+
+	// when the rollout has completed, the target is the version
+	e.complete(id)
+	p = e.mustPlan(request())
+	assert.Equal(t, "0.162.0", p.Collector.Version)
+	assert.Equal(t, SourceGit, p.Version.Source)
+}
+
+// A target that needs no rollout (every host runs it) is handled too: the planner records it, and the host gets it.
+func TestPlanHandsOutANewGitTargetWhenNoRolloutIsNeeded(t *testing.T) {
+	e := newPlanEnv(t)
+	e.gitMoves("linux-hosts", "0.161.0")
+	e.load()
+	e.waits(request())
+	e.planned() // no rollout was created, the record says that the planner has been there
+	assert.Equal(t, "0.161.0", e.mustPlan(request()).Collector.Version)
+}
+
+// A version chosen in the UI says that the planner has handled it with plannedAt, which a new selection clears.
+func TestPlanWaitsForThePlannerAfterANewSelection(t *testing.T) {
+	e := newPlanEnv(t)
+	ctx := context.Background()
+	sel, err := e.st.FleetVersions().Put(ctx, domain.FleetVersionSelection{
+		Fleet: "linux-hosts", Version: "0.161.0", State: domain.SelectionActive, GitVersion: "0.162.0", SelectedBy: "user:x", SelectedAt: time.Now(),
+	}, nil)
+	require.NoError(t, err)
+	e.load()
+	e.waits(request())
+
+	id := e.rollout("linux-hosts", domain.RolloutKindVersion, domain.RolloutRunning, "0.162.0", "0.161.0")
+	e.waits(request()) // the rollout exists, the planner has not marked the selection
+	e.planned()
+	p := e.mustPlan(request())
+	assert.Equal(t, "0.162.0", p.Collector.Version, "the version before the rollout")
+	assert.Equal(t, SourceRollout, p.Version.Source)
+	e.complete(id)
+	p = e.mustPlan(request())
+	assert.Equal(t, "0.161.0", p.Collector.Version)
+	assert.Equal(t, SourceUI, p.Version.Source)
+
+	// the operator selects the same version again: the record of the planner still says 0.161.0, but the selection is new
+	again, err := e.st.FleetVersions().Put(ctx, domain.FleetVersionSelection{
+		Fleet: "linux-hosts", Version: "0.161.0", State: domain.SelectionActive, GitVersion: "0.162.0", SelectedBy: "user:x", SelectedAt: time.Now().Add(time.Second),
+	}, &sel.UpdatedAt)
+	require.NoError(t, err)
+	require.Nil(t, again.PlannedAt)
+	e.load()
+	e.waits(request())
+	e.planned()
+	assert.Equal(t, SourceUI, e.mustPlan(request()).Version.Source)
+}
+
+// A selection that is cleared makes the target fall back to the one in Git: another target, for the planner too.
+func TestPlanWaitsForThePlannerAfterASelectionIsCleared(t *testing.T) {
+	e := newPlanEnv(t)
+	ctx := context.Background()
+	_, err := e.st.FleetVersions().Put(ctx, domain.FleetVersionSelection{
+		Fleet: "linux-hosts", Version: "0.161.0", State: domain.SelectionActive, GitVersion: "0.162.0", SelectedBy: "user:x", SelectedAt: time.Now(),
+	}, nil)
+	require.NoError(t, err)
+	e.reload()
+	require.Equal(t, "0.161.0", e.mustPlan(request()).Collector.Version)
+
+	ok, err := e.st.FleetVersions().Delete(ctx, "linux-hosts", nil)
+	require.NoError(t, err)
+	require.True(t, ok)
+	e.load()
+	e.waits(request()) // the target is 0.162.0 in Git again; the planner recorded 0.161.0 for the selection
+	e.planned()
+	p := e.mustPlan(request())
+	assert.Equal(t, "0.162.0", p.Collector.Version)
+	assert.Equal(t, SourceGit, p.Version.Source)
+}
+
+// A fleet that the planner has never handled has no record: nobody is installed into it before.
+func TestPlanNeedsTheRecordOfThePlanner(t *testing.T) {
+	e := newPlanEnv(t)
+	require.NoError(t, e.st.KV().Delete(context.Background(), store.PlannedTargetKey("linux-hosts")))
+	e.waits(request())
+	e.planned()
+	e.mustPlan(request())
+}
+
+// The record is read from the database: a failure is a 503 without the cause, and nothing is prepared.
+func TestPlanDoesNotGuessWhenTheRecordCannotBeRead(t *testing.T) {
+	e := newPlanEnv(t)
+	p, err := NewPlanner(Deps{Store: brokenKV{e.st}, Assigner: e.assigner, Artifacts: e.arts, Config: e.cfg, PublicURL: "https://fleet.example.com", OpAMPPath: "/v1/opamp"})
+	require.NoError(t, err)
+	plan, err := p.Plan(context.Background(), e.cred, request())
+	require.Nil(t, plan)
+	require.ErrorIs(t, err, domain.ErrUnavailable)
+	var r *Refusal
+	assert.False(t, errors.As(err, &r), "an infrastructure failure is no refusal with a reason")
+	assert.Empty(t, e.arts.prepared())
+}
+
+// brokenKV is a store whose key-value part fails every read.
+type brokenKV struct{ store.Store }
+
+func (b brokenKV) KV() store.KVStore { return failingKV{b.Store.KV()} }
+
+type failingKV struct{ store.KVStore }
+
+func (failingKV) Get(context.Context, string) ([]byte, error) {
+	return nil, errors.New("connection refused (password=hunter2)")
+}
+
+// The leader moves the Git target of the fleet back and forth while hosts ask all the time. Per move the target reaches
+// the replicas first, then the leader creates the rollout and records the target, and finally the rollout completes. A
+// plan never gives the new version with the source "git" before the rollout from the old version has completed: it
+// waits (503), or it names the old version with the source "rollout".
+func TestPlanUnderConcurrentTargetChanges(t *testing.T) {
+	e := newPlanEnv(t)
+	ctx := context.Background()
+
+	// phases of a move: 0 the old target is settled, 1 the new target is loaded and the planner has not run, 2 the
+	// rollout exists and the target is recorded, 3 the rollout completes (stored before it completes)
+	type move struct {
+		from, to string
+		phase    atomic.Int32
+	}
+	var cur atomic.Pointer[move]
+	cur.Store(&move{from: "0.161.0", to: "0.161.0"})
+	e.gitMoves("linux-hosts", "0.161.0")
+	e.reload()
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	var waited, viaRollout, viaGitOld, viaGitNew atomic.Int64
+	for w := 0; w < 8; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				before := cur.Load()
+				p, err := e.plan(request())
+				after := cur.Load()
+				if err != nil {
+					var r *Refusal
+					if !errors.As(err, &r) || r.Code != CodePreparing {
+						t.Errorf("unexpected error: %v", err)
+						return
+					}
+					waited.Add(1)
+					continue
+				}
+				if p.Collector.Version != p.Supervisor.Version {
+					t.Errorf("collector %s and supervisor %s differ", p.Collector.Version, p.Supervisor.Version)
+				}
+				if before != after {
+					continue // the leader went on to the next move meanwhile: the plan belongs to either
+				}
+				switch {
+				case p.Version.Source == SourceRollout && p.Collector.Version == after.from:
+					viaRollout.Add(1)
+				case p.Version.Source == SourceGit && p.Collector.Version == after.from:
+					viaGitOld.Add(1) // read before the new target was loaded
+				case p.Version.Source == SourceGit && p.Collector.Version == after.to:
+					if after.phase.Load() != 3 {
+						t.Errorf("the new version %s was given as the target in phase %d, before the rollout had completed", after.to, after.phase.Load())
+					}
+					viaGitNew.Add(1)
+				default:
+					t.Errorf("source %s with version %s in a move from %s to %s", p.Version.Source, p.Collector.Version, after.from, after.to)
+				}
+			}
+		}()
+	}
+
+	started := time.Now()
+	for i := 0; i < 40 || ((waited.Load() == 0 || viaRollout.Load() == 0 || viaGitNew.Load() == 0) && time.Since(started) < 30*time.Second); i++ {
+		old := cur.Load()
+		m := &move{from: old.to, to: map[string]string{"0.161.0": "0.162.0", "0.162.0": "0.161.0"}[old.to]}
+		cur.Store(m)
+
+		m.phase.Store(1)
+		e.gitMoves("linux-hosts", m.to)
+		e.load()
+		time.Sleep(2 * time.Millisecond)
+
+		id := e.rollout("linux-hosts", domain.RolloutKindVersion, domain.RolloutRunning, m.from, m.to)
+		// the planner records the target after it created the rollout
+		require.NoError(t, e.st.KV().Put(ctx, store.PlannedTargetKey("linux-hosts"), []byte(m.to)))
+		m.phase.Store(2)
+		time.Sleep(2 * time.Millisecond)
+
+		m.phase.Store(3)
+		e.complete(id)
+		time.Sleep(time.Millisecond)
+	}
+	close(stop)
+	wg.Wait()
+	t.Logf("waited %d, via rollout %d, via git (old) %d, via git (new) %d", waited.Load(), viaRollout.Load(), viaGitOld.Load(), viaGitNew.Load())
+	assert.Greater(t, waited.Load(), int64(0), "the window between the new target and the rollout was seen")
+	assert.Greater(t, viaRollout.Load(), int64(0), "the rollout was seen")
+	assert.Greater(t, viaGitNew.Load(), int64(0), "the new target was handed out after the rollout had completed")
 }

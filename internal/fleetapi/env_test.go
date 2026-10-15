@@ -155,6 +155,9 @@ func newAPIEnv(t *testing.T) *apiEnv {
 		Now: func() time.Time { return e.clock }, Registerer: prometheus.NewRegistry(),
 	})
 
+	// the leader has planned the state of Git by the time hosts ask: the installation waits for the record of the planner
+	require.NoError(t, e.engine.Plan(context.Background()))
+
 	// release tracker with the recorded fixtures
 	tr, err := release.NewTracker(e.cfg.Releases, release.Deps{Store: e.st, Bus: e.bus, Notifier: notify.Nop{}, HTTPClient: http.DefaultClient, Logger: logger, Registerer: prometheus.NewRegistry()})
 	require.NoError(t, err)
