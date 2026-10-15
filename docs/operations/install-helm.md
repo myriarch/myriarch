@@ -344,7 +344,9 @@ configuration. Helm can skip the schema with `--skip-schema-validation`; the che
 is then ignored again, so use the flag only to get past a finding while you investigate it.
 
 **Before you upgrade from v0.1.0,** run `helm lint` or `helm template` with your values file and the chart of the new release.
-Values that the old chart ignored can fail now. Typical findings and what to do:
+If the release was installed with `--set` or upgraded with `--reuse-values`, write its values to a file first:
+`helm get values myriarch -n myriarch -o yaml > myriarch-values.yaml`. Values that the old chart ignored can fail now. Typical
+findings and what to do:
 
 | Finding | What to do |
 |---|---|

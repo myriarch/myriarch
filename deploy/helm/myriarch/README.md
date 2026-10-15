@@ -344,6 +344,7 @@ that starts with the value path, followed by what is wrong and how to fix it, fo
 | Path | Cause |
 |---|---|
 | `image.digest` | not of the form `sha256:<64 hex>` |
+| `image.repository` | empty, for example set to `null` |
 | `config.server.trustedProxies` | empty while `ingress.enabled` or `httpRoute.enabled` (unless `allowWithoutTrustedProxies`) |
 | `ingress.tls` | empty with an https `publicUrl` (unless `allowWithoutTls`) |
 | `networkPolicy.ingress.from` | empty while `networkPolicy.enabled` and `ingress.enabled` or `httpRoute.enabled` |

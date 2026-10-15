@@ -26,7 +26,7 @@ replicaCount: 2
 image:
   # Registry host (and optional port) of the image. It applies when repository has no registry host of its own;
   # global.imageRegistry (below) replaces it, for example with the host of a mirror. Empty = the default registry of the
-  # container runtime.
+  # container runtime (usually Docker Hub, where the project publishes no image).
   registry: ghcr.io
   # Repository of the image without the registry host. A repository that starts with a registry host (the form of the values
   # of v0.1.0, for example registry.example.com/myriarch/myriarch) is used unchanged: registry and global.imageRegistry then
