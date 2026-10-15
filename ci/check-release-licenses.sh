@@ -8,7 +8,8 @@
 #   ci/check-release-licenses.sh
 #
 # Needs go-licenses (ci/install-tools.sh go-licenses) and the module cache (go mod download).
-# Allowlist: Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MIT, Zlib. Exceptions: ci/license-overrides.txt.
+# Allowlist: the "release" entries of ci/license-allowlist.txt (ADR-0038), which also lists the wider CNCF allowlist that only the
+# dependency review of a pull request applies. Exceptions: ci/license-overrides.txt.
 # Exit status: 0 = clean, non-zero = at least one finding (all findings are printed) or an environment error.
 set -euo pipefail
 # shellcheck source=ci/lib.sh
@@ -18,7 +19,30 @@ need_cmd go
 export PATH="${TOOLS_BIN}:${PATH}"
 have go-licenses || die "go-licenses is missing (ci/install-tools.sh go-licenses)"
 
-ALLOWED='^(Apache-2\.0|BSD-2-Clause|BSD-3-Clause|ISC|MIT|Zlib)$'
+# The allowlist: one entry per line of ci/license-allowlist.txt ("<identifier>|<list>|<note>"), and only the entries of the list
+# "release" count here. A malformed line, a repeated identifier, an unknown list or a file without a release entry fails, so the
+# check never runs against a list that is empty or half read.
+ALLOWLIST="${LICENSE_ALLOWLIST:-${CI_DIR}/license-allowlist.txt}"   # LICENSE_ALLOWLIST: tests only
+[ -f "${ALLOWLIST}" ] || die "license allowlist is missing: ${ALLOWLIST}"
+allowlist_name="$(basename "${ALLOWLIST}")"
+trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
+ALLOWED=""; seen_ids=" "; lineno=0
+while IFS= read -r line || [ -n "${line}" ]; do
+  lineno=$((lineno + 1))
+  case "${line}" in ''|'#'*) continue ;; esac
+  bars="${line//[^|]/}"
+  [ "${#bars}" -eq 2 ] || die "${allowlist_name}:${lineno}: malformed entry (expected <identifier>|release or review|<note>)"
+  IFS='|' read -r a_id a_list a_note <<<"${line}"
+  a_id="$(trim "${a_id}")"; a_list="$(trim "${a_list}")"; a_note="$(trim "${a_note}")"
+  [[ "${a_id}" =~ ^[A-Za-z0-9][A-Za-z0-9.+-]*$ ]] || die "${allowlist_name}:${lineno}: ${a_id:-an empty field} is not a license identifier"
+  case "${a_list}" in release|review) ;; *) die "${allowlist_name}:${lineno}: the list must be release or review, not '${a_list}'" ;; esac
+  [ -n "${a_note}" ] || die "${allowlist_name}:${lineno}: the note is empty"
+  case "${seen_ids}" in *" ${a_id} "*) die "${allowlist_name}:${lineno}: ${a_id} is listed twice" ;; esac
+  seen_ids="${seen_ids}${a_id} "
+  if [ "${a_list}" = release ]; then ALLOWED="${ALLOWED:+${ALLOWED}|}$(printf '%s' "${a_id}" | sed -e 's/[.+]/\\&/g')"; fi
+done < "${ALLOWLIST}"
+[ -n "${ALLOWED}" ] || die "${allowlist_name} has no entry of the list release"
+ALLOWED="^(${ALLOWED})\$"
 
 # Documented exceptions: ci/license-overrides.txt ("<package path prefix>|<license go-licenses reports>|<license to declare>|
 # <license file>|<scope>|<reason>", shared with scripts/gen-third-party-notices.sh). An exception is a prefix match plus the

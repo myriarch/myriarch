@@ -38,6 +38,7 @@ path = [
   "**/build-requirements.in",
   "scripts/check-language.exclude",
   "hack/kind/git/sshd_config",
+  "ci/license-allowlist.txt",
   "ci/license-overrides.txt",
   "ci/vulncheck-allowlist.txt",
   "ci/workflow-permissions.txt",
