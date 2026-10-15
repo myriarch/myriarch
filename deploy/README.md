@@ -30,15 +30,25 @@ neither deb/rpm nor the contrib MSI (both start a service of their own immediate
 
 ### Linux (systemd)
 
+Run the script from the verified, unpacked release archive, in a root shell (`sudo -i`) and in a directory that only root can
+read and write. [Connect a host](../docs/tasks/connect-a-host.md) has the steps before the call: create the token (step 1),
+download and check the archive in that directory (step 2) and put the token into the file `enrollment-token` (step 4).
+`--verifier` takes `cosign` 3.0.4 or newer at a place that only root can replace (`/usr/local/bin` is one), or the
+`myriarch-updater` of the verified archive. The call, with the updater taken from a mirror, and the removal of the token file
+afterwards:
+
 ```bash
-sudo ./deploy/scripts/install-linux.sh \
+./deploy/scripts/install-linux.sh \
   --opamp-endpoint wss://fleet.example.com/v1/opamp \
-  --token myre_xxx \
+  --token-file ./enrollment-token \
   --site-type hq --site-id HQ1 --site-name "Headquarters" --site-country DE --site-timezone Europe/Berlin \
   --collector-version 0.162.0 \
+  --verifier /usr/local/bin/cosign \
   --with-updater --updater-url https://mirror.example.com/myriarch-releases/v<ver>/myriarch-updater_<ver>_linux_amd64 \
   --updater-checksums-url https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt \
   --trusted-root ./trusted_root.json
+
+rm -f enrollment-token
 ```
 
 * Collector and supervisor are **verified with SHA-256 and a Sigstore bundle** (`<asset>.sha256`,
@@ -79,17 +89,32 @@ sudo ./deploy/scripts/install-linux.sh \
 
 ### Windows
 
+Run the script from the verified, unpacked release archive, in an elevated Windows PowerShell. The setup folder is the one of
+[Connect a host](../docs/tasks/connect-a-host.md#2-download-and-verify-the-installer), which only SYSTEM and the administrators
+can read and write: it holds the unpacked archive (`package`) and the token file `enrollment-token.txt` (step 5 of the
+guide creates it). The verifier is `cosign.exe` 3.0.4 or newer in a folder that only administrators can write, or the
+`myriarch-updater.exe` of the verified archive. The call, with the updater taken from a mirror, and the removal of the token
+file afterwards:
+
 ```powershell
-.\deploy\scripts\install-windows.ps1 -OpampEndpoint wss://fleet.example.com/v1/opamp -Token myre_xxx `
+$Setup    = 'C:\Program Files\myriarch-setup'        # the setup folder of the guide
+$Verifier = 'C:\Program Files\cosign\cosign.exe'     # or "$Setup\package\myriarch-updater.exe"
+
+Unblock-File "$Setup\package\deploy\scripts\install-windows.ps1"        # only after the checks of the download passed
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "$Setup\package\deploy\scripts\install-windows.ps1" `
+  -OpampEndpoint wss://fleet.example.com/v1/opamp -TokenFile "$Setup\enrollment-token.txt" `
   -SiteType branch -SiteId BR042 -SiteName "Branch Hamburg" -SiteCountry DE -SiteRegion north `
   -SiteTimezone Europe/Berlin -CollectorVersion 0.162.0 -WithUpdater `
   -UpdaterUrl https://mirror.example.com/myriarch-releases/v<ver>/myriarch-updater_<ver>_windows_amd64.exe `
-  -UpdaterChecksumsUrl https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt
+  -UpdaterChecksumsUrl https://mirror.example.com/myriarch-releases/v<ver>/checksums.txt `
+  -Verifier $Verifier
+
+Remove-Item "$Setup\enrollment-token.txt"
 ```
 
-Under the default execution policy `Restricted` start the script as [`windows/README.md`](windows/README.md#start-the-installer)
-describes (`powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File ...`, an execution policy for that one process, never a
-change of the machine). Details, paths, services and troubleshooting (Event Viewer): [`windows/README.md`](windows/README.md).
+The start sets the execution policy for that one PowerShell process, never for the machine; why, and what to avoid, is in
+[`windows/README.md`](windows/README.md#start-the-installer). Details, paths, services and troubleshooting (Event Viewer):
+[`windows/README.md`](windows/README.md).
 
 The supervisor runs as the virtual service account `NT SERVICE\otelcol-supervisor` (not LocalSystem), only the
 `myriarch-updater` runs as SYSTEM. Directories under `C:\ProgramData\Myriarch` are never taken over (foreign owner or

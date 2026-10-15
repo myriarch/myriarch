@@ -119,12 +119,18 @@ verifier from `-Verifier` (in a directory that only Administrators can write), a
 only from a directory that only Administrators can write); the updater that it downloads in the same run is never the
 verifier of the `checksums.txt` that carries its own hash. It creates its working directory with a protected DACL, hashes verified files again after they
 were copied, and copies a `-CaFile` bundle to `C:\ProgramData\Myriarch\config\ca.pem`. Collector secrets (for example
-`OTEL_GATEWAY_TOKEN`) are set with [`Set-ServiceEnvironment.ps1`](Set-ServiceEnvironment.ps1):
+`OTEL_GATEWAY_TOKEN`) are set with [`Set-ServiceEnvironment.ps1`](Set-ServiceEnvironment.ps1). Start it like the installer
+([Start the installer](#start-the-installer)), in the unpacked archive. `-EnvFile` reads one `NAME=VALUE` per line, which keeps
+the secrets out of the process logs and the command history. Write that file into the setup folder of
+[Start the installer](#start-the-installer) (step 1 creates it, and only SYSTEM and the administrators can read it) and delete it
+afterwards:
 
 ```powershell
-.\Set-ServiceEnvironment.ps1 -EnvFile C:\Temp\secrets.env   # NAME=VALUE per line, delete the file afterwards (keeps secrets out of process logs)
-.\Set-ServiceEnvironment.ps1 -Set @{ OTEL_GATEWAY_TOKEN = '...' }
-.\Set-ServiceEnvironment.ps1 -List        # names only
+Unblock-File .\deploy\windows\Set-ServiceEnvironment.ps1        # only after the checks of the download passed
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\deploy\windows\Set-ServiceEnvironment.ps1 `
+  -EnvFile 'C:\Program Files\myriarch-setup\secrets.env'
+Remove-Item 'C:\Program Files\myriarch-setup\secrets.env'
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\deploy\windows\Set-ServiceEnvironment.ps1 -List     # names only
 ```
 
 Crash or power loss during an update: when the service starts, the updater compares the active binary with the
