@@ -239,7 +239,9 @@ sweeper, housekeeping and the periodic gauges. Everything else runs on every rep
 
 - Tokens. API tokens start with `myra_`, enrollment tokens with `myre_` and download tokens with `myrd_`. A token is 32
   random base62 characters; only the SHA-256 is stored, together with a display prefix. Lookups are by hash. Tokens can
-  be revoked or expire, and a token created by another token is capped by the creator's role and expiry.
+  be revoked or expire, and a token created by another token is capped by the creator's role and expiry. A download token
+  is signed, not stored, and comes in two kinds: the token of a package offer (bound to one updater and one artifact) and,
+  from v0.2.0, the install grant of a host that is not enrolled yet ([Artifact cache](#artifact-cache)).
 - Browser sessions are server side. The cookie holds 32 random bytes and the database key is their SHA-256. The cookie is
   `HttpOnly`, `SameSite=Lax` and `Secure` by configuration. A session has a sliding idle timeout (default 2 hours) and
   an absolute lifetime (default 12 hours), after which identity provider changes take effect.
@@ -269,6 +271,11 @@ sweeper, housekeeping and the periodic gauges. Everything else runs on every rep
   `opamp.requireEnrollmentToken` a token is mandatory. With `opamp.requireClientCert` a verified client certificate is
   mandatory too (token and certificate both). A certificate is either verified by myriarchd's own TLS or forwarded in a
   configured header by a trusted proxy and verified against the client CA.
+- Install routes. The plan for installing a host from the server and its downloads need a valid enrollment token,
+  always: also where `opamp.requireEnrollmentToken` is off ([Installation from the server](#installation-from-the-server)).
+  The rules of the OpAMP endpoint apply, including the client certificate rule, the token cache and the bound on lookups.
+  Failed authentications on these routes are limited per client address as well, because the routes can be reached by
+  anyone and share the lookup bound with the OpAMP endpoint.
 - Credential binding. An instance UID is bound to the enrollment token (or certificate subject) it first registered
   with. A connection that presents another credential for that UID is rejected, an `identity_conflict` event and an
   audit entry are written, and an administrator re-enrolls the agent. Optionally an agent whose bound token was revoked
@@ -768,6 +775,24 @@ The executor interface has `Validate` (environment dependent), `Start` (per wave
 - Download endpoint (`downloadArtifact`): verifies the token (signature, artifact ID, and that the agent currently has an
   offer referencing this artifact; age only when a TTL is set). A replica that lacks the file fetches it from the source
   and checks it against the stored SHA-256. It serves ranges with `Content-Type: application/gzip`.
+- Install grants (from v0.2.0). The endpoint also accepts the second kind of `myrd_` token, the install grant of a host
+  that is not enrolled yet. The signed payload holds the artifact ID, the ID of the enrollment token that the host
+  presented to get its plan, the time and the kind `i` (the token of an offer has no kind, and the kind is part of what is
+  signed, so neither can be turned into the other; an unknown kind or a grant without an enrollment token is refused). A
+  grant is accepted while it is younger than `install.grantTtl` and only while its enrollment token exists and is neither
+  revoked nor expired; the token is read from the database on every request, so a revocation applies at once on every
+  replica, and a token that is gone, revoked or expired looks the same. It needs no package offer. Besides the artifact it
+  gets `<filename>.sha256` (`<hex>  <filename>`, like `sha256sum`) and `<filename>.sigstore.json` from the record, the files
+  that the installer checks the artifact with; the token of an offer gets neither. A grant is issued, and a file is served,
+  only for an artifact that is `ready`, has a pinned SHA-256 and, where signatures are required, a verified bundle. The log
+  names the token of a grant by its ID, never the grant.
+- Preparation without waiting (`Prepare`). The install plan needs an artifact now and cannot wait for a download of
+  100 MB. `Prepare` returns a ready artifact, and otherwise starts `Ensure` in the background (once per replica however
+  many callers ask) and reports that it is pending. A record in the status `downloading` that changed within ten minutes
+  belongs to another replica or to the prefetch of the leader and is not started again; an older one belongs to a replica that
+  is gone and is taken over. A failed record is tried again after a minute, and until then `Prepare` reports the failure, so
+  a host that asks every few seconds cannot make the server request an upstream release in a loop. `Ensure` also fetches a
+  record that claims to be ready but has no pinned hash or no verified bundle again, instead of returning it.
 - Prefetch on the leader every 10 minutes: for each fleet with executor `updater` and a target, fetch the platforms of
   the members plus `prefetchPlatforms`, then evict least recently used artifacts until the size cap is met. Target
   versions of fleets are never evicted.
@@ -853,3 +878,83 @@ scripts replace (no Go templating, so `${env:...}` stays untouched). Required co
   hardening options. Windows assets are `.tar.gz` too and unpack with the built-in `tar`.
 - The supervisor reads `agent.executable` at start and detects version and components during bootstrap. After a binary
   change the supervisor service is restarted.
+
+### Installation from the server
+
+*Available from v0.2.0.* [ADR-0046](../adr/0046-host-installation-from-the-server.md) decides it: the server provides data
+(versions, artifacts, the endpoint) and the host verifies code (SHA-256 and Sigstore, against an identity that the
+installer builds itself, never one that the server names). Hosts download from `myriarchd` only. The settings are
+`install.enabled` (default true; off, every route of the tag `install` answers 404 before it looks at a token),
+`install.grantTtl`, `install.bundleSourceBaseUrl` and `install.platforms` (`linux/amd64`, `linux/arm64` and
+`windows/amd64`); see the [configuration reference](../reference/configuration.md#install).
+
+**Authentication.** A request needs a valid enrollment token, always: `Authorization: Bearer myre_...`, also where
+`opamp.requireEnrollmentToken` is off. The token authenticates the request and binds the grants; it is never part of a
+body, a URL, an answer, a log line, a metric label or an audit entry (the log names it by its ID). Unknown, revoked, expired
+and missing tokens get the same 401. The rules are those of the OpAMP endpoint (see [Authentication and
+authorization](#authentication-and-authorization)); in addition 30 failed authentications per client address are free,
+then one more is allowed per second, and an address without budget gets 429 before any lookup happens.
+
+**The plan.** `POST /api/v1/install/plan` (`getInstallPlan`; a body of at most 16 KiB that holds no secret). The request
+names the platform (`os` `linux` or `windows`, `arch` `amd64` or `arm64`; `x86_64` and `aarch64` are accepted), the
+`attributes` the host would report, an optional `fleet` and an optional `collectorVersion`. The attributes may be
+`host.name`, `site.type`, `site.id`, `site.name`, `site.country`, `site.region`, `site.timezone` and
+`deployment.environment.name`, with values of 1 to 253 characters without control characters or surrounding spaces;
+`os.type` and `host.arch` come from the platform and the labels from the token. The server checks all of this against
+allowlists first (422, one issue per problem) and decides, in this order:
+
+1. **The fleet.** `assignment.Service.Match`, the function that assigns a connected agent, with the attributes, the
+   platform and the `labels.*` of the token. No fleet: 409 `no_fleet`. Several fleets of the same highest priority: 409
+   `fleet_ambiguous`. A `fleet` in the request that is another than the one found: 409 `fleet_mismatch`; nothing is
+   delivered. A fleet that selects on other attributes than the ones above cannot be found. A distribution other than
+   `otelcol-contrib`: 412 `unsupported_distribution`.
+2. **The version** (below).
+3. **The releases.** The release tracker must know the release of the collector and the release of the supervisor for the
+   version (the supervisor has the version of the collector). Otherwise 412 `unknown_version` or
+   `unknown_supervisor_version`; for a version that the host asked for, 422 with the same codes.
+4. **The artifacts.** `Prepare` starts both downloads at once. Until both are ready the answer is 503 with the reason
+   `preparing` and `Retry-After` (10 seconds; 30 after a failed attempt). The first request for a platform downloads about
+   112 MB, so this can last minutes. Nothing is started for a request that failed one of the steps before.
+
+**The version.** The plan gives the effective target of the fleet (`version.source` is `git` or `ui`; see
+[Version selection](version-selection.md)). A fleet on hold or without a target: 412 `no_target_version`. While a version
+rollout of the fleet is `pending`, `running` or `waiting_approval`, it gives the `fromRef` of that rollout instead
+(`version.source` is `rollout`), so that the new host becomes a straggler of the last wave and waves and approvals apply to
+new hosts as well; a rollout that is `paused`, `failed` or `rolling_back`, or whose hosts start from different versions
+(no uniform `fromRef`), is 409 `rollout_blocking`. A `collectorVersion` of the request is accepted if it equals the version
+the plan would give, the target of the fleet or a version inside the frame `spec.update.selection` in Git (`version.source`
+is then `request`); otherwise 422 `version_not_allowed`. The reads are ordered so that a concurrent change cannot send a
+host past the waves: the target comes from the memory of the assignment service, which follows the database and never
+runs ahead of it, and the rollouts are read after it. A rollout that the leader creates for a new target in between is then
+seen with the `fromRef` that belongs to the previous target; "new target, no rollout yet" cannot arise.
+
+**The answer.** A plan of format 1 with the OpAMP endpoint (`wss://` for an https public URL, plus `opamp.path`), the fleet,
+the source of the version, the version, the URL of the artifact on the origin of `server.publicUrl` and an install grant for
+each of collector and supervisor, and `updater.install` (true when the executor of the fleet is `updater`). It is
+`text/plain` by default, with `Vary: Accept`, and JSON with `Accept: application/json`. The text is one `key=value` line per
+key, in this order: `format`, `fleet`, `version.source`, `opamp.endpoint`, `collector.version`, `collector.url`,
+`collector.grant`, `supervisor.version`, `supervisor.url`, `supervisor.grant`, `updater.install`. A value consists of the
+characters `A-Z a-z 0-9 . _ : / @ + = -` and nothing else; the three URL values may also contain the brackets of an IPv6 literal in
+the authority (`wss://[2001:db8::1]:8443/v1/opamp`); there are at most 64 lines and 8 KiB; lines end in `\n`; a reader accepts
+only these keys, each once, with `format` first, and stops at a format that it does not know. The server writes nothing that
+breaks the rules (a `server.publicUrl` with another character is a 412 `server_settings`), and `install.ParseText` is the
+reference reader with the rules that the installers implement. The plan is data: the installer takes the values as they are,
+checks each against a pattern and runs nothing that it contains. The URLs of `artifacts.agentBaseUrls` do not apply to a host
+that is not enrolled.
+
+| Status | `code` | Reason (`issues[0].code`) |
+|---|---|---|
+| 400 | `bad_request` | invalid JSON, an unknown field, a body above 16 KiB (415 for another content type) |
+| 401 | `unauthorized` | none: the same answer for every token problem |
+| 404 | `not_found` | `install.enabled` is off |
+| 409 | `conflict` | `fleet_mismatch`, `no_fleet`, `fleet_ambiguous`, `rollout_blocking` |
+| 412 | `precondition_failed` | `no_target_version`, `unsupported_distribution`, `unknown_version`, `unknown_supervisor_version`, `server_settings` |
+| 422 | `validation_failed` | `invalid_value`, `unknown_attribute`, `platform_not_supported`, `version_not_allowed`, `unknown_version`, `unknown_supervisor_version` |
+| 429 | `too_many_requests` | none; `Retry-After` |
+| 503 | `unavailable` | `preparing` (with `Retry-After`), or none for a database failure |
+
+**Observability.** `myriarch_install_plans_total{result}` counts the requests (`ok`, `disabled`, `unauthorized`,
+`rate_limited`, `bad_request`, `invalid_request`, `unavailable`, `error`, or the reason of a refusal such as `fleet_mismatch`
+or `preparing`). A plan that is issued is logged at info level with the ID of the token, the fleet, the platform and the
+version; it is not an audit entry, because it is a call of a host with its token and changes no configuration (the
+creation of the token is audited).
