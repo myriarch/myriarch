@@ -419,6 +419,31 @@ func TestEvictRespectsLimitAndLRU(t *testing.T) {
 	assert.NoError(t, errB)
 }
 
+// The installer bundles live in the directory install of the cache directory: the eviction neither counts nor removes
+// them, however old they are, and the artifacts around them are evicted as before.
+func TestEvictLeavesTheInstallerBundlesAlone(t *testing.T) {
+	f := newFixture(t, func(cfg *config.ArtifactsConfig) { cfg.MaxCacheBytes = 2500 })
+	mk := func(rel string, size int, age time.Duration) string {
+		p := filepath.Join(f.dir, filepath.FromSlash(rel))
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, make([]byte, size), 0o644))
+		ts := time.Now().Add(-age)
+		require.NoError(t, os.Chtimes(p, ts, ts))
+		return p
+	}
+	bundle := mk(InstallDir+"/sha256/"+strings.Repeat("a", 64), 100000, 100*time.Hour)
+	tmp := mk(InstallDir+"/.tmp/dl-1", 100000, 100*time.Hour)
+	a := mk("otelcol-contrib/0.1.0/otelcol-contrib_0.1.0_linux_amd64.tar.gz", 1000, 3*time.Hour)
+	b := mk("otelcol-contrib/0.2.0/otelcol-contrib_0.2.0_linux_amd64.tar.gz", 1000, 2*time.Hour)
+	c := mk("otelcol-contrib/0.3.0/otelcol-contrib_0.3.0_linux_amd64.tar.gz", 1000, time.Hour)
+	require.NoError(t, f.cache.Evict(context.Background(), nil))
+	assert.FileExists(t, bundle, "a bundle is not an artifact: it is not counted and not evicted")
+	assert.FileExists(t, tmp)
+	assert.NoFileExists(t, a, "the artifacts are evicted as before")
+	assert.FileExists(t, b)
+	assert.FileExists(t, c)
+}
+
 func TestStartPrefetchAndDelete(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

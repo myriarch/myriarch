@@ -32,6 +32,7 @@ import (
 	"github.com/myriarch/myriarch/internal/brand"
 	"github.com/myriarch/myriarch/internal/config"
 	"github.com/myriarch/myriarch/internal/domain"
+	"github.com/myriarch/myriarch/internal/netguard"
 )
 
 // ------------------------------------------------------------------- fixtures ----
@@ -1335,4 +1336,60 @@ func TestBundlesRunStopsAPreparationWithTheServer(t *testing.T) {
 		assert.NotEqual(t, BundleReady, it.Status)
 	}
 	assert.Empty(t, e.tmpFiles())
+}
+
+// The source is a connection of the server like every other: the destination policy checks the address, so a source on
+// a network that the policy denies (here the loopback address of the test server) is not contacted at all, and the
+// operator opens it with outbound.allowedCidrs.
+func TestBundlesGoThroughTheOutboundPolicy(t *testing.T) {
+	policy, err := netguard.New(nil)
+	require.NoError(t, err)
+	e := newBundlesEnv(t, func(e *bundlesEnv, d *BundleDeps) {
+		d.HTTPClient, d.Policy = policy.Client(time.Minute), policy
+	})
+	e.prepare()
+	for _, it := range e.b.State().Items {
+		assert.Equal(t, BundleFailed, it.Status)
+		assert.Contains(t, it.Error, "not allowed by the outbound policy", "the policy names the reason: "+it.Error)
+	}
+	assert.Zero(t, e.src.total(), "the connection was refused before a byte was sent")
+	assert.Zero(t, e.ver.count())
+
+	opened, err := netguard.New([]string{"127.0.0.0/8"})
+	require.NoError(t, err)
+	e2 := newBundlesEnv(t, func(e *bundlesEnv, d *BundleDeps) {
+		d.HTTPClient, d.Policy = opened.Client(time.Minute), opened
+	})
+	e2.prepare()
+	for _, it := range e2.b.State().Items {
+		assert.Equal(t, BundleReady, it.Status, it.Error)
+	}
+}
+
+// A proxy of artifacts.proxyUrl carries the requests of the source, and a setting that is no proxy is refused at the
+// start.
+func TestBundlesUseTheProxyOfTheArtifacts(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.URL.String())
+		mu.Unlock()
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(proxy.Close)
+	e := newBundlesEnv(t, func(e *bundlesEnv, d *BundleDeps) {
+		d.HTTPClient = nil
+		d.ProxyURL = proxy.URL
+		d.BaseURL = "http://source.example.test/releases"
+	})
+	e.prepare()
+	mu.Lock()
+	defer mu.Unlock()
+	require.NotEmpty(t, seen, "the request went to the proxy")
+	assert.Equal(t, "http://source.example.test/releases/v0.2.0/checksums.txt", seen[0])
+	assert.Zero(t, e.src.total())
+	for _, it := range e.b.State().Items {
+		assert.Equal(t, BundleFailed, it.Status)
+	}
 }

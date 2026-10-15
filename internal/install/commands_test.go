@@ -431,10 +431,10 @@ func TestCommandsAcceptAnIPv6ServerAndAPrefix(t *testing.T) {
 
 func TestCommandsAcceptTheTextOfRealSites(t *testing.T) {
 	e := newCommandsEnv(t)
-	for _, name := range []string{"Data center 1", "Edge site 42 (north)", "Stockholm, SE", "Plant #3 / hall B", "R&D" /* refused below */, "Zürich"} {
+	for _, name := range []string{"Data center 1", "Edge site 42 (north)", "Stockholm, SE", "Plant #3 / hall B", "R&D" /* refused below */, "Z\u00fcrich"} {
 		_, err := e.render(site(func(r *CommandsRequest) { r.Attributes["site.name"] = name }))
 		switch name {
-		case "R&D", "Zürich":
+		case "R&D", "Z\u00fcrich":
 			require.Error(t, err, name)
 		default:
 			require.NoError(t, err, name)
