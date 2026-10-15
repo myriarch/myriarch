@@ -103,7 +103,7 @@ jobs:
         uses: ./.github/actions/setup
         with:
           node: 'true'
-          tools: kind kubectl helm crane yq
+          tools: kind kubectl helm crane yq cosign
       - name: Describe the runner
         run: |
           docker version --format '{{.Server.Version}} {{.Server.Os}}/{{.Server.Arch}}'

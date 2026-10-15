@@ -41,8 +41,9 @@ stage_0() {
   local p busy=""
   for p in "${PROBE_PORT_API}" "${PROBE_PORT_DEXAPI}" "${PROBE_PORT_DEX}"; do port_free "${p}" || busy="${busy} ${p}"; done
   if [ -z "${busy}" ]; then pass "local ports free" "${PROBE_PORT_API} ${PROBE_PORT_DEXAPI} ${PROBE_PORT_DEX}"; else fatal "local ports free" "in use:${busy} (PROBE_PORT_API, PROBE_PORT_DEXAPI, PROBE_PORT_DEX)"; fi
-  if "${ROOT}/ci/install-tools.sh" kind kubectl helm crane yq >"${PROBE_WORK}/logs/tools.log" 2>&1; then
-    pass "pinned tools installed" "kind $(kind version | awk '{print $2}'), kubectl $(kubectl version --client -o json | jq -r .clientVersion.gitVersion), helm $(helm version --short), crane $(crane version)"
+  # cosign: the image build checks the upstream collector images against the signed release artifacts (stage 2.1)
+  if "${ROOT}/ci/install-tools.sh" kind kubectl helm crane yq cosign >"${PROBE_WORK}/logs/tools.log" 2>&1; then
+    pass "pinned tools installed" "kind $(kind version | awk '{print $2}'), kubectl $(kubectl version --client -o json | jq -r .clientVersion.gitVersion), helm $(helm version --short), crane $(crane version), cosign $(cosign version --json 2>/dev/null | jq -r .gitVersion)"
   else fatal "pinned tools installed" "see ${PROBE_WORK}/logs/tools.log"; fi
   if make -C "${ROOT}" build >"${PROBE_WORK}/logs/make-build.log" 2>&1; then pass "make build" "bin/myriarchd bin/myriarch-updater bin/myrctl bin/myriarch-sim"; else fatal "make build" "see ${PROBE_WORK}/logs/make-build.log"; fi
   local head dirty=""
