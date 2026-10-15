@@ -372,6 +372,10 @@ that starts with the value path, followed by what is wrong and how to fix it, fo
 | `config.opamp.enrollmentTokens` | set in `config`; use the top-level `enrollmentTokens` values |
 | `config.auth.devLogin` | not available in this chart |
 | `config.dev` | not available in this chart |
+| `config.database.dsn` | set in `config` (the ConfigMap would hold the password); put the DSN into the Secret and use `config.database.dsnFile` |
+| `config.auth.oidc.clientSecret` | set in `config`; put it into the Secret and use `config.auth.oidc.clientSecretFile` |
+| `config.gitops.webhookSecret` | set in `config`; put it into the Secret and use `config.gitops.webhookSecretFile` |
+| `config.notifications.channels[<i>].url` | set in `config`; put the URL into the Secret and set `urlFile` |
 | `bootstrapAdmin.enabled` | no login path: `bootstrapAdmin.enabled` is `false` while neither `config.auth.oidc.enabled` nor `oidcFromEnvironment` is `true` |
 | `bootstrapAdmin.tokenKey` | `existingSecret` set without `tokenKey` and `passwordHashKey` |
 | `bootstrapAdmin.passwordHashKey` | set without `existingSecret` |
