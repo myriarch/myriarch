@@ -71,11 +71,18 @@ func TestChartValuesSchema(t *testing.T) {
 	}
 }
 
-// chartConfigLeaves returns the dotted path and the schema of every property below the config block of the generated schema.
+// chartConfigLeaves returns the dotted path and the schema of every property below the config block of the production schema.
 func chartConfigLeaves(t *testing.T) map[string]map[string]any {
 	t.Helper()
 	page, err := RenderChartValuesSchema(productionChartSchemaSource(t))
 	require.NoError(t, err)
+	return chartLeavesOf(t, page)
+}
+
+// chartLeavesOf returns the dotted path and the schema of every property below the config block of a generated schema. A list of
+// entries contributes path[] for the entries and a map path.<name>.
+func chartLeavesOf(t *testing.T, page []byte) map[string]map[string]any {
+	t.Helper()
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(page, &doc))
 	cfg := doc["properties"].(map[string]any)["config"].(map[string]any)
@@ -104,35 +111,101 @@ func chartConfigLeaves(t *testing.T) map[string]map[string]any {
 	return out
 }
 
-// TestChartSchemaOffersNoSecret is the control that keeps secrets out of the values: no property of the config block is one of the
-// keys that the loader redacts, and no string setting that names a token, a secret, a password or a DSN holds anything but a path
-// (a file, a directory) or a prefix. A new setting of that kind has to be excluded, or written as a file setting, on purpose.
-func TestChartSchemaOffersNoSecret(t *testing.T) {
-	leaves := chartConfigLeaves(t)
-	require.Greater(t, len(leaves), 150, "the config block looks incomplete")
-	secretWords := []string{"token", "secret", "password", "dsn"}
-	var offending []string
+// chartSecretWords are the words that make the name of a setting the name of a secret. A name is matched in lower case, anywhere in
+// it. The list errs on the side of too many: a setting that has one of them in its name and holds no secret says so in
+// chartSecretNamedSettings.
+var chartSecretWords = []string{"token", "secret", "password", "dsn", "key", "credential", "passphrase", "bearer"}
+
+// chartPathSuffixes end the name of a setting that holds a path or a prefix and not the secret: it says where a secret is.
+var chartPathSuffixes = []string{"File", "Dir", "Prefix"}
+
+// chartSecretNamedSettings are the settings whose names contain a word of chartSecretWords although they hold no secret, by path,
+// with the reason. They are listed one by one, not by a part of the name, so a new setting is never exempt because of its name.
+var chartSecretNamedSettings = map[string]string{
+	"executors.secretEnvHosts":  "the destinations that an environment variable of an executor may be sent to",
+	"executors.secretFileHosts": "the destinations that a secret file of an executor may be sent to",
+}
+
+// chartSchemaType returns the type name of a node of the config block, which has exactly one.
+func chartSchemaType(node map[string]any) string {
+	t, _ := node["type"].(string)
+	return t
+}
+
+// chartHoldsText reports whether a setting can hold text that might be a secret: a string that is not a time span, a list of
+// strings, or a map of strings or of lists of strings. A list or a map of structures holds text only in its own settings, which the
+// check looks at one by one.
+func chartHoldsText(node map[string]any) bool {
+	switch chartSchemaType(node) {
+	case "string":
+		return node["pattern"] != durationPattern
+	case "array":
+		items, _ := node["items"].(map[string]any)
+		return items != nil && chartHoldsText(items)
+	case "object":
+		values, _ := node["additionalProperties"].(map[string]any)
+		return values != nil && chartHoldsText(values)
+	}
+	return false
+}
+
+// chartSecretWord returns the first word of chartSecretWords in the name of a setting, or "".
+func chartSecretWord(key string) string {
+	lower := strings.ToLower(key)
+	for _, w := range chartSecretWords {
+		if strings.Contains(lower, w) {
+			return w
+		}
+	}
+	return ""
+}
+
+// chartSecretFindings returns one line for every setting of the leaves (see chartLeavesOf) that offers a secret as a value, sorted: a
+// key that the loader redacts, whatever its shape, and every setting that can hold text and has a secret word in its name unless it
+// is a path or a prefix or is listed in chartSecretNamedSettings.
+func chartSecretFindings(leaves map[string]map[string]any) []string {
+	var findings []string
+leaves:
 	for path, node := range leaves {
 		key := path[strings.LastIndexAny(path, ".]")+1:]
 		if configload.IsSecretKey(key) {
-			offending = append(offending, path+" (a key that the loader redacts)")
+			findings = append(findings, path+" (a key that the loader redacts)")
 			continue
 		}
-		if node["type"] != "string" {
+		if _, listed := chartSecretNamedSettings[path]; listed || !chartHoldsText(node) {
 			continue
 		}
-		if node["pattern"] == durationPattern {
-			continue // a time span, such as downloadTokenTtl, holds no token
-		}
-		lower := strings.ToLower(key)
-		for _, w := range secretWords {
-			if strings.Contains(lower, w) && !strings.HasSuffix(key, "File") && !strings.HasSuffix(key, "Dir") && !strings.HasSuffix(key, "Prefix") {
-				offending = append(offending, path+" (a string that names a "+w+" but is neither a file nor a directory nor a prefix)")
+		for _, suffix := range chartPathSuffixes {
+			if strings.HasSuffix(key, suffix) {
+				continue leaves
 			}
 		}
+		if w := chartSecretWord(key); w != "" {
+			findings = append(findings, path+" (can hold text and names a "+w+", but is neither a file nor a directory nor a prefix)")
+		}
 	}
-	sort.Strings(offending)
-	assert.Empty(t, offending, "the schema offers a secret as a value: exclude the key in chartConfigExclusions or use a file setting")
+	sort.Strings(findings)
+	return findings
+}
+
+// TestChartSchemaOffersNoSecret is the control that keeps secrets out of the values: no property of the config block is one of the
+// keys that the loader redacts, and no setting that can hold text (a string, a list of strings, a map of strings or of lists of
+// strings) names a token, a secret, a password, a key, a credential, a passphrase, a bearer token or a DSN, unless it holds a path (a
+// file, a directory) or a prefix. A new setting of that kind has to be excluded, or written as a file setting, on purpose; one that
+// only has such a word in its name is listed in chartSecretNamedSettings with the reason.
+func TestChartSchemaOffersNoSecret(t *testing.T) {
+	leaves := chartConfigLeaves(t)
+	require.Greater(t, len(leaves), 150, "the config block looks incomplete")
+	assert.Empty(t, chartSecretFindings(leaves), "the schema offers a secret as a value: exclude the key in chartConfigExclusions or use a file setting")
+
+	// an entry of chartSecretNamedSettings that is not needed any more is removed, so that the list does not grow into an exemption
+	for path, why := range chartSecretNamedSettings {
+		node, ok := leaves[path]
+		require.True(t, ok, "%s is listed in chartSecretNamedSettings but is not a setting of the config block: remove it", path)
+		key := path[strings.LastIndexAny(path, ".]")+1:]
+		assert.True(t, chartHoldsText(node) && chartSecretWord(key) != "", "%s is listed in chartSecretNamedSettings but would not be reported: remove it", path)
+		assert.NotEmpty(t, strings.TrimSpace(why), "%s needs a reason", path)
+	}
 
 	for _, e := range chartConfigExclusions {
 		assert.NotContains(t, leaves, e.Path, "%s is excluded", e.Path)
@@ -140,6 +213,42 @@ func TestChartSchemaOffersNoSecret(t *testing.T) {
 	for _, k := range []string{"database.dsnFile", "auth.oidc.clientSecretFile", "gitops.webhookSecretFile", "notifications.channels[].urlFile"} {
 		assert.Contains(t, leaves, k, "the file setting that replaces an excluded secret is offered")
 	}
+}
+
+// TestChartSchemaSecretCheckSeesEveryShape runs the settings of ChartLeaky and ChartHarmless through the generator and the check of
+// the secrets. A check that looked at strings only, or at a short list of words, would let a list or a map of strings named tokens,
+// passwords or credentials pass; this test fails for such a check.
+func TestChartSchemaSecretCheckSeesEveryShape(t *testing.T) {
+	findingsOf := func(root reflect.Type) []string {
+		src := chartMiniSource(readChartMiniSource(t))
+		src.Config.Root, src.Config.SourceFiles, src.Config.Excluded = root, []string{"chartschema_types_test.go"}, nil
+		page, err := RenderChartValuesSchema(src)
+		require.NoError(t, err)
+		return chartSecretFindings(chartLeavesOf(t, page))
+	}
+	paths := func(findings []string) []string {
+		out := make([]string, len(findings))
+		for i, f := range findings {
+			out[i], _, _ = strings.Cut(f, " ")
+		}
+		return out
+	}
+
+	assert.Equal(t, []string{
+		"apiKey",                   // a string, the word key
+		"byName.<name>.bearer",     // a string in a map of structures, the word bearer
+		"byName.<name>.passphrase", // the word passphrase
+		"credentials",              // a map of lists of strings, the word credential
+		"items[].bearer",           // a string in a list of structures
+		"items[].passphrase",       //
+		"nested.bearer",            // a string in a structure
+		"nested.passphrase",        //
+		"passwords",                // a map of strings, the word password
+		"tokens",                   // a list of strings, the word token
+		"url",                      // a key that the loader redacts
+	}, paths(findingsOf(reflect.TypeOf(ChartLeaky{}))))
+
+	assert.Empty(t, findingsOf(reflect.TypeOf(ChartHarmless{})), "files, directories, prefixes, time spans, numbers and switches are no secrets, and neither are names without a secret word")
 }
 
 // TestChartSchemaDescribesEverySetting: the description is the only documentation of a setting in the schema, so none is empty.

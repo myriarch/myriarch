@@ -1019,13 +1019,17 @@ The generators for the configuration, environment and metrics pages and for the 
   listed with its reason in `openObjects` of `internal/updater/deploy_chart_schema_test.go`. The keys of the configuration that the
   chart does not offer (secrets as values, the development mode, the settings that the chart generates) are excluded by path in
   `chartConfigExclusions` (`internal/refdoc/chartschema_production_test.go`); the test of `internal/updater` repeats the list on
-  purpose, and an exclusion that matches no setting fails the generation. `TestChartSchemaOffersNoSecret` fails for a string
-  setting of the configuration that names a token, secret, password or DSN and is not a file, a directory or a prefix, so a new
-  setting of that kind is excluded or written as a file setting deliberately. `deploy_chart_schema_test.go` checks the schema
-  without Helm (its stand-in validator implements the keywords the schema uses and reports any other) for strictness, coverage of
-  `values.yaml` and of the values the templates read, the match of the block with `internal/config`, the shipped example values
-  and a table of refused values; `ci/tests/helm-messages-test.sh` checks it with the real Helm. Helm reads YAML 1.1, in which the
-  plain words `y`, `n`, `yes`, `no`, `on` and `off` are booleans: quote them in example and test values.
+  purpose, and an exclusion that matches no setting fails the generation. `TestChartSchemaOffersNoSecret` fails for a setting of
+  the configuration that can hold text (a string, a list of strings, a map of strings or of lists of strings) and names a token,
+  secret, password, key, credential, passphrase, bearer token or DSN, unless it is a file, a directory or a prefix, so a new setting of
+  that kind is excluded or written as a file setting deliberately; a setting that only has such a word in its name
+  (`executors.secretEnvHosts`) is listed in `chartSecretNamedSettings` with the reason. `TestChartSchemaSecretCheckSeesEveryShape`
+  runs a setting of every shape through the generator and the check, so a check that looks at strings only fails.
+  `deploy_chart_schema_test.go` checks the schema without Helm (its stand-in validator implements the keywords the schema uses and
+  reports any other) for strictness, coverage of `values.yaml` and of the values the templates read, the match of the block with
+  `internal/config`, the shipped example values and a table of refused values; `ci/tests/helm-messages-test.sh` checks it with the
+  real Helm. Helm reads YAML 1.1, in which the plain words `y`, `n`, `yes`, `no`, `on` and `off` are booleans: quote them in example
+  and test values.
 
 The API generator renders a deliberately small subset of OpenAPI: the keywords type, format, enum, default, example, description,
 properties, required, items, additionalProperties, the numeric, length and item limits, uniqueItems, pattern, `$ref` to

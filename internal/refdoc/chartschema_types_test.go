@@ -61,3 +61,64 @@ type ChartBadNested struct {
 	// Inner is a structure.
 	Inner ChartBadSlice `yaml:"inner"`
 }
+
+// ChartLeaky has a setting of every shape that can hold text, each named like a secret, and the same inside a structure, a list of
+// structures and a map of structures. TestChartSchemaSecretCheckSeesEveryShape expects the check of TestChartSchemaOffersNoSecret
+// to report every one of them.
+type ChartLeaky struct {
+	// APIKey is a string.
+	APIKey string `yaml:"apiKey"`
+	// Tokens is a list of strings.
+	Tokens []string `yaml:"tokens"`
+	// Passwords maps names to strings.
+	Passwords map[string]string `yaml:"passwords"`
+	// Credentials maps names to lists of strings.
+	Credentials map[string][]string `yaml:"credentials"`
+	// URL is a string with a key that the loader redacts.
+	URL string `yaml:"url"`
+	// Nested is a structure.
+	Nested ChartLeakySecrets `yaml:"nested"`
+	// Items is a list of structures.
+	Items []ChartLeakySecrets `yaml:"items"`
+	// ByName maps names to structures.
+	ByName map[string]ChartLeakySecrets `yaml:"byName"`
+}
+
+// ChartLeakySecrets has two strings that are named like secrets.
+type ChartLeakySecrets struct {
+	// Passphrase is a string.
+	Passphrase string `yaml:"passphrase"`
+	// Bearer is a string.
+	Bearer string `yaml:"bearer"`
+}
+
+// ChartHarmless has settings that the check of the secrets must not report: names that mention a secret but hold a path, a
+// directory, a prefix or a time span, and settings that are not text.
+type ChartHarmless struct {
+	// TokenFile is the path of a file.
+	TokenFile string `yaml:"tokenFile"`
+	// KeyDir is a directory.
+	KeyDir string `yaml:"keyDir"`
+	// SecretPrefix is a prefix.
+	SecretPrefix string `yaml:"secretPrefix"`
+	// TokenTTL is a time span.
+	TokenTTL time.Duration `yaml:"tokenTtl"`
+	// LockKey is a number.
+	LockKey int `yaml:"lockKey"`
+	// RequireToken is a switch.
+	RequireToken bool `yaml:"requireToken"`
+	// Hosts is a list of strings with an unsuspicious name.
+	Hosts []string `yaml:"hosts"`
+	// Labels maps names to strings with an unsuspicious name.
+	Labels map[string]string `yaml:"labels"`
+	// Secrets maps names to structures whose strings are unsuspicious.
+	Secrets map[string]ChartHarmlessEntry `yaml:"secrets"`
+}
+
+// ChartHarmlessEntry is an entry of the map of ChartHarmless.
+type ChartHarmlessEntry struct {
+	// Env is a string with an unsuspicious name.
+	Env string `yaml:"env"`
+	// AllowedHosts is a list of strings with an unsuspicious name.
+	AllowedHosts []string `yaml:"allowedHosts"`
+}
