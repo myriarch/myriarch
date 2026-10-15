@@ -47,7 +47,9 @@
   SYSTEM/Administrators or is a reparse point, the installation aborts; otherwise the ACL of the whole tree is
   reset and verified.
 
-  Do NOT use the contrib MSI: it installs a service of its own, "otelcol-contrib", which starts immediately.
+  Do NOT use the contrib MSI: it installs a service of its own, "otelcol-contrib", which starts immediately. The supervisor
+  MSI installs a service "opampsupervisor". When one of these services exists the installer stops with conflicting_install
+  before it stops a service, downloads or writes anything, names the service and removes nothing.
   The supervisor storage directory (C:\ProgramData\Myriarch\supervisor) is only created empty:
   persistent_state.yaml holds the instance UID - golden images must empty it before cloning.
 
@@ -133,7 +135,7 @@ $script:MinCosignVersion = [Version]'3.0.4'
 # The full catalog with the shared codes (usage_error, option_missing, option_invalid, option_conflict,
 # updater_hash_source_missing, insecure_required, https_required, file_unreadable, tool_missing,
 # sigstore_verifier_missing, sigstore_verifier_outdated, option_removed, privilege_required,
-# unsupported_platform, download_failed, template_missing, template_placeholder, checksum_invalid,
+# unsupported_platform, conflicting_install, download_failed, template_missing, template_placeholder, checksum_invalid,
 # checksum_mismatch, checksum_entry_count, checksum_conflict, sigstore_verification_failed, archive_invalid,
 # collector_start_failed, collector_version_mismatch, service_not_running, token_on_command_line,
 # updater_unauthenticated) is at the top of install-linux.sh.
@@ -677,6 +679,23 @@ function Stop-ServiceAndWait {
   }
 }
 
+# The MSI packages of the upstream project register services of their own: the contrib MSI installs "otelcol-contrib" and starts it
+# at once, the supervisor MSI installs "opampsupervisor" with manual start (docs/design/upstream-notes.md, "Packages and what they
+# install"). This installer uses neither package: it creates "otelcol-supervisor" with the supervisor in a folder of its own, so
+# each of those services would be a second collector on the host that myriarch does not manage. The run stops before it stops a
+# service, downloads or writes anything, and removes nothing: which package goes is the decision of the operator. Staging mode
+# (-Root) touches no service and reads none.
+function Assert-NoConflictingInstall {
+  if ($script:StagingMode) { return }
+  $found = @()
+  foreach ($name in @('opampsupervisor', 'otelcol-contrib')) {
+    $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+    if ($svc) { $found += "service $name ($($svc.Status))" }
+  }
+  if ($found.Count -eq 0) { return }
+  Stop-Install 'conflicting_install' "an installation of the upstream project is present: $($found -join ', '); it provides a second collector next to the one that myriarch manages, and the installer removes nothing - uninstall its MSI (Settings, Apps, or msiexec /x with the MSI file, or sc.exe delete for a service that you created yourself) and run the installer again"
+}
+
 # Working directory for downloads and staging. It is created with a protected DACL (SYSTEM and Administrators only,
 # owner Administrators) before anything is written into it: the installer runs elevated, and a directory that
 # inherits the ACL of the invoking account's temporary directory could be changed by a non-elevated process of that
@@ -1120,6 +1139,8 @@ function Invoke-Main {
   if (-not (Test-Path -LiteralPath ([IO.Path]::Combine($templates, 'supervisor', 'windows')))) {
     Stop-Install 'template_missing' "templates not found under $templates (-TemplatesDir)"
   }
+  # Before the work directory, a download, a verifier or the stop of a service
+  Assert-NoConflictingInstall
   $tmpDir = New-WorkDirectory -Staging $staging
   try {
     Write-Log "installing: collector v$($script:CollectorVersion), supervisor v$($script:SupervisorVersion), windows/$arch, site $SiteType/$SiteId"

@@ -68,7 +68,10 @@ Install neither MSI of the upstream project on a host that myriarch manages. The
 which starts at once with its own configuration. The supervisor MSI installs a service `opampsupervisor` with manual start, in a
 folder of its own. myriarch manages neither: the installer creates the service `otelcol-supervisor` and puts the supervisor into
 `C:\Program Files\Myriarch\supervisor\`. The installer of v0.1.0 does not look for the upstream services and does not remove
-them. To see what a host has:
+them. From v0.2.0 it looks first: when a service `opampsupervisor` or `otelcol-contrib` exists, in any state, it stops with
+`conflicting_install` before it stops a service, downloads or writes anything. The message names the service and the next step,
+and nothing is removed. A service that you created yourself under one of these names counts too (`sc.exe delete <name>` removes
+it). To see what a host has:
 
 ```powershell
 Get-Service otelcol-supervisor, opampsupervisor, otelcol-contrib -ErrorAction SilentlyContinue
@@ -238,6 +241,7 @@ is at the top of that script.
 | `sigstore_verifier_missing` | no Sigstore verifier (`-Verifier`, an installed updater, or `cosign.exe` from an administrator-only directory) |
 | `sigstore_verifier_outdated` | `cosign.exe` is older than 3.0.4 or reports no usable version |
 | `privilege_required` | not running as Administrator |
+| `conflicting_install` | (from v0.2.0) a service `opampsupervisor` (supervisor MSI) or `otelcol-contrib` (contrib MSI) exists, in any state. The check runs before the installer stops a service, downloads or writes anything; the message names the service and the next step, and nothing is removed ([Packages of the upstream project](#packages-of-the-upstream-project)). `install-linux.sh` raises the code for an active or enabled unit `otelcol-contrib.service` or `opampsupervisor.service` of a deb or rpm package |
 | `language_mode_unsupported` | (from v0.2.0) PowerShell runs the script in Constrained Language Mode or another mode below `FullLanguage`, usually because App Control for Business with script enforcement allows no unsigned script. It is the first check of a run and changes nothing. Allow the installer with a hash rule ([Language mode and App Control](#language-mode-and-app-control)) |
 | `unsupported_platform` | unsupported CPU architecture, or the supervisor on Windows ARM64 (install with `-Arch amd64`) |
 | `download_failed` | a download did not succeed: a permanent error (for example HTTP 404) at once, a transient one (timeout, failed connection, HTTP 408, 429, 500, 502, 503, 504) after the retry window of 2 minutes; the message names the number of attempts. Under PowerShell 7.5 or later behind an `HTTPS_PROXY` that refuses the connection, the status of the proxy decides (`proxy HTTP 503` is retried, `proxy HTTP 407` is not); PowerShell 7.4 retries it like a failed connection |

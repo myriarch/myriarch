@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -30,6 +32,61 @@ func runPwshCommand(t *testing.T, command string, env ...string) (string, error)
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
 	return out.String(), err
+}
+
+// pwshChecksPrologue starts every test script of runPwshChecks: it dot-sources the installer (which then runs no main code) with
+// the arguments of a complete installation, and offers Check and Message-Of. The test scripts replace the functions of the
+// installer that need Windows with functions of their own; nothing here touches a service, the registry or a path outside
+// $Work.
+const pwshChecksPrologue = `
+param([Parameter(Mandatory)][string]$Installer, [Parameter(Mandatory)][string]$Templates, [Parameter(Mandatory)][string]$Work)
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+$tokenFile = Join-Path $Work 'enrollment-token'
+Set-Content -LiteralPath $tokenFile -Value 'myre_abc123' -NoNewline
+$verifierFile = Join-Path $Work 'verifier'
+Set-Content -LiteralPath $verifierFile -Value 'x' -NoNewline
+$installerArgs = @{ OpampEndpoint = 'wss://fleet.example.com/v1/opamp'; TokenFile = $tokenFile; SiteType = 'edge'; SiteId = '1'
+  CollectorVersion = '0.162.0'; Arch = 'amd64'; TemplatesDir = $Templates; Verifier = $verifierFile }
+. $Installer @installerArgs
+$ErrorActionPreference = 'Stop'
+$script:failures = 0
+$script:passes = 0
+function Check { param([string]$Title, [bool]$Ok) if ($Ok) { $script:passes++; Write-Host "  ok    $Title" } else { $script:failures++; Write-Host "  FAIL  $Title" } }
+function Message-Of { param([scriptblock]$Block) try { & $Block; return '' } catch { return $_.Exception.Message } }
+`
+
+// pwshChecksEpilogue ends the script with the counts that the Go test reads.
+const pwshChecksEpilogue = `
+Write-Host "checks: $($script:passes) ok, $($script:failures) failed"
+if ($script:failures -gt 0) { exit 1 }
+`
+
+// runPwshChecks runs the body of a PowerShell test script behind pwshChecksPrologue and fails the test when a Check failed. It
+// returns the output and the number of checks that passed, so that a test can see that its checks ran.
+func runPwshChecks(t *testing.T, body string) (string, int) {
+	t.Helper()
+	pwsh := pwshPath(t)
+	installer, err := filepath.Abs(filepath.Join(deployDir, "scripts", "install-windows.ps1"))
+	require.NoError(t, err)
+	templates, err := filepath.Abs(deployDir)
+	require.NoError(t, err)
+	work := t.TempDir()
+	script := filepath.Join(t.TempDir(), "checks.ps1")
+	require.NoError(t, os.WriteFile(script, []byte(pwshChecksPrologue+body+pwshChecksEpilogue), 0o600))
+	cmd := exec.Command(pwsh, "-NoProfile", "-NonInteractive", "-File", script, "-Installer", installer, "-Templates", templates, "-Work", work)
+	cmd.Dir = work
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	runErr := cmd.Run()
+	t.Log("\n" + out.String())
+	require.NoError(t, runErr, "the checks ran:\n%s", out.String())
+	assert.NotContains(t, out.String(), "FAIL", out.String())
+	m := regexp.MustCompile(`checks: (\d+) ok, 0 failed`).FindStringSubmatch(out.String())
+	require.NotNil(t, m, "the script reached its end:\n%s", out.String())
+	n, convErr := strconv.Atoi(m[1])
+	require.NoError(t, convErr)
+	return out.String(), n
 }
 
 // installerLines returns the lines of the output that carry the prefix of an installer message.
@@ -76,4 +133,69 @@ func TestInstallWindowsScriptStopsFirstInConstrainedLanguageMode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, entries, "nothing was installed or created")
 	assert.NotContains(t, out, "downloading")
+}
+
+// The services that the MSI packages of the upstream project register (opampsupervisor, otelcol-contrib) stop the installer
+// before it does anything. The tests run with a Get-Service that lists the services of a made-up host.
+func TestInstallWindowsScriptStopsAtServicesOfTheUpstreamPackages(t *testing.T) {
+	out, n := runPwshChecks(t, `
+$script:Existing = @{}
+$script:GetServiceCalls = 0
+function Get-Service {
+  [CmdletBinding()] param([string]$Name)
+  $script:GetServiceCalls++
+  if ($script:Existing.ContainsKey($Name)) { return [pscustomobject]@{ Name = $Name; Status = $script:Existing[$Name] } }
+}
+$script:StagingMode = $false
+
+$script:Existing = @{ 'otelcol-supervisor' = 'Running'; 'myriarch-updater' = 'Running' }
+Check 'the services of myriarch itself are no conflict' ((Message-Of { Assert-NoConflictingInstall }) -eq '')
+
+$script:Existing = @{}
+Check 'a host without any service is no conflict' ((Message-Of { Assert-NoConflictingInstall }) -eq '')
+
+$script:Existing = @{ 'opampsupervisor' = 'Stopped' }
+$msg = Message-Of { Assert-NoConflictingInstall }
+Check 'the supervisor MSI service stops the run with conflicting_install' ($msg -match '^\[conflicting_install\] ')
+Check 'the message names the service and its state' ($msg.Contains('service opampsupervisor (Stopped)'))
+Check 'the message does not name the other service' (-not $msg.Contains('otelcol-contrib'))
+Check 'the message names the next step and that nothing is removed' ($msg.Contains('msiexec /x') -and $msg.Contains('removes nothing'))
+
+$script:Existing = @{ 'otelcol-contrib' = 'Running' }
+$msg = Message-Of { Assert-NoConflictingInstall }
+Check 'the contrib MSI service stops the run with conflicting_install' ($msg -match '^\[conflicting_install\] ' -and $msg.Contains('service otelcol-contrib (Running)'))
+
+$script:Existing = @{ 'otelcol-contrib' = 'Running'; 'opampsupervisor' = 'Stopped'; 'otelcol-supervisor' = 'Running' }
+$msg = Message-Of { Assert-NoConflictingInstall }
+Check 'both services are named in one message' ($msg.Contains('service opampsupervisor (Stopped), service otelcol-contrib (Running)'))
+
+# a staging root touches no service and reads none
+$script:StagingMode = $true
+$before = $script:GetServiceCalls
+Check 'staging mode neither reads nor reports services' ((Message-Of { Assert-NoConflictingInstall }) -eq '' -and $script:GetServiceCalls -eq $before)
+`)
+	assert.GreaterOrEqual(t, n, 9, out)
+}
+
+// The whole run stops at the services of an upstream package before it creates the work directory, downloads, stops a service
+// or writes a file: the functions that do those things are replaced by ones that fail the run when they are called.
+func TestInstallWindowsScriptStopsAtAnUpstreamServiceBeforeItDoesAnything(t *testing.T) {
+	out, n := runPwshChecks(t, `
+$script:Calls = New-Object System.Collections.Generic.List[string]
+function Get-Service {
+  [CmdletBinding()] param([string]$Name)
+  if ($Name -eq 'opampsupervisor') { return [pscustomobject]@{ Name = $Name; Status = 'Running' } }
+}
+function Test-Administrator { return $true }
+foreach ($name in @('New-WorkDirectory', 'Invoke-Download', 'Stop-ServiceAndWait', 'Resolve-Verifier', 'Get-UpdaterDownload', 'Initialize-DataDirectories',
+    'Install-Collector', 'Install-SupervisorBinary', 'Install-SupervisorService')) {
+  Set-Item -Path "function:$name" -Value ([scriptblock]::Create("param() [void]`+"`"+`$script:Calls.Add('$name'); throw ('unexpected call of $name')"))
+}
+Check 'a normal run is not in staging mode' (-not [bool]$Root)
+$msg = Message-Of { Invoke-Main }
+Check 'the run stops with conflicting_install' ($msg -match '^\[conflicting_install\] ' -and $msg.Contains('service opampsupervisor (Running)'))
+Check 'no work directory, download, service stop, verifier or install step was reached' ($script:Calls.Count -eq 0)
+Check 'nothing was written to the working directory' (@(Get-ChildItem -LiteralPath $Work -Force).Count -eq 2)   # the token file and the verifier file of this script
+`)
+	assert.GreaterOrEqual(t, n, 4, out)
 }

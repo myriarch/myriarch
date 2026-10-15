@@ -13,7 +13,9 @@
 #   - systemd units otelcol-supervisor (+ optionally myriarch-updater)
 #
 # The collector deb/rpm packages are deliberately NOT used: the contrib package starts a service of
-# its own immediately.
+# its own immediately. A host that has such a package is not touched: when otelcol-contrib.service or
+# opampsupervisor.service of the upstream project is active or enabled, the installer stops with
+# conflicting_install before it creates a user, a directory or a file, and it removes nothing.
 #
 # The supervisor storage directory (/var/lib/otelcol/supervisor) is only created empty, never
 # pre-populated: persistent_state.yaml holds the instance UID. Golden images must empty it BEFORE
@@ -77,6 +79,9 @@
 #   sigstore_verifier_outdated      cosign is older than 3.0.4 or reports no usable version
 #   privilege_required              not running as root
 #   unsupported_platform            not Linux, or unsupported CPU architecture
+#   conflicting_install             otelcol-contrib.service or opampsupervisor.service of a deb or rpm package of the upstream
+#                                   project is active or enabled (Windows: a service otelcol-contrib or opampsupervisor of an
+#                                   MSI exists); the message names the unit or service and the next step, nothing is removed
 #   download_failed                 a download did not succeed (a permanent error at once, a transient one after the
 #                                   retry window of 120 s; the message gives the number of attempts)
 #   template_missing                template directory or template file not found
@@ -535,6 +540,44 @@ check_prereqs() {
   [ -d "${TEMPLATES_DIR}/supervisor/linux" ] || die template_missing "templates not found under ${TEMPLATES_DIR} (--templates-dir)"
 }
 
+# ---------------------------------------------------------------- Packages of the upstream project
+# The deb and rpm packages of the upstream project bring units of their own: otelcol-contrib.service (the contrib package
+# enables and starts it at once) and opampsupervisor.service (the supervisor package enables it when its configuration file
+# exists; docs/design/upstream-notes.md, "Packages and what they install"). A unit that runs or is enabled is a second collector
+# next to the one that myriarch manages. The installer stops before it creates a user, a directory or a file, and it removes
+# nothing: which package goes is the decision of the operator. A package whose unit neither runs nor is enabled (the rpm
+# packages since 0.157.0 start nothing) runs no second collector and does not stop the installation.
+FOREIGN_UNITS=(otelcol-contrib.service opampsupervisor.service)
+
+# How a unit of the upstream packages is set up on this host: "active", "enabled", "active, enabled", or nothing.
+# A root directory (--root) has no running manager of its own and the manager of this host says nothing about it, so there only
+# the unit files below the directory tell whether the unit is enabled (systemctl --root).
+foreign_unit_state() { # unit
+  local unit="$1" state found=""
+  have systemctl || return 0
+  if [ "${STAGING_MODE}" = 0 ]; then
+    state="$(systemctl is-active "${unit}" 2>/dev/null || true)"
+    case "${state}" in active | activating | reloading) found="active" ;; esac
+    state="$(systemctl is-enabled "${unit}" 2>/dev/null || true)"
+  else
+    state="$(systemctl --root="${ROOT_PREFIX}" is-enabled "${unit}" 2>/dev/null || true)"
+  fi
+  case "${state}" in enabled | enabled-runtime) found="${found:+${found}, }enabled" ;; esac
+  printf '%s' "${found}"
+}
+
+check_foreign_installations() {
+  local unit state found="" units=""
+  for unit in "${FOREIGN_UNITS[@]}"; do
+    state="$(foreign_unit_state "${unit}")"
+    if [ -n "${state}" ]; then
+      found="${found}${found:+, }${unit} (${state})"
+      units="${units}${units:+ }${unit}"
+    fi
+  done
+  [ -z "${found}" ] || die conflicting_install "an installation of the upstream project is present: ${found}; it provides a second collector next to the one that myriarch manages, and the installer removes nothing - stop and disable it ('systemctl disable --now ${units}'), remove its package with your package manager and run the installer again"
+}
+
 # ---------------------------------------------------------------- Signature verification (Sigstore, fail-closed)
 # Verifier: cosign 3.0.4 or newer (PATH or --verifier) or "myriarch-updater verify-bundle" (--verifier, an already
 # installed one, or - only with --updater-sha256 and without --updater-checksums-url - the updater downloaded here and
@@ -892,6 +935,7 @@ main() {
   validate_inputs
   detect_arch
   check_prereqs
+  check_foreign_installations
   TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/myriarch-install.XXXXXX")"
   log "installing: collector v${COLLECTOR_VERSION}, supervisor v${SUPERVISOR_VERSION}, linux/${ARCH}, site ${SITE_TYPE}/${SITE_ID}"
   if [ "${WITH_UPDATER}" = 1 ] && [ -n "${UPDATER_CHECKSUMS_URL}" ]; then
