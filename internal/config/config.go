@@ -580,7 +580,8 @@ type InstallConfig struct {
 	// every route under `/install` answers 404 and the server fetches no installer bundle.
 	Enabled bool `yaml:"enabled"`
 	// GrantTTL is the lifetime of an install grant, the credential with which a host downloads the
-	// collector and the supervisor after it asked for its plan (default 1h). A grant is also
+	// collector and the supervisor after it asked for its plan (default 1h; when neither the file nor
+	// the environment sets it, it is `artifacts.downloadTokenTtl` if that is shorter). A grant is also
 	// bound to the enrollment token of that request and stops working when the token is revoked
 	// or expires. In production the value must be positive and at most `artifacts.downloadTokenTtl`.
 	GrantTTL time.Duration `yaml:"grantTtl"`

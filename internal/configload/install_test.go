@@ -72,6 +72,75 @@ func TestInstallGrantTTL(t *testing.T) {
 	}
 }
 
+// A production configuration of v0.1.0 that shortens the download tokens knows nothing of install.grantTtl. The default
+// of the setting must not turn such a configuration invalid by the upgrade, while a value that is set stays checked as
+// written, whether it comes from the file or from the environment.
+func TestInstallGrantTTLDefaultFollowsTheDownloadTokenTTL(t *testing.T) {
+	withDownloadTTL := func(ttl string) string {
+		return strings.Replace(prodMinimal, "artifacts:\n", "artifacts:\n  downloadTokenTtl: "+ttl+"\n", 1)
+	}
+	const refused = "install.grantTtl: must not exceed artifacts.downloadTokenTtl (30m0s)"
+	cases := []struct {
+		name    string
+		yaml    string
+		env     map[string]string
+		want    time.Duration
+		wantErr string
+	}{
+		{"a file of v0.1.0 with download tokens of 30 minutes", withDownloadTTL("30m"), nil, 30 * time.Minute, ""},
+		{"download tokens of exactly one hour", withDownloadTTL("1h"), nil, time.Hour, ""},
+		{"longer download tokens leave the default", withDownloadTTL("48h"), nil, time.Hour, ""},
+		{"the default download tokens of 24 hours", prodMinimal, nil, time.Hour, ""},
+		{"the environment shortens the download tokens", prodMinimal, map[string]string{"MYRIARCH_ARTIFACTS_DOWNLOADTOKENTTL": "10m"}, 10 * time.Minute, ""},
+		{"a value in the file is kept", withDownloadTTL("30m") + "install:\n  grantTtl: 20m\n", nil, 20 * time.Minute, ""},
+		{"a value in the file above the lifetime is refused, also when it is the default", withDownloadTTL("30m") + "install:\n  grantTtl: 1h\n", nil, 0, refused},
+		{"a value in the environment above the lifetime is refused", withDownloadTTL("30m"), map[string]string{"MYRIARCH_INSTALL_GRANTTTL": "1h"}, 0, refused},
+		{"a value in the environment is kept", withDownloadTTL("30m"), map[string]string{"MYRIARCH_INSTALL_GRANTTTL": "5m"}, 5 * time.Minute, ""},
+		{"a null value is no value", withDownloadTTL("30m") + "install:\n  grantTtl: null\n", nil, 30 * time.Minute, ""},
+		{"an empty variable is no value", withDownloadTTL("30m"), map[string]string{"MYRIARCH_INSTALL_GRANTTTL": ""}, 30 * time.Minute, ""},
+		{"other settings of the section do not count", withDownloadTTL("30m") + "install:\n  platforms: [linux/amd64]\n", nil, 30 * time.Minute, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := load(writeFile(t, "myriarchd.yaml", tc.yaml), false, env(tc.env))
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("want the error %q, got %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			if cfg.Install.GrantTTL != tc.want {
+				t.Errorf("install.grantTtl = %s, want %s", cfg.Install.GrantTTL, tc.want)
+			}
+		})
+	}
+
+	t.Run("without a file", func(t *testing.T) {
+		// no file: the defaults, and the environment alone can make the download tokens shorter than the grants
+		cfg, err := load("", true, env(map[string]string{"MYRIARCH_ARTIFACTS_DOWNLOADTOKENTTL": "15m"}))
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Install.GrantTTL != 15*time.Minute {
+			t.Errorf("install.grantTtl = %s, want 15m0s", cfg.Install.GrantTTL)
+		}
+		cfg, err = load("", true, env(nil))
+		if err != nil || cfg.Install.GrantTTL != time.Hour {
+			t.Errorf("the default of a development server: %s, %v", cfg.Install.GrantTTL, err)
+		}
+	})
+	t.Run("download tokens that never expire", func(t *testing.T) {
+		// development only: there is no lifetime to follow
+		cfg, err := load("", true, env(map[string]string{"MYRIARCH_ARTIFACTS_DOWNLOADTOKENTTL": "0s"}))
+		if err != nil || cfg.Install.GrantTTL != time.Hour {
+			t.Errorf("install.grantTtl = %s, %v", cfg.Install.GrantTTL, err)
+		}
+	})
+}
+
 func TestInstallBundleSourceBaseURL(t *testing.T) {
 	cases := []struct {
 		name, url string

@@ -5,6 +5,7 @@ package configload
 
 import (
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,13 @@ func sampleFor(t *testing.T, o EnvOverride, cur reflect.Value) (string, any) {
 	return "", nil
 }
 
+// derivedDefaults lists the settings whose default follows another setting while they are left out: an override of the
+// key changes them too, to the value that their default derives from it (the sample of a duration is 7m).
+var derivedDefaults = map[string]map[string]any{
+	// install.grantTtl is the shorter of one hour and artifacts.downloadTokenTtl (defaultInstallGrantTTL)
+	"artifacts.downloadTokenTtl": {"install.grantTtl": 7 * time.Minute},
+}
+
 func TestEnvOverridesListEveryOverridableSettingAndSetExactlyThatField(t *testing.T) {
 	overrides := EnvOverrides()
 	require.Greater(t, len(overrides), 100, "the list looks incomplete")
@@ -76,8 +84,17 @@ func TestEnvOverridesListEveryOverridableSettingAndSetExactlyThatField(t *testin
 				changed = append(changed, path)
 			}
 		}
-		assert.Equal(t, []string{o.Path}, changed, "%s changes exactly its own field", o.Name)
+		wantChanged := []string{o.Path}
+		for p := range derivedDefaults[o.Path] {
+			wantChanged = append(wantChanged, p)
+		}
+		sort.Strings(changed)
+		sort.Strings(wantChanged)
+		assert.Equal(t, wantChanged, changed, "%s changes its own field and the settings whose default follows it, nothing else", o.Name)
 		assert.Equal(t, want, gotValues[o.Path], o.Name)
+		for p, v := range derivedDefaults[o.Path] {
+			assert.Equal(t, v, gotValues[p], "%s: the default of %s", o.Name, p)
+		}
 	}
 }
 
