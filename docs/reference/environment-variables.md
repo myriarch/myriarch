@@ -101,6 +101,10 @@ Every setting of the [server configuration](configuration.md) except lists of ob
 | `MYRIARCH_HA_HEARTBEATINTERVAL` | [`ha.heartbeatInterval`](configuration.md#ha) | duration |
 | `MYRIARCH_HA_LEADERLOCKKEY` | [`ha.leaderLockKey`](configuration.md#ha) | integer |
 | `MYRIARCH_HA_REPLICAID` | [`ha.replicaId`](configuration.md#ha) | string |
+| `MYRIARCH_INSTALL_BUNDLESOURCEBASEURL` | [`install.bundleSourceBaseUrl`](configuration.md#install) | string |
+| `MYRIARCH_INSTALL_ENABLED` | [`install.enabled`](configuration.md#install) | boolean |
+| `MYRIARCH_INSTALL_GRANTTTL` | [`install.grantTtl`](configuration.md#install) | duration |
+| `MYRIARCH_INSTALL_PLATFORMS` | [`install.platforms`](configuration.md#install) | list of strings |
 | `MYRIARCH_OPAMP_ALLOWUNBOUNDEDCOMPRESSION` | [`opamp.allowUnboundedCompression`](configuration.md#opamp) | boolean |
 | `MYRIARCH_OPAMP_AUTOREBINDONTOKENROTATION` | [`opamp.autoRebindOnTokenRotation`](configuration.md#opamp) | boolean |
 | `MYRIARCH_OPAMP_CLIENTCERTHEADER` | [`opamp.clientCertHeader`](configuration.md#opamp) | string |

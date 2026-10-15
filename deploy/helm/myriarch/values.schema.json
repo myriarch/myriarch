@@ -658,6 +658,33 @@
             }
           }
         },
+        "install": {
+          "type": "object",
+          "description": "`install` configures the installation of hosts from the server (ADR-0046): the plan that a host asks for with its enrollment token, the install grants for its downloads, the installer bundles of the release that the server runs and the rendered install commands.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "`enabled` turns the installation of hosts from the server on (default true). When it is off, every route under `/install` answers 404 and the server fetches no installer bundle."
+            },
+            "grantTtl": {
+              "type": "string",
+              "description": "`grantTtl` is the lifetime of an install grant, the credential with which a host downloads the collector and the supervisor after it asked for its plan (default 1h). A grant is also bound to the enrollment token of that request and stops working when the token is revoked or expires. In production the value must be positive and at most `artifacts.downloadTokenTtl`.",
+              "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|ms|s|m|h))+)$"
+            },
+            "bundleSourceBaseUrl": {
+              "type": "string",
+              "description": "`bundleSourceBaseUrl` is where the installer bundles of the release that the server runs come from (default \"https://github.com/myriarch/myriarch/releases/download\"). A mirror keeps the layout `<base>/v<version>/<asset>` with `checksums.txt` and its Sigstore bundle `checksums.txt.sigstore.json` next to the archives; the server verifies both against the identity of the release workflow, whichever server they come from. Production requires https."
+            },
+            "platforms": {
+              "type": "array",
+              "description": "`platforms` lists the platforms that a host can be installed on from the server, as \"os/arch\" (default linux/amd64, linux/arm64 and windows/amd64, which is all that is supported). The plan refuses a host on another platform, and the server prepares an installer bundle for each platform listed.",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
         "outbound": {
           "type": "object",
           "description": "`outbound` is the destination policy of all outbound connections.",

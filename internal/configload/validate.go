@@ -322,6 +322,9 @@ func ValidateOptions(c *config.Config, opts Options) error {
 	v.checkSourceAuth(c.Artifacts)
 	v.checkVerify(c.Artifacts.Verify, dev)
 
+	// ----------------------------------------------------------- install ---
+	v.checkInstall(c, dev)
+
 	// -------------------------------------------------------- outbound ---
 	for i, cidr := range c.Outbound.AllowedCIDRs {
 		// the parser of the policy itself: what it refuses, serve would refuse at startup
@@ -686,6 +689,9 @@ func Warnings(c *config.Config, dev bool) []string {
 	}
 	if c.Artifacts.Verify.TrustedRootFile != "" && c.Artifacts.Verify.TUFRepositoryURL != "" {
 		w = append(w, "artifacts.verify.tufRepositoryUrl is ignored because artifacts.verify.trustedRootFile is set")
+	}
+	if c.Install.Enabled && !c.Releases.Enabled {
+		w = append(w, "install.enabled is on while releases.enabled is off: the install plan names only versions that the release tracker knows, so a host can be installed from the server only for releases that were tracked before")
 	}
 	return w
 }
