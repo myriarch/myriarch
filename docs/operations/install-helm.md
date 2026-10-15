@@ -333,6 +333,10 @@ The schema refuses:
 - **Keys that the chart generates or does not offer:** `config.auth.bootstrapAdmin` and `config.opamp.enrollmentTokens`
   (use `bootstrapAdmin` and `enrollmentTokens` at the top level) and the development mode (`config.dev`, `config.auth.devLogin`).
 
+A parent chart that includes this chart as a dependency passes its values under the name of the dependency (`myriarch:`), and
+Helm checks them against the same schema. The key `enabled`, which the usual `condition: myriarch.enabled` reads, and the shared
+values under `global` are accepted; any other key that the chart does not know is refused there as well.
+
 It does not judge whether a configuration makes sense, and it does not relate values to each other. The templates still stop an
 Ingress without `trustedProxies`, and `myriarchd config validate` ([below](#check-before-you-deploy)) still checks the rendered
 configuration. Helm can skip the schema with `--skip-schema-validation`; the checks of the templates remain, but a misspelled key

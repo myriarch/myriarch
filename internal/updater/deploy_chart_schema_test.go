@@ -553,6 +553,8 @@ func TestChartSchemaAcceptsValidValues(t *testing.T) {
 		"global registry":         `global: {imageRegistry: mirror.example.com}`,
 		"global registry null":    `global: {imageRegistry: null}`,
 		"other global keys":       `global: {storageClass: fast, anything: [1, 2]}`,
+		"dependency condition":    `enabled: false`,
+		"values of a parent":      "enabled: true\nglobal: {imageRegistry: mirror.example.com}",
 		"pull policy":             `image: {pullPolicy: Always}`,
 		"pull secret":             `imagePullSecrets: [{name: registry-pull-secret}]`,
 		"openshift as a string":   `openshift: {enabled: auto}`,
@@ -626,6 +628,7 @@ func TestChartSchemaRefusesInvalidValues(t *testing.T) {
 
 		// types
 		{"replica count as a word", `replicaCount: two`, `/replicaCount: is string, want integer`},
+		{"dependency condition as a word", `enabled: maybe`, `/enabled: is string, want boolean`},
 		{"negative replica count", `replicaCount: -1`, `/replicaCount: -1 is below 0`},
 		{"fractional replica count", `replicaCount: 1.5`, `/replicaCount: is number, want integer`},
 		{"boolean as a word", `ingress: {enabled: "yes"}`, `/ingress/enabled: is string, want boolean`},

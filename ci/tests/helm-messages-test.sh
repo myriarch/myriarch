@@ -56,10 +56,11 @@ expect_schema() {
   if printf '%s' "${OUT}" | grep -Eq -- "${german}"; then fail "${name} (message is not English)"; printf '%s\n' "${OUT}" | sed 's/^/        /' >&2; fi
 }
 
-# expect_image <name> <image> <helm args...>: the chart renders and the pod runs exactly this image
+# expect_image <name> <image> <helm args...>: the chart renders and the pod runs exactly this image (RENDERER names the function
+# that renders: the chart itself by default, or the parent chart of the case (67))
 expect_image() {
   local name="$1" want="$2" got; shift 2
-  if ! got="$(render "$@" 2>&1)"; then fail "${name} (does not render)"; printf '%s\n' "${got}" | sed 's/^/        /' >&2; return; fi
+  if ! got="$("${RENDERER:-render}" "$@" 2>&1)"; then fail "${name} (does not render)"; printf '%s\n' "${got}" | sed 's/^/        /' >&2; return; fi
   got="$(printf '%s\n' "${got}" | sed -n 's/^ *image: "\(.*\)"$/\1/p' | sort -u)"
   if [ "${got}" = "${want}" ]; then ok "${name}"; else fail "${name} (image ${got:-none}, want ${want})"; fi
 }
@@ -164,6 +165,19 @@ expect_ok "(63) null removes a value that the chart defines" render --set config
 expect_ok "(64) a parent chart may pass a null registry" render --set-json 'global={"imageRegistry":null,"other":{"a":1}}'
 expect_ok "(65) quantities as numbers and strings" render --set resources.requests.cpu=1 --set resources.requests.memory=536870912 --set resources.limits.memory=1Gi
 expect_ok "(66) a declared enrollment token with a Secret" render --set-json 'enrollmentTokens=[{"name":"gateway","existingSecret":"gateway-token","key":"token","labels":{"site":"hq"},"expiresAt":"2030-01-01T00:00:00Z"}]'
+
+# A parent chart (an umbrella chart) includes this chart with the usual dependency condition. Helm validates the values that the parent
+# passes to the subchart, and they contain the key of the condition: `myriarch.enabled` arrives as `enabled`. Copying the chart into
+# charts/ of the parent is all Helm needs to load it as a subchart; there is no repository and no network.
+umbrella="${TEST_TMP}/umbrella"
+mkdir -p "${umbrella}/charts"
+cp -R "${chart}" "${umbrella}/charts/myriarch"
+printf 'apiVersion: v2\nname: umbrella\nversion: 0.0.1\ndependencies:\n  - name: myriarch\n    version: ">=0.0.0-0"\n    repository: ""\n    condition: myriarch.enabled\n' > "${umbrella}/Chart.yaml"
+printf 'global:\n  imageRegistry: mirror.example.com\nmyriarch:\n  enabled: true\n  config:\n    server:\n      publicUrl: https://fleet.example.com\n' > "${umbrella}/values.yaml"
+render_umbrella() { helm template u "${umbrella}" "$@"; }
+RENDERER=render_umbrella expect_image "(67) a parent chart switches the chart on with a dependency condition and passes global.imageRegistry" "mirror.example.com/myriarch/myriarch:${APP}"
+if got="$(render_umbrella --set myriarch.enabled=false 2>&1)" && ! printf '%s\n' "${got}" | grep -q '^kind:'; then ok "(68) the dependency condition switches the chart off"; else fail "(68) the dependency condition switches the chart off"; printf '%s\n' "${got}" | sed 's/^/        /' >&2; fi
+expect_schema "(69) the key of the dependency condition is a boolean" /enabled --set enabled=maybe
 
 # --- the image: registry, repository, digest and global.imageRegistry --------------------------------------------------------
 expect_image "(70) the default image" "ghcr.io/myriarch/myriarch:${APP}"

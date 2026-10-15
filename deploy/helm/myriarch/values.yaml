@@ -52,6 +52,11 @@ fullnameOverride: ""
 # repository that has a registry host of its own.
 global: {}
 
+# A parent chart that includes this chart as a dependency can switch it on and off with a dependency condition, for example
+# condition: myriarch.enabled in the Chart.yaml of the parent chart. Helm reads the key enabled of the values that the parent chart
+# passes to this chart. This chart ignores the key, and the schema accepts it for that reason. There is no default here: the
+# condition of the parent chart decides what a missing key means. A standalone installation does not need the key.
+
 serviceAccount:
   # Create a ServiceAccount.
   create: true

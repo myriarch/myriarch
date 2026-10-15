@@ -297,6 +297,9 @@ helm install myriarch ... --set image.repository=registry.example.com/myriarch/m
 * The few places that take a Kubernetes object as it is (`extraVolumes`, `extraVolumeMounts`, `podSecurityContext`,
   `securityContext`, `topologySpreadConstraints`, `affinity`, the Gateway API references) are open objects; the API server
   validates them.
+* A parent chart that includes this chart as a dependency can use it: `global` is open (the chart reads only
+  `global.imageRegistry`), and the key `enabled`, which Helm reads for `condition: myriarch.enabled`, is accepted and ignored by
+  the chart. Every other key that the parent passes under `myriarch:` is checked like a key of a standalone installation.
 * `null` removes a value that `values.yaml` defines, as in Helm. For a key that `values.yaml` does not define Helm keeps the
   null, and the schema accepts it only for the entries of the maps of the chart (annotations, labels, selectors), where the
   values files of `examples/` use it to switch off an entry of an earlier file, and for `global.imageRegistry`. It refuses it

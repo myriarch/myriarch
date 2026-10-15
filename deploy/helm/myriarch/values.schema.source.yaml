@@ -103,6 +103,11 @@ properties:
         anyOf:
           - $ref: '#/$defs/registryHost'
           - type: 'null'
+  enabled:
+    description: >-
+      Read by the dependency condition of a parent chart (condition: myriarch.enabled), not by this chart, which ignores it. It has
+      no default and no effect on a standalone installation.
+    type: boolean
 
   serviceAccount:
     description: The ServiceAccount of the pods. It has no API access, because its token is not mounted.
