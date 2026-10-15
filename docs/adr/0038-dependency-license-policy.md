@@ -66,13 +66,18 @@ the web UI with combined permissive licenses.
    not failed, as the action does; a license expression that is not valid SPDX fails.
 4. **Exceptions are recorded with a reason.** `allow-dependencies-licenses` lists packages that may carry any license in the
    dependency review, as package URLs without a version, each group under a comment that gives the reason; the test refuses an entry
-   with a version, a repeated entry and a group without a reason. The initial list holds the 80 packages that the review would
+   with a version, a repeated entry and a group without a reason. The reason names the license expression that the dependency graph
+   reports for the package (the SBOM of the repository), because that expression decides whether an exception is needed: `A AND B`
+   needs both identifiers on the list, `A OR B` one of them, and a `LicenseRef` identifier of the graph's own, such as
+   `LicenseRef-bad-bsd-2-clause-isc`, is on no list. An entry goes when the graph reports an expression that the list covers for every
+   version of the package that a lockfile resolves. The initial list holds the 80 packages that the review would
    otherwise report today: the four dependencies of the product that `ci/license-overrides.txt` or the development build already
    explain, the Go and Python modules of the CI tools (MPL-2.0 libraries of HashiCorp and Let's Encrypt, modules with several licenses in
    their test data or fonts, the REUSE checker), the development tool trees of the web UI and the website, the brand generator and the
-   packages with combined permissive licenses. The action ignores the version of a package URL, so an exception also covers later
-   versions of the package; whoever updates a package of the list looks at its license. The Go and Python modules of the CI tools are no
-   part of any release artifact.
+   packages with combined permissive licenses. Each of them was checked against the SBOM on 2026-10-15: for at least one version that
+   a lockfile resolves, the graph reports an expression that the list does not cover. The action ignores the version of a package URL,
+   so an exception also covers later versions of the package; whoever updates a package of the list looks at its license. The Go and
+   Python modules of the CI tools are no part of any release artifact.
    A change of the lists, or of an exception, is a change of policy and is reviewed as one; the configuration is read from the checkout
    of the pull request, like every other file of the pipeline.
 5. **`elkjs` is not excepted.** The npm package `elkjs` (EPL-2.0, a weak copyleft license) is a dependency of Mermaid, and the Mermaid
@@ -106,7 +111,8 @@ the web UI with combined permissive licenses.
 
 - The license data comes from ClearlyDefined through the dependency graph. It can be wrong, partial or missing; a package without
   license information is only listed. A compound expression (`A AND B`) needs both parts on the list, so packages with a documentation
-  license next to the code license need an exception.
+  license next to the code license need an exception, and so does a package for which the graph reports an identifier of its own
+  (`LicenseRef-bad-bsd-2-clause-isc` for `emirpasic/gods`, whose LICENSE holds two licenses of the list).
 - The review looks at the dependencies that a change adds or updates, not at the whole tree, and an exception covers every later version
   of its package.
 - The list of exceptions is long at the start (80 packages), and the dependency graph does not say which npm packages it counts as

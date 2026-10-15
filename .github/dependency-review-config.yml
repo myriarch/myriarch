@@ -46,6 +46,13 @@ allow-ghsas: []
 # Look at the license of a package of this list again when its version changes. A package without an entry that carries a license
 # outside the list fails the check; adding it here needs a reason and a review like a change of policy (ADR-0038).
 #
+# A reason names the license expression that the dependency graph reports for the package (licenseConcluded in the SBOM of the
+# repository, gh api repos/<repository>/dependency-graph/sbom) and why the package is acceptable. That expression, not the license that
+# the package declares, decides whether the check needs an exception: A AND B needs both identifiers on the list, A OR B one of them, and
+# a LicenseRef identifier of the graph's own, such as LicenseRef-bad-bsd-2-clause-isc, is on no list. On 2026-10-15 every entry below was
+# needed: for at least one version of its package that a lockfile resolves, the graph reports an expression that allow-licenses does not
+# cover. Remove an entry when the graph reports an expression that allow-licenses covers for every such version.
+#
 # Not listed on purpose: pkg:npm/elkjs (EPL-2.0, weak copyleft), a dependency of Mermaid, whose chunks the website serves. Whether the
 # website needs a notice for it has to be decided before an exception is recorded. A change that adds it or changes its resolved version
 # fails the check (Mermaid 12.1.0 resolves 0.9.3 today); a Mermaid update that keeps the version passes.
@@ -59,12 +66,13 @@ allow-dependencies-licenses:
   # (CC-BY-SA-4.0) covers its documentation, which is not part of a binary (ci/license-overrides.txt).
   - 'pkg:golang/github.com/opencontainers/go-digest'
 
-  # github.com/emirpasic/gods (BSD-2-Clause with ISC), linked through go-git: its LICENSE holds the BSD-2-Clause text and, for the AVL
-  # tree, the ISC text. Both licenses are on the release list.
+  # github.com/emirpasic/gods, linked through go-git: its LICENSE holds the BSD-2-Clause text and, for the AVL tree, the ISC text, and both
+  # licenses are on the release list. The dependency graph does not report them as two licenses but as the one identifier
+  # LicenseRef-bad-bsd-2-clause-isc for the module, which is on no list.
   - 'pkg:golang/github.com/emirpasic/gods'
 
-  # github.com/xi2/xz (public domain dedication), required by embedded-postgres: linked into the development build only (build tag devpg).
-  # ci/check-release-deps.sh keeps it out of every release build.
+  # github.com/xi2/xz (public domain dedication, reported as LicenseRef-scancode-public-domain-disclaimer), required by embedded-postgres:
+  # linked into the development build only (build tag devpg). ci/check-release-deps.sh keeps it out of every release build.
   - 'pkg:golang/github.com/xi2/xz'
 
   # MPL-2.0, a file-level copyleft: HashiCorp libraries and github.com/letsencrypt/boulder, required only by the Go modules of the CI
@@ -85,17 +93,27 @@ allow-dependencies-licenses:
   - 'pkg:golang/github.com/hashicorp/vault/api'
   - 'pkg:golang/github.com/letsencrypt/boulder'
 
-  # More Go modules of the CI tools (ci/tools) with several licenses in the report of the dependency graph, which scans every file of a
-  # module: chroma (MIT; the OFL-1.1 font of its SVG formatter), go-licenses (the licenses of its test data), image-spec (Apache-2.0 and
-  # the DCO text), opa (Apache-2.0, with code of other projects under other licenses), gitlab client-go (Apache-2.0), go-metrics
-  # (BSD-2-Clause-Views), therootcompany/xz (CC0-1.0) and go-timezone-local (Unlicense and Apache-2.0). No release binary links them.
+  # More Go modules of the CI tools (ci/tools) whose expression in the report of the dependency graph the list does not cover. The graph
+  # reports the licenses it finds in any file of a module, test data and fonts included: chroma (MIT AND OFL-1.1: the OFL-1.1 font of its
+  # SVG formatter), go-licenses (Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND MIT AND Unlicense AND WTFPL AND Xnet: the licenses of its
+  # test data), image-spec (Apache-2.0 AND LicenseRef-scancode-dco-1.1 AND MIT, the DCO text among them), go-metrics
+  # (BSD-2-Clause-Views), therootcompany/xz (CC0-1.0) and go-timezone-local (Apache-2.0 AND BSD-3-Clause AND Unlicense). No release binary
+  # links them.
   - 'pkg:golang/github.com/alecthomas/chroma/v2'
   - 'pkg:golang/github.com/google/go-licenses/v2'
   - 'pkg:golang/github.com/opencontainers/image-spec'
-  - 'pkg:golang/github.com/open-policy-agent/opa'
   - 'pkg:golang/github.com/rcrowley/go-metrics'
   - 'pkg:golang/github.com/therootcompany/xz'
   - 'pkg:golang/github.com/thlib/go-timezone-local'
+
+  # opa, a Go module of the CI tools: Apache-2.0, with files of other projects under BSD licenses (the bit vector of internal/edittree and
+  # the libmpdec sources under wasm/src, for example). Those licenses are on the list, but the dependency graph reports the one identifier
+  # LicenseRef-bad-apache-2.0-bsd-3-clause for the module, which is on no list. No release binary links it.
+  - 'pkg:golang/github.com/open-policy-agent/opa'
+
+  # gitlab client-go, a Go module of the CI tools: its LICENSE is Apache-2.0, but the dependency graph reports Apache-2.0 AND JSON for
+  # v1.46.0. The JSON license is not on the list, and a search of the module at that version for the wording of the JSON license finds
+  # none. No release binary links the module.
   - 'pkg:golang/gitlab.com/gitlab-org/api/client-go'
 
   # The REUSE checker and two of its dependencies (ci/tools/reuse/requirements.txt): reuse has several licenses, GPL-3.0 among them,
@@ -140,8 +158,8 @@ allow-dependencies-licenses:
   - 'pkg:npm/path-scurry'
   - 'pkg:npm/tar'
 
-  # lru-cache, minimatch, yallist (BlueOak-1.0.0, permissive) and uri-js (BSD-2-Clause and BSD-2-Clause-Views, permissive) in the tool trees
-  # of both web/ and website/.
+  # lru-cache, minimatch, yallist (BlueOak-1.0.0, permissive; the graph reports it for the newest versions that the lockfiles resolve and
+  # ISC for older ones) and uri-js (BSD-2-Clause AND BSD-2-Clause-Views, permissive) in the tool trees of both web/ and website/.
   - 'pkg:npm/lru-cache'
   - 'pkg:npm/minimatch'
   - 'pkg:npm/uri-js'
@@ -164,13 +182,25 @@ allow-dependencies-licenses:
   - 'pkg:npm/%40resvg/resvg-js-win32-x64-msvc'
   - 'pkg:npm/sax'
 
-  # Packages of the web UI and of the website that the dependency graph reports with a combination of permissive or public-domain
-  # licenses: bootstrap and @fortawesome/fontawesome-free (website/data/third_party.yaml lists them with their license texts), lodash-es
-  # and robust-predicates (MIT and Unlicense, through Mermaid), victory-vendor (through recharts; MIT AND ISC in its package.json, with its
-  # notice in THIRD_PARTY_NOTICES) and type-fest (type declarations, MIT OR CC0-1.0).
+  # Packages of the website that the dependency graph reports as a combination of licenses (website/data/third_party.yaml lists the first
+  # two with their license texts): @fortawesome/fontawesome-free (CC-BY-4.0 AND OFL-1.1 AND MIT: icons, fonts and code), bootstrap
+  # (CC-BY-3.0 AND MIT: the code is MIT, and the README names Creative Commons for the documentation) and robust-predicates
+  # (LicenseRef-scancode-public-domain AND Unlicense: an Unlicense package of public-domain code, through Mermaid).
   - 'pkg:npm/%40fortawesome/fontawesome-free'
   - 'pkg:npm/bootstrap'
-  - 'pkg:npm/lodash-es'
   - 'pkg:npm/robust-predicates'
+
+  # lodash-es (through Mermaid): package.json declares MIT, and the LICENSE adds a CC0 waiver for the sample code in the documentation.
+  # The dependency graph reports CC0-1.0 AND MIT for 4.18.1, and CC0-1.0 is not on the list.
+  - 'pkg:npm/lodash-es'
+
+  # type-fest (type declarations): package.json declares (MIT OR CC0-1.0) for 4.41.0 and for 5.10.0, and both versions ship both license
+  # files. The dependency graph reports (MIT OR CC0-1.0) for 5.10.0 (through @mantine/core and msw in web/), which the list covers, and
+  # CC0-1.0 AND MIT for 4.41.0 (through parse-json of openapi-typescript), which it does not. The entry goes when no lockfile resolves a
+  # version that the graph reports with AND.
   - 'pkg:npm/type-fest'
+
+  # victory-vendor (through recharts, bundled in the web UI; its notice is in THIRD_PARTY_NOTICES): package.json declares MIT AND ISC. The
+  # dependency graph reports ISC AND JSON AND MIT for 37.3.6. The JSON license is not on the list, and a search of the installed package
+  # for the wording of the JSON license finds none. The entry stays until the graph reports an expression that the list covers.
   - 'pkg:npm/victory-vendor'

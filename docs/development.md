@@ -558,9 +558,14 @@ is a decision record.
 **When the review fails.** Do not add the dependency, or take the license to the maintainer, when the package really carries a license
 outside the list. When the dependency graph reports a license wrongly or as a combination (a documentation license next to the code
 license, test data, a font), add the package URL without a version to `allow-dependencies-licenses`, in a group under a comment that
-gives the reason: the test refuses an entry with a version, a repeated entry and a group without a reason. The action ignores the
-version of a package URL, so an exception also covers the later versions of its package; look at the license of such a package when
-you update it. An advisory that does not apply goes to `allow-ghsas` with its GHSA ID and a reason; `govulncheck` (gate `vulncheck`) is
+gives the reason: the test refuses an entry with a version, a repeated entry and a group without a reason. The reason names the
+expression that the dependency graph reports for the package (`licenseConcluded` in the SBOM that
+`gh api repos/<repository>/dependency-graph/sbom` returns) and why the package is acceptable. That expression, not the license that the
+package declares, decides whether the review needs an exception: `A AND B` needs both identifiers on the list, `A OR B` one of them, and
+a `LicenseRef` identifier of the graph's own, such as `LicenseRef-bad-bsd-2-clause-isc`, is on no list. Remove an exception when the
+graph reports an expression that the list covers for every version of the package that a lockfile resolves. The action ignores the
+version of a package URL, so an exception also covers the later versions of its package; look at the license of such a package when you
+update it. An advisory that does not apply goes to `allow-ghsas` with its GHSA ID and a reason; `govulncheck` (gate `vulncheck`) is
 the check that knows which vulnerable symbols the code calls. The configuration comes from the checkout of the pull request, so a
 change of the lists or of an exception is a change of policy and is reviewed as one. `pkg:npm/elkjs` (EPL-2.0, a dependency of
 Mermaid) has no exception on purpose: whether the website owes a notice for it is still to be decided (ADR-0038, decision 5). A change
