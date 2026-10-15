@@ -4,8 +4,8 @@
   $ProgressPreference = 'SilentlyContinue'
   $Server = $P.Server; $File = $P.File; $Sha256 = $P.Sha256
   $Token = $P.Token; $TokenFile = $P.TokenFile; $InstallerArgs = $P.InstallerArgs
-  if (-not (whoami.exe /groups | Select-String -SimpleMatch 'S-1-16-12288' -Quiet)) {
-    throw '[myriarch-install] ERROR [privilege_required] this command has to run in an elevated Windows PowerShell (Run as administrator)'
+  if (-not (whoami.exe /groups | Select-String -SimpleMatch -Pattern 'S-1-16-12288', 'S-1-16-16384' -Quiet)) {
+    throw '[myriarch-install] ERROR [privilege_required] this command has to run in an elevated Windows PowerShell (Run as administrator) or as SYSTEM'
   }
   $blocked = @(Get-ExecutionPolicy -List | Where-Object { ($_.Scope -eq 'MachinePolicy' -or $_.Scope -eq 'UserPolicy') -and ($_.ExecutionPolicy -eq 'AllSigned' -or $_.ExecutionPolicy -eq 'Restricted') })
   if ($blocked.Count -gt 0) {

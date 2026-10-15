@@ -1090,12 +1090,14 @@ another POSIX shell; the here document does not exist in fish). The script, in t
    (`archive_invalid`) and starts `bash deploy/scripts/install-linux.sh --server <server> --token-file <file> [--ca-file ...] <options>` from there, with no standard
    input; the exit status of the installer is the status of the command.
 
-**What the Windows command does.** A script block `& { param([hashtable]$P) ... } @{ ... }` for an elevated Windows PowerShell, which is
+**What the Windows command does.** A script block `& { param([hashtable]$P) ... } @{ ... }` for an elevated Windows PowerShell or a session of SYSTEM, which is
 the constant script followed by the values in a hashtable. It uses cmdlets and native programs only (`whoami.exe`, `icacls.exe`, `powershell.exe`) and no
 .NET method or type, because under App Control the typed command runs in Constrained Language Mode. It, in this order:
 
-1. stops unless the session is elevated (`privilege_required`, from the integrity level in `whoami.exe /groups`) and unless Group Policy leaves
-   room for a script: a policy of the scopes `MachinePolicy` or `UserPolicy` that is `AllSigned` or `Restricted` wins over `-ExecutionPolicy`
+1. stops unless the session is elevated or runs as SYSTEM (`privilege_required`, from the mandatory integrity level that `whoami.exe /groups` lists: High,
+   `S-1-16-12288`, is an elevated administrator; System, `S-1-16-16384`, is a session of SYSTEM, the context of scheduled tasks, software distribution and management
+   agents, which run the variant `token_file`; an administrator who is not elevated has Medium and is refused, although the group Administrators is in the token "for deny
+   only") and unless Group Policy leaves room for a script: a policy of the scopes `MachinePolicy` or `UserPolicy` that is `AllSigned` or `Restricted` wins over `-ExecutionPolicy`
    and would stop the unsigned installer later, so the command says so first (`execution_policy_blocked`); then it checks the token as above;
 2. makes a directory below `%ProgramData%` with a name that cannot be guessed, replaces its DACL with `icacls.exe /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F`
    (SYSTEM and the administrators) **before the first download** (`acl_failed`), stops if anything is in it (`directory_unsafe`), and removes it in a `finally`;

@@ -595,14 +595,19 @@ var heredocDelimiter = strings.ToUpper(brand.Name) + "_TOKEN_END"
 // The setup script of the Windows command: a script block with one parameter, a hashtable with the values, so that the
 // text of the block is a constant and the values come after it. It uses cmdlets and native programs only (no .NET
 // method call, no type accelerator beyond the parameter type), which Constrained Language Mode permits.
+//
+// The first check is the mandatory integrity level of the session, which `whoami.exe /groups` lists as a label: High
+// (S-1-16-12288) is an elevated administrator, System (S-1-16-16384) is a session of SYSTEM, the context of scheduled
+// tasks, software distribution and management agents that run the variant token_file. An administrator who is not
+// elevated has the level Medium and the group Administrators "for deny only", so the membership alone would say yes.
 const windowsScript = `
 param([hashtable]$P)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $Server = $P.Server; $File = $P.File; $Sha256 = $P.Sha256
 $Token = $P.Token; $TokenFile = $P.TokenFile; $InstallerArgs = $P.InstallerArgs
-if (-not (whoami.exe /groups | Select-String -SimpleMatch 'S-1-16-12288' -Quiet)) {
-  throw '[{{LOG}}] ERROR [privilege_required] this command has to run in an elevated Windows PowerShell (Run as administrator)'
+if (-not (whoami.exe /groups | Select-String -SimpleMatch -Pattern 'S-1-16-12288', 'S-1-16-16384' -Quiet)) {
+  throw '[{{LOG}}] ERROR [privilege_required] this command has to run in an elevated Windows PowerShell (Run as administrator) or as SYSTEM'
 }
 $blocked = @(Get-ExecutionPolicy -List | Where-Object { ($_.Scope -eq 'MachinePolicy' -or $_.Scope -eq 'UserPolicy') -and ($_.ExecutionPolicy -eq 'AllSigned' -or $_.ExecutionPolicy -eq 'Restricted') })
 if ($blocked.Count -gt 0) {

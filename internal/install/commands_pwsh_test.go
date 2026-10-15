@@ -78,9 +78,28 @@ function Get-Content {
   param($LiteralPath, [switch]$Raw)
   return (Microsoft.PowerShell.Management\Get-Content -LiteralPath (Map-Path $LiteralPath) -Raw:$Raw)
 }
+# the groups of the token as whoami.exe /groups lists them; the sessions differ in the mandatory label (MOCK_INTEGRITY: high,
+# the default, is an elevated administrator; system is a session of SYSTEM; medium is an administrator who is not elevated,
+# whose group Administrators is for deny only; low)
 function whoami.exe {
   Log ('whoami ' + ($args -join ' '))
-  if ($env:MOCK_NOT_ADMIN -eq '1') { 'Mandatory Label\Medium Mandatory Level  Label  S-1-16-8192' } else { 'Mandatory Label\High Mandatory Level  Label  S-1-16-12288' }
+  'Everyone                       Well-known group S-1-1-0     Mandatory group, Enabled by default, Enabled group'
+  switch ($env:MOCK_INTEGRITY) {
+    'system' {
+      'NT AUTHORITY\SYSTEM            Well-known group S-1-5-18    Mandatory group, Enabled by default, Enabled group, Group owner'
+      'BUILTIN\Administrators         Alias            S-1-5-32-544 Mandatory group, Enabled by default, Enabled group, Group owner'
+      'Mandatory Label\System Mandatory Level  Label  S-1-16-16384'
+    }
+    'medium' {
+      'BUILTIN\Administrators         Alias            S-1-5-32-544 Group used for deny only'
+      'Mandatory Label\Medium Mandatory Level  Label  S-1-16-8192'
+    }
+    'low' { 'Mandatory Label\Low Mandatory Level  Label  S-1-16-4096' }
+    default {
+      'BUILTIN\Administrators         Alias            S-1-5-32-544 Mandatory group, Enabled by default, Enabled group, Group owner'
+      'Mandatory Label\High Mandatory Level  Label  S-1-16-12288'
+    }
+  }
 }
 function Get-ExecutionPolicy {
   param([switch]$List)
@@ -340,7 +359,8 @@ func TestPowerShellCommandChecksBeforeItTouchesTheHost(t *testing.T) {
 		env  []string
 		code string
 	}{
-		"not elevated":             {[]string{"MOCK_NOT_ADMIN=1"}, "privilege_required"},
+		"not elevated":             {[]string{"MOCK_INTEGRITY=medium"}, "privilege_required"},
+		"low integrity":            {[]string{"MOCK_INTEGRITY=low"}, "privilege_required"},
 		"Group Policy: AllSigned":  {[]string{"MOCK_GPO=AllSigned"}, "execution_policy_blocked"},
 		"Group Policy: Restricted": {[]string{"MOCK_GPO=Restricted"}, "execution_policy_blocked"},
 		"Group Policy of the user": {[]string{"MOCK_GPO_USER=AllSigned"}, "execution_policy_blocked"},
@@ -362,6 +382,43 @@ func TestPowerShellCommandChecksBeforeItTouchesTheHost(t *testing.T) {
 			e := newPwshEnv(t)
 			r := e.run(e.command(site(), testToken), false, "MOCK_GPO="+gpo)
 			assert.Equal(t, 0, r.code, r.out)
+		})
+	}
+}
+
+// A session of SYSTEM has the integrity level System, above High: it is the context of scheduled tasks, software
+// distribution and management agents, which run the variant with the token in a file. It has more rights than an elevated
+// administrator and installs the host the same way; only the levels below High are refused.
+func TestPowerShellCommandRunsAsSystemToo(t *testing.T) {
+	for _, clm := range []bool{false, true} {
+		for _, variant := range []string{VariantTokenInline, VariantTokenFile} {
+			t.Run(fmt.Sprintf("%s clm=%v", variant, clm), func(t *testing.T) {
+				e := newPwshEnv(t)
+				req := fullRequest(variant)
+				token := testToken
+				if variant == VariantTokenFile {
+					e.writeWindowsFile(windowsTokenFile, testToken)
+					req.TokenFiles = &TokenFiles{Windows: windowsTokenFile}
+					token = ""
+				}
+				r := e.run(e.command(req, token), clm, "MOCK_INTEGRITY=system")
+				require.Equal(t, 0, r.code, r.out)
+				assert.Len(t, r.called("powershell "), 1, "the installer was started")
+				assert.NotContains(t, r.out, "privilege_required")
+				assert.NotContains(t, strings.Join(r.log, "\n"), testToken)
+			})
+		}
+	}
+	// the other levels keep out, whatever the groups say: an administrator who is not elevated is in the group
+	// Administrators, "for deny only"
+	for _, level := range []string{"medium", "low"} {
+		t.Run("not "+level, func(t *testing.T) {
+			e := newPwshEnv(t)
+			r := e.run(e.command(site(), testToken), false, "MOCK_INTEGRITY="+level)
+			assert.NotEqual(t, 0, r.code)
+			assert.Contains(t, r.out, "[myriarch-install] ERROR [privilege_required]")
+			assert.Contains(t, r.out, "or as SYSTEM")
+			assert.Empty(t, r.called("icacls "))
 		})
 	}
 }
