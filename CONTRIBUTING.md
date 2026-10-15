@@ -46,8 +46,9 @@ Please also make sure that:
 
 - new behavior has tests;
 - generated files are regenerated: `pnpm gen:api` in `web/` after a change of `api/openapi.yaml`, and `make docs-gen`
-  after a change of commands, flags, help texts, `api/openapi.yaml`, configuration keys, environment reads or metrics
-  (`docs/reference/cli`, `docs/reference/api` and the configuration, environment variable and metrics pages are generated);
+  after a change of commands, flags, help texts, `api/openapi.yaml`, configuration keys, environment reads, metrics or values of
+  the Helm chart (`docs/reference/cli`, `docs/reference/api`, the configuration, environment variable and metrics pages and
+  `deploy/helm/myriarch/values.schema.json` are generated);
 - the documentation is updated: every new setting, field, flag or API path appears in the matching page under `docs/`
   (the GitOps field reference is [docs/reference/gitops-schema.md](docs/reference/gitops-schema.md));
 - user-visible changes have a line under "Unreleased" in [CHANGELOG.md](CHANGELOG.md).

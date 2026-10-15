@@ -85,9 +85,11 @@ Some tests and scripts use fixed ports or a shared local cluster (`scripts/e2e.s
 - **Keep generated and reference files in step.**
   - Run `make docs-gen` when you change commands, flags or help texts, `api/openapi.yaml`, a configuration key (or its doc
     comment), an environment read or a metric; `docs/reference/cli/` (from the commands), `docs/reference/api/` (from the OpenAPI
-    contract) and `docs/reference/{configuration,environment-variables,metrics}.md` (from the code) are generated and not edited
-    by hand. The rules for the doc comments of `internal/config/config.go` are in
-    [docs/development.md](docs/development.md#generated-references).
+    contract), `docs/reference/{configuration,environment-variables,metrics}.md` (from the code) and
+    `deploy/helm/myriarch/values.schema.json` (from the hand-written `deploy/helm/myriarch/values.schema.source.yaml` and the
+    configuration struct) are generated and not edited by hand. A new or changed value of the Helm chart goes into
+    `values.yaml` and `values.schema.source.yaml`; the schema is strict, so a value that it does not list fails `helm lint`. The rules
+    for the doc comments of `internal/config/config.go` are in [docs/development.md](docs/development.md#generated-references).
   - Keep `docs/reference/gitops-schema.md` complete: every kind, field and option of the GitOps format is documented there,
     and a test fails otherwise.
   - Run `pnpm gen:api` in `web/` after a change of `api/openapi.yaml` (and `make docs-gen`, see above) and commit `web/src/api/schema.d.ts`.

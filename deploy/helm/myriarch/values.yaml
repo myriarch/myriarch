@@ -1,5 +1,9 @@
 # Helm chart for myriarchd (OpAMP server, REST API and web UI in one binary).
 #
+# The values are validated against values.schema.json: Helm refuses a key that the chart does not know, a value of the wrong type
+# and a malformed value in "helm install", "upgrade", "template" and "lint". The block "config" mirrors the configuration file of
+# the server. Secrets are not values: the chart reads them from Secrets (existingSecret and the keys described below).
+#
 # Minimal installation: the chart installs with its defaults once two things exist:
 #   1. a Secret (existingSecret, default myriarch-secrets) with the key database-dsn, and
 #   2. config.server.publicUrl set to the external URL (--set config.server.publicUrl=https://fleet.example.com).
@@ -501,6 +505,7 @@ probes:
   readiness: {path: /readyz, periodSeconds: 5, timeoutSeconds: 3, failureThreshold: 3}
 
 # PodDisruptionBudget (rendered only while replicaCount is greater than 1, otherwise it would block node drains).
+# maxUnavailable (a number or a percentage) replaces minAvailable when it is set.
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
