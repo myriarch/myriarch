@@ -953,10 +953,10 @@ rollout, take the new version at once and skip the waves and approvals. So the p
 has handled it ([Planner](#planner)): for a version chosen in the UI until the selection has `plannedAt` (a new selection of the fleet,
 also of the same version, clears it), for any other target (the one in Git, also after a selection was cleared) until the record of the
 planner for the fleet equals the target. Until then the answer is 503 `preparing` with `Retry-After` (5 seconds), and nothing is prepared.
-The planner usually needs seconds. A fleet that the planner has never handled has no record, so a new fleet waits for the first run of the
-planner, and so does every fleet right after the start of a leader. Without a leader nothing is planned, and the hosts of a fleet whose target
-changed wait until there is one; the other fleets are not affected. If the planning of a fleet keeps failing, its hosts wait and the log of
-the leader names the reason.
+The planner usually needs seconds. A fleet that the planner has never handled has no record, so a new fleet waits for its first run, and so
+does every fleet right after an update from v0.1.0 (the records stay in the database, so the restart of a leader does not make hosts wait
+again). Without a leader nothing is planned, and the hosts of a fleet whose target changed wait until there is one; the other fleets are not
+affected. If the planning of a fleet keeps failing, its hosts wait and the log of the leader names the reason.
 
 The reads are ordered so that a concurrent change cannot send a host past the waves: the target comes from the memory of the assignment
 service, which follows the database and never runs ahead of it, then the record of the planner, and the rollouts last. The planner writes
