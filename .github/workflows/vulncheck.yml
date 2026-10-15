@@ -1,0 +1,149 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Known vulnerabilities in code scanning (docs/development.md, "Vulnerability reports in code scanning"; docs/security/model.md,
+# "Static analysis in CI"). govulncheck reports go to the code scanning alerts of the repository as SARIF, in three categories:
+#
+#   govulncheck/source-release   the code of main, built the way a release is built
+#   govulncheck/source-devpg     the code of main with the build tag devpg (the development server with an embedded PostgreSQL)
+#   govulncheck/binaries         the programs of the latest stable release, or of the tag that a manual run names
+#
+# This workflow reports and blocks nothing: the check that blocks is the gate vulncheck in the job compliance of ci.yml. A finding that
+# ci/vulncheck-allowlist.txt accepts is left out of the reports.
+#
+# It runs on pushes to main, every day (an advisory can appear without a change of the code) and by hand, never for a pull request: the
+# token of a pull request from a fork is read-only and cannot upload, and a report of a pull request is no analysis of a branch that
+# code scanning tracks.
+#
+# Privileges (rule R3 of ci/check-workflows.py, ci/workflow-permissions.txt): the jobs source and binaries hold contents: read. They
+# run govulncheck, built from ci/tools, over the code of main or over release files that were verified first (ci/vulncheck-binaries.sh
+# checks the keyless signature of checksums.txt and the SHA-256 of every archive before it scans), and hand the reports on as artifacts.
+# The job upload holds security-events: write and nothing else; it runs no code of the repository, it downloads the reports and uploads
+# them with github/codeql-action/upload-sarif, the pin of codeql.yml and scorecard.yml (rule R2).
+name: vulncheck
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # daily, off the full hour, after the nightly run of ci.yml
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Scan the programs of this release instead of the latest stable one (vX.Y.Z or vX.Y.Z-rc.N)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# A run on main (a push, the daily run or a manual run) waits for the one that is running, and a newer run replaces a run that is
+# still pending, so the newest commit of main is always scanned and a commit in between may not be.
+concurrency:
+  group: vulncheck-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  # ---- the code of main --------------------------------------------------------------------------------------------------------------
+  source:
+    name: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+        with:
+          tools: govulncheck
+      - name: Scan the source of the release build and of the devpg build
+        run: ci/vulncheck.sh --sarif "${RUNNER_TEMP}/sarif"
+      - name: Keep the reports for the upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vulncheck-sarif-source
+          path: ${{ runner.temp }}/sarif/*.sarif
+          if-no-files-found: error
+          retention-days: 1
+
+  # ---- the programs of the latest release ------------------------------------------------------------------------------------------
+  binaries:
+    name: binaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+        with:
+          tools: cosign govulncheck
+      # No credentials: the release files are public. The script verifies the signature of checksums.txt and the SHA-256 of every archive
+      # before it scans, and it checks the tag against the pattern of a release tag. An empty tag means the latest stable release.
+      - name: Verify the release files and scan their programs
+        env:
+          VULNCHECK_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: ci/vulncheck-binaries.sh --out "${RUNNER_TEMP}/sarif"
+      - name: Keep the report for the upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vulncheck-sarif-binaries
+          path: ${{ runner.temp }}/sarif/govulncheck-binaries.sarif
+          if-no-files-found: error
+          retention-days: 1
+
+  # ---- the upload: the only job with a write scope --------------------------------------------------------------------------------
+  upload:
+    name: upload
+    needs: [source, binaries]
+    # a report that exists is uploaded although the other scan failed; a run that was cancelled uploads nothing
+    if: ${{ !cancelled() && (needs.source.result == 'success' || needs.binaries.result == 'success') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      security-events: write # upload the reports to code scanning (reviewed in ci/workflow-permissions.txt)
+      contents: read # check out the repository (the repository is public, so no actions: read is needed)
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the reports of the source scan
+        if: ${{ needs.source.result == 'success' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vulncheck-sarif-source
+          path: ${{ runner.temp }}/sarif/source
+      - name: Upload the report of the release build
+        if: ${{ needs.source.result == 'success' }}
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: ${{ runner.temp }}/sarif/source/govulncheck-source-release.sarif
+          category: govulncheck/source-release
+      - name: Upload the report of the devpg build
+        if: ${{ needs.source.result == 'success' }}
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: ${{ runner.temp }}/sarif/source/govulncheck-source-devpg.sarif
+          category: govulncheck/source-devpg
+      - name: Download the report of the binary scan
+        if: ${{ needs.binaries.result == 'success' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vulncheck-sarif-binaries
+          path: ${{ runner.temp }}/sarif/binaries
+      - name: Upload the report of the released binaries
+        if: ${{ needs.binaries.result == 'success' }}
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: ${{ runner.temp }}/sarif/binaries/govulncheck-binaries.sarif
+          category: govulncheck/binaries
