@@ -11,7 +11,8 @@
 # cases, and then breaks copies of the workflows in the ways that matter (a path that is too wide, a missing exclusion, an upload
 # for every job, a secret, a registry login, an image reference) and requires a finding for each. The same goes for the logs of a
 # run that hangs (a step that runs the test needs a timeout of its own, below that of the job: a job that runs out of time is
-# cancelled and uploads nothing). No network access.
+# cancelled and uploads nothing) and for the path filter of the kind workflow (a file that the probe depends on must be in it).
+# No network access.
 set -uo pipefail
 # shellcheck source=ci/tests/lib-test.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
@@ -215,6 +216,13 @@ fresh_tree; edit "${KIND}" '        timeout-minutes: 65' '        timeout-minute
 expect_ok "e2e-kind: a probe timeout exactly 5 minutes below that of the job is fine" run_check "${T}"
 fresh_tree; removed_line "${KIND}" '    timeout-minutes: 75'
 bites "e2e-kind: a job without a timeout is found" 'the job must have one timeout-minutes'
+# the path filter of pull requests: a file that only the probe depends on must start it
+fresh_tree; removed_line "${KIND}" "      - 'ci/versions.env'"
+bites "e2e-kind: a path filter without the pins of ci/versions.env is found" 'path filter of pull requests lacks `ci/versions.env`'
+fresh_tree; removed_line "${KIND}" "      - 'scripts/lib/image-common.sh'"
+bites "e2e-kind: a path filter without the library of the image scripts is found" 'path filter of pull requests lacks `scripts/lib/image-common.sh`'
+fresh_tree; removed_line "${KIND}" "      - '.github/actions/setup/**'"
+bites "e2e-kind: a path filter without the setup action of the job is found" 'path filter of pull requests lacks `.github/actions/setup/\*\*`'
 
 # the unbroken copy is fine, so the cases above fail for their own reason
 fresh_tree

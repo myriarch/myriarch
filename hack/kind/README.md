@@ -126,8 +126,9 @@ make kind-down ALL=1                     # also the registry container and .cach
 ## In CI
 
 `.github/workflows/e2e-kind.yml` runs `make kind-probe` on an `ubuntu-24.04` runner of GitHub Actions: every night (01:51 UTC), for pull
-requests that touch the chart, the updater, the images or the scripts of the probe (a path filter), and on a manual run
-(`workflow_dispatch`), which can set `PROBE_SKIP` (`rotation,netpol,dex,downgrade`). The job installs the pinned tools with
+requests that touch the chart, the updater, the images (their build scripts, labels and pins), the tools or the scripts of the probe (a
+path filter that names the files the probe reads or runs besides this directory), and on a manual run (`workflow_dispatch`), which can
+set `PROBE_SKIP` (`rotation,netpol,dex,downgrade`). The job installs the pinned tools with
 `.github/actions/setup` (kind, kubectl, helm, crane and yq; `ci/install-tools.sh` retries their downloads after a transient network
 error), runs the probe without any change and shows the summary block of `probe.log` in the job summary. It is not part of `ci-ok` and
 not a gate of the release; before a tag the last green run of the commit does what a local `make kind-probe` did
@@ -143,9 +144,9 @@ A failed run uploads an allow-list for seven days: `probe.log`, `results.txt`, `
 `logs/hygiene-dump/` (the scan dump of stage 15), because anyone who is signed in to GitHub can download the artifacts of a public
 repository; `ci/tests/workflow-artifacts-test.sh` checks the patterns. The step that runs the probe has a timeout of its own, below
 that of the job, so that a probe that hangs counts as a failed step and still uploads its logs (a job that runs out of time is
-cancelled, and the upload is skipped for a cancelled job); the same test holds the margin. Anonymous pulls from Docker Hub (the
-node image, `registry`, `postgres`, `alpine`, `busybox`, `curlimages/curl` and the upstream collector images) can hit the pull limit
-of a busy day; the workflow has no secret to log in with, so rerun the job.
+cancelled, and the upload is skipped for a cancelled job); the same test holds the margin and the path filter. Anonymous pulls from
+Docker Hub (the node image, `registry`, `postgres`, `alpine`, `busybox`, `curlimages/curl` and the upstream collector images) can hit
+the pull limit of a busy day; the workflow has no secret to log in with, so rerun the job.
 
 ## Troubleshooting
 

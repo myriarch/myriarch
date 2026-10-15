@@ -904,8 +904,9 @@ The probe is part of the language guard (`hack` is in the strict scope) and of t
 variables and troubleshooting: [`hack/kind/README.md`](../hack/kind/README.md).
 
 **In CI.** `.github/workflows/e2e-kind.yml` runs `make kind-probe` on an `ubuntu-24.04` runner, whose Docker engine runs the cluster:
-every night, for pull requests that touch the chart, the updater, the images or the scripts of the probe, and on a manual run, which
-can skip optional parts (`PROBE_SKIP`). It is not part of `ci-ok` and not a gate of the release; before a tag the last green run of
+every night, for pull requests that touch the chart, the updater, the images of the probe (their build scripts and the pins of
+`ci/versions.env`), the tools it installs or the scripts of the probe, and on a manual run, which can skip optional parts
+(`PROBE_SKIP`). It is not part of `ci-ok` and not a gate of the release; before a tag the last green run of
 the commit replaces a local `make kind-probe` ([Releasing](releasing.md)). The matrix has one entry per Kubernetes version: `image-var`
 names the pin of `hack/kind/versions.env` that holds the node image (`KIND_NODE_IMAGE` today), so the digest stays in one place
 and `ci/check.sh` keeps holding it; a second version is a second pin and a second entry. The summary block of the probe goes to the job
@@ -913,8 +914,10 @@ summary. A failed run uploads an allow-list from `.cache/kind` (the log of the p
 pods and the diagnostics of `hack/kind/diag.sh`) for seven days, and never the kubeconfig, the generated secrets, cookie jars or the
 scan dump of the hygiene stage (`ci/tests/workflow-artifacts-test.sh`). The step that runs the probe has a timeout of its own, below
 that of the job, so that a probe that hangs counts as a failed step and still uploads its logs; a job that runs out of time is
-cancelled, and the upload is skipped for a cancelled job. The runner pulls the images anonymously, so Docker Hub can limit the pulls
-of a busy day; the workflow has no secret to log in with, and a rerun of the job is the answer.
+cancelled, and the upload is skipped for a cancelled job. The path filter of pull requests names the files that the probe reads or
+runs besides `hack/kind` (the image scripts and what they source, the pins, the tool installer, the Makefile, the setup action of
+the job and the Node.js version it installs), and the same test holds the list. The runner pulls the images anonymously, so Docker Hub can limit the pulls of a busy day;
+the workflow has no secret to log in with, and a rerun of the job is the answer.
 
 ## Web UI
 

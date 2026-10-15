@@ -24,8 +24,10 @@ that is held to a digest (no image reference in the workflow).
 Two more rules keep the logs of a run that hangs. A job that runs out of time is cancelled, and `failure()` is false for a cancelled
 job, so the upload would not run; a step that runs out of time counts as failed. The steps that run the test (the scenario steps of
 the host test, the probe of the kind test) therefore have a `timeout-minutes` of their own, and together they stay at least
-STEP_TIMEOUT_MARGIN minutes below the timeout of the job (the checkout, the toolchain, the build and the upload need that time).
-The output is one line per finding, "<file>: <message>"; the exit status is 1 when there is a finding. Standard library only.
+STEP_TIMEOUT_MARGIN minutes below the timeout of the job (the checkout, the toolchain, the build and the upload need that time). And
+the path filter of pull requests of the kind test names the files outside hack/kind that the probe reads or runs (KIND_PATHS): a
+change that touches only one of them must start the probe. The output is one line per finding, "<file>: <message>"; the exit
+status is 1 when there is a finding. Standard library only.
 """
 
 import argparse
@@ -130,6 +132,30 @@ POLICY = {
 
 # Minutes that the timeout of the job keeps over the timeouts of the steps that run the test.
 STEP_TIMEOUT_MARGIN = 5
+
+# The files outside hack/kind that the probe reads or runs, and that a pull request can change without touching hack/kind: the
+# image build scripts and what they source and read, the pins, the tool installer and the module files of the tools it builds, the
+# simulator profile and component list, the Makefile target, the setup action of the job and the Node.js version it installs.
+# Entries of the path filter, as written there. The code of the product that goes into the images is not on the list; the nightly
+# run covers it.
+KIND_PATHS = [
+    "scripts/build-image-crane.sh",
+    "scripts/build-collector-image-crane.sh",
+    "scripts/lib/image-common.sh",
+    "scripts/lib/oci_image.py",
+    "ci/image-labels.env",
+    "ci/install-tools.sh",
+    "ci/lib.sh",
+    "ci/versions.env",
+    "ci/tools/kind/**",
+    "ci/tools/helm/**",
+    "ci/tools/crane/**",
+    "ci/tools/yq/**",
+    "examples/sim/**",
+    "Makefile",
+    ".github/actions/setup/**",
+    ".node-version",
+]
 
 
 # ------------------------------------------------------------------------------------------------------------- globs ---
@@ -372,6 +398,10 @@ def check_kind(text, root, findings):
         findings.append("%s: the probe runs through make kind-probe" % name)
     probe_steps = [(number, lines) for number, lines in read_steps(text) if any("make kind-probe" in line for line in step_block(lines, "run"))]
     check_timeouts(name, text, probe_steps, findings)
+    filter_entries = set(re.findall(r"^[ \t]+- '([^']+)'$", text, re.M))
+    for entry in KIND_PATHS:
+        if entry not in filter_entries:
+            findings.append("%s: the path filter of pull requests lacks `%s`, which the probe reads or runs" % (name, entry))
     if re.search(r"^[ \t]+HOST_E2E:", text, re.M):
         findings.append("%s: HOST_E2E belongs to the host test" % name)
     if "docker login" in text or "docker/login-action" in text:

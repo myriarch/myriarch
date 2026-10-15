@@ -7,11 +7,13 @@
 # with a rollback and a retry on the real collector, the takeover of the leader, NetworkPolicy, the Dex quickstart and the hygiene of
 # logs and secrets. Containers run on the runner only: nothing here is started on a developer machine, and the tests never need it.
 #
-# Not part of ci-ok: a pull request starts it only when it touches the chart, the updater, the images of the probe, the probe or this
-# workflow; every night it runs against main; a manual run (workflow_dispatch) starts it on any branch and can skip optional parts
-# (PROBE_SKIP of hack/kind/README.md). The matrix has one entry per Kubernetes version: the node image comes from a pin of
-# hack/kind/versions.env (image-var), which ci/check.sh holds to a digest, so a second version is a second entry and a second pin,
-# not a digest in this file.
+# Not part of ci-ok: a pull request starts it only when it touches the chart, the updater, the images of the probe (their build
+# scripts and pins), the tools it installs, the probe or this workflow; every night it runs against main, which also covers a
+# change in code that only goes into the images; a manual run (workflow_dispatch) starts it on any branch and can skip optional
+# parts (PROBE_SKIP of hack/kind/README.md). The path filter names the files that the probe reads or runs, except the code of the
+# product itself; ci/tests/workflow-artifacts-check.py holds the list. The matrix has one entry per Kubernetes version: the node
+# image comes from a pin of hack/kind/versions.env (image-var), which ci/check.sh holds to a digest, so a second version is a
+# second entry and a second pin, not a digest in this file.
 #
 # The token is read-only and the workflow has no secret. Artifacts of a failed run are an allow-list (the log of the probe, the
 # result list, the durations, the logs of the pods and the diagnostics of diag.sh) and never the kubeconfig, the generated secrets or
@@ -24,6 +26,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      # the probe, what it installs (chart, collector pod, updater, supervisor) and the code it exercises most
       - 'hack/kind/**'
       - 'deploy/helm/**'
       - 'deploy/updater/**'
@@ -32,9 +35,26 @@ on:
       - 'cmd/myriarch-updater/**'
       - 'internal/updater/**'
       - 'internal/leader/**'
+      # the simulator profile and the component list that the probe uses
+      - 'examples/sim/**'
+      # the images of the probe: the build scripts, what they source, and the labels they read
       - 'scripts/build-image-crane.sh'
       - 'scripts/build-collector-image-crane.sh'
+      - 'scripts/lib/image-common.sh'
+      - 'scripts/lib/oci_image.py'
+      - 'ci/image-labels.env'
+      # the tools (kind, kubectl, helm, crane, yq) and the pins of the tools and of the upstream collector images
       - 'ci/install-tools.sh'
+      - 'ci/lib.sh'
+      - 'ci/versions.env'
+      - 'ci/tools/kind/**'
+      - 'ci/tools/helm/**'
+      - 'ci/tools/crane/**'
+      - 'ci/tools/yq/**'
+      # how the job starts the probe, and the Node.js version that the setup action installs for the web UI of the server image
+      - 'Makefile'
+      - '.github/actions/setup/**'
+      - '.node-version'
       - '.github/workflows/e2e-kind.yml'
   schedule:
     - cron: '51 1 * * *'
