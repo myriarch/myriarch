@@ -376,6 +376,30 @@ bin/myriarchd config validate --config myriarchd.yaml --skip-files
 [production checklist](production-checklist.md). A complete, validated example with OIDC, an artifact mirror and a gateway
 collector is in [`deploy/examples/production/README.md`](../../deploy/examples/production/README.md).
 
+## Test the installation
+
+**Available from v0.2.0.** `helm test` checks the running server through its Service:
+
+```bash
+helm test myriarch -n myriarch
+```
+
+The test runs one Pod with the image of the server and the command `myriarchd healthcheck`. `GET /readyz` must answer 200, and a
+WebSocket upgrade at the OpAMP path must be refused with 401, which shows that the route and the authentication are in place; the Pod
+needs no credential for that. The command sends no OpAMP message, so the test registers no agent, and the server counts it as one
+unauthorized OpAMP connect per run. The Pod exists only while the test runs and follows the restricted Pod Security profile. For a
+complete handshake create an enrollment token for the test only, put it into a Secret and set `tests.token.existingSecret`; the
+[README of the chart](../../deploy/helm/myriarch/README.md#helm-test) describes the opt-in and the messages of a failed test.
+
+The values of this guide set `trustedProxies`, so the NetworkPolicy has **no rule for the test Pod** (a rule would admit every pod that
+carries its labels, and those settings are safe only while no pod of the namespace reaches port 8080 directly), and the test cannot
+connect: it fails with `readyz failed: cannot reach ...: no answer within 10s`. If you accept that, add the test Pod to the sources
+of `networkPolicy.ingress.from`, as the [README of the chart](../../deploy/helm/myriarch/README.md#network-access-of-the-test) shows.
+`helm template | kubectl apply` creates the test Pod as an ordinary Pod: add `--skip-tests`, or set `tests.enabled: false`.
+
+With the Prometheus Operator, `prometheusRule.enabled: true` (and `prometheusRule.labels` for the label that your Prometheus resource
+selects rules by) adds the alerts of the server; see [Alerting rules](../../deploy/helm/myriarch/README.md#alerting-rules).
+
 ## Upgrade and uninstall
 
 Upgrade from the checkout of a newer tag, with the same values file; read the changelog of the release first:

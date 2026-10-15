@@ -12,7 +12,10 @@
 # Cases: default, openshift (openshift.enabled=true), openshift-auto (auto with --api-versions security.openshift.io/v1),
 # auto-standard (auto without it: standard profile), quickstart-dex, install-guide (the values of the Helm guide), prod, prod-<variant> for each
 # deploy/helm/myriarch/examples/ingress-*.yaml, prod-openshift (examples/openshift.yaml), plus option cases
-# (single replica, SSH Git URL, extra ports, DNS override, enrollment tokens, OIDC, OIDC from the environment).
+# (single replica, SSH Git URL, extra ports, DNS override, enrollment tokens, OIDC, OIDC from the environment), the Pod of
+# "helm test" (tests-*: restricted profile, no Secret without the opt-in, the NetworkPolicy rule only with tests.enabled and without
+# trustedProxies) and the PrometheusRule (prometheusrule*: validated against the CRD catalog, equal to the rules of
+# deploy/examples/production/monitoring/prometheusrule.yaml).
 #
 # Environment: KUBERNETES_VERSION (default 1.30.0), KUBECONFORM_CACHE (default .cache/kubeconform). The first run needs
 # network access to the schema locations (Kubernetes schemas, the datreeio CRDs catalog and the OpenShift schemas); later
@@ -100,6 +103,11 @@ q() { yq "$2" "${out}/$1.yaml"; }
 qc() { yq "$2" "${out}/$1.myriarchd.yaml"; }
 # dep <case> <expression>: expression over the Deployment
 dep() { yq "select(.kind == \"Deployment\") | $2" "${out}/$1.yaml"; }
+# one <case> <kind> <expression>: expression over the one document of that kind. The document is cut out first: yq answers the
+# collect operator ([...]) with an empty array, and prints a blank line for it, for every other document of the stream.
+one() { yq "select(.kind == \"$2\")" "${out}/$1.yaml" | yq "$3"; }
+# tpod <case> <expression>: expression over the Pod of "helm test"
+tpod() { one "$1" Pod "$2"; }
 
 expect() { # case description want got
   if [ "$3" != "$4" ]; then fail_case "$1" "$2: got '$4', want '$3'"; fi
@@ -147,6 +155,40 @@ run_case() { # case-name [helm template args...]
   fi
 }
 
+# check_test_pod <case> [token-secret]: the Pod of "helm test" (templates/tests/test-connection.yaml). A hook that runs
+# "myriarchd healthcheck" of the image of the Deployment against the Service; the restricted Pod Security profile; labels that
+# neither the Service nor the Deployment selects; no Secret and no environment without the opt-in (tests.token), and with it one key
+# of the named Secret.
+check_test_pod() {
+  local c="$1" secret="${2:-}" want_args="healthcheck --url http://myriarch.myriarch.svc:8080 --opamp-path /v1/opamp"
+  expect "${c}" "one test Pod" "myriarch-test-connection" "$(tpod "${c}" '.metadata.name')"
+  expect "${c}" "test Pod hook" "test before-hook-creation,hook-succeeded" \
+    "$(tpod "${c}" '.metadata.annotations["helm.sh/hook"]') $(tpod "${c}" '.metadata.annotations["helm.sh/hook-delete-policy"]')"
+  expect "${c}" "test Pod runs the image of the Deployment" "$(dep "${c}" '.spec.template.spec.containers[0].image')" "$(tpod "${c}" '.spec.containers[0].image')"
+  expect "${c}" "test Pod command" "${want_args}${secret:+ --token-file /etc/myriarchd-test/token}" "$(tpod "${c}" '.spec.containers[0].args | join(" ")')"
+  expect "${c}" "test Pod never restarts and mounts no service account token" "Never false" \
+    "$(tpod "${c}" '.spec.restartPolicy') $(tpod "${c}" '.spec.automountServiceAccountToken')"
+  expect "${c}" "test Pod: restricted container context" "false true true ALL RuntimeDefault" \
+    "$(tpod "${c}" '.spec.containers[0].securityContext | [.allowPrivilegeEscalation, .readOnlyRootFilesystem, .runAsNonRoot, (.capabilities.drop | join(",")), .seccompProfile.type] | join(" ")')"
+  expect "${c}" "test Pod: restricted pod context" "true RuntimeDefault" \
+    "$(tpod "${c}" '.spec.securityContext | [.runAsNonRoot, .seccompProfile.type] | join(" ")')"
+  expect "${c}" "test Pod: no added capability and not privileged" "null null" \
+    "$(tpod "${c}" '.spec.containers[0].securityContext.capabilities.add') $(tpod "${c}" '.spec.containers[0].securityContext.privileged')"
+  expect "${c}" "test Pod: the labels select neither the Service nor the Deployment" "myriarch-test myriarch test" \
+    "$(tpod "${c}" '.metadata.labels["app.kubernetes.io/name"]') $(tpod "${c}" '.metadata.labels["app.kubernetes.io/instance"]') $(tpod "${c}" '.metadata.labels["app.kubernetes.io/component"]')"
+  expect "${c}" "test Pod: requests and limits" "10m 32Mi 16Mi 64Mi 64Mi" \
+    "$(tpod "${c}" '.spec.containers[0].resources | [.requests.cpu, .requests.memory, .requests["ephemeral-storage"], .limits.memory, .limits["ephemeral-storage"]] | join(" ")')"
+  expect "${c}" "test Pod: no environment" "null" "$(tpod "${c}" '.spec.containers[0].env')"
+  if [ -z "${secret}" ]; then
+    expect "${c}" "test Pod without tests.token mounts nothing" "null null" "$(tpod "${c}" '.spec.volumes') $(tpod "${c}" '.spec.containers[0].volumeMounts')"
+    if tpod "${c}" '.' | grep -Eq 'secretName|secretKeyRef|--token-file|mountPath'; then fail_case "${c}" "the test Pod without tests.token refers to a Secret or a file"; fi
+  else
+    expect "${c}" "test Pod mounts one key of the Secret, read-only" "${secret} token token 288 1 /etc/myriarchd-test true" \
+      "$(tpod "${c}" '.spec.volumes[0].secret | [.secretName, .items[0].key, .items[0].path, .defaultMode, (.items | length)] | join(" ")') $(tpod "${c}" '.spec.containers[0].volumeMounts[0] | [.mountPath, .readOnly] | join(" ")')"
+    expect "${c}" "test Pod has one volume" "1" "$(tpod "${c}" '.spec.volumes | length')"
+  fi
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 # default: the chart installs with its defaults
 # ---------------------------------------------------------------------------------------------------------------------
@@ -174,6 +216,9 @@ if run_case default; then
     expect "${c}" "${key} is not rendered" "null" "$(qc ${c} "${key}")"
   done
   expect "${c}" "standard profile runAsUser" "65532" "$(dep ${c} '.spec.template.spec.securityContext.runAsUser')"
+  check_test_pod "${c}"
+  expect "${c}" "the test Pod follows the user of the pod security context" "65532" "$(tpod ${c} '.spec.securityContext.runAsUser')"
+  expect "${c}" "no PrometheusRule by default" "" "$(q ${c} 'select(.kind == "PrometheusRule") | .kind')"
   # two renders give the same Deployment and ConfigMap (the generated Secret differs)
   if render default-again; then
     if ! diff <(q default 'select(.kind == "Deployment" or .kind == "ConfigMap")') \
@@ -288,6 +333,124 @@ fi
 config_env=()
 
 # ---------------------------------------------------------------------------------------------------------------------
+# the Pod of "helm test": the opt-in token, the switch, and the rule of the NetworkPolicy
+# ---------------------------------------------------------------------------------------------------------------------
+if run_case tests-token --set tests.token.existingSecret=helm-test-token; then
+  check_test_pod tests-token helm-test-token
+fi
+if run_case tests-token-key --set tests.token.existingSecret=helm-test-token --set tests.token.key=probe-token; then
+  expect tests-token-key "the key of the Secret" "probe-token token" \
+    "$(tpod tests-token-key '.spec.volumes[0].secret.items[0].key') $(tpod tests-token-key '.spec.volumes[0].secret.items[0].path')"
+fi
+if run_case tests-off --set tests.enabled=false; then
+  expect tests-off "no test Pod" "" "$(q tests-off 'select(.kind == "Pod") | .kind')"
+fi
+if run_case tests-service --set service.port=9080 --set-json 'config.opamp.path="/agents/opamp"' --set fullnameOverride=fleet; then
+  expect tests-service "the test Pod asks the Service on its port and the OpAMP path of the configuration" \
+    "healthcheck --url http://fleet.myriarch.svc:9080 --opamp-path /agents/opamp" "$(tpod tests-service '.spec.containers[0].args | join(" ")')"
+  expect tests-service "the name of the test Pod" "fleet-test-connection" "$(tpod tests-service '.metadata.name')"
+fi
+# scheduling follows the server: a node selector and a toleration of the pods apply to the test Pod as well
+if run_case tests-scheduling --set nodeSelector.pool=edge --set-json 'tolerations=[{"key":"dedicated","operator":"Equal","value":"infra","effect":"NoSchedule"}]'; then
+  expect tests-scheduling "node selector and toleration" "edge dedicated" \
+    "$(tpod tests-scheduling '.spec.nodeSelector.pool') $(tpod tests-scheduling '.spec.tolerations[0].key')"
+fi
+
+# annotations for a service mesh reach the test Pod, next to the annotations of the hook
+if run_case tests-annotations --set-string 'tests.podAnnotations.sidecar\.istio\.io/inject=false'; then
+  expect tests-annotations "mesh annotation and hook annotations" "false test before-hook-creation,hook-succeeded" \
+    "$(tpod tests-annotations '.metadata.annotations["sidecar.istio.io/inject"]') $(tpod tests-annotations '.metadata.annotations["helm.sh/hook"]') $(tpod tests-annotations '.metadata.annotations["helm.sh/hook-delete-policy"]')"
+fi
+
+# The NetworkPolicy: the test Pod needs a rule only when allowSameNamespace is false, and the rule never exists together with
+# trustedProxies or clientCertHeader (any pod with the labels of the test Pod could use it). The labels of the rule are the labels of the Pod.
+np_from='select(.kind == "NetworkPolicy") | .spec.ingress[0].from'
+test_rule='.[] | select(has("podSelector")) | .podSelector.matchLabels | to_entries | sort_by(.key) | map(.key + "=" + .value) | join(",")'
+if run_case tests-np --set networkPolicy.ingress.allowSameNamespace=false; then
+  expect tests-np "the only source of port 8080 is the test Pod" "1 app.kubernetes.io/component=test,app.kubernetes.io/instance=myriarch,app.kubernetes.io/name=myriarch-test" \
+    "$(q tests-np "${np_from} | length") $(q tests-np "${np_from} | ${test_rule}")"
+  expect tests-np "the Pod carries these labels" "test myriarch myriarch-test" \
+    "$(tpod tests-np '.metadata.labels["app.kubernetes.io/component"]') $(tpod tests-np '.metadata.labels["app.kubernetes.io/instance"]') $(tpod tests-np '.metadata.labels["app.kubernetes.io/name"]')"
+  expect tests-np "the rule is for the port of the server only" "http" "$(q tests-np 'select(.kind == "NetworkPolicy") | .spec.ingress[0].ports | map(.port) | join(",")')"
+  expect tests-np "no rule for the metrics port" "1" "$(q tests-np 'select(.kind == "NetworkPolicy") | .spec.ingress | length')"
+fi
+if run_case tests-np-off --set networkPolicy.ingress.allowSameNamespace=false --set tests.enabled=false; then
+  expect tests-np-off "no rule without the test Pod: nothing reaches port 8080" "null" "$(q tests-np-off 'select(.kind == "NetworkPolicy") | .spec.ingress')"
+fi
+if run_case tests-np-from --set networkPolicy.ingress.allowSameNamespace=false \
+    --set-json 'networkPolicy.ingress.from=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"ingress"}}}]'; then
+  expect tests-np-from "the listed source first, the test Pod after it" "2 true true" \
+    "$(q tests-np-from "${np_from} | length") $(q tests-np-from "${np_from}[0] | has(\"namespaceSelector\")") $(q tests-np-from "${np_from}[1] | has(\"podSelector\")")"
+fi
+if run_case tests-np-trusted --set networkPolicy.ingress.allowSameNamespace=false --set-json 'config.server.trustedProxies=["10.0.0.0/8"]' \
+    --set-json 'networkPolicy.ingress.from=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"ingress"}}}]'; then
+  expect tests-np-trusted "trustedProxies: no rule for the test Pod although tests.enabled" "1 true" \
+    "$(q tests-np-trusted "${np_from} | length") $(q tests-np-trusted "${np_from}[0] | has(\"namespaceSelector\")")"
+  expect tests-np-trusted "the test Pod is still rendered" "myriarch-test-connection" "$(tpod tests-np-trusted '.metadata.name')"
+fi
+# clientCertHeader on its own is refused by the configuration check of the server (it needs trustedProxies), so this case renders and
+# validates the manifests without it
+if render tests-np-cert-header --set networkPolicy.ingress.allowSameNamespace=false --set config.opamp.clientCertHeader=X-Forwarded-Client-Cert \
+    --set-json 'networkPolicy.ingress.from=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"ingress"}}}]'; then
+  validate tests-np-cert-header
+  expect tests-np-cert-header "clientCertHeader: no rule for the test Pod" "1 true" \
+    "$(q tests-np-cert-header "${np_from} | length") $(q tests-np-cert-header "${np_from}[0] | has(\"namespaceSelector\")")"
+else
+  cat "${err}" >&2
+  fail_case tests-np-cert-header "helm template"
+fi
+if run_case tests-np-same-namespace --set networkPolicy.ingress.allowSameNamespace=true; then
+  expect tests-np-same-namespace "every pod of the namespace is a source already: no rule of its own" "1 true" \
+    "$(q tests-np-same-namespace "${np_from} | length") $(q tests-np-same-namespace "${np_from}[0] | has(\"podSelector\")")"
+  expect tests-np-same-namespace "that source selects every pod" "{}" "$(q tests-np-same-namespace "${np_from}[0].podSelector" | tr -d ' ')"
+fi
+# with the NetworkPolicy off there is nothing to open
+if run_case tests-np-disabled --set networkPolicy.enabled=false; then
+  expect tests-np-disabled "no NetworkPolicy" "" "$(q tests-np-disabled 'select(.kind == "NetworkPolicy") | .kind')"
+  expect tests-np-disabled "the test Pod is rendered" "myriarch-test-connection" "$(tpod tests-np-disabled '.metadata.name')"
+fi
+
+# ---------------------------------------------------------------------------------------------------------------------
+# the PrometheusRule: validated against the CRD catalog, the rules of the example, selectors that follow the release
+# ---------------------------------------------------------------------------------------------------------------------
+example_rules=deploy/examples/production/monitoring/prometheusrule.yaml
+rule_groups() { yq -o=json -I=2 'select(.kind == "PrometheusRule") | .spec.groups | sort_keys(..)' "${out}/$1.yaml"; }
+if run_case prometheusrule --set prometheusRule.enabled=true --set-json 'prometheusRule.labels={"release":"kube-prometheus-stack"}'; then
+  c=prometheusrule
+  pr='select(.kind == "PrometheusRule") | '
+  expect "${c}" "one PrometheusRule" "PrometheusRule monitoring.coreos.com/v1 myriarch" \
+    "$(q ${c} "${pr}.kind") $(q ${c} "${pr}.apiVersion") $(q ${c} "${pr}.metadata.name")"
+  expect "${c}" "the label of the values and the labels of the chart" "kube-prometheus-stack myriarch" \
+    "$(q ${c} "${pr}.metadata.labels.release") $(q ${c} "${pr}.metadata.labels[\"app.kubernetes.io/instance\"]")"
+  expect "${c}" "groups and alerts" "3 13" "$(one ${c} PrometheusRule '.spec.groups | length') $(one ${c} PrometheusRule '[.spec.groups[].rules[]] | length')"
+  # the Prometheus templates of the annotations are not touched by Helm
+  expect "${c}" "annotation templates" 'myriarchd rejects connections ({{ $labels.reason }})' \
+    "$(q ${c} "${pr}.spec.groups[].rules[] | select(.alert == \"MyriarchConnectRejected\") | .annotations.summary")"
+  # every job matcher comes with the namespace matcher
+  expect "${c}" "every selector names the job and the namespace" "$(grep -o 'job="myriarch"' "${out}/${c}.yaml" | wc -l | tr -d ' ')" \
+    "$(grep -o 'job="myriarch", namespace="myriarch"' "${out}/${c}.yaml" | wc -l | tr -d ' ')"
+  if [ -f "${example_rules}" ]; then
+    if ! diff <(rule_groups ${c}) <(yq -o=json -I=2 '.spec.groups | sort_keys(..)' "${example_rules}") >"${err}"; then
+      cat "${err}" >&2
+      fail_case "${c}" "the rules of the chart differ from ${example_rules} (release myriarch, namespace myriarch, two replicas): change both"
+    fi
+    cp "${example_rules}" "${out}/prometheusrule-example.yaml"
+    validate prometheusrule-example
+  fi
+fi
+# a release with another name in another namespace: job, namespace, deployment and replica count follow it
+if helm template fleet "${chart}" --namespace production --set prometheusRule.enabled=true --set replicaCount=3 >"${out}/prometheusrule-release.yaml" 2>"${err}"; then
+  c=prometheusrule-release
+  expect "${c}" "job, namespace, deployment and replicas follow the release" \
+    'max(myriarch_leader{job="fleet-myriarch", namespace="production"}) < 1|kube_deployment_status_replicas_available{namespace="production", deployment="fleet-myriarch"} < 3|up{job="fleet-myriarch", namespace="production"} == 0' \
+    "$(one ${c} PrometheusRule '[.spec.groups[0].rules[0].expr, .spec.groups[0].rules[2].expr, .spec.groups[0].rules[3].expr] | join("|")')"
+  validate "${c}"
+else
+  cat "${err}" >&2
+  fail_case prometheusrule "helm template for another release"
+fi
+
+# ---------------------------------------------------------------------------------------------------------------------
 # profiles
 # ---------------------------------------------------------------------------------------------------------------------
 check_openshift_profile() { # case
@@ -304,6 +467,11 @@ check_openshift_profile() { # case
     "$(dep ${c} '.spec.template.spec.securityContext | has("runAsUser")') $(dep ${c} '.spec.template.spec.securityContext | has("runAsGroup")') $(dep ${c} '.spec.template.spec.securityContext | has("fsGroup")')"
   expect "${c}" "runAsNonRoot stays" "true" "$(dep ${c} '.spec.template.spec.securityContext.runAsNonRoot')"
   if dep "${c}" '.' | grep -q 'runAsUser'; then fail_case "${c}" "the Deployment contains runAsUser"; fi
+  # the test Pod leaves the user, the group and the fsGroup to the SCC as well, and stays non-root
+  expect "${c}" "test Pod: no fixed user, group or fsGroup" "false false false false false" \
+    "$(tpod ${c} '.spec.securityContext | has("runAsUser")') $(tpod ${c} '.spec.securityContext | has("runAsGroup")') $(tpod ${c} '.spec.securityContext | has("fsGroup")') $(tpod ${c} '.spec.containers[0].securityContext | has("runAsUser")') $(tpod ${c} '.spec.containers[0].securityContext | has("runAsGroup")')"
+  expect "${c}" "test Pod: non-root and seccomp stay" "true RuntimeDefault" "$(tpod ${c} '.spec.securityContext | [.runAsNonRoot, .seccompProfile.type] | join(" ")')"
+  if tpod "${c}" '.' | grep -q 'runAsUser'; then fail_case "${c}" "the test Pod contains runAsUser"; fi
 }
 
 if run_case openshift --set openshift.enabled=true; then check_openshift_profile openshift; fi

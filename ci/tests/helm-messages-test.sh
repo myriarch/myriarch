@@ -211,4 +211,35 @@ expect_schema "(86) the policy for plain HTTP at the router is one of three" /op
 expect_renders "(87) the Route terminates TLS at the router" '^ +termination: edge$' --set openshift.enabled=true
 expect_renders "(88) the Route redirects plain HTTP by default" '^ +insecureEdgeTerminationPolicy: Redirect$' --set openshift.enabled=true
 expect_renders "(89) plain HTTP at the router is an explicit opt-in" '^ +insecureEdgeTerminationPolicy: Allow$' --set openshift.enabled=true --set openshift.route.tls.insecureEdgeTerminationPolicy=Allow
+
+# --- the Pod of "helm test" and the PrometheusRule (tests.*, prometheusRule.*) ------------------------------------------------------
+# The schema refuses what one value can get wrong; the templates repeat the refusal of the Secrets of the server itself (a Pod that
+# runs a health check must not get the database DSN or the credentials of the bootstrap admin), which also holds without the schema.
+expect_schema "(90) the switch of the test Pod is a boolean" /tests/enabled --set-string tests.enabled=false
+expect_schema "(91) unknown key of the test Pod" /tests --set tests.tokenSecret=helm-test-token
+expect_schema "(92) unknown key of the test token" /tests/token --set tests.token.secret=helm-test-token
+expect_schema "(93) the Secret of the test token has the form of an enrollment token" /tests/token/existingSecret --set "tests.token.existingSecret=${TOKEN}"
+expect_schema "(94) the key of the test token has the form of an enrollment token" /tests/token/key --set tests.token.existingSecret=helm-test-token --set "tests.token.key=${TOKEN}"
+expect_schema "(95) the key of the test token is empty" /tests/token/key --set tests.token.existingSecret=helm-test-token --set tests.token.key=
+expect_schema "(96) a quantity of the test Pod" /tests/resources/requests/cpu --set tests.resources.requests.cpu=lots
+expect_schema "(97) the test Pod has no image of its own" /tests --set tests.image.tag=0.2.0
+expect_schema "(98) the switch of the PrometheusRule is a boolean" /prometheusRule/enabled --set-string prometheusRule.enabled=false
+expect_schema "(99) unknown key of the PrometheusRule" /prometheusRule --set prometheusRule.groups=none
+expect_schema "(100) a label of the PrometheusRule is a number" /prometheusRule/labels/release --set-json 'prometheusRule.labels={"release":1}'
+expect_guard "(101) the key of the test token is empty" tests.token.key --set tests.token.existingSecret=helm-test-token --set tests.token.key=
+expect_path "(102) the test token in the Secret of the server" tests.token.existingSecret --set tests.token.existingSecret=myriarch-secrets
+expect_path "(103) the test token in the generated bootstrap Secret" tests.token.existingSecret --set tests.token.existingSecret=t-myriarch-bootstrap
+expect_path "(104) the test token in the bootstrap Secret of the values" tests.token.existingSecret --set bootstrapAdmin.existingSecret=my-bootstrap --set tests.token.existingSecret=my-bootstrap
+expect_path "(105) the test token in a changed Secret of the server" tests.token.existingSecret --set existingSecret=fleet-secrets --set tests.token.existingSecret=fleet-secrets
+expect_schema "(105b) an annotation of the test Pod is a number" /tests/podAnnotations/sidecar.istio.io~1inject --set-json 'tests.podAnnotations={"sidecar.istio.io/inject":1}'
+expect_ok "(106) the test token in a Secret of its own" render --set tests.token.existingSecret=helm-test-token
+expect_ok "(107) the test Pod and the PrometheusRule are switched off" render --set tests.enabled=false --set prometheusRule.enabled=false
+expect_ok "(108) the PrometheusRule renders" render --set prometheusRule.enabled=true --set-json 'prometheusRule.labels={"release":"kube-prometheus-stack"}'
+# the Pod of "helm test" is a hook; a render without it has no Pod, and a render with it has exactly one
+test_pods() { render "$@" 2>/dev/null | grep -c '^kind: Pod$'; }
+if [ "$(test_pods)" = 1 ] && [ "$(test_pods --set tests.enabled=false)" = 0 ] && [ "$(test_pods --skip-tests)" = 0 ]; then ok "(109) one test Pod by default, none with tests.enabled=false or --skip-tests"; else fail "(109) one test Pod by default, none with tests.enabled=false or --skip-tests"; fi
+# no Secret reaches the Pod without the opt-in: the rendered Pod names no Secret, and with the opt-in only the named one
+pod_text() { render "$@" 2>/dev/null | awk '/^kind: Pod$/ {p=1} p && /^---$/ {p=0} p'; }
+if ! pod_text | grep -Eq 'secretName|secretKeyRef|--token-file'; then ok "(110) the test Pod refers to no Secret by default"; else fail "(110) the test Pod refers to no Secret by default"; fi
+if [ "$(pod_text --set tests.token.existingSecret=helm-test-token | grep -c 'secretName:')" = 1 ] && pod_text --set tests.token.existingSecret=helm-test-token | grep -q 'secretName: "helm-test-token"'; then ok "(111) with the opt-in the test Pod mounts the named Secret and no other"; else fail "(111) with the opt-in the test Pod mounts the named Secret and no other"; fi
 finish_tests "helm-messages-test"

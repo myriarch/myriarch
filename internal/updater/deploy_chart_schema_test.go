@@ -331,8 +331,14 @@ var valuesRef = regexp.MustCompile(`\.Values((?:\.[A-Za-z_][A-Za-z0-9_]*)+)`)
 
 func TestChartSchemaCoversTheValuesTheTemplatesRead(t *testing.T) {
 	schema := loadChartSchema(t)
-	files, err := filepath.Glob(filepath.Join(deployDir, "helm/myriarch/templates/*"))
-	require.NoError(t, err)
+	// the templates below templates/ and in its subdirectories (templates/tests/ holds the Pod of "helm test")
+	var files []string
+	require.NoError(t, filepath.WalkDir(filepath.Join(deployDir, "helm/myriarch/templates"), func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			files = append(files, path)
+		}
+		return err
+	}))
 	require.NotEmpty(t, files)
 	read := map[string][]string{}
 	for _, f := range files {
@@ -353,6 +359,8 @@ func TestChartSchemaCoversTheValuesTheTemplatesRead(t *testing.T) {
 	assert.Empty(t, missing, "a template reads a value that the schema does not list, so the schema would refuse the value")
 	assert.Contains(t, read, "global", "the image helper reads global.imageRegistry")
 	assert.Contains(t, read, "podDisruptionBudget.maxUnavailable")
+	assert.Contains(t, read, "tests.resources", "the scan reaches templates/tests/")
+	assert.Contains(t, read, "prometheusRule.labels")
 }
 
 // ------------------------------------------------------ the config block ---
@@ -581,6 +589,8 @@ func TestChartSchemaAcceptsValidValues(t *testing.T) {
 		"persistence":             `persistence: {enabled: true, storageClass: fast, accessModes: [ReadWriteMany], size: 20Gi}`,
 		"service":                 `service: {type: LoadBalancer, port: 8443, annotations: {a: b}}`,
 		"service monitor":         `serviceMonitor: {enabled: true, interval: 1m30s, labels: {release: prometheus}}`,
+		"test pod":                `tests: {enabled: false, token: {existingSecret: helm-test-token, key: probe-token}, podAnnotations: {sidecar.istio.io/inject: "false"}, resources: {requests: {cpu: 20m}, limits: {memory: 128Mi}}}`,
+		"prometheus rule":         `prometheusRule: {enabled: true, labels: {release: kube-prometheus-stack}}`,
 		"openshift route":         `openshift: {enabled: true, route: {host: fleet.example.com, timeout: 1h, tls: {insecureEdgeTerminationPolicy: Allow}}}`,
 		"config sections":         `config: {server: {shutdownTimeout: 1m, trustedProxies: [10.0.0.0/8]}, opamp: {maxMessageSize: 1048576, connectRateLimit: 2.5}, executors: {secrets: {awx: {env: X, allowedHosts: [awx.example.com]}}, secretEnvHosts: {A: [h.example.com]}}, notifications: {channels: [{name: ops, type: slack, urlFile: /f, events: ["rollout.*"]}]}}`,
 	}
@@ -697,6 +707,17 @@ func TestChartSchemaRefusesInvalidValues(t *testing.T) {
 		{"router timeout without a unit", `openshift: {route: {timeout: 3600}}`, `/openshift/route/timeout`},
 		{"termination policy", `openshift: {route: {tls: {insecureEdgeTerminationPolicy: Never}}}`, `/openshift/route/tls/insecureEdgeTerminationPolicy`},
 		{"scrape interval", `serviceMonitor: {interval: 30 seconds}`, `/serviceMonitor/interval`},
+		{"unknown key of the test Pod", `tests: {tokenSecret: helm-test-token}`, `/tests: additional property "tokenSecret"`},
+		{"unknown key of the test token", `tests: {token: {secret: helm-test-token}}`, `/tests/token: additional property "secret"`},
+		{"test switch as a string", `tests: {enabled: "false"}`, `/tests/enabled: is string, want boolean`},
+		{"enrollment token as the Secret of the test", `tests: {token: {existingSecret: ` + token + `}}`, `/tests/token/existingSecret`},
+		{"enrollment token as the key of the test", `tests: {token: {existingSecret: helm-test-token, key: ` + token + `}}`, `/tests/token/key: matches a schema that it must not match`},
+		{"empty key of the test token", `tests: {token: {key: ""}}`, `/tests/token/key`},
+		{"quantity of the test Pod", `tests: {resources: {limits: {memory: lots}}}`, `/tests/resources/limits/memory: matches none of the alternatives`},
+		{"annotation of the test Pod as a number", `tests: {podAnnotations: {a: 1}}`, `/tests/podAnnotations/a: is integer`},
+		{"unknown key of the PrometheusRule", `prometheusRule: {rules: []}`, `/prometheusRule: additional property "rules"`},
+		{"switch of the PrometheusRule as a string", `prometheusRule: {enabled: "true"}`, `/prometheusRule/enabled: is string, want boolean`},
+		{"label of the PrometheusRule as a number", `prometheusRule: {labels: {release: 1}}`, `/prometheusRule/labels/release: is integer`},
 		{"cidr", `networkPolicy: {egress: {exceptCidrs: [metadata]}}`, `/networkPolicy/egress/exceptCidrs/0`},
 		{"peer without a cidr", `networkPolicy: {ingress: {from: [{ipBlock: {except: []}}]}}`, `: is missing the property cidr`},
 		{"toleration operator", `tolerations: [{operator: Maybe}]`, `/tolerations/0/operator`},

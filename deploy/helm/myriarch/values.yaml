@@ -403,7 +403,10 @@ networkPolicy:
     # Allow every pod of the release namespace to reach port 8080 (agents and a port-forward next to the pods).
     # MUST be false when config.server.trustedProxies or config.opamp.clientCertHeader is set (rendering fails
     # otherwise): any pod of the namespace could forge the forwarded headers. With false and an empty "from" no pod
-    # reaches port 8080 (kubectl port-forward still works).
+    # reaches port 8080 (kubectl port-forward still works), except the Pod of "helm test": while tests.enabled the chart
+    # adds a source for the pods that carry the labels of that Pod (app.kubernetes.io/component: test), unless
+    # trustedProxies or clientCertHeader is set. Then no rule exists for the test Pod, because any pod with those labels
+    # could use it; list the source yourself if you accept that.
     allowSameNamespace: true
   metrics:
     # Sources for port 9090 (/metrics, unauthenticated) in NetworkPolicy "from" format; empty = nobody. Example:
@@ -509,6 +512,40 @@ probes:
   liveness: {path: /healthz, periodSeconds: 10, timeoutSeconds: 3, failureThreshold: 3}
   readiness: {path: /readyz, periodSeconds: 5, timeoutSeconds: 3, failureThreshold: 3}
 
+# --- Helm test -----------------------------------------------------------------------------------------
+# "helm test <release>" runs one Pod (templates/tests/test-connection.yaml, the Helm hook "test") with the server image and the
+# command "myriarchd healthcheck" against the Service of the release. It asks GET /readyz, which must answer 200, and then for a
+# WebSocket upgrade at config.opamp.path, which must be refused with 401 (the route and the authentication are in place) or, with
+# tests.token, accepted with 101. The check sends no OpAMP message and registers no agent; the server counts the check without a
+# token as an unauthorized OpAMP connect. The Pod exists only while "helm test" runs (a successful Pod is deleted), runs under the
+# restricted Pod Security profile (the OpenShift profile leaves the user ID to the SCC) and mounts no Secret unless tests.token
+# names one.
+tests:
+  # Render the test Pod. Switch it off for tools that render hooks as ordinary resources ("helm template | kubectl apply"
+  # creates the Pod; "helm template --skip-tests" leaves it out) or when you never run "helm test".
+  enabled: true
+  # Opt-in: complete the OpAMP handshake. Name a Secret with an enrollment token that exists for this test only (create one in
+  # the UI with a short expiry); never the Secret of your agents. The chart refuses the Secrets of the server itself
+  # (existingSecret and the bootstrap Secret), and the command refuses a file that holds anything but an enrollment token. Only
+  # the key below is mounted, at /etc/myriarchd-test/token.
+  token:
+    existingSecret: ""
+    # Key of the token in the Secret.
+    key: token
+  # Annotations of the test Pod, for example the opt-out from the sidecar injection of a service mesh
+  # (sidecar.istio.io/inject: "false"): a sidecar that keeps running stops the Pod from completing, and helm test waits for it.
+  # The hook annotations of the Pod cannot be changed here.
+  podAnnotations: {}
+  # Resources of the test Pod (many clusters require requests and limits, also for ephemeral-storage).
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+      ephemeral-storage: 16Mi
+    limits:
+      memory: 64Mi
+      ephemeral-storage: 64Mi
+
 # PodDisruptionBudget (rendered only while replicaCount is greater than 1, otherwise it would block node drains).
 # maxUnavailable (a number or a percentage) replaces minAvailable when it is set.
 podDisruptionBudget:
@@ -567,4 +604,16 @@ affinity: {}
 serviceMonitor:
   enabled: false
   interval: 30s
+  labels: {}
+
+# Prometheus Operator PrometheusRule with the alerts of the server (no leader, more than one leader, replicas not ready, metrics not
+# reachable, dropped and rejected OpAMP connections, failing GitOps sync, release tracker, rollouts, notifications and housekeeping).
+# The rules select the metrics by job (the name of the Service, which the ServiceMonitor of this chart gives to the series) and by the
+# namespace of the release, and the replica alert compares with replicaCount and needs kube-state-metrics. They are the rules of
+# deploy/examples/production/monitoring/prometheusrule.yaml, which a cluster without Helm applies with kubectl. The cluster needs the
+# CRD monitoring.coreos.com before this is enabled, otherwise helm install fails. There is no dashboard.
+prometheusRule:
+  enabled: false
+  # Labels of the PrometheusRule, for example the label that selects it in the Prometheus resource
+  # (ruleSelector), such as release: kube-prometheus-stack.
   labels: {}

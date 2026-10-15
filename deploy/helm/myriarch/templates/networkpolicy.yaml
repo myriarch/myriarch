@@ -26,6 +26,15 @@ SPDX-License-Identifier: Apache-2.0
 {{- if and $openshift .Values.openshift.route.enabled }}
 {{- $sources = append $sources (dict "namespaceSelector" .Values.openshift.routerNamespaceSelector) }}
 {{- end }}
+{{- /*
+  The Pod of "helm test" (templates/tests/test-connection.yaml). With allowSameNamespace every pod of the namespace may reach port
+  8080 anyway. Otherwise the Pod gets a source of its own, selected by its labels. Every pod that carries these labels can use the
+  rule, so it never exists together with trustedProxies or clientCertHeader, whose protection is that nothing in the namespace can
+  reach the port directly: then "helm test" cannot connect unless networkPolicy.ingress.from names the test Pod.
+*/ -}}
+{{- if and .Values.tests.enabled (not $np.ingress.allowSameNamespace) (not (or .Values.config.server.trustedProxies $clientCertHeader)) }}
+{{- $sources = append $sources (dict "podSelector" (dict "matchLabels" (include "myriarch.testSelectorLabels" . | fromYaml))) }}
+{{- end }}
 {{- /* DNS: OpenShift profile uses the OpenShift DNS pods */ -}}
 {{- $dnsTo := $np.egress.dns.to }}
 {{- $dnsPorts := $np.egress.dns.ports }}

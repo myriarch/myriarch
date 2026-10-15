@@ -316,8 +316,12 @@ networkPolicy:
     extraRules: []
 
 # --- Observability ---------------------------------------------------------------------------------------------------
-# Prometheus Operator: serviceMonitor.enabled=true creates a ServiceMonitor (port 9090). Keep it off while the
-# operator (CRD monitoring.coreos.com) is missing in the cluster, otherwise helm upgrade fails. Example rules:
-# deploy/examples/production/monitoring/prometheusrule.yaml
+# Prometheus Operator: serviceMonitor.enabled=true creates a ServiceMonitor (port 9090), prometheusRule.enabled=true a
+# PrometheusRule with the alerts of the server (the rules of deploy/examples/production/monitoring/prometheusrule.yaml, which
+# is the file for a cluster without Helm). Keep both off while the operator (CRD monitoring.coreos.com) is missing in the
+# cluster, otherwise helm upgrade fails. Set prometheusRule.labels to the label that your Prometheus resource selects rules by.
 serviceMonitor:
   enabled: false
+prometheusRule:
+  enabled: false
+  labels: {}

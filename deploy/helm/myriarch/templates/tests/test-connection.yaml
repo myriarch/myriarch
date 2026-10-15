@@ -1,0 +1,89 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- if .Values.tests.enabled }}
+{{- /*
+  The Pod of "helm test". It runs "myriarchd healthcheck" of the server image (the image has neither a shell nor curl) against the
+  Service of the release: GET /readyz must answer 200, and a WebSocket upgrade at the OpAMP path must be refused with 401 (the route
+  and the authentication are in place) or, with tests.token, accepted with 101. The command sends no OpAMP message, so no agent is
+  registered.
+
+  The Pod follows the restricted Pod Security profile: it runs as non-root, drops all capabilities, keeps the root file system
+  read-only and mounts no service account token. Its pod-level context is the one of the server (podSecurityContext, without a user
+  ID in the OpenShift profile); the container-level settings are fixed and cannot be loosened through the values. Without
+  tests.token it mounts no Secret. With it, it mounts one key of that Secret and nothing else.
+*/ -}}
+{{- $tokenSecret := include "myriarch.tests.tokenSecret" . }}
+{{- $opampPath := (.Values.config.opamp | default dict).path | default "/v1/opamp" }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "myriarch.fullname" . }}-test-connection
+  labels:
+    {{- include "myriarch.testLabels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- with .Values.tests.podAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "myriarch.serviceAccountName" . }}
+  automountServiceAccountToken: false
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    {{- include "myriarch.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: healthcheck
+      image: {{ include "myriarch.image" . | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      args:
+        - healthcheck
+        - --url
+        - {{ printf "http://%s.%s.svc:%d" (include "myriarch.fullname" .) .Release.Namespace (int .Values.service.port) | quote }}
+        - --opamp-path
+        - {{ $opampPath | quote }}
+        {{- if $tokenSecret }}
+        - --token-file
+        - /etc/myriarchd-test/token
+        {{- end }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        capabilities:
+          drop: [ALL]
+        seccompProfile:
+          type: RuntimeDefault
+      resources:
+        {{- toYaml .Values.tests.resources | nindent 8 }}
+      {{- if $tokenSecret }}
+      volumeMounts:
+        - name: test-token
+          mountPath: /etc/myriarchd-test
+          readOnly: true
+      {{- end }}
+  {{- if $tokenSecret }}
+  volumes:
+    - name: test-token
+      secret:
+        secretName: {{ $tokenSecret | quote }}
+        defaultMode: 288 # 0440
+        items:
+          - key: {{ .Values.tests.token.key | quote }}
+            path: token
+  {{- end }}
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

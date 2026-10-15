@@ -157,6 +157,10 @@ are validated against a strict schema, [`helm/myriarch/values.schema.json`](helm
 `template`, `install` and `upgrade` refuse a key that the chart does not know and a value of the wrong type, and secrets cannot be
 set as values. The schema is generated (`make docs-gen`) from `helm/myriarch/values.schema.source.yaml` and `internal/config`.
 
+From v0.2.0 on, `helm test myriarch -n myriarch` runs `myriarchd healthcheck` in a Pod against the Service of the release (`GET /readyz`
+and the OpAMP endpoint; [Helm test](helm/myriarch/README.md#helm-test)), and `prometheusRule.enabled` renders the alerts of the server
+for the Prometheus Operator ([Alerting rules](helm/myriarch/README.md#alerting-rules)).
+
 Login and the settings that matter for a real installation (in production myriarchd refuses insecure or missing
 settings):
 

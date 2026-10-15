@@ -342,3 +342,41 @@ nothing and the value is constant.
 {{- fail "networkPolicy.ingress.from: must name the ingress controller or Gateway (namespace and pod selector) when networkPolicy.enabled and ingress.enabled or httpRoute.enabled are true; otherwise the NetworkPolicy blocks the traffic from it" -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Labels that select the Pod of "helm test". The name differs from the selector labels of the server on purpose: the Service and
+the Deployment select by app.kubernetes.io/name and app.kubernetes.io/instance, and the test Pod must be neither an endpoint of the
+Service nor a pod the Deployment counts. The NetworkPolicy selects the test Pod by these labels.
+*/}}
+{{- define "myriarch.testSelectorLabels" -}}
+app.kubernetes.io/name: {{ printf "%s-test" (include "myriarch.name" . | trunc 58 | trimSuffix "-") }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: test
+{{- end -}}
+
+{{- define "myriarch.testLabels" -}}
+helm.sh/chart: {{ include "myriarch.chart" . }}
+{{ include "myriarch.testSelectorLabels" . }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end -}}
+
+{{/*
+The Secret of the test token (tests.token.existingSecret): renders the name, or nothing without the opt-in. The Pod of "helm test"
+mounts one key of it and nothing else, and the Secrets of the server itself are refused: the test would hand the database DSN or the
+credentials of the bootstrap admin to a Pod that has no use for them. The command refuses a file that holds anything but an enrollment
+token as well, so a mistake here is not sent to a server either.
+*/}}
+{{- define "myriarch.tests.tokenSecret" -}}
+{{- $t := .Values.tests.token | default dict -}}
+{{- $name := toString ($t.existingSecret | default "") -}}
+{{- if $name -}}
+{{- if not (toString ($t.key | default "")) -}}
+{{- fail "tests.token.key: must not be empty when tests.token.existingSecret is set; name the key of the token in the Secret" -}}
+{{- end -}}
+{{- if or (eq $name (toString .Values.existingSecret)) (eq $name (include "myriarch.bootstrap.secretName" .)) -}}
+{{- fail (printf "tests.token.existingSecret: %q is a Secret of the server itself (existingSecret or the bootstrap Secret); name a Secret of its own that holds an enrollment token for the test only" $name) -}}
+{{- end -}}
+{{- $name -}}
+{{- end -}}
+{{- end -}}
