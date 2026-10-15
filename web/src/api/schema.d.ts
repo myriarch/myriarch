@@ -1348,7 +1348,9 @@ export interface paths {
          *     goes; the web UI replaces it in the browser with the token that the person created or pasted, in every command. The variant `token_file`
          *     reads the token from a file on the host (`tokenFiles`, one path for each operating system that is rendered) and has no placeholder. The
          *     variant `lab` is `token_inline` for a development server over plain http, with `--insecure` for the installer; any other server refuses it.
-         *     A command that carries a token needs `server.publicUrl` to be an https URL.
+         *     A command that carries a token needs `server.publicUrl` to be an https URL. A server that requires a client certificate
+         *     (`opamp.requireClientCert`) renders no command (412, reason `server_settings`): the routes of the installation ask for a verified client
+         *     certificate there too, and the commands cannot present one.
          *
          *     The text of a command is a constant. Every value (the server, the bundle, its SHA-256, the options of the installer) is an argument of its own,
          *     quoted with single quotes, and has been checked against an allowlist: printable ASCII, no quotation mark of any kind (also not the typographic

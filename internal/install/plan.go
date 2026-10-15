@@ -144,6 +144,10 @@ type Deps struct {
 	Bundles BundleStore
 	// DevMode lets the commands have the variant lab, which lowers the checks of the installer.
 	DevMode bool
+	// RequireClientCert is opamp.requireClientCert. The routes of the installation ask for a verified client certificate
+	// then, as the OpAMP endpoint does (authn.AuthenticateInstall), and the command that a person copies to a host
+	// cannot present one, so the commands are not rendered.
+	RequireClientCert bool
 }
 
 // Planner answers a host's request for its plan.

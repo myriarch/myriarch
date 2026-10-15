@@ -1050,7 +1050,10 @@ of the web UI) puts the token in.
 
 The answer has the `variant`, the `server` that the commands use (`server.publicUrl`), the `version` of the bundles, `insecure`, the
 `tokenPlaceholder` and for each platform the `shell` (`bash` or `powershell`), the `command`, the `bundle` that it pins (name, `sha256`, `size`)
-and, under `token_file`, the `tokenFile`. A command that carries a token needs `server.publicUrl` to be https (412 `server_settings`). A bundle that is not
+and, under `token_file`, the `tokenFile`. A command that carries a token needs `server.publicUrl` to be https (412 `server_settings`). A server with
+`opamp.requireClientCert` renders no command at all (412 `server_settings`, checked before the bundles): the plan and the download of a bundle ask for a verified client
+certificate there, as the OpAMP endpoint does, and neither `curl` nor `Invoke-WebRequest` in the command presents one, so every copy would fail at the download. Hosts of
+such a server are installed on the manual path ([Connect a host](../tasks/connect-a-host.md)). A bundle that is not
 `ready` is 503 `bundle_preparing` or `bundle_failed` and the request starts the preparation; the commands of all platforms that are asked for
 come together or not at all.
 

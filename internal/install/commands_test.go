@@ -808,6 +808,37 @@ func TestCommandsNeedAnHTTPSServer(t *testing.T) {
 	}
 }
 
+// With opamp.requireClientCert the plan and the download of the bundle ask for a verified client certificate, and the
+// command cannot present one: it would fail at the download for a reason the message does not name. The server says so
+// when the command is rendered, whichever variant and platform is asked for, and after the request itself was checked.
+func TestCommandsRefuseAServerThatRequiresAClientCertificate(t *testing.T) {
+	e := newCommandsEnv(t, func(d *Deps, s *stubBundles) { d.RequireClientCert = true })
+	for _, req := range []CommandsRequest{
+		site(), fullRequest(VariantTokenInline), fullRequest(VariantTokenFile),
+		site(func(r *CommandsRequest) { r.Platforms = []string{"windows/amd64"} }),
+	} {
+		c, err := e.render(req)
+		require.Nil(t, c)
+		r := refusal(t, err, domain.ErrPrecondition, CodeServerSettings)
+		assert.Contains(t, r.Detail, "opamp.requireClientCert")
+		assert.Contains(t, r.Detail, "client certificate")
+		assert.Contains(t, r.Detail, "manual path")
+	}
+	assert.Zero(t, e.bundles.prepared, "a setting that no wait can change does not start the preparation of the bundles")
+
+	// a bad request is a bad request first
+	_, err := e.render(CommandsRequest{})
+	invalid(t, err, CodeInvalidValue, "attributes.site.type")
+
+	// the development server is no exception, and without the setting everything works as before
+	dev := newCommandsEnv(t, func(d *Deps, s *stubBundles) {
+		d.DevMode, d.PublicURL, d.RequireClientCert = true, "http://localhost:8080", true
+	})
+	_, err = dev.render(site(func(r *CommandsRequest) { r.Variant = VariantLab }))
+	refusal(t, err, domain.ErrPrecondition, CodeServerSettings)
+	assert.NotEmpty(t, newCommandsEnv(t).mustRender(site()).Commands)
+}
+
 func TestCommandServer(t *testing.T) {
 	good := map[string][2]string{
 		"https://fleet.example.com":       {"https://fleet.example.com", "https://fleet.example.com"},

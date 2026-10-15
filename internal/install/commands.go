@@ -129,11 +129,18 @@ const maxCommandPlatforms = 8
 
 // RenderCommands renders the install commands: the request is checked against allowlists (422), the bundles of the
 // platforms have to be ready, and the server has to be reachable over https (the commands carry a token), unless the
-// request is for the variant lab of a development server.
+// request is for the variant lab of a development server. A server that requires a client certificate
+// (opamp.requireClientCert) renders none, because the command cannot present one (412 server_settings).
 func (p *Planner) RenderCommands(req CommandsRequest) (*Commands, error) {
 	in, err := p.checkCommands(&req)
 	if err != nil {
 		return nil, err
+	}
+	if p.d.RequireClientCert {
+		// not a state that passes: every copy of the command would fail at the download, with a message that points to the
+		// address, the certificate of the server and the token, none of which is the reason
+		return nil, refuse(domain.ErrPrecondition, CodeServerSettings,
+			"opamp.requireClientCert is on: the plan and the download of the installer bundle then ask for a verified client certificate, and the command that is copied to a host cannot present one, so it would fail at the download. Install the host on the manual path (Connect a host in the documentation)")
 	}
 	if p.d.Bundles == nil {
 		return nil, refuse(domain.ErrPrecondition, CodeLocalBuild, "this server has no installer bundles")

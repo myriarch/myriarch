@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/myriarch/myriarch/internal/api"
 	"github.com/myriarch/myriarch/internal/api/dto"
 	"github.com/myriarch/myriarch/internal/brand"
 	"github.com/myriarch/myriarch/internal/install"
@@ -265,6 +266,26 @@ func TestInstallCommandThroughTheRealServer(t *testing.T) {
 	}
 	if strings.Contains(string(metrics), token) {
 		t.Error("the token is in the metrics")
+	}
+}
+
+// With opamp.requireClientCert the routes of the installation ask for a verified client certificate, which the command
+// that a person copies cannot present. The server says so when the command is rendered, and the setting reaches the
+// planner through the start: even a development server, whose build has no bundle to give, names this reason first.
+func TestInstallCommandsAreRefusedWhenTheServerRequiresAClientCertificate(t *testing.T) {
+	cfg, addr := devConfig(t)
+	cfg.OpAMP.RequireClientCert = true
+	startRunWith(t, cfg, addr, runOptions{dev: true})
+	viewer := signIn(t, "http://"+addr, "viewer")
+	request := map[string]any{"variant": "lab", "attributes": map[string]string{"site.type": "datacenter", "site.id": "dc-01"}}
+	code, body := viewer.do(http.MethodPost, "/api/v1/install/commands", request, true)
+	var p api.Problem
+	if code != http.StatusPreconditionFailed || json.Unmarshal(body, &p) != nil || len(p.Issues) == 0 || p.Issues[0].Code != install.CodeServerSettings ||
+		!strings.Contains(p.Detail, "client certificate") {
+		t.Fatalf("rendering: %d %s", code, body)
+	}
+	if strings.Contains(string(body), "sudo sh -c") {
+		t.Error("a command in the refusal")
 	}
 }
 

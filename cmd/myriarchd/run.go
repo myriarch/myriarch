@@ -359,6 +359,7 @@ func run(ctx context.Context, cfg config.Config, opts runOptions) error {
 		installer, err = install.NewPlanner(install.Deps{
 			Store: st, Assigner: assigner, Artifacts: artifacts, Config: cfg.Install,
 			PublicURL: cfg.Server.PublicURL, OpAMPPath: cfg.OpAMP.Path, Logger: logger, Bundles: bundles, DevMode: opts.dev,
+			RequireClientCert: cfg.OpAMP.RequireClientCert,
 		})
 		if err != nil {
 			return fmt.Errorf("install: %w", err)

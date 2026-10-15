@@ -432,6 +432,22 @@ func TestRenderInstallCommandsNeedsAnHTTPSServer(t *testing.T) {
 	assert.Equal(t, "server_settings", asMap(t, doc["issues"].([]any)[0])["code"])
 }
 
+func TestRenderInstallCommandsRefusesAServerThatRequiresAClientCertificate(t *testing.T) {
+	e := newAPIEnv(t)
+	ab := e.withBundles(t, "0.2.0", false)
+	ab.ready(t)
+	e.expect(e.renderCommands("admin", edgeSite()), "renderInstallCommands", http.StatusOK)
+
+	e.useBundles(t, ab.b, false, func(d *install.Deps) { d.RequireClientCert = true })
+	r := e.renderCommands("admin", edgeSite())
+	doc := asMap(t, e.expect(r, "renderInstallCommands", http.StatusPreconditionFailed))
+	assert.Equal(t, "precondition_failed", doc["code"])
+	assert.Equal(t, "server_settings", asMap(t, doc["issues"].([]any)[0])["code"])
+	assert.Contains(t, doc["detail"], "client certificate")
+	assert.Contains(t, doc["detail"], "opamp.requireClientCert")
+	assert.NotContains(t, r.Body.String(), "sudo sh -c", "no command comes with the refusal")
+}
+
 func TestRenderInstallCommandsWaitsForTheBundles(t *testing.T) {
 	e := newAPIEnv(t)
 	ab := e.withBundles(t, "0.2.0", true)
