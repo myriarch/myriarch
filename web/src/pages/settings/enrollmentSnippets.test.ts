@@ -76,15 +76,64 @@ describe('enrollment install snippets', () => {
     expect(cmd).toContain("-CollectorVersion '<collector-version>'");
     // a cosign.exe is only taken from a folder that only administrators can write
     expect(cmd).toContain("-Verifier 'C:\\Program Files\\cosign\\cosign.exe'");
+    // a host without cosign uses the myriarch-updater.exe of the verified archive
+    expect(cmd).toContain('or .\\myriarch-updater.exe of that');
   });
 
   it('runs the scripts from the unpacked archive, where their templates are', () => {
     const linux = linuxInstallCommand(input);
-    expect(linux).toContain('sudo ./deploy/scripts/install-linux.sh');
-    expect(linux).not.toContain('sudo ./install-linux.sh');
+    expect(codeLines(linux)).toContain('./deploy/scripts/install-linux.sh \\');
+    expect(linux).not.toContain('\n./install-linux.sh');
     const windows = windowsInstallCommand(input);
     expect(windows).toContain('-File .\\deploy\\scripts\\install-windows.ps1');
     expect(windows).not.toContain('\n.\\install-windows.ps1');
+  });
+
+  it('runs the Linux installer as root in a directory that only root can write, without sudo', () => {
+    const cmd = linuxInstallCommand(input);
+    // the checked files and the verifier must not be replaceable by the account that started the command
+    expect(cmd).toContain(
+      '# Run it in a root shell (sudo -i), in the directory of the verified and unpacked archive',
+    );
+    expect(cmd).toContain('# that only root can write:');
+    expect(codeLines(cmd).join('\n')).not.toMatch(/\bsudo\b/);
+    // the verifier is a full path in a place that only root can write: a cosign or the updater of the archive
+    expect(cmd).toContain(
+      '# <verifier>: the full path of cosign 3.0.4 or newer, or of the myriarch-updater of that archive',
+    );
+    expect(cmd).toContain('--verifier <verifier>');
+    expect(cmd).not.toContain('<path-to-cosign>');
+  });
+
+  it('writes the Windows token into a file that only SYSTEM and the administrators can read', () => {
+    const cmd = windowsInstallCommand(input);
+    const lines = codeLines(cmd);
+    const create = lines.findIndex((l) =>
+      l.startsWith('New-Item -ItemType File -Path .\\enrollment-token.txt'),
+    );
+    const acl = lines.findIndex((l) => l.startsWith('icacls.exe .\\enrollment-token.txt '));
+    const write = lines.findIndex((l) => l.startsWith('Set-Content '));
+    // the file exists and has its own DACL before the token is written, whatever the DACL of the folder is
+    expect(create).toBeGreaterThanOrEqual(0);
+    expect(acl).toBeGreaterThan(create);
+    expect(write).toBeGreaterThan(acl);
+    expect(lines[acl]).toContain('/inheritance:r');
+    expect(lines[acl]).toContain("/grant:r '*S-1-5-18:F' '*S-1-5-32-544:F'"); // SYSTEM and the administrators
+    // nobody else: not Users (S-1-5-32-545), Authenticated Users (S-1-5-11), Everyone (S-1-1-0) or a name
+    expect(lines[acl]).not.toMatch(/S-1-5-32-545|S-1-5-11|S-1-1-0|users|everyone/i);
+    // "only administrators can write" protects the files but not the token: the comment says read and write
+    expect(cmd).toContain('# Only SYSTEM and the administrators may read and write that folder');
+    expect(cmd).not.toMatch(/only administrators can write:/);
+  });
+
+  it('names the other places that record the pasted command, in a comment', () => {
+    // the command is text: history, transcripts, script block logs and session recordings keep the token
+    expect(linuxInstallCommand(input)).toContain(
+      '# The token is part of this command: a shell history or the recording',
+    );
+    expect(windowsInstallCommand(input)).toContain(
+      '# The token is part of this command: a PowerShell transcript, script block logging',
+    );
   });
 
   it('starts the Windows installer with an execution policy for that one process', () => {

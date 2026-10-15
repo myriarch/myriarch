@@ -20,7 +20,10 @@ import {
  * reads the required options from the installers and fails when this file does not name them.
  *
  * Secrets: the token appears exactly once in a command, as the value that a shell builtin (printf) or a cmdlet
- * (Set-Content) writes into a file. No argument of a program, no echo and no log line carries it.
+ * (Set-Content) writes into a file. No argument of a program, no echo and no log line carries it. The command is text,
+ * though: a shell history, a PowerShell transcript or script block log and a terminal recording keep it, and the comments
+ * of the examples say so. The file is private before the token is written: mode 0600 on Linux, a DACL for SYSTEM and the
+ * administrators on Windows.
  */
 export interface SnippetInput {
   endpoint: string;
@@ -39,21 +42,26 @@ function shellQuote(v: string): string {
 
 export function linuxInstallCommand({ endpoint, secret }: SnippetInput): string {
   // The token goes through a file (0600), not the command line: argv shows up in process lists and shell history.
-  // The script runs from the unpacked archive, because it reads its templates from the directory above its own.
+  // The script runs from the unpacked archive, because it reads its templates from the directory above its own, and in a
+  // root shell in a directory that only root can write, so that no other account can replace a checked file before root
+  // runs it. That is why the command has no sudo.
   const install = [
-    'sudo ./deploy/scripts/install-linux.sh',
+    './deploy/scripts/install-linux.sh',
     `--opamp-endpoint ${shellQuote(endpoint)}`,
     `--token-file ./${ENROLLMENT_TOKEN_FILE}`,
     '--site-type <edge|office|datacenter|k8s-gateway>',
     '--site-id <id>',
     '--collector-version <collector-version>',
-    '--verifier <path-to-cosign>',
+    '--verifier <verifier>',
   ].join(' \\\n  ');
   return [
-    `# Run it from the unpacked archive ${LINUX_ARCHIVE}, after you verified it:`,
+    `# Run it in a root shell (sudo -i), in the directory of the verified and unpacked archive ${LINUX_ARCHIVE}`,
+    '# that only root can write:',
     `# ${GUIDE_URL}`,
     '# <collector-version>: the target version of the fleet, for example 0.162.0',
-    '# <path-to-cosign>: cosign 3.0.4 or newer. For --with-updater see the page above.',
+    '# <verifier>: the full path of cosign 3.0.4 or newer, or of the myriarch-updater of that archive, in a place that only',
+    '# root can write. For --with-updater see the page above.',
+    '# The token is part of this command: a shell history or the recording of a terminal session keeps it.',
     `(umask 077; printf '%s\\n' ${shellQuote(secret)} > ${ENROLLMENT_TOKEN_FILE})`,
     install,
     `rm -f ./${ENROLLMENT_TOKEN_FILE}`,
@@ -72,15 +80,25 @@ export function windowsInstallCommand({ endpoint, secret }: SnippetInput): strin
     "-CollectorVersion '<collector-version>'",
     "-Verifier 'C:\\Program Files\\cosign\\cosign.exe'",
   ].join(' `\n  ');
+  // "Only administrators can write" protects the checked files but not the token: a folder below C:\Program Files can be
+  // read by every local user. So the token file gets its own DACL (SYSTEM and the administrators) before the token is
+  // written, whatever the DACL of the folder is.
+  const tokenFile = `.\\${WINDOWS_TOKEN_FILE}`;
   return [
     '# Run it in an elevated Windows PowerShell, in the folder of the verified and unpacked archive',
-    `# ${WINDOWS_ARCHIVE} that only administrators can write:`,
+    `# ${WINDOWS_ARCHIVE}.`,
+    '# Only SYSTEM and the administrators may read and write that folder; the page below creates it:',
     `# ${GUIDE_URL}`,
     '# Only after the checks of the archive passed: Unblock-File .\\deploy\\scripts\\install-windows.ps1',
     '# <collector-version>: the target version of the fleet, for example 0.162.0',
-    `Set-Content -Path .\\${WINDOWS_TOKEN_FILE} -Value '${secret.replace(/'/g, "''")}' -NoNewline`,
+    '# -Verifier: cosign.exe 3.0.4 or newer in a folder that only administrators can write, or .\\myriarch-updater.exe of that',
+    '# archive. For -WithUpdater see the page above.',
+    '# The token is part of this command: a PowerShell transcript, script block logging or the history of the console keeps it.',
+    `New-Item -ItemType File -Path ${tokenFile} -Force | Out-Null`,
+    `icacls.exe ${tokenFile} /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F'`,
+    `Set-Content -Path ${tokenFile} -Value '${secret.replace(/'/g, "''")}' -NoNewline`,
     install,
-    `Remove-Item .\\${WINDOWS_TOKEN_FILE}`,
+    `Remove-Item ${tokenFile}`,
   ].join('\n');
 }
 

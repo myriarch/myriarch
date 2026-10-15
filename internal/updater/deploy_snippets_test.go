@@ -62,7 +62,9 @@ func TestEnrollmentDialogLinuxExampleNamesEveryRequiredInstallerOption(t *testin
 		assert.Regexp(t, `(?m)^\s+`+regexp.QuoteMeta(option)+`\)`, script, "install-linux.sh accepts %s", option)
 		assert.True(t, namesOption(body, option), "the Linux example of the token dialog must name %s", option)
 	}
-	assert.Contains(t, body, "sudo ./deploy/scripts/install-linux.sh", "the script runs from the unpacked archive, where its templates are")
+	// the script runs from the unpacked archive, where its templates are, in a root shell in a directory that only root can write
+	assert.Contains(t, body, "'./deploy/scripts/install-linux.sh',")
+	assert.NotRegexp(t, `sudo +\./`, body, "the example runs as root already: sudo would invite a run from a directory that the user owns")
 }
 
 func TestEnrollmentDialogWindowsExampleNamesEveryRequiredInstallerParameter(t *testing.T) {
