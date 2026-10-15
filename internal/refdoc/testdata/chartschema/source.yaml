@@ -1,0 +1,50 @@
+# The hand-written part of the schema in the golden test of the chart schema generator. It has the shape of
+# deploy/helm/myriarch/values.schema.source.yaml: JSON Schema written as YAML, with the placeholder of the generated subtree.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Mini chart values
+description: The values of a mini chart.
+type: object
+additionalProperties: false
+properties:
+  replicaCount:
+    description: Number of replicas.
+    type: integer
+    minimum: 1
+  ratio:
+    description: A number with a fraction, a boolean default and a null.
+    type: number
+    minimum: 0.5
+    default: null
+    deprecated: false
+  mode:
+    description: A short enumeration stays on one line.
+    enum: [fast, slow]
+  service:
+    description: A long enumeration is wrapped.
+    enum:
+      - ClusterIP
+      - NodePort
+      - LoadBalancer
+      - ExternalName
+      - Headless
+      - SomethingWithALongName
+  image:
+    type: object
+    additionalProperties: false
+    properties:
+      registry:
+        $ref: '#/$defs/host'
+      pullSecrets:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [name]
+          properties:
+            name: {type: string, pattern: '^[a-z]+\.[a-z]*$'}
+  config:
+    x-generated: the mini configuration
+$defs:
+  host:
+    description: A host name with <angle brackets> & an ampersand.
+    type: string
