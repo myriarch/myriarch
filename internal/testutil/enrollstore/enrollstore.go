@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package enrollstore wraps a store.Store so that tests of packages that use the in-memory store can create,
-// read and revoke enrollment tokens by ID. The in-memory store lists the tokens it was given but cannot read
+// read (by ID and by hash) and revoke enrollment tokens. The in-memory store lists the tokens it was given but cannot read
 // one back; the install grants of the artifact cache and the install plan need exactly that. Everything else is
 // delegated to the wrapped store.
 package enrollstore
@@ -87,6 +87,22 @@ func (i *identity) GetEnrollmentToken(_ context.Context, id uuid.UUID) (*domain.
 	}
 	return &t, nil
 }
+
+// GetEnrollmentTokenByHash implements store.IdentityStore.
+func (i *identity) GetEnrollmentTokenByHash(_ context.Context, h domain.Hash) (*domain.EnrollmentToken, error) {
+	i.s.mu.Lock()
+	defer i.s.mu.Unlock()
+	for _, t := range i.s.tokens {
+		if len(t.Hash) > 0 && t.Hash.Equal(h) {
+			t := t
+			return &t, nil
+		}
+	}
+	return nil, fmt.Errorf("enrollment token: %w", domain.ErrNotFound)
+}
+
+// TouchEnrollmentToken implements store.IdentityStore (the usage is not kept).
+func (i *identity) TouchEnrollmentToken(context.Context, uuid.UUID, time.Time, int) error { return nil }
 
 // ListEnrollmentTokens implements store.IdentityStore.
 func (i *identity) ListEnrollmentTokens(ctx context.Context) ([]domain.EnrollmentToken, error) {
