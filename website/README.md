@@ -190,7 +190,7 @@ not define on schema.org (`PROPERTIES` in the script lists the ones the site use
 free-form content (paragraphs of background, then the key terms as a list after the paragraph "Key terms:"), then sections of links; the
 section "Optional" holds what a reader may skip. The format allows free-form content, lists included but no headings, only before the
 first level-2 heading and keeps the sections below a heading for lists of links, so the key terms are no section of their own. It is
-curated, not generated from the pages: `data/llms.yaml` holds the summary, what the project does, for whom, its status and its
+curated, not generated from the pages: `data/llms.yaml` holds the summary, what the project does, for whom, its license and its
 independence, the key terms and the links, and explains its keys. A link names a page by its path, and the build fails when the page does not exist. The URL written is the
 canonical one, so the file is the same in a preview. Docsy's own template (`all.llms.txt`, a listing of the main menu and the sections of the
 documentation) is replaced for the home page by `layouts/home.llms.txt`; `outputs.home` in `hugo.yaml` switches the output format `LLMS` on.

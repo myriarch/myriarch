@@ -2,7 +2,7 @@
 # renders it with the title of the site as the heading. The text is curated here, not generated from the pages.
 #
 #   summary     the one-paragraph summary (the blockquote under the heading)
-#   details     paragraphs of background: what it does, who it is for, status, independence
+#   details     paragraphs of background: what it does, who it is for, license, independence
 #   terms       key terms with a definition (term, text); the list that follows the paragraph "Key terms:" before the first section
 #               (llmstxt.org allows free-form lists only there; a list below a heading holds links)
 #   sections    groups of links (title, links); a section titled "Optional" holds what a reader may skip
@@ -21,7 +21,7 @@ summary: "Myriarch is an open-source fleet manager for OpenTelemetry Collectors,
 details:
   - "What it does: collectors keep running under the upstream OpAMP Supervisor. The server myriarchd renders one configuration per collector from layered blueprints, offers it over OpAMP, rolls changes out in waves with approvals, health gates and rollback, and starts collector version updates through exchangeable executors, because the Supervisor cannot replace the collector binary."
   - "Who it is for: operators who run many OpenTelemetry Collectors on Linux and Windows hosts, in containers and on Kubernetes, at edge sites, in data centers and in the cloud. It is designed for around 1,000 collectors, with headroom up to 5,000."
-  - "Status and license: the project is alpha, so interfaces, configuration and the GitOps format (myriarch.dev/v1alpha1) can still change. The code is licensed under Apache-2.0 and the documentation under CC BY 4.0."
+  - "License: the code is licensed under Apache-2.0 and the documentation under CC BY 4.0."
   - "Independence: myriarch is an independent project. OpenTelemetry, Kubernetes and CNCF are trademarks of The Linux Foundation, and myriarch is not affiliated with or endorsed by The Linux Foundation or the OpenTelemetry project. The names are used only to describe compatibility."
 
 terms:

@@ -139,7 +139,7 @@ LLMS = """# myriarch
 
 > Myriarch is an open-source fleet manager for OpenTelemetry Collectors, built on OpAMP.
 
-Status and license: the project is alpha. The server myriarchd renders the configuration. See myriarch.dev and the program myriarch-updater.
+License: the code is Apache-2.0. The server myriarchd renders the configuration. See myriarch.dev and the program myriarch-updater.
 
 Key terms:
 
@@ -619,7 +619,7 @@ class LlmsTest(SeoCase):
     def test_the_spelling_rule_of_the_name(self):
         self.llms(LLMS.replace("that myriarch renders", "that Myriarch renders"))
         self.assert_finding("llms.txt:9: the name is not at the start of a sentence, write 'myriarch' (ADR-0015)")
-        self.llms(LLMS.replace("Status and license: the project is alpha.", "Status and license: the project is alpha. myriarch is independent."))
+        self.llms(LLMS.replace("License: the code is Apache-2.0.", "License: the code is Apache-2.0. myriarch is independent."))
         self.assert_finding("the name starts a sentence, write 'Myriarch' (ADR-0015)")
 
     def test_identifiers_are_not_part_of_the_spelling_rule(self):
