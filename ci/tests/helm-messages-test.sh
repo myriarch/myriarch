@@ -139,6 +139,7 @@ expect_schema "(40) port out of range" /service/port --set service.port=70000
 expect_schema "(41) image registry with a scheme" /image/registry --set image.registry=https://ghcr.io
 expect_schema "(42) image repository with a tag" /image/repository --set image.repository=ghcr.io/myriarch/myriarch:0.2.0
 expect_schema "(43) image repository in upper case" /image/repository --set image.repository=Myriarch/Myriarch
+expect_schema "(43b) first segment of the image repository in upper case and no registry host" /image/repository --set image.repository=Myriarch/myriarch
 expect_schema "(44) global image registry with a scheme" /global/imageRegistry --set global.imageRegistry=https://mirror.example.com
 expect_schema "(45) bootstrap user name" /bootstrapAdmin/username --set 'bootstrapAdmin.username=not valid!'
 expect_schema "(46) enrollment token name is not a DNS label" /enrollmentTokens/0/name --set-json 'enrollmentTokens=[{"name":"Not_A_Label"}]'
