@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { healthWaitOf, type HealthWait } from '@/lib/healthWait';
 import { notifySuccess } from '@/lib/notify';
 import { call, client } from '../client';
 import type { Rollout, RolloutKind, RolloutStatus, TargetStatus } from '../types';
@@ -41,6 +43,17 @@ export function useRollout(
     queryFn: ({ signal }) =>
       call(client.GET('/rollouts/{id}', { params: { path: { id: id! } }, signal })),
   });
+}
+
+/**
+ * The health wait of a rollout: the wait of its policy snapshot, where the policy comes from and
+ * whether the engine evaluates the rollout now. On the rollout page it reads the cache entry that
+ * the page itself keeps current, so a countdown costs no request of its own. undefined until the
+ * rollout has loaded.
+ */
+export function useHealthWait(rolloutId: string | undefined): HealthWait | undefined {
+  const { data } = useRollout(rolloutId);
+  return useMemo(() => (data ? healthWaitOf(data) : undefined), [data]);
 }
 
 export interface TargetsQuery {

@@ -52,6 +52,7 @@ import type {
   WaveStatus,
 } from '@/api/types';
 import { compareVersions } from '@/lib/format';
+import { DEFAULT_HEALTH_WAIT_MS, formatWait, healthWaitMs, isEvaluated } from '@/lib/healthWait';
 import { CONFIG_SYNC_STATES } from '@/api/enums';
 import { generateAgents, generateEvents, summarize, type MockAgentEntry } from './agents';
 import { describeFrame, inFrame } from './frame';
@@ -665,10 +666,15 @@ export class MockDb {
       const idx = seen.get(wave) ?? 0;
       seen.set(wave, idx + 1);
       const status = opts.statusOf(wave, idx, waveSizes.get(wave) ?? 0, e);
-      const started =
-        status === 'pending' || status === 'waiting_window'
-          ? undefined
-          : iso(-rng.int(10, 600) * MIN);
+      const notStarted = status === 'pending' || status === 'waiting_window';
+      const startedAgo = notStarted ? 0 : rng.int(10, 600) * MIN;
+      // A target in the health wait began it 15 to 95 s ago (staggered per target), after the five
+      // update steps of two seconds each, so its timeline hangs together.
+      const verifiedAgo = (15 + 20 * (idx % 5)) * 1000;
+      const verified = status === 'verifying' ? iso(-verifiedAgo) : undefined;
+      const started = notStarted
+        ? undefined
+        : iso(status === 'verifying' ? -verifiedAgo - 5 * STEP_MS : -startedAgo);
       const finished =
         status === 'succeeded' || status === 'failed' || status === 'skipped'
           ? iso(-rng.int(1, 9) * MIN)
@@ -684,7 +690,7 @@ export class MockDb {
         attempts:
           status === 'pending' || status === 'waiting_window' ? 0 : status === 'failed' ? 2 : 1,
         startedAt: started,
-        verifiedAt: status === 'succeeded' ? finished : undefined,
+        verifiedAt: status === 'succeeded' ? finished : verified,
         finishedAt: finished,
         lastError:
           status === 'failed'
@@ -774,7 +780,9 @@ export class MockDb {
         statusOf: (w, idx) => {
           if (w === 0) return 'succeeded';
           if (idx < 40) return 'succeeded';
-          if (idx < 52) return 'in_progress';
+          if (idx < 47) return 'in_progress';
+          // in the health wait of the policy "standard" (2 minutes), which ends in 25 to 105 seconds
+          if (idx < 52) return 'verifying';
           if (idx === 52) return 'failed';
           if (idx < 60) return 'waiting_window';
           return 'pending';
@@ -847,7 +855,8 @@ export class MockDb {
       for (const t of mr.targets) {
         const e = this.entries.get(t.agentId);
         if (!e) continue;
-        if (t.status === 'succeeded') e.agent.version = mr.rollout.toRef;
+        if (t.status === 'succeeded' || t.status === 'verifying')
+          e.agent.version = mr.rollout.toRef;
         else if (
           t.status === 'pending' ||
           t.status === 'in_progress' ||
@@ -1360,29 +1369,28 @@ export class MockDb {
       this.emit('agent.updated', summarize(off, this.latestVersion()));
       this.emit('stats.changed', {});
     }
-    // Progress the running rollout: pending -> in_progress -> succeeded (agent version changes).
+    // Progress the rollouts: pending -> in_progress -> succeeded (agent version changes).
     this.syncSimulations();
     for (const mr of this.rollouts) {
-      if (mr.rollout.status !== 'running' || mr.simPlan) continue;
-      const inProg = mr.targets.filter((t) => t.status === 'in_progress');
-      if (inProg.length > 0 && this.rng.chance(0.8)) {
-        const t = this.rng.pick(inProg);
-        t.status = 'succeeded';
-        t.finishedAt = t.verifiedAt = new Date(this.now()).toISOString();
-        t.updatedAt = t.finishedAt;
-        const e = this.entries.get(t.agentId);
-        if (e) {
-          e.agent.version = mr.rollout.toRef;
-          e.agent.identifyingAttributes['service.version'] = mr.rollout.toRef;
-          this.addEvent(e.agent.id, {
-            type: 'version_changed',
-            severity: 'info',
-            message: `Version changed to ${mr.rollout.toRef}`,
-            details: { from: t.fromRef, to: t.toRef },
-          });
-          this.emit('agent.updated', summarize(e, this.latestVersion()));
+      // A simulated update is driven by syncSimulations.
+      if (mr.simPlan) continue;
+      // Like the engine, which evaluates its in-flight targets before it looks at the status of the
+      // rollout, the targets in the health wait finish in every status that the engine evaluates, so
+      // also while the rollout is paused or waits for an approval. The countdown of the rollout page
+      // keeps counting then, and the wait has to end.
+      const finished = isEvaluated(mr.rollout.status) ? this.finishHealthWaits(mr) : 0;
+      if (mr.rollout.status !== 'running') {
+        // Only a running rollout starts targets and moves on to the next wave.
+        if (finished > 0) {
+          this.recount(mr);
+          this.emit('rollout.updated', this.rolloutSummary(mr.rollout));
         }
+        continue;
       }
+      const inProg = mr.targets.filter((t) => t.status === 'in_progress');
+      // The simplification of this demo: a target in progress succeeds without a health wait of its
+      // own, and only while the rollout runs.
+      if (inProg.length > 0 && this.rng.chance(0.8)) this.succeedTarget(mr, this.rng.pick(inProg));
       const runningWaves = new Set(
         mr.rollout.waves.filter((w) => w.status === 'running').map((w) => w.index),
       );
@@ -1401,6 +1409,44 @@ export class MockDb {
       this.emit('rollout.updated', this.rolloutSummary(mr.rollout));
     }
     if (this.tickCount % 8 === 0) this.emit('stats.changed', {});
+  }
+
+  /**
+   * The rule of the engine for the targets in the health wait: a target succeeds once the wait of
+   * the policy snapshot is over (verifiedAt + healthWait). Returns how many targets it finished;
+   * the caller counts them again and tells the page.
+   */
+  private finishHealthWaits(mr: MockRollout): number {
+    const waitMs = healthWaitMs(mr.rollout.policy.healthWait) ?? DEFAULT_HEALTH_WAIT_MS;
+    const now = this.now();
+    let finished = 0;
+    for (const t of mr.targets) {
+      if (t.status === 'verifying' && t.verifiedAt && now - Date.parse(t.verifiedAt) >= waitMs) {
+        this.succeedTarget(mr, t);
+        finished++;
+      }
+    }
+    return finished;
+  }
+
+  /** A target reaches its final state: the agent runs the target version, with the live events. */
+  private succeedTarget(mr: MockRollout, t: RolloutTarget): void {
+    const finishedAt = new Date(this.now()).toISOString();
+    t.status = 'succeeded';
+    t.verifiedAt ??= finishedAt;
+    t.finishedAt = t.updatedAt = finishedAt;
+    const e = this.entries.get(t.agentId);
+    if (e && e.agent.version !== mr.rollout.toRef) {
+      e.agent.version = mr.rollout.toRef;
+      e.agent.identifyingAttributes['service.version'] = mr.rollout.toRef;
+      this.addEvent(e.agent.id, {
+        type: 'version_changed',
+        severity: 'info',
+        message: `Version changed to ${mr.rollout.toRef}`,
+        details: { from: t.fromRef, to: t.toRef },
+      });
+      this.emit('agent.updated', summarize(e, this.latestVersion()));
+    }
   }
 
   /** Completes finished waves and starts the next one (or waits for its approval). */
@@ -1886,7 +1932,9 @@ export class MockDb {
       kind: 'version',
       fleetName: fleet.name,
       policyName: policy.name,
-      policy,
+      // The simulated health wait lasts one step (see updateSim.ts): the snapshot says so, and the
+      // countdown of the rollout page counts down the same two seconds.
+      policy: { ...policy, healthWait: formatWait(STEP_MS) },
       status: 'running',
       fromRef: needing[0]!.agent.version,
       toRef: sel.version,
@@ -2053,6 +2101,10 @@ export class MockDb {
       const before = JSON.stringify([t.progress, t.status]);
       t.progress = res.progress;
       t.status = res.targetStatus;
+      // like the engine: the collector reported the version when the step health_wait began
+      const waitStart = res.progress.steps.find((s) => s.name === 'health_wait')?.startedAt;
+      if (res.targetStatus === 'verifying' || res.targetStatus === 'succeeded')
+        t.verifiedAt = waitStart ?? t.verifiedAt;
       t.updatedAt = new Date(now).toISOString();
       t.attempts = sim.attempt;
       if (JSON.stringify([t.progress, t.status]) === before) continue;
@@ -2063,7 +2115,7 @@ export class MockDb {
         const wave = mr.rollout.waves[t.wave];
         const e = this.entries.get(t.agentId);
         if (res.targetStatus === 'succeeded') {
-          t.verifiedAt = finishedAt;
+          t.verifiedAt ??= finishedAt;
           t.lastError = undefined;
           if (e) {
             e.agent.version = plan.to;
@@ -2112,6 +2164,7 @@ export class MockDb {
     t.status = 'in_progress';
     t.lastError = undefined;
     t.finishedAt = undefined;
+    t.verifiedAt = undefined;
     const attempt = (mr.sim?.attempt ?? t.attempts) + 1;
     mr.sim = { agentId: plan.agentId, script: 'success', startedAt: this.now(), attempt };
     const wave = mr.rollout.waves[t.wave];
@@ -2150,12 +2203,23 @@ export class MockDb {
           .progress;
       case 'in_progress':
       case 'verifying': {
-        const stage = hashString(t.agentId) % 6;
-        return simulateUpdate({
+        // The status has the last word (docs/design/version-selection.md, Target progress): the
+        // health wait runs exactly while the target is verifying.
+        const stage = t.status === 'verifying' ? 5 : hashString(t.agentId) % 5;
+        const progress = simulateUpdate({
           ...base,
           now: startedAt + stage * STEP_MS + STEP_MS / 2,
           script: 'success',
         }).progress;
+        const verifiedAt = t.verifiedAt;
+        if (t.status !== 'verifying' || !verifiedAt) return progress;
+        // the engine starts the step with the time the collector reported the version
+        return {
+          ...progress,
+          steps: progress.steps.map((st) =>
+            st.name === 'health_wait' ? { ...st, startedAt: verifiedAt } : st,
+          ),
+        };
       }
       default:
         return undefined;

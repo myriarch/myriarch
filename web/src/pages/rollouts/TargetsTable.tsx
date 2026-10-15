@@ -21,6 +21,7 @@ import { Link } from 'react-router';
 import { TARGET_STATUSES } from '@/api/enums';
 import { useRolloutTargets } from '@/api/hooks/rollouts';
 import type { RolloutTarget, RolloutWave, TargetStatus } from '@/api/types';
+import { HealthWaitCountdown } from '@/components/HealthWaitCountdown';
 import { Pager } from '@/components/Pager';
 import { TargetProgressView } from '@/components/TargetProgressView';
 import { UpdateStepsBar } from '@/components/UpdateStepsBar';
@@ -196,7 +197,12 @@ export function TargetsTable({
                     </Table.Td>
                     <Table.Td className="myr-tabular">{r.wave + 1}</Table.Td>
                     <Table.Td>
-                      <TargetStatusBadge status={r.status} />
+                      <Stack gap={2} align="flex-start">
+                        <TargetStatusBadge status={r.status} />
+                        {r.status === 'verifying' && (
+                          <HealthWaitCountdown rolloutId={rolloutId} verifiedAt={r.verifiedAt} />
+                        )}
+                      </Stack>
                     </Table.Td>
                     {showFlow && (
                       <Table.Td>

@@ -734,7 +734,17 @@
     "flow": "Flow",
     "flowDetails": "Show flow",
     "flowTitle": "Update flow",
-    "attempt": "Attempt"
+    "attempt": "Attempt",
+    "healthWait": {
+      "remaining": "{{time}} left",
+      "finishing": "finishing…",
+      "waveEnds_one": "Health wait: {{count}} target, ends in {{time}}",
+      "waveEnds_other": "Health wait: {{count}} targets, the last one ends in {{time}}",
+      "waveFinishing_one": "Health wait: {{count}} target, finishing…",
+      "waveFinishing_other": "Health wait: {{count}} targets, finishing…",
+      "policy": "Policy",
+      "builtIn": "built-in policy"
+    }
   },
   "dashboard": {
     "title": "Overview",
