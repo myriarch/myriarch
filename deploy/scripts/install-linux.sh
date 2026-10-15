@@ -94,6 +94,11 @@
 #   archive_invalid                 collector archive has no regular binary in its root
 #   collector_start_failed          the new collector binary cannot be started
 #   collector_version_mismatch      the collector reports another version than requested
+#   supervisor_missing              the supervisor binary is not there when the installation step is over: Linux, a missing or
+#                                   non-executable /opt/myriarch/supervisor/opampsupervisor; Windows, a missing file, a file that
+#                                   is no regular file or differs from the verified one at ...\supervisor\opampsupervisor.exe, and
+#                                   a service that did not start because the file of its binPath is gone (a security tool that
+#                                   quarantined the binary is the usual cause)
 #   service_not_running             WARNING: otelcol-supervisor is not running after the installation
 #   token_on_command_line           WARNING: --token is visible in the process list and shell history
 #   updater_unauthenticated         WARNING: the updater binary has no trusted hash (--insecure)
@@ -578,6 +583,18 @@ check_foreign_installations() {
   [ -z "${found}" ] || die conflicting_install "an installation of the upstream project is present: ${found}; it provides a second collector next to the one that myriarch manages, and the installer removes nothing - stop and disable it ('systemctl disable --now ${units}'), remove its package with your package manager and run the installer again"
 }
 
+# The supervisor must be an executable file at the path of the unit when the installation step is over. A security tool that
+# removes an unsigned binary, a mount with noexec or a copy that went wrong would otherwise show up only as a service that does
+# not start (status 203/EXEC).
+check_supervisor_binary() {
+  local target="${P_SUPERVISOR}/opampsupervisor" why=""
+  if [ ! -e "${target}" ]; then why="does not exist"
+  elif [ ! -f "${target}" ]; then why="is not a regular file"
+  elif [ ! -x "${target}" ]; then why="is not executable"
+  fi
+  [ -z "${why}" ] || die supervisor_missing "the supervisor binary ${why}: ${target}; look for a cleanup or security tool that removed or changed it and for a noexec mount of its file system (findmnt -T ${target}), then run the installer again"
+}
+
 # ---------------------------------------------------------------- Signature verification (Sigstore, fail-closed)
 # Verifier: cosign 3.0.4 or newer (PATH or --verifier) or "myriarch-updater verify-bundle" (--verifier, an already
 # installed one, or - only with --updater-sha256 and without --updater-checksums-url - the updater downloaded here and
@@ -950,6 +967,7 @@ main() {
   ensure_dirs
   install_collector
   install_supervisor_binary
+  check_supervisor_binary
   install_config
   install_units
   install_updater

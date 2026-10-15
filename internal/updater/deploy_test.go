@@ -1252,3 +1252,69 @@ func TestInstallLinuxScriptChecksForeignInstallationsBeforeItChangesAnything(t *
 		assert.Greater(t, at, last, "%s comes after check_foreign_installations", step)
 	}
 }
+
+// --- the supervisor file after the installation step (supervisor_missing) ----------------
+
+// writeShadowingMv replaces the mv of a restricted PATH by one that does what mv does and then runs action on the file that was
+// moved to the supervisor path: a security tool that removes the new binary, or a mount that does not let it run.
+func writeShadowingMv(t *testing.T, dir, action string) {
+	t.Helper()
+	realMv, err := exec.LookPath("mv")
+	require.NoError(t, err)
+	script := "#!/bin/sh\n" + realMv + " \"$@\" || exit $?\nfor last in \"$@\"; do :; done\n" +
+		"case \"$last\" in */supervisor/opampsupervisor) " + action + " ;; esac\n"
+	_ = os.Remove(filepath.Join(dir, "mv"))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "mv"), []byte(script), 0o755))
+}
+
+func TestInstallLinuxScriptStopsWhenTheSupervisorIsMissingAfterTheInstallStep(t *testing.T) {
+	cases := []struct{ name, action, why string }{
+		{"removed after the move", `rm -f "$last"`, "does not exist"},
+		{"not executable", `chmod 0644 "$last"`, "is not executable"},
+	}
+	requireBashInstaller(t)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+			path := restrictedPath(t)
+			writeShadowingMv(t, path, c.action)
+			root := t.TempDir()
+			out, err := runInstallEnv(t, root, []string{"PATH=" + path}, stagingInstallArgs(rel)...)
+			require.Error(t, err, out)
+			assert.Regexp(t, `(?m)^\[myriarch-install\] ERROR \[supervisor_missing\] \S`, out)
+			assert.Contains(t, out, "the supervisor binary "+c.why+": "+filepath.Join(root, "opt/myriarch/supervisor/opampsupervisor"), "the message names the path as it was given")
+			assert.Contains(t, out, "noexec", "the message names the next step")
+			assert.NoFileExists(t, filepath.Join(root, "etc/myriarch/supervisor.yaml"), "the run stops before the configuration is written")
+			assert.NoFileExists(t, filepath.Join(root, "etc/systemd/system/otelcol-supervisor.service"))
+		})
+	}
+}
+
+// A directory at the path of the supervisor, with the VERSION file of the requested version next to it, passes the test of
+// the step that skips an installed supervisor ("executable" is true for a directory): the check after the step catches it.
+func TestInstallLinuxScriptStopsAtAnInstalledSupervisorThatIsNoFile(t *testing.T) {
+	requireBashInstaller(t)
+	rel := newFakeRelease(t, "0.162.0", "0.162.0", "amd64")
+	root := t.TempDir()
+	dir := filepath.Join(root, "opt/myriarch/supervisor")
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "opampsupervisor"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "VERSION"), []byte("0.162.0\n"), 0o644))
+	out, err := runInstall(t, root, rel, baseArgs()...)
+	require.Error(t, err, out)
+	assert.Contains(t, out, "[supervisor_missing]")
+	assert.Contains(t, out, "the supervisor binary is not a regular file: "+filepath.Join(dir, "opampsupervisor"))
+	assert.Contains(t, out, "Supervisor v0.162.0 is already installed")
+}
+
+// The check follows the install step and precedes everything that uses the supervisor.
+func TestInstallLinuxScriptChecksTheSupervisorRightAfterItInstallsIt(t *testing.T) {
+	linux := string(readDeploy(t, "scripts/install-linux.sh"))
+	i := strings.Index(linux, "\nmain() {")
+	require.GreaterOrEqual(t, i, 0)
+	main := linux[i:]
+	main = main[:strings.Index(main, "\n}\n")]
+	iInstall := strings.Index(main, "install_supervisor_binary")
+	iCheck := strings.Index(main, "check_supervisor_binary")
+	iConfig := strings.Index(main, "install_config")
+	require.True(t, iInstall > 0 && iCheck > iInstall && iConfig > iCheck, "install_supervisor_binary, check_supervisor_binary, install_config")
+}

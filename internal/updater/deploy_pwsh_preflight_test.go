@@ -199,3 +199,106 @@ Check 'nothing was written to the working directory' (@(Get-ChildItem -LiteralPa
 `)
 	assert.GreaterOrEqual(t, n, 4, out)
 }
+
+// The supervisor must be a regular file with the verified hash at the path of the service after its installation step. The
+// installation step is run with stand-ins for the download and the copy; the copy removes the file, as a security tool would.
+func TestInstallWindowsScriptReportsAMissingSupervisorFile(t *testing.T) {
+	out, n := runPwshChecks(t, `
+$dir = Join-Path $Work 'supervisor'
+New-Item -ItemType Directory -Path $dir | Out-Null
+$exe = Join-Path $dir 'opampsupervisor.exe'
+$good = ('b' * 64)
+
+# Assert-SupervisorBinary
+$msg = Message-Of { Assert-SupervisorBinary -Path $exe -ExpectedHash $good }
+Check 'a missing file is supervisor_missing' ($msg -match '^\[supervisor_missing\] ')
+Check 'the message says that the file does not exist and names the path' ($msg.Contains('the supervisor binary does not exist: ' + $exe))
+Check 'the message names the next step: the protection history of the antivirus, and the folder to allow' ($msg.Contains('protection history') -and $msg.Contains('allow the folder ' + $dir))
+
+New-Item -ItemType Directory -Path $exe | Out-Null
+$msg = Message-Of { Assert-SupervisorBinary -Path $exe }
+Check 'a directory is no regular file' ($msg -match '^\[supervisor_missing\] ' -and $msg.Contains('is not a regular file: ' + $exe))
+Remove-Item -LiteralPath $exe -Force
+
+if (-not $IsWindows) {
+  $target = Join-Path $dir 'target'
+  Set-Content -LiteralPath $target -Value 'x' -NoNewline
+  New-Item -ItemType SymbolicLink -Path $exe -Target $target | Out-Null
+  $msg = Message-Of { Assert-SupervisorBinary -Path $exe }
+  Check 'a link is no regular file' ($msg -match '^\[supervisor_missing\] ' -and $msg.Contains('is not a regular file'))
+  Remove-Item -LiteralPath $exe -Force
+}
+
+Set-Content -LiteralPath $exe -Value 'MZ-fake' -NoNewline
+$hash = Get-Sha256 -Path $exe
+Check 'a file with the verified hash passes' ((Message-Of { Assert-SupervisorBinary -Path $exe -ExpectedHash $hash }) -eq '')
+Check 'a file passes when no hash is known (an installed supervisor)' ((Message-Of { Assert-SupervisorBinary -Path $exe }) -eq '')
+$msg = Message-Of { Assert-SupervisorBinary -Path $exe -ExpectedHash $good }
+Check 'a file with another hash is not the verified supervisor' ($msg -match '^\[supervisor_missing\] ' -and $msg.Contains('is not the file that was verified'))
+Remove-Item -LiteralPath $exe -Force
+
+# Install-SupervisorBinary with stand-ins for the download, the signature check and the copy
+$root = Join-Path $Work 'root'
+$L = Get-Layout -Prefix $root
+$script:StagingMode = $true
+$script:SupervisorVersion = '0.162.0'
+$script:ReleaseBaseUrl = 'https://mirror.example.com/r'
+$tmp = Join-Path $Work 'tmp'
+New-Item -ItemType Directory -Path $tmp | Out-Null
+$target = Join-Path $L.Supervisor 'opampsupervisor.exe'
+function Get-VerifiedAsset { param($Url, $Destination) Set-Content -LiteralPath $Destination -Value 'MZ-fake-supervisor' -NoNewline; return (Get-Sha256 -Path $Destination) }
+function Confirm-Signature { param($File, $BundleUrl, $IdentityRegexp, $Version, $TmpDir) }
+$script:Quarantine = $true
+function Copy-VerifiedFile {
+  param($Source, $Destination, $ExpectedHash)
+  Copy-Item -LiteralPath $Source -Destination $Destination -Force
+  if ($script:Quarantine) { Remove-Item -LiteralPath $Destination -Force }
+}
+$msg = Message-Of { [void](Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp) }
+Check 'a file that is gone right after the copy stops the installation step' ($msg -match '^\[supervisor_missing\] ' -and $msg.Contains($target))
+
+$script:Quarantine = $false
+$changed = Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp
+Check 'an intact installation step reports a change and leaves the file' ($changed -eq $true -and (Test-Path -LiteralPath $target -PathType Leaf))
+$changed = Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp
+Check 'a repeated step finds the installed supervisor' ($changed -eq $false)
+Remove-Item -LiteralPath $target -Force
+New-Item -ItemType Directory -Path $target | Out-Null
+$msg = Message-Of { [void](Install-SupervisorBinary -L $L -Arch 'amd64' -TmpDir $tmp) }
+Check 'an installed supervisor that is no file is reported too' ($msg -match '^\[supervisor_missing\] ' -and $msg.Contains('is not a regular file: ' + $target))
+`)
+	assert.GreaterOrEqual(t, n, 11, out)
+}
+
+// A service that is not running is explained by the file of its binPath when that is gone: the path comes from the registry
+// entry of the service (a stand-in for Get-ItemProperty here), not from the layout of the installer.
+func TestInstallWindowsScriptLooksAtTheBinaryOfAServiceThatIsNotRunning(t *testing.T) {
+	out, n := runPwshChecks(t, `
+$script:ImagePath = $null
+function Get-ItemProperty {
+  [CmdletBinding()] param([string]$Path, [string]$Name)
+  if ($null -ne $script:ImagePath) { return [pscustomobject]@{ ImagePath = $script:ImagePath } }
+}
+$dir = Join-Path $Work 'bin'
+New-Item -ItemType Directory -Path $dir | Out-Null
+$exe = Join-Path $dir 'opampsupervisor.exe'
+$fallback = Join-Path $dir 'fallback.exe'
+Set-Content -LiteralPath $fallback -Value 'x' -NoNewline
+
+$script:ImagePath = '"' + $exe + '" --config "C:\ProgramData\Myriarch\config\supervisor.yaml"'
+Check 'a quoted binPath is read from the registry entry' ((Get-ServiceBinaryPath -Name 'otelcol-supervisor' -Default $fallback) -eq $exe)
+$msg = Message-Of { [void](Assert-ServiceBinaryPresent -Name 'otelcol-supervisor' -Default $fallback) }
+Check 'a missing file of the binPath is supervisor_missing' ($msg -match '^\[supervisor_missing\] ')
+Check 'the message names the service, the path of the binPath (not the default) and the next step' ($msg.Contains('the service otelcol-supervisor is not running') -and $msg.Contains($exe) -and -not $msg.Contains($fallback) -and $msg.Contains('protection history'))
+
+Set-Content -LiteralPath $exe -Value 'MZ-fake' -NoNewline
+Check 'an existing file is returned and raises nothing' ((Assert-ServiceBinaryPresent -Name 'otelcol-supervisor' -Default $fallback) -eq $exe)
+
+$script:ImagePath = $exe + ' --config C:\x.yaml'
+Check 'an unquoted binPath is read up to .exe' ((Get-ServiceBinaryPath -Name 'otelcol-supervisor' -Default $fallback) -eq $exe)
+$script:ImagePath = $null
+Check 'without a registry entry the default is used' ((Get-ServiceBinaryPath -Name 'otelcol-supervisor' -Default $fallback) -eq $fallback)
+Check 'and it is checked like any other' ((Assert-ServiceBinaryPresent -Name 'otelcol-supervisor' -Default $fallback) -eq $fallback)
+`)
+	assert.GreaterOrEqual(t, n, 7, out)
+}

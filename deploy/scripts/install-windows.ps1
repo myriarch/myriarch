@@ -137,7 +137,7 @@ $script:MinCosignVersion = [Version]'3.0.4'
 # sigstore_verifier_missing, sigstore_verifier_outdated, option_removed, privilege_required,
 # unsupported_platform, conflicting_install, download_failed, template_missing, template_placeholder, checksum_invalid,
 # checksum_mismatch, checksum_entry_count, checksum_conflict, sigstore_verification_failed, archive_invalid,
-# collector_start_failed, collector_version_mismatch, service_not_running, token_on_command_line,
+# collector_start_failed, collector_version_mismatch, supervisor_missing, service_not_running, token_on_command_line,
 # updater_unauthenticated) is at the top of install-linux.sh.
 # Windows-only codes:
 #   authenticode_invalid       the Authenticode signature of the updater is invalid or from another certificate
@@ -150,7 +150,8 @@ $script:MinCosignVersion = [Version]'3.0.4'
 #   language_mode_unsupported  PowerShell runs the script in Constrained Language Mode (App Control for Business) or another
 #                              mode below FullLanguage; it is the first check of the run, before anything else happens
 #   unexpected_error           a failure that is not classified above (the original message follows the code)
-# service_not_running is fatal here (a warning on Linux).
+# service_not_running is fatal here (a warning on Linux). When the service is not running because the file of its binPath is gone,
+# supervisor_missing is raised in its place.
 # Every fatal error goes through Stop-Install; the top-level catch prints
 #   [myriarch-install] ERROR [<code>] <message>
 
@@ -893,6 +894,51 @@ function Enable-CollectorVersion {
   return $true
 }
 
+# What to do when the supervisor file is gone: security software removes or quarantines an unsigned binary after it was written, and
+# the service then fails to start with an error (1053) that names neither the file nor the cause.
+function Get-SupervisorMissingHint {
+  param([string]$Path)
+  return "look at the protection history of your antivirus or endpoint protection for a quarantined opampsupervisor.exe (Microsoft Defender: Windows Security, Protection history, or Get-MpThreatDetection), allow the folder $(Split-Path -Parent $Path), then run the installer again (it fetches and verifies the file again)"
+}
+
+# After the installation step the supervisor must be a regular file at the path of the service and, when the file was just
+# copied, the file whose SHA-256 was verified. The copy itself was hashed again (Copy-VerifiedFile); this check catches what
+# happens after it, and an old file in a state that a re-run would not repair. The message names the path and the next step.
+function Assert-SupervisorBinary {
+  param([string]$Path, [string]$ExpectedHash)
+  $next = Get-SupervisorMissingHint -Path $Path
+  $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+  if (-not $item) { Stop-Install 'supervisor_missing' "the supervisor binary does not exist: $Path; $next" }
+  if ($item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+    Stop-Install 'supervisor_missing' "the supervisor binary is not a regular file: $Path; $next"
+  }
+  if ($ExpectedHash -and (Get-Sha256 -Path $Path) -ne $ExpectedHash) {
+    Stop-Install 'supervisor_missing' "the supervisor binary is not the file that was verified (its SHA-256 differs): $Path; $next"
+  }
+}
+
+# The executable of a service from its registry entry (ImagePath): the quoted path at the start, or the unquoted path up to ".exe".
+function Get-ServiceBinaryPath {
+  param([string]$Name, [string]$Default)
+  $props = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$Name" -Name ImagePath -ErrorAction SilentlyContinue
+  if (-not $props -or -not $props.PSObject.Properties['ImagePath']) { return $Default }
+  $raw = [string]$props.ImagePath
+  if ($raw -match '^\s*"([^"]+)"') { return $Matches[1] }
+  if ($raw -match '(?i)^\s*(.+?\.exe)(\s|$)') { return $Matches[1] }
+  return $Default
+}
+
+# For a service that is not running: the file of its binPath has to exist, otherwise that is the reason and the error says so
+# (supervisor_missing) in place of the status. Returns the path that was checked.
+function Assert-ServiceBinaryPresent {
+  param([string]$Name, [string]$Default)
+  $path = Get-ServiceBinaryPath -Name $Name -Default $Default
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+    Stop-Install 'supervisor_missing' "the service $Name is not running because the file of its binPath does not exist: $path; $(Get-SupervisorMissingHint -Path $path)"
+  }
+  return $path
+}
+
 function Install-SupervisorBinary {
   param($L, [string]$Arch, [string]$TmpDir)
   if ($Arch -ne 'amd64') {
@@ -905,6 +951,7 @@ function Install-SupervisorBinary {
   $verFile = Join-Path $L.Supervisor 'VERSION'
   if ((Test-Path -LiteralPath $target) -and (Test-Path -LiteralPath $verFile) -and ((Get-Content -LiteralPath $verFile -Raw).Trim() -eq $version)) {
     Write-Log "Supervisor v$version is already installed"
+    Assert-SupervisorBinary -Path $target
     return $false
   }
   $tmp = Join-Path $TmpDir $asset
@@ -914,6 +961,7 @@ function Install-SupervisorBinary {
   Stop-ServiceAndWait -Name $script:SupervisorService
   Copy-VerifiedFile -Source $tmp -Destination $target -ExpectedHash $hash
   Set-FileText -Path $verFile -Text "$version`n"
+  Assert-SupervisorBinary -Path $target -ExpectedHash $hash
   Write-Log "Supervisor v$version installed"
   return $true
 }
@@ -1213,7 +1261,9 @@ function Invoke-Main {
     Start-Sleep -Seconds 2
     $svc = Get-Service -Name $script:SupervisorService
     if ($svc.Status -ne 'Running') {
-      Write-Warn 'service_not_running' "otelcol-supervisor is not running (status $($svc.Status)); Event Viewer -> Windows Logs -> Application, source otelcol-supervisor"
+      # a binary that has gone (security software) explains the status better than the status does
+      $binary = Assert-ServiceBinaryPresent -Name $script:SupervisorService -Default (Join-Path $L.Supervisor 'opampsupervisor.exe')
+      Write-Warn 'service_not_running' "otelcol-supervisor is not running (status $($svc.Status), its binary exists: $binary); Event Viewer -> Windows Logs -> Application, source otelcol-supervisor"
       Stop-Install 'service_not_running' 'the service otelcol-supervisor is not running'
     }
     Write-Log "done. The host reports to $OpampEndpoint as an agent"

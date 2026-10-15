@@ -293,6 +293,7 @@ func TestInstallersUseTheSameCodeForSharedConditions(t *testing.T) {
 		{"updater_unauthenticated", "neither --updater-sha256 nor", "neither -UpdaterSha256 nor"},
 		same("service_not_running", "otelcol-supervisor is not running"),
 		same("conflicting_install", "an installation of the upstream project is present"),
+		same("supervisor_missing", "the supervisor binary"),
 	}
 	linuxCall := func(code string) *regexp.Regexp { return regexp.MustCompile(`\b(die|warn)\s+` + code + `\s`) }
 	winCall := func(code string) *regexp.Regexp {

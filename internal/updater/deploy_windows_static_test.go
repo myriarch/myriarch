@@ -199,6 +199,25 @@ func TestInstallWindowsScriptChecksTheLanguageModeBeforeAnythingElse(t *testing.
 		"FullLanguage: the host prints the error; any other mode: Write-Host does; then exit 1")
 }
 
+// The supervisor has to be a regular file with the verified hash at the path of the service when its installation step is over,
+// whichever way the step ends, and a service that is not running is explained by its file first.
+func TestInstallWindowsScriptChecksTheSupervisorFile(t *testing.T) {
+	script := string(readDeploy(t, "scripts/install-windows.ps1"))
+	body := psFunctionBody(t, script, "Install-SupervisorBinary")
+	iSkip := strings.Index(body, "Assert-SupervisorBinary -Path $target\n    return $false")
+	iCopy := strings.Index(body, "Copy-VerifiedFile")
+	iCheck := strings.Index(body, "Assert-SupervisorBinary -Path $target -ExpectedHash $hash")
+	iDone := strings.Index(body, `Write-Log "Supervisor v$version installed"`)
+	assert.True(t, iSkip > 0, "an installed supervisor is checked too (the early return)")
+	require.True(t, iCopy > 0 && iCheck > iCopy && iDone > iCheck, "the check follows the copy and precedes the success message")
+
+	main := psFunctionBody(t, script, "Invoke-Main")
+	iIf := strings.Index(main, "if ($svc.Status -ne 'Running') {")
+	iBinary := strings.Index(main, "Assert-ServiceBinaryPresent")
+	iWarn := strings.Index(main, "Write-Warn 'service_not_running'")
+	require.True(t, iIf > 0 && iBinary > iIf && iWarn > iBinary, "the file of the binPath is checked before service_not_running is reported")
+}
+
 // With a checksums.txt the verifier exists before the updater is downloaded, the file is checked through the same
 // function as the upstream bundles, and the removed key options fail before anything else happens.
 func TestInstallWindowsScriptKeylessChecksumsFlow(t *testing.T) {

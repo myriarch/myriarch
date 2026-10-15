@@ -256,11 +256,12 @@ is at the top of that script.
 | `archive_invalid` | the collector archive has no regular binary in its root |
 | `collector_start_failed` | the new collector binary cannot be started |
 | `collector_version_mismatch` | the collector reports another version than requested |
+| `supervisor_missing` | (from v0.2.0) the supervisor is not there when its installation step is over: `C:\Program Files\Myriarch\supervisor\opampsupervisor.exe` does not exist, is not a regular file (a directory, a link) or is not the file whose SHA-256 was verified. It is also raised in place of `service_not_running` when the service is not running because the file of its binPath is gone. The message names the path. The usual cause is a security tool that quarantined the unsigned binary: look at its protection history (Microsoft Defender: *Windows Security*, *Protection history*, or `Get-MpThreatDetection`), allow the folder and run the installer again. `install-linux.sh` raises it for a missing or non-executable `/opt/myriarch/supervisor/opampsupervisor` |
 | `directory_unsafe` | a data directory is a reparse point, has the wrong owner, has an unexpected ACE, or is not a directory; or `-Verifier` is in a directory that unprivileged accounts can change |
 | `acl_failed` | `icacls` failed |
 | `service_config_failed` | `sc.exe` failed |
 | `updater_install_failed` | `myriarch-updater install` failed |
-| `service_not_running` | the supervisor service is not running after the installation (fatal on Windows) |
+| `service_not_running` | the supervisor service is not running after the installation (fatal on Windows). From v0.2.0 the installer first checks the file of the service's binPath and reports `supervisor_missing` when it is gone |
 | `unexpected_error` | a failure that is not classified above; the original message follows the code |
 
 Warning codes: `token_on_command_line` (`-Token` is visible in process logs), `updater_unauthenticated` (updater
@@ -280,8 +281,9 @@ name) and `group_membership_failed` (the service account could not be added to a
    when the service starts: new version healthy = keep it, otherwise roll back to `.previous`).
 5. **Health**: supervisor `http://localhost:13134/health`, collector `http://localhost:13133/`
    (`Invoke-WebRequest -UseBasicParsing`).
-6. **Service does not start** (error 1053/1067): check the paths in `supervisor.yaml` (`agent.executable` must
-   exist), run `otelcol-contrib.exe --version` manually; a missing `MYRIARCH_ENROLLMENT_TOKEN`
+6. **Service does not start** (error 1053/1067): check that `C:\Program Files\Myriarch\supervisor\opampsupervisor.exe` exists
+   (security software quarantines unsigned binaries: look at the protection history), check the paths in `supervisor.yaml`
+   (`agent.executable` must exist), run `otelcol-contrib.exe --version` manually; a missing `MYRIARCH_ENROLLMENT_TOKEN`
    in the service environment leads to `401` at the server (log `agent.log` / myriarchd audit).
 7. **Update fails**: `INSTALL_FAILED` + text in the UI (agent -> packages). Common causes: URL outside
    `allowedUrlPrefixes`, SHA-256/Sigstore mismatch, the new binary rejects the current `effective.yaml`
@@ -289,5 +291,6 @@ name) and `group_membership_failed` (the service account could not be added to a
 8. **Uninstall**: `install-windows.ps1 -Uninstall`, started like the installer ([Start the installer](#start-the-installer));
    data under `C:\ProgramData\Myriarch` is kept, `-Purge` also removes identity and queue.
 9. **No `otelcol-supervisor` service after the installer ran**: it stopped before it created the service. Read its last
-   `ERROR [<code>]` line ([Error codes](#error-codes)), and check whether an MSI of the upstream project is installed
-   ([Packages of the upstream project](#packages-of-the-upstream-project)).
+   `ERROR [<code>]` line ([Error codes](#error-codes)). From v0.2.0 the installer names an MSI of the upstream project
+   (`conflicting_install`) and a supervisor file that is not there (`supervisor_missing`); with the installer of v0.1.0 check
+   whether such an MSI is installed ([Packages of the upstream project](#packages-of-the-upstream-project)).
