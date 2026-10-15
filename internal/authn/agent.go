@@ -48,7 +48,7 @@ type AgentCredential struct {
 //   - Without token and with requireEnrollmentToken=false: allowed (mTLS-only
 //     setups with requireClientCert, or dev).
 func (s *Service) AuthenticateAgent(r *http.Request) (*AgentCredential, error) {
-	cred, err := s.authenticateAgent(r)
+	cred, err := s.authenticateAgent(r, s.opamp.RequireEnrollmentToken)
 	switch {
 	case err == nil:
 		s.metricAgent.WithLabelValues("ok").Inc()
@@ -62,7 +62,29 @@ func (s *Service) AuthenticateAgent(r *http.Request) (*AgentCredential, error) {
 	return cred, err
 }
 
-func (s *Service) authenticateAgent(r *http.Request) (*AgentCredential, error) {
+// AuthenticateInstall authenticates a request of a host that is installed from the server (the plan,
+// the installer bundle, ADR-0046). It applies the rules of AuthenticateAgent with one difference: an
+// enrollment token is mandatory whatever opamp.requireEnrollmentToken says, because the plan and the
+// bundle give a software delivery to whoever asks, and mutual TLS without a token is not supported for
+// the installation. The token lookups are those of the OpAMP endpoint (cache, negative cache, bounded
+// database lookups). Because this route is reachable by anyone, failed authentications are limited per
+// client address as well (IPv6 clients per /64): an address that used up its budget gets
+// domain.ErrTooManyRequests before any lookup happens, so one address cannot use up the lookups that
+// the agents need to enroll. Every failure carries the same message, whether the token is unknown,
+// revoked, expired or malformed. The results do not count as OpAMP connections in the metrics.
+func (s *Service) AuthenticateInstall(r *http.Request) (*AgentCredential, error) {
+	key := realip.LimiterKey(s.clientIP(r))
+	if blocked, retry := s.installFail.blocked(key); blocked {
+		return nil, rateLimitedError(nil, retry, "failed authentications from this client address")
+	}
+	cred, err := s.authenticateAgent(r, true)
+	if err != nil && errors.Is(err, domain.ErrUnauthorized) {
+		s.installFail.take(key)
+	}
+	return cred, err
+}
+
+func (s *Service) authenticateAgent(r *http.Request, tokenRequired bool) (*AgentCredential, error) {
 	cert := s.clientCert(r)
 	if s.opamp.RequireClientCert && cert == "" {
 		return nil, fmt.Errorf("%w: a verified client certificate is required", domain.ErrUnauthorized)
@@ -81,7 +103,7 @@ func (s *Service) authenticateAgent(r *http.Request) (*AgentCredential, error) {
 		cred.ClientCertSubject = cert
 		return cred, nil
 	}
-	if !s.opamp.RequireEnrollmentToken {
+	if !tokenRequired {
 		return &AgentCredential{ClientCertSubject: cert, Labels: map[string]string{}}, nil
 	}
 	return nil, fmt.Errorf("%w: enrollment token required", domain.ErrUnauthorized)
