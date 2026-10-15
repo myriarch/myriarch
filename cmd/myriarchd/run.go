@@ -62,6 +62,9 @@ import (
 
 type runOptions struct {
 	dev bool
+	// installBundleDir is the directory of installer bundles that a development server serves instead of the bundles
+	// of a release (`myriarchd dev --install-bundle-dir`). run refuses it outside development mode.
+	installBundleDir string
 }
 
 type devOptions struct {
@@ -75,6 +78,8 @@ type devOptions struct {
 	releasesFixtures string
 	dsn              string
 	replicaID        string
+	// installBundleDir: see runOptions
+	installBundleDir string
 }
 
 // runDev prepares the dev configuration (embedded PostgreSQL) and runs.
@@ -130,7 +135,7 @@ func runDev(ctx context.Context, o devOptions) error {
 		"enrollmentToken", cfg.Dev.SeedEnrollmentToken,
 		"gitops", cfg.GitOps.RepoURL,
 		"database", maskDSN(cfg.Database.DSN))
-	return run(ctx, cfg, runOptions{dev: true})
+	return run(ctx, cfg, runOptions{dev: true, installBundleDir: o.installBundleDir})
 }
 
 // devPublicURL returns the public URL of a dev instance. A publicUrl that the -c file or MYRIARCH_SERVER_PUBLICURL sets on purpose (for
@@ -148,6 +153,10 @@ func devPublicURL(configured, listen string) string {
 
 // run wires all components and blocks until ctx is cancelled.
 func run(ctx context.Context, cfg config.Config, opts runOptions) error {
+	// A directory of installer bundles has no signature to check: only a development server may serve one.
+	if opts.installBundleDir != "" && !opts.dev {
+		return errors.New("--install-bundle-dir exists only in development mode (myriarchd dev): a server in production serves the installer bundles of its own release")
+	}
 	logger := newLogger(cfg.Telemetry)
 	slog.SetDefault(logger)
 	replicaID := cfg.HA.ReplicaID
@@ -329,13 +338,27 @@ func run(ctx context.Context, cfg config.Config, opts runOptions) error {
 		ReplicaID: replicaID, DevMode: opts.dev, Logger: logger,
 		SchemaInfo: db.SchemaInfo, FleetCounts: db.FleetCounts, LocalConnections: opampSrv.Connections,
 	})...)
-	// The installation of hosts from the server (ADR-0046): the plan that a host asks for with its enrollment token.
-	// A disabled feature is not built, and its routes answer 404.
+	// The installation of hosts from the server (ADR-0046): the plan that a host asks for with its enrollment token, the
+	// installer bundles of the release that this server runs and the commands that the web UI renders. A disabled feature
+	// is not built, and its routes answer 404.
 	var installer *install.Planner
+	var bundles *install.Bundles
 	if cfg.Install.Enabled {
+		platforms, err := install.ParsePlatforms(cfg.Install.Platforms)
+		if err != nil {
+			return fmt.Errorf("install.platforms: %w", err)
+		}
+		bundles, err = install.NewBundles(install.BundleDeps{
+			Version: version.Get().Version, Dir: artifacts.Dir(), BaseURL: cfg.Install.BundleSourceBaseURL, Platforms: platforms,
+			Verifier: install.CacheVerifier(artifacts), HTTPClient: httpClient, Policy: policy, ProxyURL: cfg.Artifacts.ProxyURL,
+			AllowedRedirectHosts: cfg.Artifacts.AllowedRedirectHosts, Directory: opts.installBundleDir, DevMode: opts.dev, Logger: logger,
+		})
+		if err != nil {
+			return fmt.Errorf("install: %w", err)
+		}
 		installer, err = install.NewPlanner(install.Deps{
 			Store: st, Assigner: assigner, Artifacts: artifacts, Config: cfg.Install,
-			PublicURL: cfg.Server.PublicURL, OpAMPPath: cfg.OpAMP.Path, Logger: logger,
+			PublicURL: cfg.Server.PublicURL, OpAMPPath: cfg.OpAMP.Path, Logger: logger, Bundles: bundles, DevMode: opts.dev,
 		})
 		if err != nil {
 			return fmt.Errorf("install: %w", err)
@@ -386,6 +409,9 @@ func run(ctx context.Context, cfg config.Config, opts runOptions) error {
 	g.Go(func() error { superviseJob(gctx, logger, "live", hub.Run); return nil })
 	g.Go(func() error { superviseJob(gctx, logger, "assignment-snapshot", assigner.Run); return nil })
 	g.Go(func() error { superviseJob(gctx, logger, "artifact-cache", artifacts.Run); return nil })
+	if bundles != nil {
+		g.Go(func() error { superviseJob(gctx, logger, "install-bundles", bundles.Run); return nil })
+	}
 	g.Go(func() error {
 		err := elector.Run(gctx, func(lctx context.Context) {
 			logger.Info("acquired leadership")

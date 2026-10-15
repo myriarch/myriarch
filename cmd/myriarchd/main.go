@@ -99,6 +99,9 @@ func newRootCommand() *cobra.Command {
 		Use:   "serve",
 		Short: "Run the myriarchd server",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed(installBundleDirFlag) {
+				return fmt.Errorf("--%s exists only in development mode (myriarchd dev): a server in production serves the installer bundles of its own release", installBundleDirFlag)
+			}
 			cfg, err := configload.Load(configPath, false)
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
@@ -109,6 +112,9 @@ func newRootCommand() *cobra.Command {
 		},
 	}
 	serve.Flags().StringVarP(&configPath, "config", "c", "", "path to myriarchd.yaml (env MYRIARCH_* overrides apply)")
+	// not a feature of serve: the flag of the development server, hidden here so that serve can say why it refuses it
+	serve.Flags().String(installBundleDirFlag, "", "")
+	_ = serve.Flags().MarkHidden(installBundleDirFlag)
 
 	var dev devOptions
 	devCmd := &cobra.Command{
@@ -130,6 +136,7 @@ func newRootCommand() *cobra.Command {
 	devCmd.Flags().StringVar(&dev.releasesFixtures, "releases-fixtures", "", "read release data from recorded fixtures instead of GitHub")
 	devCmd.Flags().StringVar(&dev.dsn, "dsn", "", "use this PostgreSQL DSN instead of starting embedded PostgreSQL (second dev replica; required when myriarchd was built without the devpg build tag)")
 	devCmd.Flags().StringVar(&dev.replicaID, "replica-id", "", "replica id (default: hostname + random suffix)")
+	devCmd.Flags().StringVar(&dev.installBundleDir, installBundleDirFlag, "", "serve the installer bundles from this directory (myriarch-updater_<version>_<os>_<arch>.tar.gz or .zip, as in the release) instead of the bundles of a release; they are not signed, so only a development server takes them")
 
 	root.AddCommand(serve, devCmd, newMigrateCommand(), newConfigCommand(), newAuthCommand(), &cobra.Command{
 		Use:   "version",
@@ -141,6 +148,9 @@ func newRootCommand() *cobra.Command {
 	root.AddCommand(newHealthcheckCommand())
 	return root
 }
+
+// installBundleDirFlag is the flag of `myriarchd dev` that names a directory of installer bundles.
+const installBundleDirFlag = "install-bundle-dir"
 
 func signalContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
