@@ -79,7 +79,7 @@ Check:
   kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ $fullname }}
   kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
   kubectl -n {{ .Release.Namespace }} port-forward deploy/{{ $fullname }} 8080:8080   # then open /healthz and /readyz
-{{- if .Values.tests.enabled }}
+{{- if include "myriarch.tests.enabled" . }}
   helm test {{ .Release.Name }} -n {{ .Release.Namespace }}   # GET /readyz and the OpAMP endpoint, through the Service
 {{- if and .Values.networkPolicy.enabled (or .Values.config.server.trustedProxies (.Values.config.opamp | default dict).clientCertHeader) }}
   The NetworkPolicy has no rule for the test Pod while config.server.trustedProxies or config.opamp.clientCertHeader is set (any

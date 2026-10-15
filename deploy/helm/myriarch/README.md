@@ -409,6 +409,9 @@ example the opt-out from the sidecar injection of a service mesh (`sidecar.istio
 stops the Pod from completing, and `helm test` then waits for it. `tests.enabled: false` removes the Pod.
 `helm template | kubectl apply` and tools that render hooks as ordinary resources create it as a normal Pod that runs once and
 ends: use `helm template --skip-tests` or `tests.enabled: false` there.
+`helm upgrade --reuse-values` from a release of v0.1.0 renders with the values of that release in place of the defaults of the chart,
+and they have no `tests` and no `prometheusRule`: the chart then renders neither the Pod nor the PrometheusRule, as v0.1.0 did. Upgrade
+with `--reset-then-reuse-values` or a values file to get the defaults ([Install with Helm](../../../docs/operations/install-helm.md#test-the-installation)).
 
 ### Complete handshake with a token (opt-in)
 

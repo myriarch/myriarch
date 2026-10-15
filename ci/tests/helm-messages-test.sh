@@ -242,4 +242,31 @@ if [ "$(test_pods)" = 1 ] && [ "$(test_pods --set tests.enabled=false)" = 0 ] &&
 pod_text() { render "$@" 2>/dev/null | awk '/^kind: Pod$/ {p=1} p && /^---$/ {p=0} p'; }
 if ! pod_text | grep -Eq 'secretName|secretKeyRef|--token-file'; then ok "(110) the test Pod refers to no Secret by default"; else fail "(110) the test Pod refers to no Secret by default"; fi
 if [ "$(pod_text --set tests.token.existingSecret=helm-test-token | grep -c 'secretName:')" = 1 ] && pod_text --set tests.token.existingSecret=helm-test-token | grep -q 'secretName: "helm-test-token"'; then ok "(111) with the opt-in the test Pod mounts the named Secret and no other"; else fail "(111) with the opt-in the test Pod mounts the named Secret and no other"; fi
+
+# --- helm upgrade --reuse-values from a release of v0.1.0 ----------------------------------------------------------------------------
+# "helm upgrade --reuse-values" renders the chart with the values of the release that is upgraded in place of the defaults of the new
+# chart (Helm replaces the values of the chart with those of the old release). A map that values.yaml gained after v0.1.0 (tests,
+# prometheusRule) is then missing, and a template that reads a key of it without a default stops with "nil pointer evaluating
+# interface {}.enabled". The copy of the chart below has the values.yaml of v0.1.0 as its defaults (the file of the tag, unchanged:
+# ci/tests/testdata/helm-values-v0.1.0.yaml) and the templates and the schema of this chart. A later map without a guard fails here too.
+reuse="${TEST_TMP}/reuse-values"
+mkdir -p "${reuse}"
+cp -R "${chart}" "${reuse}/myriarch"
+cp "${ROOT}/ci/tests/testdata/helm-values-v0.1.0.yaml" "${reuse}/myriarch/values.yaml"
+render_reuse() { helm template t "${reuse}/myriarch" "$@"; }
+reuse_text() { render_reuse "$@" 2>/dev/null; }
+expect_ok "(112) the chart renders with the defaults of v0.1.0, as in helm upgrade --reuse-values" render_reuse
+# what the old values lack keeps the behaviour of v0.1.0: no test Pod, no PrometheusRule, no source for the test Pod in the NetworkPolicy
+reuse_np() { render_reuse --show-only templates/networkpolicy.yaml "$@" 2>/dev/null; }
+reuse_all="$(reuse_text)"
+if printf '%s\n' "${reuse_all}" | grep -q '^kind: Deployment$' && ! printf '%s\n' "${reuse_all}" | grep -Eq '^kind: (Pod|PrometheusRule)$'; then ok "(113) no test Pod and no PrometheusRule without the maps in the values"; else fail "(113) no test Pod and no PrometheusRule without the maps in the values"; fi
+if reuse_np --set networkPolicy.ingress.allowSameNamespace=false | grep -q 'kind: NetworkPolicy' && ! reuse_np --set networkPolicy.ingress.allowSameNamespace=false | grep -q 'component: test'; then ok "(114) no source for the test Pod in the NetworkPolicy without the map tests"; else fail "(114) no source for the test Pod in the NetworkPolicy without the map tests"; fi
+# switching both on by --set still renders: the maps are partial then (only the switch), and the Pod has no requests and limits
+reuse_on=(--set tests.enabled=true --set prometheusRule.enabled=true)
+expect_ok "(115) the switches alone, on top of the values of v0.1.0, render" render_reuse "${reuse_on[@]}"
+if [ "$(reuse_text "${reuse_on[@]}" | grep -c '^kind: Pod$')" = 1 ] && [ "$(reuse_text "${reuse_on[@]}" | grep -c '^kind: PrometheusRule$')" = 1 ]; then ok "(116) one test Pod and one PrometheusRule with the switches on"; else fail "(116) one test Pod and one PrometheusRule with the switches on"; fi
+if reuse_np "${reuse_on[@]}" --set networkPolicy.ingress.allowSameNamespace=false | grep -q 'app.kubernetes.io/component: test'; then ok "(117) the source for the test Pod follows the switch"; else fail "(117) the source for the test Pod follows the switch"; fi
+# tests.resources is missing from such values, and the documents say so: the Pod has no requests and limits then
+reuse_pod() { render_reuse "$@" 2>/dev/null | awk '/^kind: Pod$/ {p=1} p && /^---$/ {p=0} p'; }
+if reuse_pod "${reuse_on[@]}" | grep -q '^kind: Pod$' && ! reuse_pod "${reuse_on[@]}" | grep -q 'resources:'; then ok "(117b) the test Pod has no requests and limits when tests.resources is missing"; else fail "(117b) the test Pod has no requests and limits when tests.resources is missing"; fi
 finish_tests "helm-messages-test"

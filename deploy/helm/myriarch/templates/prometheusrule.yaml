@@ -2,7 +2,7 @@
 Copyright The Myriarch Authors
 SPDX-License-Identifier: Apache-2.0
 */ -}}
-{{- if .Values.prometheusRule.enabled }}
+{{- if (.Values.prometheusRule | default dict).enabled }}
 {{- /*
   The alerts of the server. They are the rules of deploy/examples/production/monitoring/prometheusrule.yaml for a cluster without
   Helm; ci/helm-conform.sh compares the two for the release "myriarch" in the namespace "myriarch" with two replicas, so change both.
@@ -23,7 +23,7 @@ metadata:
   name: {{ $job }}
   labels:
     {{- include "myriarch.labels" . | nindent 4 }}
-    {{- with .Values.prometheusRule.labels }}
+    {{- with (.Values.prometheusRule | default dict).labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:

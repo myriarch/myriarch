@@ -2,7 +2,7 @@
 Copyright The Myriarch Authors
 SPDX-License-Identifier: Apache-2.0
 */ -}}
-{{- if .Values.tests.enabled }}
+{{- if include "myriarch.tests.enabled" . }}
 {{- /*
   The Pod of "helm test". It runs "myriarchd healthcheck" of the server image (the image has neither a shell nor curl) against the
   Service of the release: GET /readyz must answer 200, and a WebSocket upgrade at the OpAMP path must be refused with 401 (the route
@@ -13,6 +13,10 @@ SPDX-License-Identifier: Apache-2.0
   read-only and mounts no service account token. Its pod-level context is the one of the server (podSecurityContext, without a user
   ID in the OpenShift profile); the container-level settings are fixed and cannot be loosened through the values. Without
   tests.token it mounts no Secret. With it, it mounts one key of that Secret and nothing else.
+
+  The values may lack the whole tests map: "helm upgrade --reuse-values" renders a release of v0.1.0 with the values of that release.
+  The helper "myriarch.tests.enabled" then says no, and the Pod is not rendered. With only "--set tests.enabled=true" on top of such
+  values the Pod has no requests and limits, because tests.resources is missing too.
 */ -}}
 {{- $tokenSecret := include "myriarch.tests.tokenSecret" . }}
 {{- $opampPath := (.Values.config.opamp | default dict).path | default "/v1/opamp" }}
@@ -60,8 +64,10 @@ spec:
           drop: [ALL]
         seccompProfile:
           type: RuntimeDefault
+      {{- with .Values.tests.resources }}
       resources:
-        {{- toYaml .Values.tests.resources | nindent 8 }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- if $tokenSecret }}
       volumeMounts:
         - name: test-token

@@ -329,9 +329,13 @@ func TestChartSchemaCoversTheValuesFile(t *testing.T) {
 
 var valuesRef = regexp.MustCompile(`\.Values((?:\.[A-Za-z_][A-Za-z0-9_]*)+)`)
 
-func TestChartSchemaCoversTheValuesTheTemplatesRead(t *testing.T) {
-	schema := loadChartSchema(t)
-	// the templates below templates/ and in its subdirectories (templates/tests/ holds the Pod of "helm test")
+// guardedValuesRef finds a read through a default, (.Values.a.b | default dict).c, which the templates use for a map that the values of
+// an older release may lack ("helm upgrade --reuse-values"). The read is the path a.b.c.
+var guardedValuesRef = regexp.MustCompile(`\(\s*\.Values((?:\.[A-Za-z_][A-Za-z0-9_]*)+)\s*\|\s*default\s+dict\s*\)((?:\.[A-Za-z_][A-Za-z0-9_]*)+)`)
+
+// chartTemplateFiles lists the templates below templates/ and in its subdirectories (templates/tests/ holds the Pod of "helm test").
+func chartTemplateFiles(t *testing.T) []string {
+	t.Helper()
 	var files []string
 	require.NoError(t, filepath.WalkDir(filepath.Join(deployDir, "helm/myriarch/templates"), func(path string, d os.DirEntry, err error) error {
 		if err == nil && !d.IsDir() {
@@ -340,12 +344,21 @@ func TestChartSchemaCoversTheValuesTheTemplatesRead(t *testing.T) {
 		return err
 	}))
 	require.NotEmpty(t, files)
+	return files
+}
+
+func TestChartSchemaCoversTheValuesTheTemplatesRead(t *testing.T) {
+	schema := loadChartSchema(t)
 	read := map[string][]string{}
-	for _, f := range files {
+	for _, f := range chartTemplateFiles(t) {
 		b, err := os.ReadFile(f)
 		require.NoError(t, err)
 		for _, m := range valuesRef.FindAllStringSubmatch(string(b), -1) {
 			read[m[1][1:]] = append(read[m[1][1:]], filepath.Base(f))
+		}
+		for _, m := range guardedValuesRef.FindAllStringSubmatch(string(b), -1) {
+			path := m[1][1:] + m[2]
+			read[path] = append(read[path], filepath.Base(f))
 		}
 	}
 	require.Greater(t, len(read), 60, "the scan of the templates looks broken")
@@ -360,6 +373,8 @@ func TestChartSchemaCoversTheValuesTheTemplatesRead(t *testing.T) {
 	assert.Contains(t, read, "global", "the image helper reads global.imageRegistry")
 	assert.Contains(t, read, "podDisruptionBudget.maxUnavailable")
 	assert.Contains(t, read, "tests.resources", "the scan reaches templates/tests/")
+	assert.Contains(t, read, "tests.enabled", "the scan reads (.Values.tests | default dict).enabled in the helper")
+	assert.Contains(t, read, "prometheusRule.enabled")
 	assert.Contains(t, read, "prometheusRule.labels")
 }
 

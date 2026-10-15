@@ -362,13 +362,24 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
 {{/*
+Whether the Pod of "helm test" is rendered (tests.enabled): renders "true", or nothing. A missing tests map counts as off.
+"helm upgrade --reuse-values" replaces the defaults of the chart with the values of the release that is upgraded, so a release of
+v0.1.0 has no tests map there, and the chart has to render for it as it did before: without the Pod and without a source for it in
+the NetworkPolicy. Ask this helper, and do not read the switch from .Values directly; the same holds for the map prometheusRule,
+which templates/prometheusrule.yaml reads with a default.
+*/}}
+{{- define "myriarch.tests.enabled" -}}
+{{- if (.Values.tests | default dict).enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 The Secret of the test token (tests.token.existingSecret): renders the name, or nothing without the opt-in. The Pod of "helm test"
 mounts one key of it and nothing else, and the Secrets of the server itself are refused: the test would hand the database DSN or the
 credentials of the bootstrap admin to a Pod that has no use for them. The command refuses a file that holds anything but an enrollment
 token as well, so a mistake here is not sent to a server either.
 */}}
 {{- define "myriarch.tests.tokenSecret" -}}
-{{- $t := .Values.tests.token | default dict -}}
+{{- $t := (.Values.tests | default dict).token | default dict -}}
 {{- $name := toString ($t.existingSecret | default "") -}}
 {{- if $name -}}
 {{- if not (toString ($t.key | default "")) -}}

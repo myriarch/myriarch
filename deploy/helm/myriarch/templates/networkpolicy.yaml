@@ -32,7 +32,7 @@ SPDX-License-Identifier: Apache-2.0
   rule, so it never exists together with trustedProxies or clientCertHeader, whose protection is that nothing in the namespace can
   reach the port directly: then "helm test" cannot connect unless networkPolicy.ingress.from names the test Pod.
 */ -}}
-{{- if and .Values.tests.enabled (not $np.ingress.allowSameNamespace) (not (or .Values.config.server.trustedProxies $clientCertHeader)) }}
+{{- if and (include "myriarch.tests.enabled" .) (not $np.ingress.allowSameNamespace) (not (or .Values.config.server.trustedProxies $clientCertHeader)) }}
 {{- $sources = append $sources (dict "podSelector" (dict "matchLabels" (include "myriarch.testSelectorLabels" . | fromYaml))) }}
 {{- end }}
 {{- /* DNS: OpenShift profile uses the OpenShift DNS pods */ -}}

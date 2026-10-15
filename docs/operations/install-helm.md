@@ -400,6 +400,12 @@ of `networkPolicy.ingress.from`, as the [README of the chart](../../deploy/helm/
 With the Prometheus Operator, `prometheusRule.enabled: true` (and `prometheusRule.labels` for the label that your Prometheus resource
 selects rules by) adds the alerts of the server; see [Alerting rules](../../deploy/helm/myriarch/README.md#alerting-rules).
 
+`helm upgrade --reuse-values` renders the chart with the values of the installed release in place of its own defaults. The values of a
+release of v0.1.0 have neither `tests` nor `prometheusRule`, so the chart then renders as v0.1.0 did, without the test Pod, without a
+NetworkPolicy source for it and without the PrometheusRule; `--set tests.enabled=true` on top of them gives a Pod without requests and
+limits. To get the defaults of the new chart, upgrade with `--reset-then-reuse-values` or with a values file (`helm get values`, see
+[The values schema](#the-values-schema)).
+
 ## Upgrade and uninstall
 
 Upgrade from the checkout of a newer tag, with the same values file; read the changelog of the release first:

@@ -908,8 +908,29 @@ func TestHelmTestPodTemplate(t *testing.T) {
 	// the network policy rule for the Pod: only behind tests.enabled, without allowSameNamespace, and never with the settings that
 	// need the port to be closed to the pods of the namespace
 	np := string(readDeploy(t, "helm/myriarch/templates/networkpolicy.yaml"))
-	assert.Contains(t, np, "and .Values.tests.enabled (not $np.ingress.allowSameNamespace) (not (or .Values.config.server.trustedProxies $clientCertHeader))")
+	assert.Contains(t, np, `and (include "myriarch.tests.enabled" .) (not $np.ingress.allowSameNamespace) (not (or .Values.config.server.trustedProxies $clientCertHeader))`)
 	assert.Contains(t, np, `include "myriarch.testSelectorLabels"`)
+}
+
+// "helm upgrade --reuse-values" renders a release of v0.1.0 with the values of that release in place of the defaults of the chart. They
+// have neither the map tests nor the map prometheusRule, and a template that reads .Values.tests.enabled or
+// .Values.prometheusRule.enabled then stops with "nil pointer evaluating interface {}.enabled". The switches are read through the
+// helper myriarch.tests.enabled and through a default; ci/tests/helm-messages-test.sh renders the chart with the values of v0.1.0.
+func TestTemplatesReadTheNewSwitchesThroughADefault(t *testing.T) {
+	direct := regexp.MustCompile(`\.Values\.(tests|prometheusRule)\.enabled\b`)
+	users := map[string]bool{}
+	for _, f := range chartTemplateFiles(t) {
+		b, err := os.ReadFile(f)
+		require.NoError(t, err)
+		assert.NotRegexp(t, direct, string(b), "%s reads a switch of a map that the values of v0.1.0 lack; read it through a default", filepath.Base(f))
+		if strings.Contains(string(b), `include "myriarch.tests.enabled" .`) {
+			users[filepath.Base(f)] = true
+		}
+	}
+	for _, f := range []string{"test-connection.yaml", "networkpolicy.yaml", "NOTES.txt"} {
+		assert.True(t, users[f], "%s asks the helper myriarch.tests.enabled", f)
+	}
+	assert.Contains(t, string(readDeploy(t, "helm/myriarch/templates/prometheusrule.yaml")), "(.Values.prometheusRule | default dict).enabled")
 }
 
 // The alerts of the chart and of the example for a cluster without Helm are the same rules (ci/helm-conform.sh compares the
