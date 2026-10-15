@@ -936,8 +936,10 @@ func TestPlanUnderConcurrentChanges(t *testing.T) {
 		}()
 	}
 
-	// the leader: a rollout is created, runs, is paused, resumed and completes, again and again
-	for i := 0; i < 40; i++ {
+	// the leader: a rollout is created, runs, is paused, resumed and completes, again and again; at least 40 rounds,
+	// and on until both a plan and a refusal were seen (a loaded machine may need longer)
+	started := time.Now()
+	for i := 0; i < 40 || ((plans.Load() == 0 || refused.Load() == 0) && time.Since(started) < 20*time.Second); i++ {
 		id := uuid.New()
 		require.NoError(t, e.st.Rollouts().Create(ctx, &domain.Rollout{ID: id, Kind: domain.RolloutKindVersion, FleetName: "linux-hosts", PolicyName: "default",
 			Status: domain.RolloutPending, FromRef: "0.161.0", ToRef: "0.162.0", CreatedBy: "gitops"}, nil))

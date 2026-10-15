@@ -47,7 +47,8 @@ func (f *fixture) waitPrepared() {
 func TestPrepareStartsOneDownloadAndReportsPending(t *testing.T) {
 	f := prepFixture(t)
 	f.up.release("0.162.0", "linux", "amd64", fakeArchive(5000), []byte("bundle"))
-	f.up.delay = 30 * time.Millisecond
+	release := f.up.block()
+	t.Cleanup(release)
 
 	a, state, err := f.prepare()
 	require.NoError(t, err)
@@ -60,6 +61,7 @@ func TestPrepareStartsOneDownloadAndReportsPending(t *testing.T) {
 		assert.Nil(t, a)
 		assert.Equal(t, PreparePending, state)
 	}
+	release()
 	f.waitPrepared()
 	assert.Equal(t, 1, f.up.count(prepAsset), "one download")
 
@@ -76,7 +78,8 @@ func TestPrepareStartsOneDownloadAndReportsPending(t *testing.T) {
 func TestPrepareManyCallersStartOneDownload(t *testing.T) {
 	f := prepFixture(t)
 	f.up.release("0.162.0", "linux", "amd64", fakeArchive(5000), []byte("bundle"))
-	f.up.delay = 30 * time.Millisecond
+	release := f.up.block()
+	t.Cleanup(release)
 	var wg sync.WaitGroup
 	states := make(chan Readiness, 50)
 	for i := 0; i < 50; i++ {
@@ -91,8 +94,9 @@ func TestPrepareManyCallersStartOneDownload(t *testing.T) {
 	wg.Wait()
 	close(states)
 	for st := range states {
-		assert.Contains(t, []Readiness{PreparePending, PrepareReady}, st)
+		assert.Equal(t, PreparePending, st, "the upstream answers nothing yet")
 	}
+	release()
 	f.waitPrepared()
 	assert.Equal(t, 1, f.up.count(prepAsset))
 }
@@ -100,18 +104,24 @@ func TestPrepareManyCallersStartOneDownload(t *testing.T) {
 func TestPrepareDoesNotWaitForTheDownload(t *testing.T) {
 	f := prepFixture(t)
 	f.up.release("0.162.0", "linux", "amd64", fakeArchive(5000), []byte("bundle"))
-	f.up.delay = 300 * time.Millisecond
-	start := time.Now()
-	_, state, err := f.prepare()
+	release := f.up.block() // the upstream answers nothing until the test lets it
+	t.Cleanup(release)
+
+	a, state, err := f.prepare()
 	require.NoError(t, err)
-	assert.Equal(t, PreparePending, state)
-	assert.Less(t, time.Since(start), 200*time.Millisecond, "Prepare returned before the download could finish")
+	assert.Nil(t, a)
+	assert.Equal(t, PreparePending, state, "Prepare returned while the download could not finish")
 
 	// waiting can be given up
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	assert.ErrorIs(t, f.cache.WaitPrepared(ctx), context.DeadlineExceeded)
+
+	release()
 	f.waitPrepared()
+	_, state, err = f.prepare()
+	require.NoError(t, err)
+	assert.Equal(t, PrepareReady, state)
 }
 
 // A failed attempt is recorded, not repeated before a minute has passed, and tried again afterwards.
