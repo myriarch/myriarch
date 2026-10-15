@@ -179,7 +179,7 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	acfg.Verify.RequireSignature = false
 	e.tokens = enrollstore.Wrap(e.st)
 	cache, err := artifact.NewCache(acfg, artifact.Deps{Store: e.tokens, Bus: e.bus, HTTPClient: http.DefaultClient, PublicURL: e.cfg.Server.PublicURL,
-		DownloadSecret: []byte("0123456789abcdef0123456789abcdef"), InstallGrantTTL: e.cfg.Install.GrantTTL, Logger: logger, Registerer: prometheus.NewRegistry()})
+		DownloadSecret: []byte("0123456789abcdef0123456789abcdef"), InstallEnabled: e.cfg.Install.Enabled, InstallGrantTTL: e.cfg.Install.GrantTTL, Logger: logger, Registerer: prometheus.NewRegistry()})
 	require.NoError(t, err)
 	e.cache = cache
 	t.Cleanup(func() {

@@ -264,7 +264,7 @@ func run(ctx context.Context, cfg config.Config, opts runOptions) error {
 	artifacts, err := artifact.NewCache(cfg.Artifacts, artifact.Deps{
 		Store: st, Bus: bus, HTTPClient: httpClient, PublicURL: cfg.Server.PublicURL,
 		DownloadSecret: downloadSecret, Logger: logger, Registerer: reg, Policy: policy,
-		InstallGrantTTL: cfg.Install.GrantTTL,
+		InstallEnabled: cfg.Install.Enabled, InstallGrantTTL: cfg.Install.GrantTTL,
 	})
 	if err != nil {
 		return fmt.Errorf("artifact cache: %w", err)

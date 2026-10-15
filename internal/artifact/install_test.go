@@ -58,6 +58,7 @@ func (s *syncBuffer) String() string {
 func newInstallFixture(t *testing.T, mut ...func(cfg *config.ArtifactsConfig)) *installFixture {
 	t.Helper()
 	s := newServeFixture(t, mut...)
+	s.deps.InstallEnabled = true // the other caches of the tests are built on these dependencies
 	tokens := enrollstore.Wrap(s.st)
 	logs := &syncBuffer{}
 	s.cache = s.otherCache(func(d *Deps) {
@@ -272,6 +273,40 @@ func TestInstallGrantStopsWithItsEnrollmentToken(t *testing.T) {
 	assert.Equal(t, detail(msgs[0]), detail(msgs[1]), "revoked and expired look the same")
 	assert.Equal(t, detail(msgs[1]), detail(msgs[2]), "revoked and removed look the same")
 	assert.NotContains(t, detail(msgs[1]), f.tok.ID.String())
+}
+
+// A credential stops working with the feature that issues it. A grant that was minted before a restart with
+// install.enabled=false is refused with 401 although its enrollment token is valid and its lifetime has not passed,
+// also when the lifetime is not checked any more (install.grantTtl is not validated while the installation is off,
+// and 0 means no expiry). The token of a package offer is not affected, and no new grant is minted.
+func TestInstallGrantIsRefusedWhileTheInstallationIsOff(t *testing.T) {
+	f := newInstallFixture(t)
+	hdr := f.grant()
+	for _, name := range []string{"", ".sha256", ".sigstore.json"} {
+		require.Equal(t, http.StatusOK, f.get(f.path()+name, hdr).Code, "the grant works while the installation is on: "+name)
+	}
+
+	for _, ttl := range []time.Duration{time.Hour, 0} {
+		off := f.otherCache(func(d *Deps) { d.Store, d.InstallEnabled, d.InstallGrantTTL = f.tokens, false, ttl })
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /api/v1/artifacts/{id}/content/{filename}", off.ServeContent)
+		on := f.mux
+		f.mux = mux
+		for _, name := range []string{"", ".sha256", ".sigstore.json"} {
+			f.denied("a grant while the installation is off, lifetime "+ttl.String()+": "+name, hdr, f.path()+name)
+		}
+		assert.Equal(t, http.StatusOK, f.get(f.path(), f.headers).Code, "the token of a package offer is not a grant")
+		_, err := off.InstallGrant(f.art, f.tok.ID)
+		assert.ErrorContains(t, err, "install.enabled", "no new grant is minted")
+		f.mux = on
+	}
+
+	// a cache that nobody told about the installation does not take grants either
+	zero := f.otherCache(func(d *Deps) { d.Store, d.InstallGrantTTL = f.tokens, time.Hour; d.InstallEnabled = false })
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/artifacts/{id}/content/{filename}", zero.ServeContent)
+	f.mux = mux
+	f.denied("the zero value is off", hdr, f.path())
 }
 
 // A store failure on the token is a 503 and does not serve the file.

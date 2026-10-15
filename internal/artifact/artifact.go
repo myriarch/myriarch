@@ -62,6 +62,10 @@ type Deps struct {
 	// Policy (optional) is the outbound destination policy used for the proxy
 	// transport; the shared HTTPClient carries it otherwise.
 	Policy *netguard.Policy
+	// InstallEnabled is install.enabled: the cache mints and accepts install grants only while the installation
+	// from the server is on. A grant that was minted before the setting was turned off (a restart in between) is
+	// refused with 401 however long it would still live; the zero value is off.
+	InstallEnabled bool
 	// InstallGrantTTL is the lifetime of an install grant (install.grantTtl;
 	// 0 = no expiry, development only).
 	InstallGrantTTL time.Duration

@@ -272,9 +272,12 @@ func (c *Cache) InstallURL(a *domain.Artifact) (string, error) {
 // (ADR-0046): a "myrd_" token bound to the artifact and to the ID of the enrollment token that the host
 // presented to get its plan. ServeContent accepts it for the artifact, its ".sha256" and its ".sigstore.json"
 // until it is older than Deps.InstallGrantTTL, and only while the enrollment token is neither revoked nor
-// expired. It is never accepted as the token of a package offer. A grant is issued only for an artifact that
-// is ready, has a pinned SHA-256 and, where signatures are required, a verified bundle.
+// expired and Deps.InstallEnabled is on. It is never accepted as the token of a package offer. A grant is issued
+// only for an artifact that is ready, has a pinned SHA-256 and, where signatures are required, a verified bundle.
 func (c *Cache) InstallGrant(a *domain.Artifact, enrollmentToken uuid.UUID) (string, error) {
+	if !c.deps.InstallEnabled {
+		return "", errors.New("install grant: the installation from the server is turned off (install.enabled)")
+	}
 	if a == nil || !c.servable(a) {
 		return "", errors.New("install grant: the artifact is not ready and verified")
 	}
@@ -300,10 +303,10 @@ func (c *Cache) result(res string) { c.downloads.WithLabelValues(res).Inc() }
 //
 // Two credentials work (see the comment on grantKindInstall). The token of a package offer is accepted only
 // while its agent has an offer for the artifact and serves the artifact itself. An install grant is accepted
-// only while its enrollment token is valid and serves the artifact and, from the record, its checksum
-// (<filename>.sha256) and its Sigstore bundle (<filename>.sigstore.json), the files that the installer checks
-// the artifact with. Everything that is served is verified: ready, with a pinned SHA-256 and, where
-// signatures are required, a verified bundle.
+// only while the installation from the server is on (Deps.InstallEnabled) and its enrollment token is valid, and
+// serves the artifact and, from the record, its checksum (<filename>.sha256) and its Sigstore bundle
+// (<filename>.sigstore.json), the files that the installer checks the artifact with. Everything that is served is
+// verified: ready, with a pinned SHA-256 and, where signatures are required, a verified bundle.
 func (c *Cache) ServeContent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id, err := uuid.Parse(r.PathValue("id"))
@@ -342,6 +345,12 @@ func (c *Cache) ServeContent(w http.ResponseWriter, r *http.Request) {
 		}
 	case grantKindInstall:
 		install = true
+		if !c.deps.InstallEnabled {
+			// the feature that issues the credential is off: a grant minted before is no credential any more, and its
+			// lifetime and its enrollment token do not matter (install.grantTtl is not checked while the feature is off)
+			unauthorized("invalid install grant")
+			return
+		}
 		if msg, err := c.authorizeInstall(ctx, cl); err != nil {
 			c.result("error")
 			api.WriteError(w, r, err)

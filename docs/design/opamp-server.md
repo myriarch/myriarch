@@ -786,7 +786,9 @@ The executor interface has `Validate` (environment dependent), `Start` (per wave
   signed, so neither can be turned into the other; an unknown kind or a grant without an enrollment token is refused). A
   grant is accepted while it is younger than `install.grantTtl` and only while its enrollment token exists and is neither
   revoked nor expired; the token is read from the database on every request, so a revocation applies at once on every
-  replica, and a token that is gone, revoked or expired looks the same. It needs no package offer. Besides the artifact it
+  replica, and a token that is gone, revoked or expired looks the same. It is accepted only while `install.enabled` is on:
+  a server that runs with the installation turned off (also after a restart on the same database) refuses every grant with
+  401, whatever its lifetime is, and mints none. It needs no package offer. Besides the artifact it
   gets `<filename>.sha256` (`<hex>  <filename>`, like `sha256sum`) and `<filename>.sigstore.json` from the record, the files
   that the installer checks the artifact with; the token of an offer gets neither. A grant is issued, and a file is served,
   only for an artifact that is `ready`, has a pinned SHA-256 and, where signatures are required, a verified bundle. The log
