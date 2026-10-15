@@ -9,7 +9,8 @@
 #
 # Not part of ci-ok: a pull request starts it only when it touches the installer, the updater, the templates of a host or the
 # harness; every night it runs against main; a manual run (workflow_dispatch) starts it on any branch. A new scenario is a new step
-# that calls it by name; its logs go to .cache/host-e2e/upload/<scenario>/, which the upload step below already covers.
+# that calls it by name, with a timeout of its own (together the steps stay below the timeout of the job, see the step below); its
+# logs go to .cache/host-e2e/upload/<scenario>/, which the upload step below already covers.
 #
 # The token is read-only and the workflow has no secret. The job runs the code of the commit with sudo on a throwaway VM, like every
 # job of the CI runs it. Never move it to a self-hosted runner that is not recreated for each job.
@@ -78,7 +79,11 @@ jobs:
       - name: Build the binaries
         run: make build
       # HOST_E2E=1 says that this machine is a throwaway VM; the scripts refuse to run without it.
+      # The step has a timeout of its own, below that of the job. A step that runs out of time counts as failed, so the upload below
+      # runs; a job that runs out of time is cancelled, and failure() is false for a cancelled job, so nothing would be uploaded.
+      # ci/tests/workflow-artifacts-check.py holds the margin for the steps around it (checkout, toolchain, build and upload).
       - name: 'Scenario manual: the installer as the documentation describes it'
+        timeout-minutes: 35
         env:
           HOST_E2E: '1'
         run: scripts/host-e2e/linux.sh manual

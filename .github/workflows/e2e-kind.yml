@@ -89,7 +89,11 @@ jobs:
           docker version --format '{{.Server.Version}} {{.Server.Os}}/{{.Server.Arch}}'
           docker info --format '{{.NCPU}} CPUs, {{.MemTotal}} bytes of memory'
           df -h . | tail -n 1
+      # The step has a timeout of its own, below that of the job. A step that runs out of time counts as failed, so the upload below
+      # runs; a job that runs out of time is cancelled, and failure() is false for a cancelled job, so nothing would be uploaded.
+      # ci/tests/workflow-artifacts-check.py holds the margin for the steps around it (checkout, toolchain with tools, and upload).
       - name: Run the probe
+        timeout-minutes: 65
         env:
           IMAGE_VAR: ${{ matrix.image-var }}
           PROBE_SKIP: ${{ inputs.skip }}

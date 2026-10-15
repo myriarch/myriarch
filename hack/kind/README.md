@@ -141,9 +141,11 @@ of both node images.
 A failed run uploads an allow-list for seven days: `probe.log`, `results.txt`, `durations.txt`, `logs/` and `diag/` below
 `.cache/kind`. It never uploads the kubeconfig, `secrets/`, the cookie jars, the Helm credentials in `helm/`, `values-tokens.yaml` or
 `logs/hygiene-dump/` (the scan dump of stage 15), because anyone who is signed in to GitHub can download the artifacts of a public
-repository; `ci/tests/workflow-artifacts-test.sh` checks the patterns. Anonymous pulls from Docker Hub (the node image, `registry`,
-`postgres`, `alpine`, `busybox`, `curlimages/curl` and the upstream collector images) can hit the pull limit of a busy day; the workflow
-has no secret to log in with, so rerun the job.
+repository; `ci/tests/workflow-artifacts-test.sh` checks the patterns. The step that runs the probe has a timeout of its own, below
+that of the job, so that a probe that hangs counts as a failed step and still uploads its logs (a job that runs out of time is
+cancelled, and the upload is skipped for a cancelled job); the same test holds the margin. Anonymous pulls from Docker Hub (the
+node image, `registry`, `postgres`, `alpine`, `busybox`, `curlimages/curl` and the upstream collector images) can hit the pull limit
+of a busy day; the workflow has no secret to log in with, so rerun the job.
 
 ## Troubleshooting
 

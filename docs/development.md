@@ -911,8 +911,10 @@ names the pin of `hack/kind/versions.env` that holds the node image (`KIND_NODE_
 and `ci/check.sh` keeps holding it; a second version is a second pin and a second entry. The summary block of the probe goes to the job
 summary. A failed run uploads an allow-list from `.cache/kind` (the log of the probe, the result list, the durations, the logs of the
 pods and the diagnostics of `hack/kind/diag.sh`) for seven days, and never the kubeconfig, the generated secrets, cookie jars or the
-scan dump of the hygiene stage (`ci/tests/workflow-artifacts-test.sh`). The runner pulls the images anonymously, so Docker Hub can
-limit the pulls of a busy day; the workflow has no secret to log in with, and a rerun of the job is the answer.
+scan dump of the hygiene stage (`ci/tests/workflow-artifacts-test.sh`). The step that runs the probe has a timeout of its own, below
+that of the job, so that a probe that hangs counts as a failed step and still uploads its logs; a job that runs out of time is
+cancelled, and the upload is skipped for a cancelled job. The runner pulls the images anonymously, so Docker Hub can limit the pulls
+of a busy day; the workflow has no secret to log in with, and a rerun of the job is the answer.
 
 ## Web UI
 
@@ -1111,8 +1113,12 @@ work files (the token file, the cookie jar and the database are in there). A fai
 (seven days): the harness copies an allow-list of files into it (results, the logs of `myriarchd`, the mirror and the installer runs,
 the journal and the state of both services, `supervisor.yaml` and `updater.yaml`, snapshots of the API), scrubs them of tokens,
 bearer credentials, DSNs, session cookies and private keys, and removes the directory if the token or a key of the run, or anything
-shaped like one, is still in it. `myriarch.env` and the token file of the host are never copied. `ci/tests/workflow-artifacts-test.sh`
-holds the patterns of the upload step to this, with copies of the workflow that are broken on purpose.
+shaped like one, is still in it. `myriarch.env` and the token file of the host are never copied. After a failure the harness collects
+them twice, right after the diagnostics and again at the end, because a runner that cancels a step kills the script a few seconds
+later. The step that runs the scenario has a timeout of its own, below that of the job: a job that runs out of time is cancelled, and
+the upload, which runs only for a failed job, is skipped for a cancelled one, whereas a step that runs out of time counts as failed.
+`ci/tests/workflow-artifacts-test.sh` holds the patterns of the upload step to this, and the timeouts of the steps that run a scenario
+to at least five minutes below that of the job, with copies of the workflow that are broken on purpose.
 
 | Variable | Meaning |
 |---|---|

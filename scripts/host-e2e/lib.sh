@@ -650,6 +650,8 @@ he_assert_no_secrets() { # dir
   return 0
 }
 
+# Assembles HE_UP from the allow-list. Every call starts from an empty directory and ends with the same check, so it can be
+# repeated: he_finish_scenario calls it after the diagnostics of a failure and again at the end.
 he_collect_artifacts() {
   local pat f rel out pats
   [ -n "${HE_DIR}" ] && [ -d "${HE_DIR}" ] || return 0
@@ -696,11 +698,18 @@ he_prepare_shared() {
 }
 
 # Ends a scenario: the fault injector, diagnostics after a failure, the servers, a reset of the host, the artifacts.
+# After a failure the artifacts are collected twice. The first copy comes right after the diagnostics, before the part that can
+# take long (stopping the servers waits up to 40 s, the reset runs the uninstaller): a runner that cancels the step, for example
+# when the step runs out of time, gives the script only a few seconds before it kills it. The second copy, at the end, replaces
+# the first with a complete one (he_collect_artifacts starts from an empty directory, so calling it again is safe).
 he_finish_scenario() {
   [ "${HE_ACTIVE}" = 1 ] || return 0
   HE_ACTIVE=0
   he_fault_stop
-  if [ "${HE_FAILED}" -gt 0 ] || [ "${HE_ABORTED:-0}" = 1 ]; then he_diag; fi
+  if [ "${HE_FAILED}" -gt 0 ] || [ "${HE_ABORTED:-0}" = 1 ]; then
+    he_diag
+    he_collect_artifacts || true
+  fi
   he_stop_tracked
   if [ -n "$(he_host_leftovers)" ]; then he_reset_host quiet; fi
   he_collect_artifacts || true

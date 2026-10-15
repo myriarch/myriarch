@@ -9,7 +9,9 @@
 # secret. The check emulates @actions/glob (what upload-artifact uses) for the patterns of the upload steps and holds them against
 # lists of file names that must and must not be uploaded; this test runs it on the repository, proves the emulation with small
 # cases, and then breaks copies of the workflows in the ways that matter (a path that is too wide, a missing exclusion, an upload
-# for every job, a secret, a registry login, an image reference) and requires a finding for each. No network access.
+# for every job, a secret, a registry login, an image reference) and requires a finding for each. The same goes for the logs of a
+# run that hangs (a step that runs the test needs a timeout of its own, below that of the job: a job that runs out of time is
+# cancelled and uploads nothing). No network access.
 set -uo pipefail
 # shellcheck source=ci/tests/lib-test.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
@@ -139,6 +141,25 @@ fresh_tree; edit "${HOST}" '.cache/host-e2e/upload/**
 bites "host-e2e: a path that matches everything is no allow-list" 'is not an allow-list'
 fresh_tree; rm "${HOST}"
 bites "host-e2e: a missing workflow is found" 'host-e2e.yml: the workflow does not exist'
+fresh_tree; removed_line "${HOST}" 'timeout-minutes: 35'
+bites "host-e2e: a scenario step without a timeout of its own is found" 'host-e2e.yml: the step `Scenario manual[^`]*` needs a timeout-minutes of its own'
+fresh_tree; edit "${HOST}" '        timeout-minutes: 35' '        timeout-minutes: 41'
+bites "host-e2e: a step timeout less than 5 minutes below that of the job is found" 'steps that run the test \(41 minutes together\) must stay at least 5 minutes below that of the job \(45 minutes\)'
+fresh_tree; edit "${HOST}" '        timeout-minutes: 35' '        timeout-minutes: 40'
+expect_ok "host-e2e: a step timeout exactly 5 minutes below that of the job is fine" run_check "${T}"
+fresh_tree; edit "${HOST}" '        timeout-minutes: 35' '        timeout-minutes: soon'
+bites "host-e2e: a step timeout that is no number is found" 'needs a timeout-minutes of its own, a number of minutes, found `soon`'
+fresh_tree; removed_line "${HOST}" '    timeout-minutes: 45'
+bites "host-e2e: a job without a timeout is found" 'the job must have one timeout-minutes'
+fresh_tree; edit "${HOST}" "    steps:
+" "    steps:
+      - name: A second scenario
+        timeout-minutes: 35
+        env:
+          HOST_E2E: '1'
+        run: scripts/host-e2e/linux.sh one-command
+"
+bites "host-e2e: scenario steps whose timeouts together do not fit into the job are found" 'steps that run the test \(70 minutes together\)'
 
 fresh_tree; edit "${KIND}" '            .cache/kind/logs/**
             .cache/kind/diag/**' '            .cache/kind/**'
@@ -186,6 +207,14 @@ bites "e2e-kind: a job that raises its permissions is found" 'no job may raise i
 fresh_tree; edit "${KIND}" "          PROBE_SKIP: \${{ inputs.skip }}" "          PROBE_SKIP: \${{ inputs.skip }}
           HOST_E2E: '1'"
 bites "e2e-kind: HOST_E2E in the cluster test is found" 'HOST_E2E belongs to the host test'
+fresh_tree; removed_line "${KIND}" 'timeout-minutes: 65'
+bites "e2e-kind: a probe step without a timeout of its own is found" 'e2e-kind.yml: the step `Run the probe` needs a timeout-minutes of its own'
+fresh_tree; edit "${KIND}" '        timeout-minutes: 65' '        timeout-minutes: 71'
+bites "e2e-kind: a probe timeout less than 5 minutes below that of the job is found" 'steps that run the test \(71 minutes together\) must stay at least 5 minutes below that of the job \(75 minutes\)'
+fresh_tree; edit "${KIND}" '        timeout-minutes: 65' '        timeout-minutes: 70'
+expect_ok "e2e-kind: a probe timeout exactly 5 minutes below that of the job is fine" run_check "${T}"
+fresh_tree; removed_line "${KIND}" '    timeout-minutes: 75'
+bites "e2e-kind: a job without a timeout is found" 'the job must have one timeout-minutes'
 
 # the unbroken copy is fine, so the cases above fail for their own reason
 fresh_tree

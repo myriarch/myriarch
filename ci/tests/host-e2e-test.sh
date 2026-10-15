@@ -13,8 +13,9 @@
 #   - the waiting for state that the server derives on its tick (he_settle, he_target_phase, he_package_status), against canned
 #     answers of the REST helper;
 #   - the artifacts: the scrubber removes tokens, credentials, DSNs, cookies and private keys, the upload directory holds the
-#     allow-listed files only (never the token file, the cookie jar, the keys, the database or the templates), and a secret in it
-#     removes it;
+#     allow-listed files only (never the token file, the cookie jar, the keys, the database or the templates), a secret in it
+#     removes it, collecting them twice gives the same directory, and a failed scenario saves them right after the diagnostics, before
+#     it stops anything (a runner that cancels a step kills the script a few seconds later);
 #   - the pieces that need no host: the throwaway CA (SAN, chain, validity), the https file server (listing, traversal, methods, a
 #     wrong CA), the update-wait tuning of the updater template, the GitOps fixture, the versions against ci/versions.env.
 # The scenario itself is proven by the workflow .github/workflows/host-e2e.yml on a runner; the workflow shape and its artifact
@@ -459,6 +460,46 @@ mkdir -p "${UP}"; cp "${HOST_E2E_DIR}/tls/ca.key" "${UP}/ca-key-copy.txt"
 expect_fail "the content of a key file of the run is found" "secret was found in the upload directory" assert_clean
 mkdir -p "${UP}"; printf 'clean\n' > "${UP}/clean.txt"
 expect_ok "a clean directory passes" assert_clean
+
+# ---- collecting twice, and a failed scenario saves the artifacts before it stops anything ---------------------------------------------
+# A runner that cancels a step (for example when the step runs out of time) gives the script only a few seconds before it kills it. So
+# he_finish_scenario collects the artifacts right after the diagnostics of a failure, before the slow part (the servers, the reset of
+# the host), and again at the end, where the second copy replaces the first. The stand-ins below record the order of the calls and
+# what the upload directory holds at each of them.
+tree_digest() { ( cd "$1" && find . -type f | sort | while IFS= read -r f; do printf '== %s\n' "${f}"; cat "${f}"; done ); }
+collect_now() { bash -c ". '${LIB}'; HE_SCENARIO=manual; HE_DIR='${HOST_E2E_DIR}/manual'; HE_UP='${HOST_E2E_DIR}/upload/manual'; he_collect_artifacts" 2>&1; }
+prepare_scenario_dir
+collect_now >/dev/null; FIRST="$(tree_digest "${UP}")"
+collect_now >/dev/null; SECOND="$(tree_digest "${UP}")"
+[ -n "${FIRST}" ] && [ "${FIRST}" = "${SECOND}" ] && ok "collecting the artifacts a second time gives the same upload directory" || fail "the second collection differs from the first"
+printf 'stale\n' > "${UP}/stale.log"
+collect_now >/dev/null
+[ ! -e "${UP}/stale.log" ] && [ "$(tree_digest "${UP}")" = "${FIRST}" ] && ok "... and it starts from an empty directory (nothing stale is kept)" || fail "a stale file survived the collection"
+
+finish_run() { # failed aborted: the calls of he_finish_scenario in order, and what the upload directory holds at the time
+  prepare_scenario_dir
+  bash -c '
+    . "$1"
+    HE_SCENARIO=manual; HE_DIR="$2/manual"; HE_UP="$2/upload/manual"; HE_ACTIVE=1; HE_FAILED=$3; HE_ABORTED=$4
+    has() { if [ -f "${HE_UP}/$1" ]; then echo yes; else echo no; fi; }
+    he_fault_stop() { echo "fault_stop"; }
+    he_diag() { echo "diag"; printf "journal\n" > "${HE_DIR}/diag/journal-myriarch-updater.txt"; }
+    he_stop_tracked() { echo "stop_tracked diag_saved=$(has diag/journal-myriarch-updater.txt)"; }
+    he_host_leftovers() { echo "path /opt/myriarch"; }
+    he_reset_host() { echo "reset $* uninstall_saved=$(has uninstall-120000.log)"; printf "uninstalled\n" > "${HE_DIR}/uninstall-120000.log"; }
+    he_summary() { echo "summary diag_saved=$(has diag/journal-myriarch-updater.txt) uninstall_saved=$(has uninstall-120000.log)"; }
+    he_finish_scenario
+  ' _ "${LIB}" "${HOST_E2E_DIR}" "$1" "$2" 2>/dev/null
+}
+WANT_FAILED=$'fault_stop\ndiag\nstop_tracked diag_saved=yes\nreset quiet uninstall_saved=no\nsummary diag_saved=yes uninstall_saved=yes'
+OUT="$(finish_run 1 0)"
+[ "${OUT}" = "${WANT_FAILED}" ] && ok "a failed scenario saves the artifacts right after the diagnostics, before it stops anything, and again at the end" \
+  || fail "failed scenario: $(printf '%s' "${OUT}" | tr '\n' '|')"
+OUT="$(finish_run 0 1)"
+[ "${OUT}" = "${WANT_FAILED}" ] && ok "... also a scenario that was cut short (aborted)" || fail "aborted scenario: $(printf '%s' "${OUT}" | tr '\n' '|')"
+WANT_PASSED=$'fault_stop\nstop_tracked diag_saved=no\nreset quiet uninstall_saved=no\nsummary diag_saved=no uninstall_saved=yes'
+OUT="$(finish_run 0 0)"
+[ "${OUT}" = "${WANT_PASSED}" ] && ok "a scenario without a failure collects them once, at the end, and takes no diagnostics" || fail "passed scenario: $(printf '%s' "${OUT}" | tr '\n' '|')"
 
 # ---- the throwaway CA and the https file server -----------------------------------------------------------------------------------
 mode_of() { case "$(uname -s)" in Darwin) stat -f %Lp "$1" ;; *) stat -c %a "$1" ;; esac; }

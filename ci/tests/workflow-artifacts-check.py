@@ -19,8 +19,13 @@ one path segment, `**` is any number of segments, files whose name starts with a
 It also checks the shape that the documentation promises: the upload runs only for a failed job, includes hidden files (the work
 directories are dot directories), ignores a missing directory, keeps the files for seven days at most, the host test runs the scenario
 by name with HOST_E2E=1 on that step only, and the matrix of the kind test takes the node image from a pin of hack/kind/versions.env
-that is held to a digest (no image reference in the workflow). The output is one line per finding, "<file>: <message>"; the exit
-status is 1 when there is a finding. Standard library only.
+that is held to a digest (no image reference in the workflow).
+
+Two more rules keep the logs of a run that hangs. A job that runs out of time is cancelled, and `failure()` is false for a cancelled
+job, so the upload would not run; a step that runs out of time counts as failed. The steps that run the test (the scenario steps of
+the host test, the probe of the kind test) therefore have a `timeout-minutes` of their own, and together they stay at least
+STEP_TIMEOUT_MARGIN minutes below the timeout of the job (the checkout, the toolchain, the build and the upload need that time).
+The output is one line per finding, "<file>: <message>"; the exit status is 1 when there is a finding. Standard library only.
 """
 
 import argparse
@@ -122,6 +127,9 @@ POLICY = {
         ],
     },
 }
+
+# Minutes that the timeout of the job keeps over the timeouts of the steps that run the test.
+STEP_TIMEOUT_MARGIN = 5
 
 
 # ------------------------------------------------------------------------------------------------------------- globs ---
@@ -293,6 +301,29 @@ def check_common(name, text, findings):
         findings.append("%s: it must not depend on ci-ok" % name)
 
 
+def check_timeouts(name, text, steps, findings):
+    """`steps` are the (line, lines) pairs of the steps that run the test: each has a timeout of its own, and together they leave the
+    margin below the timeout of the job."""
+    jobs = re.findall(r"^    timeout-minutes:[ \t]*(\S*)[ \t]*(?:#.*)?$", text, re.M)
+    if len(jobs) != 1 or not jobs[0].isdigit():
+        findings.append("%s: the job must have one timeout-minutes, a number of minutes" % name)
+        return
+    limit = int(jobs[0])
+    total = 0
+    for _, lines in steps:
+        value = step_value(lines, "timeout-minutes") or ""
+        if not value.isdigit() or int(value) < 1:
+            findings.append("%s: the step `%s` needs a timeout-minutes of its own, a number of minutes, found `%s` (a job that runs out"
+                            " of time is cancelled and uploads nothing, a step that runs out of time counts as failed)"
+                            % (name, step_value(lines, "name") or "?", value))
+        else:
+            total += int(value)
+    if total and total + STEP_TIMEOUT_MARGIN > limit:
+        findings.append("%s: the timeouts of the steps that run the test (%d minutes together) must stay at least %d minutes below that"
+                        " of the job (%d minutes), so that the upload still runs when a step runs out of time"
+                        % (name, total, STEP_TIMEOUT_MARGIN, limit))
+
+
 def check_host(text, findings):
     name = "host-e2e.yml"
     if not re.search(r"^[ \t]+run: scripts/host-e2e/linux\.sh manual$", text, re.M):
@@ -301,12 +332,13 @@ def check_host(text, findings):
     top = text.split("\njobs:\n", 1)[0]
     if re.search(r"^[ \t]+HOST_E2E:", top, re.M):
         findings.append("%s: HOST_E2E must not be set for the whole workflow" % name)
-    scenario_steps = [lines for _, lines in read_steps(text) if (step_value(lines, "run") or "").startswith("scripts/host-e2e/")]
+    scenario_steps = [(number, lines) for number, lines in read_steps(text) if (step_value(lines, "run") or "").startswith("scripts/host-e2e/")]
     if not scenario_steps:
         findings.append("%s: no step runs a scenario" % name)
-    for lines in scenario_steps:
+    for _, lines in scenario_steps:
         if not re.search(r"^[ \t]+HOST_E2E: '1'$", "\n".join(lines), re.M):
             findings.append("%s: a step that runs a scenario must set HOST_E2E: '1'" % name)
+    check_timeouts(name, text, scenario_steps, findings)
     if text.count("HOST_E2E:") != len(scenario_steps):
         findings.append("%s: HOST_E2E is set somewhere else than on the steps that run a scenario" % name)
     for runner in ("ubuntu-24.04", "ubuntu-24.04-arm"):
@@ -338,6 +370,8 @@ def check_kind(text, root, findings):
             findings.append("%s: image-var %s is no pin of hack/kind/versions.env, or it has no digest" % (name, v))
     if "make kind-probe" not in text:
         findings.append("%s: the probe runs through make kind-probe" % name)
+    probe_steps = [(number, lines) for number, lines in read_steps(text) if any("make kind-probe" in line for line in step_block(lines, "run"))]
+    check_timeouts(name, text, probe_steps, findings)
     if re.search(r"^[ \t]+HOST_E2E:", text, re.M):
         findings.append("%s: HOST_E2E belongs to the host test" % name)
     if "docker login" in text or "docker/login-action" in text:
