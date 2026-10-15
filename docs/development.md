@@ -942,7 +942,9 @@ is out of date. Run `make docs-gen` as well: the REST API reference (`docs/refer
 `pnpm dev:mock` starts around 1,000 deterministic collectors in five fleets, a few unassigned agents and some
 `myriarch-updater` agents, releases up to 0.163.0 with breaking changes, three rollouts (running, waiting for approval,
 completed) and a GitOps status with a warning. Actions change the state in memory, and a timer simulates live events
-(heartbeats, health changes, rollout progress).
+(heartbeats, health changes, rollout progress). The running rollout, the version rollout of the data center fleet, has
+five targets in the health wait: the rollout page counts down their remaining time, and the mock finishes them when the
+`healthWait` of the policy snapshot, two minutes, is over.
 
 - Sign-in: the user name `admin`, `operator` or `viewer` (any password) selects the role, so you can check permissions.
   The mock starts signed in as `admin`.
@@ -956,7 +958,9 @@ Mock mode lets you play through the whole flow "choose in the UI, watch the upda
 - A Kubernetes gateway fleet whose Git target is 0.161.0 and whose frame allows `>=0.161.0, <=0.162.0` offers the button to
   update to 0.162.0. The dialog starts the update and the rollout page shows the steps of the single target live: offered,
   download, verification, installation, restart, health check, probation, succeeded (about two seconds per step). The mock
-  updates one collector only, so that the steps of a single target are easy to follow.
+  updates one collector only, so that the steps of a single target are easy to follow. The health wait takes one step
+  like the others, and the policy snapshot of that rollout says `healthWait: 2s`, so the countdown of the step runs from
+  2 seconds to 0.
 - Rollback variant: if the reason you enter contains the word `rollback`, the health check fails, the host rolls back
   (phase "rolled back") and the rollout pauses. "Retry failed" starts a second attempt that succeeds.
 - Other fleets show the remaining states: a selection made in the UI that is running with a step bar per target, a selection

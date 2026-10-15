@@ -19,6 +19,11 @@ spec:
       percent: 100
       requireApproval: true
   maxConcurrent: 5
+  # How long a target must stay online and healthy after its collector has applied the new configuration. 2m covers the
+  # restart of the collector and the first export attempts with the configuration, and it is a value for real fleets on
+  # purpose, as the 5m of policies/canary-then-all.yaml is for versions. The rollout page shows the time that is left
+  # and names this policy as the source of the wait. A demo that has to finish quickly needs a copy of this policy with
+  # a shorter healthWait (for example 30s); maxConcurrent decides how many hosts wait at the same time.
   healthWait: 2m
   applyTimeout: 10m
   failureThreshold:

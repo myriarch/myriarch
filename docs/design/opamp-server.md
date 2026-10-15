@@ -593,6 +593,13 @@ A target is one agent in a rollout. Statuses: `pending`, `waiting_window`, `in_p
   target. Crash loop (version rollouts): if the collector was healthy on the new version once and then falls back to a
   start-up report more than once, the target fails. A single restart after the update, for example due to a configuration
   that was applied meanwhile, is allowed.
+- The health wait ends at `verifiedAt + healthWait` of the policy snapshot (60 seconds when the policy sets none, see
+  [Policy](#policy)). The engine evaluates it on each tick, and only for a rollout that is `running`, `paused` or
+  `waiting_approval`: the `verifying` targets of a `failed` rollout stay as they are until an operator decides. The API has
+  no field for the end. A client computes it from `verifiedAt` of the target (`GET /rollouts/{id}/targets`) and
+  `policy.healthWait` of the rollout (`GET /rollouts/{id}`), and the web UI shows the remaining time that way, for a
+  target and for the latest end among the targets of a wave, with the name, `healthWait`, path and commit of the policy
+  snapshot as the source.
 - Failure: `FAILED` for the target configuration hash, `INSTALL_FAILED` of the updater for the offered version (only
   reports after the start of the current attempt count), unhealthy during the wait, offline during the wait,
   `applyTimeout` exceeded, or an executor error.

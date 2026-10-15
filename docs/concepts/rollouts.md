@@ -118,6 +118,53 @@ A **target** is one agent within a rollout.
 - Starting a version through a webhook or AWX is *at-least-once*. A deterministic `X-Myriarch-Delivery` ID lets the
   receiver de-duplicate calls.
 
+## Health wait
+
+The **health wait** is the time that a target must stay healthy after it has reported success. It is the safety margin of
+a rollout: a collector that crashes, restarts in a loop or turns unhealthy shortly after a change fails its target while
+the rollout is still working on its current wave.
+
+- **Rule.** A target enters `verifying` when its agent reports the new configuration (`APPLIED`) or the new version. The
+  server stores that moment as `verifiedAt` of the target; for a version rollout it is also the start of the step
+  `health_wait`. The target becomes `succeeded` when the agent is still online, still reports the target configuration or
+  version, is healthy and `now - verifiedAt >= healthWait`. The health wait therefore ends at `verifiedAt + healthWait`.
+- **Value.** `healthWait` is `spec.healthWait` of the [rollout policy](../reference/gitops-schema.md#rolloutpolicy). A
+  policy that sets none, or `0`, waits 60 seconds. A rollout keeps the value of its policy snapshot, so an edit of the
+  policy in Git changes neither a rollout that already runs nor its health waits. The wait is a trade-off: a longer wait
+  gives a bad change more time to show itself before the rollout goes on, and it makes every round of `maxConcurrent`
+  targets last that much longer. The example policies in
+  [`examples/quickstart/policies/`](../../examples/quickstart/policies/) wait 5 minutes for a version and 2 minutes for a
+  configuration, and their comments say why.
+- **When it ends.** The engine checks the rule on every tick (`rollouts.tickInterval`, 5 seconds by default, and sooner
+  after agent events), so a target finishes up to one tick after its wait has ended. It can take longer when the agent has
+  not yet reported the health of the new process: the old process that is stopping and the normal start-up of the new one
+  neither fail the target nor let it succeed (see [Targets and success](#targets-and-success)).
+- **Failure during the wait.** A target whose agent goes offline, reports an error or no longer reports the target
+  configuration or version fails at once, and the wait does not start again within an attempt. `retry-failed` starts a new
+  attempt with a new wait.
+- **Pause.** `pause` stops new targets from starting, but a target that is in `verifying` keeps its wait and the engine
+  evaluates it to the end, also while the rollout is `paused` or `waiting_approval`. The engine does not evaluate a rollout
+  in the status `failed`: its targets stay in `verifying` until an operator aborts, rolls back or retries the rollout. A
+  rollout that rolls back resets its targets and does not let them finish.
+
+*Available from v0.2.0.* The rollout page shows the remaining time:
+
+- **Where.** In the status column of the target list, for every target in `verifying`. In the step *Health wait* of the
+  progress of a version target. On the card of a wave, as the number of its targets in the health wait and the time until
+  the wait that ends last is over.
+- **At 0** the page says "finishing…" until the engine has evaluated the target. The count does not stop while the
+  rollout is paused, because the engine does not stop either, and it disappears when the target reaches a final status. The
+  page shows no remaining time for a rollout that the engine does not evaluate (the statuses `failed`, `rolling_back` and
+  the final ones).
+- **Source.** The step and the wave card also say where the wait comes from, in a line like
+  `Policy canary-then-all · healthWait 5m · policies/canary-then-all.yaml@9f3c2a17`. The policy name links to the policy.
+  Path and commit belong to the policy snapshot of the rollout and can differ from the policy as it is now. The built-in
+  policy has no file, and the line says so instead of the path.
+- **No field for the end.** The API has no field for the end of the wait. The browser computes `verifiedAt` plus
+  `policy.healthWait` from the targets of `GET /api/v1/rollouts/{id}/targets` and from `GET /api/v1/rollouts/{id}`, with
+  the rule above (60 seconds when the snapshot has no value), and counts down with its own clock. A browser clock that
+  differs from the clock of the server shifts the display, not the decision of the engine.
+
 ## Maintenance windows
 
 - A target may **start** only while the current time is inside at least one window. Running targets are not

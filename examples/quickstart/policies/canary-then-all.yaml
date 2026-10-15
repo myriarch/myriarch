@@ -27,6 +27,13 @@ spec:
       percent: 100
       requireApproval: true
   maxConcurrent: 5
+  # How long a target must stay online and healthy after its collector has reported the new version. 5m is a value for
+  # real fleets on purpose, and this file is the example of such a policy: a collector that crashes, restarts in a loop
+  # or turns unhealthy within the wait fails its target while the rollout is still in the canary wave, instead of after
+  # the update has reached the rest of the hosts. The rollout page shows the time that is left and names this policy as
+  # the source of the wait. A demo that has to finish quickly needs a copy of this policy: a shorter healthWait (for
+  # example 30s) alone does not do it, because maxConcurrent and the maintenance windows decide how long the rollout
+  # takes as well.
   healthWait: 5m
   applyTimeout: 30m
   offlineGracePeriod: 30m
