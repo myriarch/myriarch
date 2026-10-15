@@ -235,6 +235,13 @@ OpenShift usually demand.
 * Rolling update: `maxUnavailable: 0`, `preStop` 10 s, `terminationGracePeriodSeconds: 60`; agents reconnect with
   backoff through other replicas. Exception for the upgrade to migration `00003`: replicas of an older version can no
   longer store OIDC users afterwards; for this upgrade set `replicaCount=1` and scale up again afterwards.
+* Upgrade and rollback: back up the PostgreSQL database before every upgrade. From v0.2.0 on the server checks the schema at
+  start (`config.database.migrateOnStart` stays `true`): it refuses to start on a database that a newer version has migrated
+  in a way it cannot work with (the error names the schema version and the compatibility levels), and it starts with a warning
+  on a newer schema that is still compatible. `helm rollback` therefore works as long as the migrations since the revision
+  were compatible; otherwise the old pods stop at start and you restore the backup. A rollback to v0.1.0 is not supported:
+  it does not check the schema, so going back means restoring the backup. See
+  [Server behaviour](../../../docs/design/opamp-server.md) and [ADR-0036](../../../docs/adr/0036-database-schema-compatibility-and-rollback.md).
 * Security: non-root, `readOnlyRootFilesystem`, all capabilities dropped, seccomp `RuntimeDefault`; only
   `/var/lib/myriarchd` (GitOps clone, artifact cache) and `/tmp` are writable. The image creates `/var/lib/myriarchd`
   (0750, owned by 65532:65532) and the chart mounts the data volume there with `fsGroup` 65532. The chart always starts `myriarchd serve`;

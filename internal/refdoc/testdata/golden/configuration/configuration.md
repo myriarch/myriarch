@@ -8,7 +8,7 @@ This page is generated from the mini configuration of the test by `make docs-gen
 
 ## How the configuration is loaded
 
-`myriarchd serve`, `myriarchd dev`, `myriarchd migrate`, `myriarchd config validate` and `myriarchd config print` load the configuration the same way:
+`myriarchd serve`, `myriarchd dev`, `myriarchd config validate` and `myriarchd config print` load the configuration the same way (`myriarchd migrate` needs only the database settings, see the last item of this list):
 
 - The configuration file is YAML. An unknown key is an error.
 - The loader starts from the defaults in the **Default** column. `myriarchd dev` starts from other defaults, shown as "(dev: ...)" where they differ.
@@ -18,6 +18,7 @@ This page is generated from the mini configuration of the test by `make docs-gen
 - Durations use Go syntax such as `30s`, `5m` or `720h`. A plain integer is rejected, and `d` is not a unit: write `720h` for 30 days.
 - [`myriarchd config print`](cli/myriarchd_config_print.md) shows the effective configuration with secrets redacted, [`myriarchd config validate`](cli/myriarchd_config_validate.md) checks a file.
 - [`myriarchd dev`](cli/myriarchd_dev.md) sets some keys from its flags: `--listen` sets `server.listenAddr` (and `server.publicUrl`, unless the file or the environment sets it), `--gitops-dir` sets `gitops.repoUrl` to `dir:<directory>`, `--data-dir` sets `dev.dataDir` (and with it `artifacts.dir` to `<data-dir>/artifacts` and `gitops.cloneDir` to `<data-dir>/gitops`), `--releases-fixtures` sets `releases.fixtureDir`, `--replica-id` sets `ha.replicaId` and `--dsn` sets `database.dsn`.
+- [`myriarchd migrate`](cli/myriarchd_migrate.md) loads the database settings and nothing else, so that it runs where the server configuration does not exist: the `database` section of the file (an unknown key inside it is an error; every other section is ignored, whatever it holds), `${VAR}` references in its values, the `MYRIARCH_DATABASE_*` variables and `database.dsnFile`. It validates only the database settings.
 
 How to read the tables: **Type** `duration` is a string in Go syntax. **Default** `empty` is the empty string, an empty list or an empty map, `-` marks a group of keys (the defaults are on its keys), `none` means that a list or map has no entries and its fields have no default of their own, and a size in bytes shows its binary unit in parentheses. A key such as `notifications.channels[].name` is a field of every entry of the list, and `<name>` in `executors.secrets.<name>.env` stands for the key of the map entry.
 

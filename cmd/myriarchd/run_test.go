@@ -408,30 +408,6 @@ func TestInvalidProductionConfigIsRejected(t *testing.T) {
 	}
 }
 
-func TestMigrateCommand(t *testing.T) {
-	pool := pgtest.NewPool(t)
-	p := filepath.Join(t.TempDir(), "c.yaml")
-	tokenFile := filepath.Join(t.TempDir(), "bootstrap-token")
-	if err := os.WriteFile(tokenFile, []byte(strings.Repeat("t", 40)+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	content := fmt.Sprintf("server:\n  publicUrl: https://fleet.example.com\n  tls:\n    terminatedUpstream: true\ndatabase:\n  dsn: %q\ngitops:\n  enabled: false\nexecutors:\n  allowedWebhookHosts: [\"*.example.com\"]\nauth:\n  bootstrapAdmin:\n    enabled: true\n    tokenFile: %q\n", pool.Config().ConnString(), tokenFile)
-	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cmd := newRootCommand()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"migrate", "--config", p})
-	err := cmd.Execute()
-	if err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	if !strings.Contains(out.String(), "schema version: 5") {
-		t.Fatalf("migrate output: %q", out.String())
-	}
-}
-
 func TestVersionCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := execute([]string{"version"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "0.0.0-dev") || stderr.Len() != 0 {

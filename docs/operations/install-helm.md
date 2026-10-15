@@ -386,9 +386,15 @@ git -C myriarch checkout <newer tag>
 helm upgrade myriarch ./myriarch/deploy/helm/myriarch -n myriarch -f myriarch-values.yaml
 ```
 
-The server applies new database migrations at its start. From v0.2.0 on the chart validates its values against a strict schema:
-run `helm lint` with your values file before the upgrade ([The values schema](#the-values-schema)). An upgrade guide is planned
-for v0.2.0.
+**Back up the database before every upgrade.** The server applies new database migrations at its start. A database that a newer
+version has migrated must not be used with v0.1.0 again, because v0.1.0 does not check the schema and would start on it without a
+word: going back to v0.1.0 means restoring the backup, and a rollback to it is not supported. From v0.2.0 on the database records a compatibility level, and the server checks
+it at start: it refuses to start on a schema that it cannot work with, with an error that names the schema version and the levels
+(see [Troubleshooting](troubleshooting.md)), and it starts with a warning on a newer schema that is still compatible. A
+`helm rollback` between versions that have this check therefore works as long as the migrations since then were compatible.
+
+From v0.2.0 on the chart validates its values against a strict schema: run `helm lint` with your values file before the upgrade
+([The values schema](#the-values-schema)). An upgrade guide is planned for v0.2.0.
 
 `helm uninstall myriarch -n myriarch` removes what the chart created, including the generated Secrets (the bootstrap
 token and the declared enrollment tokens). It keeps the Secret `myriarch-secrets`, the namespace and every external

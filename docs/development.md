@@ -337,7 +337,8 @@ depend on it, and so do operators who write `$(myriarch-updater status)`.
   (`myriarch-sim: ...`). A command can print results on stdout before it fails (`myriarch-updater status` prints the service
   status first and then the error of a missing configuration).
 - **Exit codes:** `myrctl` and the `auth` and `config` commands of `myriarchd` use 2 for a usage error and 1 for invalid input or
-  findings. Every other command uses 0 for success and 1 for an error.
+  findings. Every other command uses 0 for success and 1 for an error. The exception is `myriarchd migrate`: it also returns 4 for a
+  schema that is incompatible with the binary, and with `--check` 3 for pending migrations (the code 2 stays unused).
 
 Write results with `fmt.Fprint*(cmd.OutOrStdout(), ...)`, never with cobra's `cmd.Print`, `cmd.Println` or `cmd.Printf`: those
 write to stderr unless the program called `SetOut`, which is how `myriarch-sim version` printed nothing on stdout in the image
@@ -890,6 +891,57 @@ select version, then the live progress), triggers a real rollback by killing the
 succeeds after a retry. It needs network access once for the release files. Options include `E2E_KEEP=1`, `NO_BUILD=1`,
 `E2E_DIR` (default `.e2e/ui-updates`), `E2E_GIT_TARGET=git|none` and `E2E_UI=auto|1|0`; the header of the script lists them
 all. It uses its own ports (myriarchd 18090, PostgreSQL 54340, mirror 19997).
+
+## Database migrations and upgrade notes
+
+The schema is created and changed by the numbered SQL files in `internal/store/migrations` (goose format). The server applies
+them at start (`database.migrateOnStart`), and `myriarchd migrate` applies them from the database settings alone. How a database
+and a binary fit together, and what the server does when they do not, is specified in
+[Server behaviour](design/opamp-server.md) (section "Start, migrations and schema compatibility") and decided in
+[ADR-0036](adr/0036-database-schema-compatibility-and-rollback.md).
+
+**Add a migration** with these steps:
+
+1. Create `NNNNN_description.sql` with the next number (no gaps), the SPDX header, a header comment, `-- +goose Up` and
+   `-- +goose Down`. Never edit a migration that may have been applied anywhere; a mistake is fixed by a new migration.
+2. State the effect in the header comment with two lines that agree with each other. These are the only two forms, and
+   `TestMigrationHeaders` rejects a text that starts with neither of them and any other combination. For a change that the
+   previous version keeps working with:
+
+   ```sql
+   -- Rolling update: expand only. Older replicas ignore the new column.
+   -- Compatibility level: unchanged.
+   ```
+
+   For a change that binaries below some level cannot work with (it drops, renames or tightens something they use, or changes what
+   stored data means), the text starts with `not compatible,` and says what stops working:
+
+   ```sql
+   -- Rolling update: not compatible, replicas of the previous version can no longer store x until they are updated.
+   -- Compatibility level: raised to 00009.
+   ```
+
+   The number is the oldest migration whose binaries still work on the new schema: greater than the previous level and at most the
+   number of the migration itself. Up ends with `UPDATE schema_compat SET min_binary_schema = 9, updated_at = now();` and Down
+   sets the previous value again. Binaries below that level refuse to start on the database; binaries at or above it start.
+   Split a destructive change into two releases to keep rollbacks possible: add the new object in one release (expand only),
+   drop the old one in a later release, and raise the level to the number of the migration that added the new object. The
+   migration that drops it is `not compatible` for the releases before the first one: its text names them and says that the
+   previous release keeps working.
+3. Add a test for the change itself (see `TestBootstrapAdminMigration` and `TestUIVersionSelectionMigration`), and raise the table
+   count in `TestSchema` when the migration adds a table. `TestMigrationNumbersAreConsecutive`, `TestMigrationHeaders` and
+   `TestCompatibilityLevelFollowsTheHeaders` run for every migration from 00006 on and fail when the numbers have a gap, a header
+   line is missing or wrong, the two lines contradict each other (for example `not compatible` with `unchanged`), the header and
+   the effect on `schema_compat` differ, or Down does not restore the previous level.
+4. Describe every consequence that a user must know before the upgrade in the changelog (next paragraph), and change the design
+   documents in the same pull request.
+
+**Upgrade notes in the changelog.** The section `## Unreleased` of [CHANGELOG.md](../CHANGELOG.md) uses these subsections in this
+order, and only the ones that are needed: `### Upgrade notes`, `### Added`, `### Changed`, `### Fixed`, `### Security`,
+`### Documentation`. "Upgrade notes" holds every change of behaviour that a user of the previous release must know before the
+upgrade, each with what to do about it: a changed default, a removed or renamed key, a migration that raises the compatibility
+level, a higher minimum version of a dependency. A pull request appends its own bullets and does not rewrite the bullets of
+others; the release preparation consolidates the notes.
 
 ## Database tests against an existing PostgreSQL
 

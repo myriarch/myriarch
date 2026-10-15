@@ -177,12 +177,11 @@ func TestConfigValidateReportsAMissingLoginPath(t *testing.T) {
 	if code != 1 || out != "" || errs != wantLine {
 		t.Fatalf("validate: exit %d, stdout %q, stderr %q", code, out, errs)
 	}
-	// serve and migrate stop with the same reason
-	for _, sub := range []string{"serve", "migrate"} {
-		code, _, errs := runMyriarchd(t, sub, "--config", p)
-		if code != 1 || !strings.Contains(errs, strings.TrimSuffix(strings.TrimPrefix(wantLine, "ERROR: "), "\n")) {
-			t.Errorf("%s: exit %d stderr %q", sub, code, errs)
-		}
+	// serve stops with the same reason (migrate reads the database settings only and does not check the login path:
+	// TestMigrateNeedsTheDatabaseSettingsOnly)
+	code, _, errs = runMyriarchd(t, "serve", "--config", p)
+	if code != 1 || !strings.Contains(errs, strings.TrimSuffix(strings.TrimPrefix(wantLine, "ERROR: "), "\n")) {
+		t.Errorf("serve: exit %d stderr %q", code, errs)
 	}
 	// a bootstrap admin or OIDC is a login path
 	tokenFile := filepath.Join(t.TempDir(), "token")

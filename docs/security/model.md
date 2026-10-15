@@ -283,6 +283,23 @@ Development mode weakens these controls, and `--allow-nonlocal` exposes all of t
 
 `myriarchd config validate --config FILE [--skip-files]` loads the configuration exactly as `myriarchd serve` does (defaults, YAML with unknown keys rejected, `${VAR}`, `MYRIARCH_*`) and runs every check that `serve` performs before touching the database or the network. There is one validation, not two. Without `--skip-files` it also reads the referenced files (secrets not empty, CA file with a certificate, key matching certificate, readable `trusted_root.json`). Exit codes: 0 valid (warnings allowed), 1 invalid, 2 usage error. Use it in CI and in deployment pipelines so that a misconfiguration is found before the pod starts. See the [command reference](../reference/cli/myriarchd_config_validate.md).
 
+## Database schema compatibility
+
+The server does not run on a database schema that it cannot work with. The behaviour is specified in [Server behaviour](../design/opamp-server.md) and decided in [ADR-0036](../adr/0036-database-schema-compatibility-and-rollback.md).
+
+| Control | Setting and default |
+|---|---|
+| The database records a compatibility level (table `schema_compat`): the lowest schema level that a binary must have to run on it. At start, `myriarchd serve` and `myriarchd dev` refuse a database whose compatibility level is above their own schema level. The error names the schema version and both levels, nothing is changed and no component is started. A release that cannot work with the changes of a later migration (its author raised the level for them) therefore does not run on that schema, for example after a rollback of the deployment. | Always on, also with `database.migrateOnStart` off. Not configurable. |
+| From migration 00006 on, a schema without the table `schema_compat` or without its row has no known compatibility level and is refused by `myriarchd serve`, `myriarchd dev` and `myriarchd migrate`; the error says to restore the database from a backup. | Always on. |
+| A schema that lacks migrations of the binary is refused at once when migrations are not applied at start. The error names the setting and the command `myriarchd migrate`, where the server would otherwise start and fail later in some component. | `database.migrateOnStart`, default `true`. |
+| A schema that is newer than the binary but compatible with it starts with a warning in the log that names the schema version, the compatibility level and the schema level of the binary. | Always on. |
+| `myriarchd migrate` applies the migrations from the database settings alone and refuses an incompatible schema in the same way. It reads no secret of another feature (bootstrap admin, enrollment tokens, OIDC, Git), so the job that runs it needs none of them. `--check` changes nothing and reports the state by its exit code. | `database.dsn` or `database.dsnFile`, `MYRIARCH_DATABASE_*`. |
+
+Residual risk:
+
+- The check runs at start. Replicas that already run are not stopped when another replica migrates the database to a level they cannot work with. A migration that older replicas cannot work with says so in its header and in the upgrade notes; update with one replica or in a maintenance window then.
+- Whether a migration is compatible with the previous version is the claim of its author. A test compares the claim with the effect on the compatibility level, but only the review of the migration can judge whether the older binary really works on the new schema.
+
 ## Known limitations
 
 The controls above leave the following limitations. They are listed so that operators can compensate for them; the
@@ -390,6 +407,10 @@ guidance after each item names what to do.
 - **Restoring a backup.** A replica started from a restored database can become leader and continue rollouts and
   executor calls. Start a restored copy without ingress, with an empty `executors.allowedWebhookHosts`, without executor
   secrets and without Git and notification channels until it is meant to take over.
+- **No rollback to v0.1.0.** v0.1.0 does not read the compatibility level of the database, and its migration library accepts
+  a database with higher versions, so it starts on a database that a later release has migrated without any check. The
+  project does not support that. Back up the database before an upgrade, and go back by restoring the backup. Later
+  releases check the level: a rollback between them is refused when the database needs a newer binary.
 
 ### Build and release
 

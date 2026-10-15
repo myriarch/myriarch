@@ -28,8 +28,8 @@ func TestSchema(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name <> 'goose_db_version'`).Scan(&tables); err != nil {
 		t.Fatal(err)
 	}
-	if tables != 23 {
-		t.Fatalf("expected 23 tables, got %d", tables)
+	if tables != 24 {
+		t.Fatalf("expected 24 tables, got %d", tables)
 	}
 
 	cases := []struct {

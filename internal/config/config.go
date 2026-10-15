@@ -218,6 +218,11 @@ type DatabaseConfig struct {
 	MaxConns int32 `yaml:"maxConns"`
 	// MigrateOnStart runs pending migrations at startup (default true).
 	// Migrations take a Postgres advisory lock, so concurrent replicas are safe.
+	// When it is false and the schema lacks migrations of this version,
+	// myriarchd refuses to start: run `myriarchd migrate` first. A schema
+	// that is newer than this version but compatible with it starts with a
+	// warning, and a schema that is incompatible with it is refused, whatever
+	// this setting says.
 	MigrateOnStart bool `yaml:"migrateOnStart"`
 	// StatementTimeout is the server-side limit of one SQL statement of the
 	// application pool (default 15s; migrations and housekeeping are exempt).
