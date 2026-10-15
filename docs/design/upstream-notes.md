@@ -7,8 +7,9 @@ description: "Verified facts about third-party software that the design relies o
 Facts about third-party software that the design relies on. Each item names a public source. The versions reviewed are
 the OpAMP Supervisor and collector 0.162.0, opamp-go 0.25.0, sigstore-go 1.3.0, the OpenTelemetry Operator 0.160.0 and
 embedded-postgres 1.34.0. The review of the release assets and the supervisor was done on 2026-10-06 against real
-binaries and the public release pages. Upstream may change these details; the dated status at the end shows what was
-rechecked last.
+binaries and the public release pages. The restart behaviour of the supervisor and the identity and modes of the OpAMP
+Bridge were reviewed on 2026-10-15 in the sources of tagged releases and of the main branches; the sources were read, never
+built or run. Upstream may change these details; the dated status at the end shows what was rechecked last.
 
 ## Supervisor limits
 
@@ -60,6 +61,49 @@ The specification still describes `run_as` and `access_dirs`; the code has neith
 - Connection settings offered by a server are kept only in memory, and without a certificate in the offer the supervisor
   disables TLS verification ([source](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.162.0/cmd/opampsupervisor/supervisor/supervisor.go)).
   myriarchd therefore never sends connection settings. The heartbeat interval is 30 seconds by default.
+
+### Restart while a remote config is applying
+
+Reviewed on 2026-10-15 in `cmd/opampsupervisor` at the tags v0.162.0 (commit `ae8c507`) and v0.163.0 (commit `df849b5`)
+and on main (commit `d810415`). The functions named below are identical at the three revisions. Nothing was run.
+
+- **The status survives a restart.** Every remote config status that the supervisor reports is first written to
+  `persistent_state.yaml` (`last_remote_config_status`: the status, the hash in hexadecimal and the error message), see
+  [persistence.go](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.162.0/cmd/opampsupervisor/supervisor/persistence.go)
+  and `saveAndReportConfigStatus` in [supervisor.go](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.162.0/cmd/opampsupervisor/supervisor/supervisor.go).
+  When the supervisor starts, it hands the stored status to the OpAMP client (`StartSettings.RemoteConfigStatus`).
+- **It is reported again, `APPLYING` included.** The client of opamp-go v0.25.0 puts that status into its first message
+  and into the reply to a `ReportFullState` request, which a server sends after a reconnect
+  ([clientcommon.go](https://github.com/open-telemetry/opamp-go/blob/v0.25.0/client/internal/clientcommon.go), `PrepareFirstMessage`;
+  [receivedprocessor.go](https://github.com/open-telemetry/opamp-go/blob/v0.25.0/client/internal/receivedprocessor.go), `rcvFlags`).
+  Apart from those two cases the client sends the status only when it changes (`SetRemoteConfigStatus`); heartbeats do not
+  repeat it.
+- **Nothing ends the apply after a restart.** The timer that turns `APPLYING` into `APPLIED` or `FAILED` after
+  `config_apply_timeout` lives in memory and is armed only when a configuration change is signalled while the supervisor
+  runs, for example by a remote config that changes the merged configuration (`runAgentProcess`, `onMessage`). After a
+  restart the supervisor loads the last received remote config from its storage directory
+  (`loadAndWriteInitialMergedConfig`, `loadRemoteConfig`), composes the merged configuration and starts the collector with
+  it, but it arms no timer for the stored status. The status stays `APPLYING` until the next remote config message arrives
+  or the collector cannot be started (then `FAILED`).
+- **The same hash ends it at once.** A remote config with a hash the supervisor has stored is processed like any other
+  message (`processRemoteConfigMessage`, no deduplication in the client either). The supervisor composes the merged
+  configuration; when the text equals the one composed at start (`composeMergedConfig`), it reports `APPLIED` immediately,
+  does not report `APPLYING` and does not restart the collector. A different result reports `APPLYING` and follows the
+  normal sequence. If an apply is genuinely still running (a reconnect without a restart), the repeated message also
+  yields `APPLIED` at once, because the merged configuration was stored when the first message arrived; the timer of the
+  first message still runs and reports `FAILED` when the collector is not healthy by then. With
+  `automatic_config_rollback` that early `APPLIED` also records the configuration as the last working one
+  (`saveAndReportConfigStatus`), which weakens the rollback of a configuration that turns out unhealthy.
+- **Timing defaults.** `config_apply_timeout` is 5 seconds in the supervisor defaults
+  ([config.go](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.162.0/cmd/opampsupervisor/supervisor/config/config.go)),
+  30 seconds in the templates of this project. Heartbeats are on by default (`reports_heartbeat`) with an interval of 30
+  seconds (`heartbeatIntervalSeconds` in `supervisor.go`). A server that wants to act on a stale `APPLYING` therefore
+  sees its chance with the next message of the connection, usually within 30 seconds.
+
+Consequence for the design: a server that waits for `APPLIED` after an offer can see a supervisor that restarted in between
+report `APPLYING` for the same hash, unchanged, for as long as nobody offers a configuration again. Offering the same
+configuration once more is safe for the supervisor. The rule that the server applies is in
+[Server behaviour](opamp-server.md).
 
 ### Identity and reported attributes
 
@@ -206,13 +250,63 @@ and its [OpAMP Bridge](https://github.com/open-telemetry/opentelemetry-operator/
 - Health is a tree of the bridge, each resource and its pods, based on pod phase. A pod in a crash loop is usually still
   in phase `Running`. Component-level health is available only through the bridge's proxy, which accepts connections from
   collectors that carry the OpAMP extension.
-- A restart command triggers a rollout restart of all managed workloads. Packages, connection settings and available
-  components are not implemented, although the bridge reports the capabilities it is configured with.
+- A restart command triggers a rollout restart of the workloads of the collector resources the bridge lists (managed and
+  reporting-only ones, sidecars excepted), and only when the capability `AcceptsRestartCommand` is configured. Packages,
+  connection settings and available components are not implemented, although the bridge reports the capabilities it is
+  configured with.
 - A standalone mode (since operator 0.154.0) works without the operator: one client per configured workload with a stable
   identity, config stored in ConfigMaps and followed by a rollout restart.
 - Changing the version through the bridge is only possible indirectly: because the whole `spec` is replaced, a server can
   set `spec.image`. Without `spec.image` the operator's default image is used, and a default image of the operator is
   the core distribution, which lacks the OpAMP extension.
+
+### OpAMP Bridge: identity, modes and remote config
+
+Reviewed on 2026-10-15 in `cmd/operator-opamp-bridge` of the OpenTelemetry Operator at the tags v0.160.0 (commit `c7cc68b`)
+and v0.161.0 (commit `f3bd366`, 2026-10-13) and on main (commit `043085a`, 2026-10-14). Apart from tests, the Bridge
+sources of v0.161.0 and main are identical. Version 0.160.0 differs only in the use of the cluster UID in the standalone
+mode (the instance UID, the attribute `k8s.cluster.uid` and the permission to read it) and in the example RBAC manifest.
+No Bridge was run.
+
+**To confirm at the release tag.** These facts come from reading source code, not from a running Bridge. Read them again
+at the tag of the Operator release that is current when a myriarch release documents support for Bridges, and whenever a
+detection rule changes. A test with a real Bridge on a cluster is planned for later.
+
+Files read, all in `cmd/operator-opamp-bridge/` at v0.161.0: [main.go](https://github.com/open-telemetry/opentelemetry-operator/blob/v0.161.0/cmd/operator-opamp-bridge/main.go),
+[internal/config/config.go](https://github.com/open-telemetry/opentelemetry-operator/blob/v0.161.0/cmd/operator-opamp-bridge/internal/config/config.go), [internal/agent/agent.go](https://github.com/open-telemetry/opentelemetry-operator/blob/v0.161.0/cmd/operator-opamp-bridge/internal/agent/agent.go),
+[internal/operator/client.go](https://github.com/open-telemetry/opentelemetry-operator/blob/v0.161.0/cmd/operator-opamp-bridge/internal/operator/client.go),
+[internal/operator/crd_instance.go](https://github.com/open-telemetry/opentelemetry-operator/blob/v0.161.0/cmd/operator-opamp-bridge/internal/operator/crd_instance.go) and
+[internal/standalone/client.go](https://github.com/open-telemetry/opentelemetry-operator/blob/v0.161.0/cmd/operator-opamp-bridge/internal/standalone/client.go).
+
+| | Operator mode (the default) | Standalone mode (`mode: standalone`) |
+|---|---|---|
+| OpAMP clients | One for the whole Bridge, plus a proxy server that collectors with the OpAMP extension can connect to (`main.go`). | One for every entry of `standalone.agents` (`main.go`). |
+| `service.name` | `io.opentelemetry.operator-opamp-bridge`. | The name of the workload (`workloadRef.name`). Only a workload named `opamp-bridge` gets the constant (`GetAgentType` in `internal/config/config.go`). |
+| `service.instance.id` | A new UUIDv7 at every start. | Stable: a name-based UUID over cluster UID, namespace, workload kind, workload name and agent type. Before 0.161.0 without the cluster UID. |
+| Other identifying attribute | `service.version`, the version of the Bridge. | The same. |
+| Non-identifying attributes | `os.family`, `host.name` (the host name of the Bridge pod), `opentelemetry.io/opamp.bridge.mode` = `operator` (since 0.157.0) and the configured `description.non_identifying_attributes`. | `os.family`, `host.name` (the workload name), `opentelemetry.io/opamp.bridge.mode` = `standalone` (since 0.157.0), `k8s.namespace.name`, `k8s.workload.name`, `k8s.workload.type`, `opentelemetry.io/agent.type`, `k8s.cluster.uid` (since 0.161.0) and the configured attributes of the Bridge and of the entry. |
+| Keys of the config map | `<namespace>/<name>` for every OpenTelemetryCollector resource; the value is the complete resource as YAML. The effective config also holds one entry per collector connected to the proxy, keyed by its instance UID (`internal/agent/agent.go`, `internal/operator/crd_instance.go`). | The name of a config entry of the agent; the value is a collector configuration (`internal/standalone/client.go`). |
+| Applying a remote config | Creates or updates the resource, only if it carries `opentelemetry.io/opamp-managed` with `true` or the name of the Bridge and not `opentelemetry.io/opamp-reporting: true`. An update replaces everything except the metadata. **Deletes the resource of every key that was applied earlier and is missing from the message.** An entry whose key is not `<namespace>/<name>` is rejected (`invalid key`), and the deletion still runs (`applyRemoteConfig` in `internal/agent/agent.go`, `internal/operator/client.go`). | Rejects a name that the agent has no entry for, validates the value as a collector configuration, writes it into the configured key of an existing ConfigMap (it never creates one) and restarts the workload. Deleting is not supported: a missing key is an error and nothing is deleted. |
+| Restart command | Rollout restart of the workloads of all listed collector resources, only with the capability `AcceptsRestartCommand`. | Rollout restart of the one workload, with the same capability. |
+
+- **Deletion in operator mode.** The set of applied keys starts from the managed resources in the cluster
+  (`rebuildAppliedKeys` at start) and grows with every key that is applied. A message that lacks one of these keys deletes
+  its resource. A message with the single entry `myriarch.yaml`, which is not a `<namespace>/<name>` key, is therefore
+  rejected as an entry and still deletes the resources of all managed collectors.
+- **The mode attribute cannot be overridden by configuration.** It is written after the configured attributes
+  (`nonIdentifyingAttributes` in `internal/config/config.go`). Any other OpAMP agent can still send it, and all other
+  attributes are chosen by whoever configures the Bridge.
+- **Status.** The Bridge reports `APPLIED` or `FAILED`, never `APPLYING`, keeps the status in memory only and skips a message
+  whose hash equals the last one it handled (`onMessage` in `internal/agent/agent.go`). The restart behaviour described for
+  the supervisor does not apply to it.
+- **Capabilities are configuration.** The `capabilities` map of the Bridge (the field `spec.capabilities` of the OpAMPBridge
+  resource) decides what it reports; a Bridge accepts remote config only if `AcceptsRemoteConfig` is set. The heartbeat
+  interval is 30 seconds by default.
+- **History of the identifying facts.** The service name constant exists since the Bridge was added in January 2023
+  ([#1339](https://github.com/open-telemetry/opentelemetry-operator/pull/1339)). The standalone mode, with the workload name
+  as `service.name`, first shipped in 0.154.0 ([#4986](https://github.com/open-telemetry/opentelemetry-operator/pull/4986)),
+  the mode attribute in 0.157.0 ([#5424](https://github.com/open-telemetry/opentelemetry-operator/pull/5424)). A standalone
+  client of a release before 0.157.0 therefore reports neither a recognisable name nor the attribute.
 
 ### Comparison in short
 
@@ -321,9 +415,11 @@ Since 0.162.0 the contrib changelog uses combined headings such as `## v1.1.0/v0
   panic or timeout; locale and time zone are inherited from the shell; the server does not run as root. A cold start
   needs about ten seconds (download and unpack), a warm start under a second.
 
-## Upstream status (as of 2026-10-08)
+## Upstream status (as of 2026-10-15)
 
-Checked on 2026-10-08 through the public GitHub issue pages and API.
+The issue rows were checked on 2026-10-08 through the public GitHub issue pages and API and not again since. The release rows
+and the source review of the supervisor and of the OpAMP Bridge are from 2026-10-15 (tags listed with `git ls-remote`, sources read
+in shallow clones).
 
 | Item | Status |
 |---|---|
@@ -331,7 +427,10 @@ Checked on 2026-10-08 through the public GitHub issue pages and API.
 | [opentelemetry-collector-contrib #47272](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/47272), "Implement Package Upgrades in the Supervisor" | Open, last updated 2026-09-01. It is a staged plan of seven changes: capabilities and docs, configuration surface and verification interfaces, Cosign verification, tar.gz extraction, package manager, binary update with rollback, end-to-end tests. |
 | [#50685](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/50685), "Package Upgrades - Cosign verifier" | Open, last updated 2026-09-05. A verifier for Cosign keyless signing, the mechanism of the official releases, is in progress. |
 | [#47298](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/47298) (initial skeleton), [#48791](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/48791) (configuration and interfaces), [#49766](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/49766) (tar.gz extractor) | Closed as completed. |
-| Latest contrib release | [v0.162.0](https://github.com/open-telemetry/opentelemetry-collector-contrib/releases/tag/v0.162.0), published 2026-09-29. |
+| Latest contrib release | The tags `v0.163.0` and `cmd/opampsupervisor/v0.163.0` exist (commit of 2026-10-14 UTC). The project is built and tested against [v0.162.0](https://github.com/open-telemetry/opentelemetry-collector-contrib/releases/tag/v0.162.0), published 2026-09-29. |
+| Supervisor: persisted `APPLYING` after a restart | The code of v0.162.0, v0.163.0 and main (2026-10-15) is the same in every function that matters; see [Restart while a remote config is applying](#restart-while-a-remote-config-is-applying). |
+| OpenTelemetry Operator | The tag `v0.161.0` exists (commit of 2026-10-13); the notes name 0.160.0 as the reviewed version. The Bridge sources of v0.160.0, v0.161.0 and main (2026-10-14) were compared; the identifying facts are the same, see [OpAMP Bridge: identity, modes and remote config](#opamp-bridge-identity-modes-and-remote-config). To confirm again at the Operator release tag that is current when Bridge support is documented. |
+| OpAMP Bridge: standalone mode and mode attribute | Standalone mode first shipped in 0.154.0 ([#4986](https://github.com/open-telemetry/opentelemetry-operator/pull/4986)), the attribute `opentelemetry.io/opamp.bridge.mode` in 0.157.0 ([#5424](https://github.com/open-telemetry/opentelemetry-operator/pull/5424)). |
 
 Consequence for the design: the supervisor still has no working binary update path, so `myriarch-updater` remains
 necessary. Once upstream finishes the work, a supervisor-native executor could reuse the same package offers, because
