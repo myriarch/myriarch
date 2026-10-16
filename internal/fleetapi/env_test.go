@@ -35,12 +35,14 @@ import (
 	"github.com/myriarch/myriarch/internal/eventbus"
 	"github.com/myriarch/myriarch/internal/executor"
 	"github.com/myriarch/myriarch/internal/gitops"
+	"github.com/myriarch/myriarch/internal/install"
 	"github.com/myriarch/myriarch/internal/notify"
 	"github.com/myriarch/myriarch/internal/notify/channels"
 	"github.com/myriarch/myriarch/internal/release"
 	"github.com/myriarch/myriarch/internal/rollout"
 	"github.com/myriarch/myriarch/internal/rollout/memstore"
 	"github.com/myriarch/myriarch/internal/store"
+	"github.com/myriarch/myriarch/internal/testutil/enrollstore"
 )
 
 type apiEnv struct {
@@ -65,6 +67,13 @@ type apiEnv struct {
 	upstream *httptest.Server
 	clock    time.Time
 	exec     *fakeExecutor
+	// the installation from the server: enrollment tokens that the artifact cache can read by ID, the
+	// authentication of the install routes, the planner, the log and the metrics of the service
+	tokens  *enrollstore.Store
+	auth    *testInstallAuth
+	planner *install.Planner
+	logs    *syncBuffer
+	reg     *prometheus.Registry
 }
 
 type hookSink struct {
@@ -146,6 +155,9 @@ func newAPIEnv(t *testing.T) *apiEnv {
 		Now: func() time.Time { return e.clock }, Registerer: prometheus.NewRegistry(),
 	})
 
+	// the leader has planned the state of Git by the time hosts ask: the installation waits for the record of the planner
+	require.NoError(t, e.engine.Plan(context.Background()))
+
 	// release tracker with the recorded fixtures
 	tr, err := release.NewTracker(e.cfg.Releases, release.Deps{Store: e.st, Bus: e.bus, Notifier: notify.Nop{}, HTTPClient: http.DefaultClient, Logger: logger, Registerer: prometheus.NewRegistry()})
 	require.NoError(t, err)
@@ -156,7 +168,7 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	archive := []byte(strings.Repeat("artifact-bytes-", 100))
 	e.upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case strings.HasSuffix(r.URL.Path, ".tar.gz"):
+		case strings.HasSuffix(r.URL.Path, ".tar.gz"), strings.Contains(r.URL.Path, "/opampsupervisor_"):
 			_, _ = w.Write(archive)
 		default:
 			http.NotFound(w, r)
@@ -168,11 +180,17 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	acfg.SourceBaseURL = e.upstream.URL
 	acfg.Verify.RequireChecksum = false
 	acfg.Verify.RequireSignature = false
-	cache, err := artifact.NewCache(acfg, artifact.Deps{Store: e.st, Bus: e.bus, HTTPClient: http.DefaultClient, PublicURL: e.cfg.Server.PublicURL,
-		DownloadSecret: []byte("0123456789abcdef0123456789abcdef"), Logger: logger, Registerer: prometheus.NewRegistry()})
+	e.tokens = enrollstore.Wrap(e.st)
+	cache, err := artifact.NewCache(acfg, artifact.Deps{Store: e.tokens, Bus: e.bus, HTTPClient: http.DefaultClient, PublicURL: e.cfg.Server.PublicURL,
+		DownloadSecret: []byte("0123456789abcdef0123456789abcdef"), InstallEnabled: e.cfg.Install.Enabled, InstallGrantTTL: e.cfg.Install.GrantTTL, Logger: logger, Registerer: prometheus.NewRegistry()})
 	require.NoError(t, err)
 	e.cache = cache
-	t.Cleanup(func() { e.waitNoDownloads(t) })
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = e.cache.WaitPrepared(ctx) // downloads that an install plan started
+		e.waitNoDownloads(t)
+	})
 
 	// syncer on a copy of the example repository
 	dir := filepath.Join(t.TempDir(), "repo")
@@ -183,8 +201,17 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	require.NoError(t, err)
 	e.syncer = syncer
 
+	// the installation from the server
+	e.logs = &syncBuffer{}
+	e.reg = prometheus.NewRegistry()
+	e.auth = newTestInstallAuth(e)
+	e.planner, err = install.NewPlanner(install.Deps{Store: e.st, Assigner: e.assigner, Artifacts: cache, Config: e.cfg.Install,
+		PublicURL: e.cfg.Server.PublicURL, OpAMPPath: e.cfg.OpAMP.Path, Logger: slog.New(slog.NewTextHandler(e.logs, nil))})
+	require.NoError(t, err)
+
 	e.deps = Deps{Store: e.st, Syncer: syncer, Assigner: e.assigner, Renderer: renderer, Engine: e.engine, Tracker: tr, Artifacts: cache,
-		Notifier: notifier, Audit: auditRec, Bus: e.bus, Config: e.cfg, Logger: logger}
+		Notifier: notifier, Audit: auditRec, Bus: e.bus, Config: e.cfg, Logger: slog.New(slog.NewTextHandler(e.logs, nil)),
+		Install: e.planner, InstallAuth: e.auth, Registerer: e.reg}
 	e.svc = newService(e.deps)
 	e.svc.waitMax, e.svc.waitPoll = 400*time.Millisecond, 5*time.Millisecond
 	mods := e.svc.modules()

@@ -17,6 +17,7 @@ import (
 	"github.com/myriarch/myriarch/internal/api"
 	"github.com/myriarch/myriarch/internal/api/dto"
 	"github.com/myriarch/myriarch/internal/domain"
+	"github.com/myriarch/myriarch/internal/install"
 	"github.com/myriarch/myriarch/internal/notify"
 	"github.com/myriarch/myriarch/internal/store"
 )
@@ -143,6 +144,15 @@ func TestOpenAPIContract(t *testing.T) {
 		"ReleaseFleetOption":         tof[dto.ReleaseFleetOption](),
 		"TargetProgress":             tof[domain.TargetProgress](),
 		"UpdateStep":                 tof[domain.UpdateStep](),
+		"InstallPlan":                tof[install.Plan](),
+		"InstallPlanVersion":         tof[install.PlanVersion](),
+		"InstallPlanOpAMP":           tof[install.PlanOpAMP](),
+		"InstallPlanArtifact":        tof[install.PlanArtifact](),
+		"InstallPlanUpdater":         tof[install.PlanUpdater](),
+		"InstallBundle":              tof[install.Bundle](),
+		"InstallBundleList":          tof[install.BundleList](),
+		"InstallCommands":            tof[install.Commands](),
+		"InstallCommand":             tof[install.Command](),
 	}
 	requestTypes := map[string]reflect.Type{
 		"CreateSavedFilterRequest":          tof[dto.CreateSavedFilterRequest](),
@@ -158,6 +168,9 @@ func TestOpenAPIContract(t *testing.T) {
 		"PrefetchRequest":                   tof[dto.PrefetchRequest](),
 		"SelectFleetVersionRequest":         tof[dto.SelectFleetVersionRequest](),
 		"ClearFleetVersionSelectionRequest": tof[dto.ClearFleetVersionSelectionRequest](),
+		"InstallPlanRequest":                tof[install.PlanRequest](),
+		"InstallCommandsRequest":            tof[install.CommandsRequest](),
+		"InstallTokenFiles":                 tof[install.TokenFiles](),
 	}
 
 	for name, typ := range responseTypes {

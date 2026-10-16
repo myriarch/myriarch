@@ -298,7 +298,9 @@ func TestEveryRegisteredRouteHasADeclaredAccessDecision(t *testing.T) {
 	}
 	wantCustom := map[string]bool{
 		"POST /api/v1/gitops/webhook":                   true, // shared secret / HMAC signature
-		"GET /api/v1/artifacts/{id}/content/{filename}": true, // signed download token
+		"GET /api/v1/artifacts/{id}/content/{filename}": true, // signed download token or install grant
+		"POST /api/v1/install/plan":                     true, // enrollment token
+		"GET /api/v1/install/bundles/{filename}":        true, // enrollment token
 	}
 	for p, d := range got {
 		if _, isInfra := infra[p]; isInfra {

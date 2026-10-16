@@ -36,6 +36,8 @@ func TestWebBrandInSync(t *testing.T) {
 		{"API_TOKEN_PREFIX", APITokenPrefix},
 		{"ENROLLMENT_TOKEN_PREFIX", EnrollmentTokenPrefix},
 		{"ATTR_COLLECTOR_INSTANCE_UID", AttrCollectorInstanceUID},
+		{"ENROLLMENT_TOKEN_PLACEHOLDER", EnrollmentTokenPlaceholder},
+		{"INSTALL_SETUP_DIR", InstallSetupDir},
 	}
 	for _, c := range shared {
 		got, ok := web[c.ts]

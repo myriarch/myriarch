@@ -65,7 +65,8 @@ flowchart LR
 | Rollout engine | `internal/rollout` | Planner, waves, gates, maintenance windows, operator actions |
 | Executors | `internal/executor/updaterexec`, `.../webhookexec`, `.../manualexec` | `updater` (OpAMP packages), `webhook` and `awx`, `manual` (no external call) |
 | Release tracker | `internal/release` | GitHub releases and breaking changes from changelogs |
-| Artifact cache | `internal/artifact` | Download, SHA-256 and Sigstore verification, delivery with download tokens |
+| Artifact cache | `internal/artifact` | Download, SHA-256 and Sigstore verification, delivery with download tokens and, from v0.2.0, with install grants |
+| Host installation | `internal/install` | The plan for a host that is installed from the server, the installer bundles of the release that the server runs and the commands that copy them to a host: fleet, collector and supervisor version, and the artifacts with their install grants, decided from the GitOps state, the version rollouts and the release tracker ([ADR-0046](adr/0046-host-installation-from-the-server.md), [Server behaviour](design/opamp-server.md#installation-from-the-server)). Available from v0.2.0 |
 | Notifier | `internal/notify`, `internal/notify/channels` | Microsoft Teams, Slack and generic webhook |
 | Housekeeping | `internal/housekeeping` | Retention jobs on the leader |
 | Outbound connection policy | `internal/netguard` | Destination checks, proxy and CA handling for every outbound connection |

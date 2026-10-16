@@ -373,7 +373,8 @@ func (c *Cache) Evict(ctx context.Context, protected map[string]bool) error {
 			return nil
 		}
 		if d.IsDir() {
-			if d.Name() == ".tmp" || d.Name() == "tuf" {
+			// the TUF cache and the installer bundles (internal/install keeps and tidies them itself) are not artifacts
+			if d.Name() == ".tmp" || d.Name() == "tuf" || p == filepath.Join(c.dir, InstallDir) {
 				return filepath.SkipDir
 			}
 			return nil

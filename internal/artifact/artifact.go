@@ -62,7 +62,18 @@ type Deps struct {
 	// Policy (optional) is the outbound destination policy used for the proxy
 	// transport; the shared HTTPClient carries it otherwise.
 	Policy *netguard.Policy
+	// InstallEnabled is install.enabled: the cache mints and accepts install grants only while the installation
+	// from the server is on. A grant that was minted before the setting was turned off (a restart in between) is
+	// refused with 401 however long it would still live; the zero value is off.
+	InstallEnabled bool
+	// InstallGrantTTL is the lifetime of an install grant (install.grantTtl;
+	// 0 = no expiry, development only).
+	InstallGrantTTL time.Duration
 }
+
+// InstallDir is the subdirectory of the cache directory in which internal/install keeps the installer bundles. The
+// cache leaves it alone: Evict does not count or remove its files.
+const InstallDir = "install"
 
 // downloadIdleTimeout aborts a download that delivers no data for this long.
 const downloadIdleTimeout = 60 * time.Second
@@ -99,6 +110,10 @@ type Cache struct {
 	agentBases []agentBase
 
 	ver *bundleVerifier // nil if signatures are not required
+	// verOnce builds the verifier that Verifier hands out when signatures of the artifacts are not required.
+	verOnce  sync.Once
+	verifier *Verifier
+	verErr   error
 	// verifyFn verifies a bundle; replaced in tests (real archives are too big
 	// to ship, and real bundles only match the real archives).
 	verifyFn func(bundleJSON, digest []byte, dist, version string) (*verified, error)
@@ -112,6 +127,11 @@ type Cache struct {
 
 	touchMu   sync.Mutex
 	lastTouch map[string]time.Time
+
+	// downloads started by Prepare that have not finished yet, by spec key (prepare.go)
+	prepMu    sync.Mutex
+	preparing map[string]struct{}
+	prepWG    sync.WaitGroup
 
 	downloads *prometheus.CounterVec
 }
@@ -211,12 +231,20 @@ func NewCache(cfg config.ArtifactsConfig, deps Deps) (*Cache, error) {
 
 // redirectPolicy is the CheckRedirect of the upstream clients.
 func (c *Cache) redirectPolicy() func(*http.Request, []*http.Request) error {
-	hosts := append([]string(nil), c.cfg.AllowedRedirectHosts...)
+	return RedirectPolicy(c.cfg.AllowedRedirectHosts, c.baseURL)
+}
+
+// RedirectPolicy is the CheckRedirect of a client that downloads release assets from sourceBaseURL: at most five hops,
+// https targets only, and only the hosts of allowedHosts (artifacts.allowedRedirectHosts; the GitHub asset hosts when it
+// is empty) and the host of sourceBaseURL itself. A plain-http source may redirect within itself (lab setups). The
+// artifact cache and the installer bundles use it, so both follow the same rule.
+func RedirectPolicy(allowedHosts []string, sourceBaseURL string) func(*http.Request, []*http.Request) error {
+	hosts := append([]string(nil), allowedHosts...)
 	if len(hosts) == 0 {
 		hosts = append(hosts, defaultRedirectHosts...)
 	}
 	var base *url.URL
-	if u, err := url.Parse(c.baseURL); err == nil {
+	if u, err := url.Parse(sourceBaseURL); err == nil {
 		base = u
 		hosts = append(hosts, u.Hostname())
 	}
@@ -230,9 +258,36 @@ func (c *Cache) redirectPolicy() func(*http.Request, []*http.Request) error {
 	}
 }
 
+// OpenNoFollow opens a file of the cache directory for reading without following a symbolic link at the final path
+// element (on Windows a link is refused after the open).
+func OpenNoFollow(path string) (*os.File, error) { return openNoFollow(path) }
+
 // SignatureRequired reports whether artifacts must carry a verified sigstore
 // bundle (artifacts.verify.requireSignature).
 func (c *Cache) SignatureRequired() bool { return c.cfg.Verify.RequireSignature }
+
+// Dir is the directory of the cache (artifacts.dir, or the default below the temporary directory).
+func (c *Cache) Dir() string { return c.dir }
+
+// Verifier returns the verifier of Sigstore bundles with the trust of the cache: the trusted root of artifacts.verify (a
+// file, or TUF through the HTTP client of the cache) and no identity of its own; the caller names the identity it
+// accepts. It exists also where artifacts.verify.requireSignature is off, because a bundle that is not an upstream
+// artifact (the installer bundles of the release of this project) is verified whatever that setting says. The error
+// is that of an unusable trusted root or identity setting.
+func (c *Cache) Verifier() (*Verifier, error) {
+	c.verOnce.Do(func() {
+		v := c.ver
+		if v == nil {
+			var err error
+			if v, err = newBundleVerifier(c.cfg.Verify, c.dir, c.tuf); err != nil {
+				c.verErr = err
+				return
+			}
+		}
+		c.verifier = &Verifier{v: v}
+	})
+	return c.verifier, c.verErr
+}
 
 // DownloadTokenTTL is the lifetime of download tokens (0 = unlimited).
 func (c *Cache) DownloadTokenTTL() time.Duration { return c.cfg.DownloadTokenTTL }
@@ -376,7 +431,8 @@ func (c *Cache) ensure(ctx context.Context, s spec) (*domain.Artifact, error) {
 	rec, err := arts.Find(ctx, s.dist, s.version, s.os, s.arch, s.format)
 	switch {
 	case err == nil:
-		if rec.Status == domain.ArtifactReady && (!c.cfg.Verify.RequireSignature || rec.SignatureVerified) {
+		// a record that would not be served (no pinned hash, no verified bundle) is fetched again
+		if c.servable(rec) {
 			return rec, nil
 		}
 	case !errors.Is(err, domain.ErrNotFound):

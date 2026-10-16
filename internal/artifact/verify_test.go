@@ -197,3 +197,138 @@ func TestLoadTrustedRootFileRefusesEmptyRoot(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, tr.FulcioCertificateAuthorities())
 }
+
+// ------------------------------------------------------------------ the exported verifier ----
+
+const upstreamContribSAN = "https://github.com/open-telemetry/opentelemetry-collector-releases/.github/workflows/base-release.yaml@refs/tags/v0.162.0"
+
+func upstreamIdentity() Identity {
+	return Identity{
+		SANRegexp: `^https://github\.com/open-telemetry/opentelemetry-collector-releases/\.github/workflows/base-release\.yaml@refs/tags/v0\.162\.0$`,
+		Issuer:    GitHubActionsIssuer,
+		Tag:       "v0.162.0",
+	}
+}
+
+// The verifier that the installer bundles use accepts exactly the identity that the caller names.
+func TestExportedVerifierChecksTheIdentityOfTheCaller(t *testing.T) {
+	v := &Verifier{v: testVerifier(t)}
+	good, digest := readSig(t, contribBundle), digestOf(t, contribSHA)
+
+	san, err := v.Verify(good, digest, upstreamIdentity())
+	require.NoError(t, err)
+	assert.Equal(t, upstreamContribSAN, san)
+
+	t.Run("without a tag binding any release of the workflow does", func(t *testing.T) {
+		id := upstreamIdentity()
+		id.Tag = ""
+		_, err := v.Verify(good, digest, id)
+		require.NoError(t, err)
+	})
+	t.Run("another tag", func(t *testing.T) {
+		id := upstreamIdentity()
+		id.Tag = "v0.161.0"
+		_, err := v.Verify(good, digest, id)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not bound to tag v0.161.0")
+	})
+	t.Run("a subject of another repository", func(t *testing.T) {
+		id := upstreamIdentity()
+		id.SANRegexp = `^https://github\.com/myriarch/myriarch/\.github/workflows/release\.yml@refs/tags/v0\.162\.0$`
+		_, err := v.Verify(good, digest, id)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "sigstore verification failed")
+	})
+	t.Run("a subject of another workflow of the same repository", func(t *testing.T) {
+		id := upstreamIdentity()
+		id.SANRegexp = `^https://github\.com/open-telemetry/opentelemetry-collector-releases/\.github/workflows/release\.yml@refs/tags/v0\.162\.0$`
+		_, err := v.Verify(good, digest, id)
+		require.Error(t, err)
+	})
+	t.Run("another issuer", func(t *testing.T) {
+		id := upstreamIdentity()
+		id.Issuer = "https://accounts.example.com"
+		_, err := v.Verify(good, digest, id)
+		require.Error(t, err)
+	})
+	t.Run("a digest of another file", func(t *testing.T) {
+		_, err := v.Verify(good, digestOf(t, superSHA), upstreamIdentity())
+		require.Error(t, err)
+	})
+	t.Run("a pattern that matches only a part of the subject", func(t *testing.T) {
+		// the caller forgot the anchors: sigstore-go would accept it, the verifier does not
+		for _, re := range []string{
+			`opentelemetry-collector-releases/\.github/workflows/base-release\.yaml@refs/tags/v0\.162\.0`,
+			`^https://github\.com/open-telemetry/opentelemetry-collector-releases/`,
+			`/\.github/workflows/base-release\.yaml@`,
+		} {
+			id := upstreamIdentity()
+			id.SANRegexp = re
+			_, err := v.Verify(good, digest, id)
+			require.Error(t, err, re)
+			assert.Contains(t, err.Error(), "as a whole", re) // sigstore-go accepted it, the check of the whole name did not
+		}
+		for _, re := range []string{
+			// a pattern that spans the whole subject is fine, anchored or not
+			`https://github\.com/open-telemetry/opentelemetry-collector-releases/.*`,
+			`^https://github\.com/open-telemetry/opentelemetry-collector-releases/\.github/workflows/base-release\.yaml@refs/tags/v0\.162\.0$|^never$`,
+		} {
+			id := upstreamIdentity()
+			id.SANRegexp = re
+			san, err := v.Verify(good, digest, id)
+			require.NoError(t, err, re)
+			assert.Equal(t, upstreamContribSAN, san)
+		}
+	})
+	t.Run("incomplete identities", func(t *testing.T) {
+		for _, id := range []Identity{{}, {SANRegexp: `^x$`}, {Issuer: GitHubActionsIssuer}} {
+			_, err := v.Verify(good, digest, id)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "needs a subject pattern and an issuer")
+		}
+	})
+	t.Run("a pattern that does not compile", func(t *testing.T) {
+		id := upstreamIdentity()
+		id.SANRegexp = "(["
+		_, err := v.Verify(good, digest, id)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "identity pattern")
+	})
+	t.Run("a bundle that is not one", func(t *testing.T) {
+		_, err := v.Verify([]byte("{not json"), digest, upstreamIdentity())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid sigstore bundle")
+	})
+}
+
+// The cache hands out a verifier also where signatures of the artifacts are not required, and one with the trusted
+// root of artifacts.verify.
+func TestCacheVerifier(t *testing.T) {
+	for _, required := range []bool{true, false} {
+		cfg := config.Default().Artifacts
+		cfg.Dir = t.TempDir()
+		cfg.Verify.RequireSignature = required
+		cfg.Verify.TrustedRootFile = filepath.Join(sigDir, "trusted_root.json")
+		c, err := NewCache(cfg, Deps{Store: nil})
+		require.NoError(t, err)
+		assert.Equal(t, cfg.Dir, c.Dir())
+		v, err := c.Verifier()
+		require.NoError(t, err, "requireSignature=%v", required)
+		again, _ := c.Verifier()
+		assert.Same(t, v, again, "one verifier, built once")
+		_, err = v.Verify(readSig(t, contribBundle), digestOf(t, contribSHA), upstreamIdentity())
+		require.NoError(t, err, "requireSignature=%v", required)
+	}
+
+	// an unusable trusted root is reported to the caller that needs the verifier, not at the start of a cache that
+	// does not require signatures
+	cfg := config.Default().Artifacts
+	cfg.Dir = t.TempDir()
+	cfg.Verify.RequireSignature = false
+	cfg.Verify.TrustedRootFile = filepath.Join(t.TempDir(), "missing.json")
+	c, err := NewCache(cfg, Deps{Store: nil})
+	require.NoError(t, err)
+	_, err = c.Verifier()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "artifacts.verify.trustedRootFile")
+}

@@ -24,3 +24,5 @@ export const STORAGE_KEY_PREFIX = 'myriarch.';
 export const MOCK_DEBUG_HOOK = '__myriarchMock';
 export const LINUX_COLLECTOR_EXECUTABLE = '/opt/myriarch/collector/current/otelcol-contrib';
 export const ENROLLMENT_TOKEN_FILE = 'enrollment-token';
+export const ENROLLMENT_TOKEN_PLACEHOLDER = '@@MYRIARCH_ENROLLMENT_TOKEN@@';
+export const INSTALL_SETUP_DIR = 'myriarch-setup';

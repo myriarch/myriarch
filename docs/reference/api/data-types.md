@@ -1,6 +1,6 @@
 ---
 title: "Data types"
-weight: 190
+weight: 200
 description: "Every schema of the REST API with its fields, types, constraints and values."
 ---
 
@@ -822,6 +822,129 @@ Effective target version of a fleet and where it comes from.
 Lower-case hex encoded hash
 
 Type: `string`. Pattern `^[0-9a-f]*$`.
+
+## InstallBundle
+
+The installer bundle for one platform.
+
+| Field | Type | Description |
+|---|---|---|
+| `os` (required) | `string` | One of `linux`, `windows`. |
+| `arch` (required) | `string` | One of `amd64`, `arm64`. |
+| `version` (required) | `string` | The version of the bundle. Example `0.2.0`. |
+| `filename` (required) | `string` | Example `myriarch-updater_0.2.0_linux_amd64.tar.gz`. |
+| `status` (required) | `string` | One of `pending`, `preparing`, `ready`, `failed`. |
+| `sha256` | `string` | The SHA-256 of the archive in lower case hex: its line in the signed checksums.txt of the release. The copied command pins it. Ready only. |
+| `size` | `integer` | The size of the archive in bytes. Ready only. Format `int64`. |
+| `error` | `string` | Why the last attempt failed. Failed only. |
+
+## InstallBundleList
+
+| Field | Type | Description |
+|---|---|---|
+| `source` (required) | `string` | release: the bundles of the release that this server runs. directory: the archives of a directory of a development server. none: the server has no bundles. One of `release`, `directory`, `none`. |
+| `version` | `string` | The version of the bundles. Not for none. Example `0.2.0`. |
+| `reason` | `string` | Why there are none (source none): the server is not a release of the project. One of `local_build`. |
+| `items` (required) | array of [InstallBundle](#installbundle) | One bundle for each platform of install.platforms. |
+
+## InstallCommand
+
+| Field | Type | Description |
+|---|---|---|
+| `platform` (required) | `string` | Example `linux/amd64`. |
+| `shell` (required) | `string` | The shell that the command is for, run as root (sudo) or in an elevated Windows PowerShell. One of `bash`, `powershell`. |
+| `command` (required) | `string` | The text to copy. Lines end in LF. |
+| `bundle` (required) | [InstallBundle](#installbundle) |  |
+| `tokenFile` | `string` | The file with the token that the command reads (variant token_file). |
+
+## InstallCommands
+
+| Field | Type | Description |
+|---|---|---|
+| `variant` (required) | `string` | One of `token_inline`, `token_file`, `lab`. |
+| `server` (required) | `string` | The address of the server in the commands (server.publicUrl). Example `https://fleet.example.com`. |
+| `version` (required) | `string` | The version of the installer bundles. Example `0.2.0`. |
+| `insecure` (required) | `boolean` | True for the variant lab: the commands lower the checks of the installer for a development server. |
+| `tokenPlaceholder` | `string` | The text in each command that stands for the enrollment token. The person replaces it, in every command, with the token. Not for the variant token_file. Example `@@MYRIARCH_ENROLLMENT_TOKEN@@`. |
+| `commands` (required) | array of [InstallCommand](#installcommand) |  |
+
+## InstallCommandsRequest
+
+The request for install commands. It holds no secret. `attributes` may hold `site.type` and `site.id` (required), `site.name`, `site.country`,
+`site.region`, `site.timezone` and `deployment.environment.name`: the options of the installers for the site.
+
+| Field | Type | Description |
+|---|---|---|
+| `variant` | `string` | The default is token_inline. lab is for development servers only. One of `token_inline`, `token_file`, `lab`. Example `token_inline`. |
+| `platforms` | array of `string` | The platforms (os/arch) to render a command for, each of install.platforms. Without any, all of them. At most 8 items. Items: example `linux/amd64`. |
+| `fleet` | `string` | The fleet that the person expects. The installer passes it to the plan, and the server refuses a host that it assigns elsewhere (fleet_mismatch). Example `linux-hosts`. |
+| `attributes` | [StringMap](#stringmap) |  |
+| `collectorVersion` | `string` | A collector version that the host asks for. The plan accepts it inside the Git frame of the fleet only. Example `0.162.0`. |
+| `tokenFiles` | [InstallTokenFiles](#installtokenfiles) |  |
+| `caFile` | `string` | The path of the PEM file with the CA of the server on a Linux host. A Windows host uses the certificate store of the machine. Example `/etc/ssl/myriarch-ca.pem`. |
+
+## InstallPlan
+
+The plan for a host, as JSON. The text form has the same content in the lines `format`, `fleet`, `version.source`, `opamp.endpoint`, `collector.version`, `collector.url`, `collector.grant`, `supervisor.version`, `supervisor.url`, `supervisor.grant` and `updater.install`.
+
+| Field | Type | Description |
+|---|---|---|
+| `format` (required) | `integer` | One of `1`. |
+| `fleet` (required) | `string` | The fleet that the host would join. Example `linux-hosts`. |
+| `version` (required) | [InstallPlanVersion](#installplanversion) |  |
+| `opamp` (required) | [InstallPlanOpAMP](#installplanopamp) |  |
+| `collector` (required) | [InstallPlanArtifact](#installplanartifact) |  |
+| `supervisor` (required) | [InstallPlanArtifact](#installplanartifact) |  |
+| `updater` (required) | [InstallPlanUpdater](#installplanupdater) |  |
+
+## InstallPlanArtifact
+
+| Field | Type | Description |
+|---|---|---|
+| `version` (required) | `string` | The version without "v". Example `0.162.0`. |
+| `url` (required) | `string` | The URL of the artifact on the origin of the server. Add ".sha256" and ".sigstore.json" for the checksum and the Sigstore bundle. |
+| `grant` (required) | `string` | The install grant (a "myrd_" token) for this artifact, sent as a bearer token. It is bound to the enrollment token of the request and expires after install.grantTtl. |
+
+## InstallPlanOpAMP
+
+| Field | Type | Description |
+|---|---|---|
+| `endpoint` (required) | `string` | The OpAMP endpoint of the host: wss:// for an https public URL (ws:// for the http URL of a development server). Example `wss://fleet.example.com/v1/opamp`. |
+
+## InstallPlanRequest
+
+The request for a plan. It holds no secret. `attributes` may only hold `host.name`, `site.type`, `site.id`, `site.name`,
+`site.country`, `site.region`, `site.timezone` and `deployment.environment.name` (values of 1 to 253 characters without control
+characters or surrounding spaces); `os.type` and `host.arch` come from `os` and `arch`, and the labels come from the enrollment token.
+
+| Field | Type | Description |
+|---|---|---|
+| `os` (required) | `string` | One of `linux`, `windows`. Example `linux`. |
+| `arch` (required) | `string` | amd64 or arm64; aliases such as x86_64 and aarch64 are accepted. Windows is amd64 only. Example `amd64`. |
+| `attributes` | [StringMap](#stringmap) |  |
+| `fleet` | `string` | The fleet that the person expects. The server decides; a fleet that does not agree is refused with 409 fleet_mismatch. Example `linux-hosts`. |
+| `collectorVersion` | `string` | A collector version without "v" that the host asks for, accepted inside the Git frame of the fleet only. Example `0.162.0`. |
+
+## InstallPlanUpdater
+
+| Field | Type | Description |
+|---|---|---|
+| `install` (required) | `boolean` | Whether the myriarch-updater is installed: the fleet updates its collectors through the updater executor. |
+
+## InstallPlanVersion
+
+| Field | Type | Description |
+|---|---|---|
+| `source` (required) | `string` | Where the version comes from: spec.collector.version (git), the choice in the UI (ui), the version before the running version rollout (rollout) or the version that the host asked for (request). One of `git`, `ui`, `rollout`, `request`. |
+
+## InstallTokenFiles
+
+The paths of the file with the token on the host (variant token_file), for each operating system that is rendered.
+
+| Field | Type | Description |
+|---|---|---|
+| `linux` | `string` | Example `/etc/myriarch/enrollment-token`. |
+| `windows` | `string` | Example `C:\ProgramData\Secrets\myriarch-token.txt`. |
 
 ## Issue
 

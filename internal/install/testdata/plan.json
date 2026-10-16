@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "fleet": "linux-hosts",
+  "version": {
+    "source": "git"
+  },
+  "opamp": {
+    "endpoint": "wss://fleet.example.com/v1/opamp"
+  },
+  "collector": {
+    "version": "0.162.0",
+    "url": "https://fleet.example.com/api/v1/artifacts/01a14077-2a29-7e29-874e-f4649a44ee59/content/otelcol-contrib_0.162.0_linux_amd64.tar.gz",
+    "grant": "myrd_ZXhhbXBsZS1jb2xsZWN0b3ItZ3JhbnQ.ZXhhbXBsZS1zaWduYXR1cmU"
+  },
+  "supervisor": {
+    "version": "0.162.0",
+    "url": "https://fleet.example.com/api/v1/artifacts/01a14077-2a29-7e29-874e-f4649a44ee60/content/opampsupervisor_0.162.0_linux_amd64",
+    "grant": "myrd_ZXhhbXBsZS1zdXBlcnZpc29yLWdyYW50.ZXhhbXBsZS1zaWduYXR1cmU"
+  },
+  "updater": {
+    "install": true
+  }
+}

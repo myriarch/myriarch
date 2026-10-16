@@ -3,7 +3,7 @@
 
 // Package fleetapi implements the REST endpoints of the tags fleets,
 // blueprints, rolloutPolicies, executors, rollouts, releases, gitops,
-// artifacts and notifications.
+// artifacts, notifications and install.
 package fleetapi
 
 import (
@@ -21,6 +21,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/myriarch/myriarch/internal/api"
 	"github.com/myriarch/myriarch/internal/api/dto"
@@ -33,6 +34,7 @@ import (
 	"github.com/myriarch/myriarch/internal/domain"
 	"github.com/myriarch/myriarch/internal/eventbus"
 	"github.com/myriarch/myriarch/internal/gitops"
+	"github.com/myriarch/myriarch/internal/install"
 	"github.com/myriarch/myriarch/internal/notify"
 	"github.com/myriarch/myriarch/internal/release"
 	"github.com/myriarch/myriarch/internal/rollout"
@@ -55,6 +57,13 @@ type Deps struct {
 	Bus    eventbus.Bus
 	Config config.Config
 	Logger *slog.Logger
+	// Install answers the plan requests of hosts that install from the server and InstallAuth authenticates them
+	// by enrollment token (ADR-0046). Without either, or with install.enabled off, the routes of the tag install
+	// answer 404.
+	Install     *install.Planner
+	InstallAuth InstallAuthenticator
+	// Registerer receives the metrics of the install routes (nil: none are registered).
+	Registerer prometheus.Registerer
 }
 
 // statsTTL is how long aggregated fleet statistics are reused (the UI
@@ -80,6 +89,9 @@ type service struct {
 	issuesCommit string
 	issuesAll    domain.Issues
 	issuesValid  bool
+
+	installPlans           *prometheus.CounterVec
+	installBundleDownloads *prometheus.CounterVec
 }
 
 // New returns the fleet modules, one per OpenAPI tag (module name = tag); the
@@ -98,6 +110,8 @@ func newService(deps Deps) *service {
 	if s.d.Notifier == nil {
 		s.d.Notifier = notify.Nop{}
 	}
+	s.installPlans = newInstallMetrics(deps.Registerer)
+	s.installBundleDownloads = newBundleMetrics(deps.Registerer)
 	return s
 }
 
@@ -112,6 +126,7 @@ func (s *service) modules() []api.Module {
 		module("gitops", s.gitopsRoutes),
 		module("artifacts", s.artifactRoutes),
 		module("notifications", s.notificationRoutes),
+		module("install", s.installRoutes),
 	}
 }
 

@@ -1223,6 +1223,155 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/install/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plan for installing a host from the server (authenticated by an enrollment token)
+         * @description Available from v0.2.0. The installers call this before a host is enrolled, and so can tools. The request names the platform of the host,
+         *     the site attributes that it would report and, optionally, the fleet that the person expects and a collector version. The server decides the
+         *     fleet exactly as it does for an agent that connects (the attributes and the labels of the enrollment token), takes the version from the
+         *     effective target of the fleet and prepares the collector and the supervisor for the platform. The answer names the versions, the
+         *     URLs of the artifacts on the origin of the server and an install grant for each. The installer downloads an artifact with
+         *     `Authorization: Bearer <grant>` from `downloadArtifact` and fetches `<url>.sha256` and `<url>.sigstore.json` from the same route; it
+         *     verifies both against an identity that it builds itself, so the answer is data and never code.
+         *
+         *     The request is authenticated by the enrollment token that the host will use, as `Authorization: Bearer myre_...`, always: also
+         *     where `opamp.requireEnrollmentToken` is off, and with the client certificate rule of the OpAMP endpoint where
+         *     `opamp.requireClientCert` is set. The token never appears in a body, a URL or an answer. A request without a token and one with a token
+         *     that is unknown, revoked or expired get the same 401. Failed authentications are limited per client address, and the lookups of tokens
+         *     per replica (429 with `Retry-After`).
+         *
+         *     The plan is `text/plain` by default: one `key=value` line each, in the order of the keys below, with values from the characters
+         *     `A-Z a-z 0-9 . _ : / @ + = -` (the three URL values may also hold the brackets of an IPv6 literal), at most 64 lines and 8 KiB, so that bash
+         *     without `jq` and Windows PowerShell 5.1 can read it. `Accept: application/json` returns the object `InstallPlan`. The keys are
+         *     `format` (1; a reader stops at a format that it does not know), `fleet`, `version.source`, `opamp.endpoint`, `collector.version`,
+         *     `collector.url`, `collector.grant`, `supervisor.version`, `supervisor.url`, `supervisor.grant` and `updater.install`.
+         *
+         *     The version is the effective target of the fleet (`version.source` is `git` or `ui`). While a version rollout of the fleet is
+         *     pending, running or waiting for approval it is the version the fleet ran before (`rollout`), so that the new host becomes a straggler of
+         *     the last wave. A version that the host asks for is accepted if it is the target, the version the plan would give anyway or inside the
+         *     frame `spec.update.selection` in Git (`request`). The supervisor has the version of the collector, and the release tracker must know
+         *     both releases. A target that the rollout planner has not handled yet (a new target in Git or a new selection in the UI, before the leader
+         *     has created the rollout for it) is not handed out, so that a new host cannot skip the waves and approvals: the answer is `preparing`.
+         *
+         *     A refusal is a problem document. The class is its `code` and the reason is the `code` of `issues[0]`, which the installers show:
+         *     `conflict` with `fleet_mismatch`, `no_fleet`, `fleet_ambiguous` or `rollout_blocking`; `precondition_failed` with `no_target_version`,
+         *     `unsupported_distribution`, `unknown_version`, `unknown_supervisor_version` or `server_settings`; `validation_failed` with
+         *     `invalid_value`, `unknown_attribute`, `platform_not_supported`, `version_not_allowed`, `unknown_version` or `unknown_supervisor_version`;
+         *     `unavailable` with `preparing`. The first request for a platform makes the server download about 112 MB, so it can answer
+         *     `preparing` for minutes, and a target that was just changed makes it answer `preparing` for the seconds that the planner needs; the
+         *     installer asks again after `Retry-After`.
+         */
+        post: operations["getInstallPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/install/bundles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The installer bundles of this server and their state
+         * @description Available from v0.2.0. The installer bundle is the updater archive of the release that the server itself runs
+         *     (`myriarch-updater_<version>_<os>_<arch>.tar.gz` or `.zip`: the installer scripts, the templates and the myriarch-updater binary),
+         *     which a host downloads with `downloadInstallBundle` before it runs the installer from it. The server fetches the archives from
+         *     `install.bundleSourceBaseUrl` and keeps one for each platform of `install.platforms`, but only after it verified `checksums.txt` of the
+         *     release keyless against the release workflow of this project and found the archive in it. Reading this list changes nothing: the
+         *     preparation starts shortly after the start of the server and when somebody renders commands or asks for a bundle.
+         *
+         *     `source` is `release` (the bundles of this release), `directory` (a development server that serves the archives of a directory) or
+         *     `none`. A server that is not a release of the project (a local build, `reason` is `local_build`) has no bundles. `status` is `pending`,
+         *     `preparing`, `ready` or `failed`; a failed bundle has the reason in `error`, is not delivered and is tried again after a minute.
+         *     Each replica keeps its own bundles, so the list shows the replica that answers.
+         */
+        get: operations["listInstallBundles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/install/bundles/{filename}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download an installer bundle (authenticated by an enrollment token; Range supported)
+         * @description Available from v0.2.0. The copied install command downloads the bundle from here and checks the SHA-256 that the command pins before
+         *     it unpacks anything. The request is authenticated by the enrollment token that the host will use, as `Authorization: Bearer myre_...`,
+         *     always, and with the rules of `getInstallPlan`: a request without a token and one with a token that is unknown, revoked or expired get the
+         *     same 401, and failed authentications and lookups are limited (429). The token is never part of the URL.
+         *
+         *     The server delivers the bytes of the release and nothing else. Before every delivery it hashes the stored archive again against the SHA-256 of
+         *     its line in the signed `checksums.txt`; an archive that is gone or changed is discarded and fetched again, and the request gets 503 with
+         *     `Retry-After`. The `ETag` is `"sha256-<hex>"`.
+         */
+        get: operations["downloadInstallBundle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/install/commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Render the install commands for hosts (a command for each platform)
+         * @description Available from v0.2.0. The command that a person copies to a host: it downloads the installer bundle of this server, checks the
+         *     SHA-256 that it pins, unpacks the bundle in a private directory and starts the installer from it, which asks the server for the plan.
+         *     The server renders the command and never sees a token. The variant `token_inline` has the placeholder `tokenPlaceholder` where the token
+         *     goes; the web UI replaces it in the browser with the token that the person created or pasted, in every command. The variant `token_file`
+         *     reads the token from a file on the host (`tokenFiles`, one path for each operating system that is rendered) and has no placeholder. The
+         *     variant `lab` is `token_inline` for a development server over plain http, with `--insecure` for the installer; any other server refuses it.
+         *     A command that carries a token needs `server.publicUrl` to be an https URL. A server that requires a client certificate
+         *     (`opamp.requireClientCert`) renders no command (412, reason `server_settings`): the routes of the installation ask for a verified client
+         *     certificate there too, and the commands cannot present one.
+         *
+         *     The text of a command is a constant. Every value (the server, the bundle, its SHA-256, the options of the installer) is an argument of its own,
+         *     quoted with single quotes, and has been checked against an allowlist: printable ASCII, no quotation mark of any kind (also not the typographic
+         *     ones of U+2018 to U+201E), no backtick, `$`, `;` or control character, no `@@`, nothing that looks like a token, and a length limit. Anything else
+         *     is 422 and nothing is rendered. The installers need the type and the ID of the site, so `site.type` and `site.id` are required.
+         *
+         *     The commands are for a root shell on Linux (they start with `sudo`) and an elevated Windows PowerShell. Reading them is `read`, creating a
+         *     token for them needs `enrollment:manage` as before.
+         *
+         *     A bundle that is not `ready` yet is 503 with `Retry-After` (reason `bundle_preparing`, or `bundle_failed` with the cause); the request starts the
+         *     preparation. A server that is not a release has no bundle: 412 with the reason `local_build`.
+         */
+        post: operations["renderInstallCommands"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2595,6 +2744,196 @@ export interface components {
             version: string;
             /** @description Platforms (os/arch) to fetch. Omitted or empty means the server default: the configured artifacts.prefetchPlatforms (empty by default); when none are configured either, the distinct platforms of the connected collectors of the fleets that use this distribution. The request fails with 422 if that set is empty too. */
             platforms?: string[];
+        };
+        /**
+         * @description The request for a plan. It holds no secret. `attributes` may only hold `host.name`, `site.type`, `site.id`, `site.name`,
+         *     `site.country`, `site.region`, `site.timezone` and `deployment.environment.name` (values of 1 to 253 characters without control
+         *     characters or surrounding spaces); `os.type` and `host.arch` come from `os` and `arch`, and the labels come from the enrollment token.
+         */
+        InstallPlanRequest: {
+            /**
+             * @example linux
+             * @enum {string}
+             */
+            os: "linux" | "windows";
+            /**
+             * @description amd64 or arm64; aliases such as x86_64 and aarch64 are accepted. Windows is amd64 only.
+             * @example amd64
+             */
+            arch: string;
+            attributes?: components["schemas"]["StringMap"];
+            /**
+             * @description The fleet that the person expects. The server decides; a fleet that does not agree is refused with 409 fleet_mismatch.
+             * @example linux-hosts
+             */
+            fleet?: string;
+            /**
+             * @description A collector version without "v" that the host asks for, accepted inside the Git frame of the fleet only.
+             * @example 0.162.0
+             */
+            collectorVersion?: string;
+        };
+        /** @description The plan for a host, as JSON. The text form has the same content in the lines `format`, `fleet`, `version.source`, `opamp.endpoint`, `collector.version`, `collector.url`, `collector.grant`, `supervisor.version`, `supervisor.url`, `supervisor.grant` and `updater.install`. */
+        InstallPlan: {
+            /** @enum {integer} */
+            format: 1;
+            /**
+             * @description The fleet that the host would join.
+             * @example linux-hosts
+             */
+            fleet: string;
+            version: components["schemas"]["InstallPlanVersion"];
+            opamp: components["schemas"]["InstallPlanOpAMP"];
+            collector: components["schemas"]["InstallPlanArtifact"];
+            supervisor: components["schemas"]["InstallPlanArtifact"];
+            updater: components["schemas"]["InstallPlanUpdater"];
+        };
+        InstallPlanVersion: {
+            /**
+             * @description Where the version comes from: spec.collector.version (git), the choice in the UI (ui), the version before the running version rollout (rollout) or the version that the host asked for (request).
+             * @enum {string}
+             */
+            source: "git" | "ui" | "rollout" | "request";
+        };
+        InstallPlanOpAMP: {
+            /**
+             * @description The OpAMP endpoint of the host: wss:// for an https public URL (ws:// for the http URL of a development server).
+             * @example wss://fleet.example.com/v1/opamp
+             */
+            endpoint: string;
+        };
+        InstallPlanArtifact: {
+            /**
+             * @description The version without "v".
+             * @example 0.162.0
+             */
+            version: string;
+            /** @description The URL of the artifact on the origin of the server. Add ".sha256" and ".sigstore.json" for the checksum and the Sigstore bundle. */
+            url: string;
+            /** @description The install grant (a "myrd_" token) for this artifact, sent as a bearer token. It is bound to the enrollment token of the request and expires after install.grantTtl. */
+            grant: string;
+        };
+        InstallPlanUpdater: {
+            /** @description Whether the myriarch-updater is installed: the fleet updates its collectors through the updater executor. */
+            install: boolean;
+        };
+        /** @description The installer bundle for one platform. */
+        InstallBundle: {
+            /** @enum {string} */
+            os: "linux" | "windows";
+            /** @enum {string} */
+            arch: "amd64" | "arm64";
+            /**
+             * @description The version of the bundle.
+             * @example 0.2.0
+             */
+            version: string;
+            /** @example myriarch-updater_0.2.0_linux_amd64.tar.gz */
+            filename: string;
+            /** @enum {string} */
+            status: "pending" | "preparing" | "ready" | "failed";
+            /** @description The SHA-256 of the archive in lower case hex: its line in the signed checksums.txt of the release. The copied command pins it. Ready only. */
+            sha256?: string;
+            /**
+             * Format: int64
+             * @description The size of the archive in bytes. Ready only.
+             */
+            size?: number;
+            /** @description Why the last attempt failed. Failed only. */
+            error?: string;
+        };
+        InstallBundleList: {
+            /**
+             * @description release: the bundles of the release that this server runs. directory: the archives of a directory of a development server. none: the server has no bundles.
+             * @enum {string}
+             */
+            source: "release" | "directory" | "none";
+            /**
+             * @description The version of the bundles. Not for none.
+             * @example 0.2.0
+             */
+            version?: string;
+            /**
+             * @description Why there are none (source none): the server is not a release of the project.
+             * @enum {string}
+             */
+            reason?: "local_build";
+            /** @description One bundle for each platform of install.platforms. */
+            items: components["schemas"]["InstallBundle"][];
+        };
+        /**
+         * @description The request for install commands. It holds no secret. `attributes` may hold `site.type` and `site.id` (required), `site.name`, `site.country`,
+         *     `site.region`, `site.timezone` and `deployment.environment.name`: the options of the installers for the site.
+         */
+        InstallCommandsRequest: {
+            /**
+             * @description The default is token_inline. lab is for development servers only.
+             * @example token_inline
+             * @enum {string}
+             */
+            variant?: "token_inline" | "token_file" | "lab";
+            /** @description The platforms (os/arch) to render a command for, each of install.platforms. Without any, all of them. */
+            platforms?: string[];
+            /**
+             * @description The fleet that the person expects. The installer passes it to the plan, and the server refuses a host that it assigns elsewhere (fleet_mismatch).
+             * @example linux-hosts
+             */
+            fleet?: string;
+            attributes?: components["schemas"]["StringMap"];
+            /**
+             * @description A collector version that the host asks for. The plan accepts it inside the Git frame of the fleet only.
+             * @example 0.162.0
+             */
+            collectorVersion?: string;
+            tokenFiles?: components["schemas"]["InstallTokenFiles"];
+            /**
+             * @description The path of the PEM file with the CA of the server on a Linux host. A Windows host uses the certificate store of the machine.
+             * @example /etc/ssl/myriarch-ca.pem
+             */
+            caFile?: string;
+        };
+        /** @description The paths of the file with the token on the host (variant token_file), for each operating system that is rendered. */
+        InstallTokenFiles: {
+            /** @example /etc/myriarch/enrollment-token */
+            linux?: string;
+            /** @example C:\ProgramData\Secrets\myriarch-token.txt */
+            windows?: string;
+        };
+        InstallCommands: {
+            /** @enum {string} */
+            variant: "token_inline" | "token_file" | "lab";
+            /**
+             * @description The address of the server in the commands (server.publicUrl).
+             * @example https://fleet.example.com
+             */
+            server: string;
+            /**
+             * @description The version of the installer bundles.
+             * @example 0.2.0
+             */
+            version: string;
+            /** @description True for the variant lab: the commands lower the checks of the installer for a development server. */
+            insecure: boolean;
+            /**
+             * @description The text in each command that stands for the enrollment token. The person replaces it, in every command, with the token. Not for the variant token_file.
+             * @example @@MYRIARCH_ENROLLMENT_TOKEN@@
+             */
+            tokenPlaceholder?: string;
+            commands: components["schemas"]["InstallCommand"][];
+        };
+        InstallCommand: {
+            /** @example linux/amd64 */
+            platform: string;
+            /**
+             * @description The shell that the command is for, run as root (sudo) or in an elevated Windows PowerShell.
+             * @enum {string}
+             */
+            shell: "bash" | "powershell";
+            /** @description The text to copy. Lines end in LF. */
+            command: string;
+            bundle: components["schemas"]["InstallBundle"];
+            /** @description The file with the token that the command reads (variant token_file). */
+            tokenFile?: string;
         };
         ChannelInfo: {
             name: string;
@@ -4575,6 +4914,246 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+        };
+    };
+    getInstallPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstallPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description The plan (header Vary: Accept) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                    "application/json": components["schemas"]["InstallPlan"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The installation of hosts from the server is turned off (`install.enabled`; code not_found) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The host cannot be placed or a version rollout is in the way (code conflict; reasons fleet_mismatch, no_fleet, fleet_ambiguous, rollout_blocking) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The server has no version to give (code precondition_failed; reasons no_target_version, unsupported_distribution, unknown_version, unknown_supervisor_version, server_settings) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not acceptable (code validation_failed; the issues name the field in `path`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many failed authentications from this client address, or too many token lookups on this replica (code too_many_requests, header Retry-After) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The artifacts are being prepared, or the planner has not handled the new target of the fleet yet (code unavailable, reason preparing, header Retry-After), or the database is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listInstallBundles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The bundles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallBundleList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description The installation of hosts from the server is turned off (`install.enabled`; code not_found) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    downloadInstallBundle: {
+        parameters: {
+            query?: never;
+            header?: {
+                Range?: string;
+            };
+            path: {
+                /** @description The name of the archive, for example `myriarch-updater_0.2.0_linux_amd64.tar.gz` (`.zip` for Windows). Only the bundles of this server exist. */
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The archive */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/gzip": string;
+                    "application/zip": string;
+                };
+            };
+            /** @description Partial content */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/gzip": string;
+                    "application/zip": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description There is no such bundle, or the installation of hosts from the server is turned off (code not_found) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many failed authentications from this client address, or too many token lookups on this replica (code too_many_requests, header Retry-After) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The bundle is being prepared or failed, or the archive on the disk was found changed and is fetched again (code unavailable, reason bundle_preparing or bundle_failed, header Retry-After), or the database is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    renderInstallCommands: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for cookie-authenticated mutating requests (value of cookie myriarch_csrf). */
+                "X-CSRF-Token"?: components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstallCommandsRequest"];
+            };
+        };
+        responses: {
+            /** @description The commands (header Cache-Control: no-store) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallCommands"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The installation of hosts from the server is turned off (`install.enabled`; code not_found) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The server cannot give the commands (code precondition_failed; reasons local_build, server_settings) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not acceptable (code validation_failed; the issues name the field in `path`; reasons invalid_value, unknown_attribute, platform_not_supported, variant_not_available) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A bundle is being prepared or failed (code unavailable, reason bundle_preparing or bundle_failed, header Retry-After) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
 }
