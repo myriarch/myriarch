@@ -9,9 +9,15 @@ where it is going, how it is run, how to take part and how it is built. The prod
 [Documentation](/docs/).
 
 {{< cardpane >}}
+{{< card title="[What is Myriarch?](/project/what-is-myriarch/)" >}}The facts in one place: scope, license, maturity and version.{{< /card >}}
+{{< card title="[Comparison](/project/comparison/)" >}}The OpAMP Supervisor alone, your own server and Myriarch, and when Myriarch is not the right choice.{{< /card >}}
+{{< card title="[FAQ](/project/faq/)" >}}Short answers to the questions that come up first.{{< /card >}}
+{{< /cardpane >}}
+
+{{< cardpane >}}
 {{< card title="[Roadmap](/project/roadmap/)" >}}What the first release contains, what comes next and what is not planned.{{< /card >}}
 {{< card title="[Release notes](/project/changelog/)" >}}Notable changes of every release.{{< /card >}}
-{{< card title="[FAQ](/project/faq/)" >}}Short answers to the questions that come up first.{{< /card >}}
+{{< card title="[Upstream notes](/docs/design/upstream-notes/)" >}}Verified facts about the software Myriarch builds on, with sources and dates.{{< /card >}}
 {{< /cardpane >}}
 
 {{< cardpane >}}

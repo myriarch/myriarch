@@ -10,10 +10,12 @@ every option. To learn the system from the start, use the [tutorials](../getting
 
 | Guide | What it covers |
 |---|---|
+| [Manage many collectors with OpAMP and Git](manage-many-collectors.md) | Set up the server, a GitOps repository, the hosts and the first rollout. |
 | [Connect a host](connect-a-host.md) | Enroll a Linux or Windows host with the installation scripts. |
 | [Validate a GitOps repository](validate-a-gitops-repository.md) | Check and render configuration with `myrctl`, locally and in CI. |
 | [Roll out a configuration change](roll-out-a-config-change.md) | Waves, approval, failure handling and rollback for a blueprint change. |
 | [Roll out a collector version](roll-out-a-collector-version.md) | Version updates with the updater, webhook or AWX executor, and the choice in the UI within the Git frame. |
+| [Upgrade the Collector on many hosts](upgrade-collectors-on-many-hosts.md) | Set the target version in Git and roll it out with an executor, when the supervisor cannot. |
 | [Track releases and send notifications](track-releases-and-notify.md) | Upstream release tracking, breaking changes and notification channels. |
 | [Simulate a fleet](simulate-a-fleet.md) | Thousands of simulated supervisors and updaters with `myriarch-sim`. |
 | [Connect a real supervisor](connect-a-real-supervisor.md) | The upstream OpAMP Supervisor and `otelcol-contrib` on your machine. |
