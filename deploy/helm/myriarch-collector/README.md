@@ -73,7 +73,9 @@ Until it arrives, a fallback configuration with the `health_check` extension run
   `filelog` receiver) and `persistence.hostPath.enabled` (the identity of a node agent). The Pod Security levels `baseline` and
   `restricted` refuse a `hostPath` volume: label the namespace `privileged`, or use an exception of your admission policy. The
   chart has **no root init container**: prepare the directory of `persistence.hostPath` on the nodes, writable for the user of the
-  supervisor image (UID 10001); the pod log files must be readable for that user or its group.
+  supervisor image (UID 10001); the pod log files must be readable for that user. containerd creates them as `0640 root:root` and CRI-O as `0600`, so neither "others" nor
+  the user's group can read them: with containerd set `podSecurityContext.supplementalGroups: [0]` (a group ID, not a user ID; the OpenShift
+  profile removes `supplementalGroups`, so grant the group through the SCC there); with CRI-O that is not enough.
 * **NetworkPolicy** (`networkPolicy.enabled`): the ports of the receivers are reachable from the release namespace and from the
   namespaces that carry the label `myriarch.dev/otlp-client=true` (and the sources in `networkPolicy.ingress.from`); the health
   ports only from the release namespace. Egress stays open, because the server, the backends and DNS differ per environment.

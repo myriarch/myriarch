@@ -76,7 +76,10 @@ The DaemonSet runs one collector per node with `site.type=k8s-node`. Without `pe
 - `persistence.hostPath.enabled=true` keeps the instance UID on the node. The directory (default
   `/var/lib/myriarch/<fullname>`) must be writable by the user of the supervisor image (UID 10001), because the chart has no root
   init container that changes the owner: create it on the nodes, for example with your node provisioning.
-- `nodeLogs.enabled=true` mounts the logs of the node (default `/var/log/pods`) **read-only** for a `filelog` receiver.
+- `nodeLogs.enabled=true` mounts the logs of the node (default `/var/log/pods`) **read-only** for a `filelog` receiver. The supervisor user must be able to
+  read the files, and by default it cannot: containerd creates them as `0640 root:root`, CRI-O as `0600`. With containerd set
+  `podSecurityContext.supplementalGroups: [0]` (a group ID, not a user ID). The OpenShift profile removes `supplementalGroups`, so grant the
+  group through the SCC there. With CRI-O that is not enough. Not yet tested against a cluster.
 
 The examples [`gateway.yaml`](../../deploy/helm/myriarch-collector/examples/gateway.yaml),
 [`node-agent.yaml`](../../deploy/helm/myriarch-collector/examples/node-agent.yaml),

@@ -167,8 +167,10 @@ persistence:
     type: DirectoryOrCreate
 
 # DaemonSet only: read-only access to the logs of the node, for a filelog receiver. This is the one hostPath of the chart that is not
-# about identity. It needs the same privileged namespace as persistence.hostPath, and the files must be readable by the group of the
-# supervisor user (the pod log files are readable by group "root" and others on most distributions).
+# about identity. It needs the same privileged namespace as persistence.hostPath, and the files must be readable by the supervisor
+# user. containerd creates the pod log files as 0640 root:root and CRI-O as 0600, so neither "others" nor the user's own group can
+# read them: for containerd add the group ID 0 with podSecurityContext.supplementalGroups: [0] (a group, not a user ID; the OpenShift
+# profile removes supplementalGroups, so grant the group through the SCC there). CRI-O needs another way to read the files.
 nodeLogs:
   enabled: false
   # Directory on the node.

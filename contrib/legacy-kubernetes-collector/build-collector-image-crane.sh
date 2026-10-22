@@ -8,8 +8,6 @@
 #
 #   IMAGE_REPO=registry.example.com/<org>/myriarch-collector contrib/legacy-kubernetes-collector/build-collector-image-crane.sh 0.161.0
 #                                                                build + push  <IMAGE_REPO>:0.161.0-<git short sha>
-#   make collector-image-crane IMAGE_REPO=... OTELCOL_VERSION=0.161.0
-#                                                                the same through the Makefile (default: OTELCOL_VERSION of ci/versions.env)
 #   IMAGE_REPO=... DRY_RUN=1 contrib/legacy-kubernetes-collector/build-collector-image-crane.sh 0.161.0
 #                                                                read + check the upstream images, build the layer, push nothing
 #   IMAGE_REPO=... WITH_UPDATER=0 contrib/legacy-kubernetes-collector/build-collector-image-crane.sh 0.162.0
