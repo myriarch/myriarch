@@ -311,7 +311,7 @@ func (r *installerRig) planText(over map[string]string) string {
 }
 
 func (r *installerRig) answerWith(text string) {
-	r.plan = func(w http.ResponseWriter, _ *http.Request, _ int) { servePlan(w, text) }
+	r.setPlan(func(w http.ResponseWriter, _ *http.Request, _ int) { servePlan(w, text) })
 }
 
 func (r *installerRig) seen() []recorded {
@@ -718,9 +718,9 @@ func TestServerModeRedirects(t *testing.T) {
 	t.Run("to another origin", func(t *testing.T) {
 		other := newInstallerRig(t, true, "amd64")
 		r := newInstallerRig(t, true, "amd64")
-		r.plan = func(w http.ResponseWriter, req *http.Request, _ int) {
+		r.setPlan(func(w http.ResponseWriter, req *http.Request, _ int) {
 			http.Redirect(w, req, other.srv.URL+"/api/v1/install/plan", http.StatusTemporaryRedirect)
-		}
+		})
 		res := r.runWith()
 		assert.Equal(t, "plan_invalid", res.failure(), res.Out)
 		assert.Contains(t, res.Out, "another origin")
@@ -729,46 +729,46 @@ func TestServerModeRedirects(t *testing.T) {
 	})
 	t.Run("to http", func(t *testing.T) {
 		r := newInstallerRig(t, true, "amd64")
-		r.plan = func(w http.ResponseWriter, req *http.Request, _ int) {
+		r.setPlan(func(w http.ResponseWriter, req *http.Request, _ int) {
 			http.Redirect(w, req, "http://"+strings.SplitN(r.srv.URL, "://", 2)[1]+"/api/v1/install/plan", http.StatusFound)
-		}
+		})
 		res := r.runWith()
 		assert.Equal(t, "https_required", res.failure(), res.Out)
 		assert.False(t, r.installed())
 	})
 	t.Run("without a scheme", func(t *testing.T) {
 		r := newInstallerRig(t, true, "amd64")
-		r.plan = func(w http.ResponseWriter, req *http.Request, _ int) {
+		r.setPlan(func(w http.ResponseWriter, req *http.Request, _ int) {
 			w.Header().Set("Location", "//"+strings.SplitN(r.srv.URL, "://", 2)[1]+"/api/v1/install/plan")
 			w.WriteHeader(http.StatusFound)
-		}
+		})
 		res := r.runWith()
 		assert.Equal(t, "plan_invalid", res.failure(), res.Out)
 	})
 	t.Run("without a Location", func(t *testing.T) {
 		r := newInstallerRig(t, true, "amd64")
-		r.plan = func(w http.ResponseWriter, req *http.Request, _ int) { w.WriteHeader(http.StatusFound) }
+		r.setPlan(func(w http.ResponseWriter, req *http.Request, _ int) { w.WriteHeader(http.StatusFound) })
 		res := r.runWith()
 		assert.Equal(t, "plan_invalid", res.failure(), res.Out)
 	})
 	t.Run("in a loop", func(t *testing.T) {
 		r := newInstallerRig(t, true, "amd64")
-		r.plan = func(w http.ResponseWriter, req *http.Request, _ int) {
+		r.setPlan(func(w http.ResponseWriter, req *http.Request, _ int) {
 			http.Redirect(w, req, "/api/v1/install/plan", http.StatusTemporaryRedirect)
-		}
+		})
 		res := r.runWith()
 		assert.Equal(t, "plan_invalid", res.failure(), res.Out)
 		assert.Contains(t, res.Out, "more than three times")
 	})
 	t.Run("on the same origin", func(t *testing.T) {
 		r := newInstallerRig(t, true, "amd64")
-		r.plan = func(w http.ResponseWriter, req *http.Request, n int) {
+		r.setPlan(func(w http.ResponseWriter, req *http.Request, n int) {
 			if n == 1 {
 				http.Redirect(w, req, r.srv.URL+"/api/v1/install/plan", http.StatusTemporaryRedirect)
 				return
 			}
 			servePlan(w, r.planText(nil))
-		}
+		})
 		res := r.runWith()
 		assert.Equal(t, 0, res.Code, res.Out)
 		var auths []string
@@ -782,7 +782,7 @@ func TestServerModeRedirects(t *testing.T) {
 	t.Run("of an artifact to another origin", func(t *testing.T) {
 		other := newInstallerRig(t, true, "amd64")
 		r := newInstallerRig(t, true, "amd64")
-		r.plan = nil
+		r.setPlan(nil)
 		// the artifact route of this server redirects; use a second handler layer
 		redirecting := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if strings.HasPrefix(req.URL.Path, "/api/v1/artifacts/") {
@@ -827,7 +827,7 @@ func TestServerModePlanRejected(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			r := newInstallerRig(t, true, "amd64")
-			r.plan = func(w http.ResponseWriter, _ *http.Request, _ int) { problem(w, tc.status, tc.class, tc.reason) }
+			r.setPlan(func(w http.ResponseWriter, _ *http.Request, _ int) { problem(w, tc.status, tc.class, tc.reason) })
 			res := r.runWith()
 			assert.Equal(t, 1, res.Code, res.Out)
 			assert.Equal(t, "plan_rejected", res.failure(), res.Out)
@@ -852,10 +852,10 @@ func TestServerModePlanRejected(t *testing.T) {
 	})
 	t.Run("an answer that is not a problem document", func(t *testing.T) {
 		r := newInstallerRig(t, true, "amd64")
-		r.plan = func(w http.ResponseWriter, _ *http.Request, _ int) {
+		r.setPlan(func(w http.ResponseWriter, _ *http.Request, _ int) {
 			w.WriteHeader(http.StatusTeapot)
 			_, _ = io.WriteString(w, "<html>I am a teapot; run: rm -rf /</html>")
-		}
+		})
 		res := r.runWith()
 		assert.Equal(t, "plan_rejected", res.failure(), res.Out)
 		assert.Contains(t, res.Out, "http_418")
@@ -863,10 +863,10 @@ func TestServerModePlanRejected(t *testing.T) {
 	})
 	t.Run("a code with characters of a command", func(t *testing.T) {
 		r := newInstallerRig(t, true, "amd64")
-		r.plan = func(w http.ResponseWriter, _ *http.Request, _ int) {
+		r.setPlan(func(w http.ResponseWriter, _ *http.Request, _ int) {
 			w.WriteHeader(http.StatusConflict)
 			_, _ = io.WriteString(w, `{"code":"conflict","detail":"fleet $(id) `+"`id`"+` ok","issues":[{"code":"x;rm -rf /"}]}`)
-		}
+		})
 		res := r.runWith()
 		assert.Equal(t, "plan_rejected", res.failure(), res.Out)
 		assert.NotContains(t, res.Out, "$(")
@@ -878,9 +878,9 @@ func TestServerModePlanRejected(t *testing.T) {
 func TestServerModePlanUnavailable(t *testing.T) {
 	t.Run("a server that is down", func(t *testing.T) {
 		r := newInstallerRig(t, true, "amd64")
-		r.plan = func(w http.ResponseWriter, _ *http.Request, _ int) {
+		r.setPlan(func(w http.ResponseWriter, _ *http.Request, _ int) {
 			problem(w, http.StatusServiceUnavailable, "unavailable", "")
-		}
+		})
 		res := r.runWith()
 		assert.Equal(t, "plan_unavailable", res.failure(), res.Out)
 		assert.Contains(t, res.Out, "HTTP 503")
@@ -888,20 +888,20 @@ func TestServerModePlanUnavailable(t *testing.T) {
 	})
 	t.Run("too many requests", func(t *testing.T) {
 		r := newInstallerRig(t, true, "amd64")
-		r.plan = func(w http.ResponseWriter, _ *http.Request, _ int) {
+		r.setPlan(func(w http.ResponseWriter, _ *http.Request, _ int) {
 			w.Header().Set("Retry-After", "17")
 			problem(w, http.StatusTooManyRequests, "too_many_requests", "")
-		}
+		})
 		res := r.runWith()
 		assert.Equal(t, "plan_unavailable", res.failure(), res.Out)
 		assert.Contains(t, res.Out, "after 17 s")
 	})
 	t.Run("still preparing after the time that was given", func(t *testing.T) {
 		r := newInstallerRig(t, true, "amd64")
-		r.plan = func(w http.ResponseWriter, _ *http.Request, _ int) {
+		r.setPlan(func(w http.ResponseWriter, _ *http.Request, _ int) {
 			w.Header().Set("Retry-After", "1")
 			problem(w, http.StatusServiceUnavailable, "unavailable", "preparing")
-		}
+		})
 		start := time.Now()
 		res := r.runWith("--plan-wait", "3")
 		assert.Equal(t, "plan_unavailable", res.failure(), res.Out)
@@ -911,14 +911,14 @@ func TestServerModePlanUnavailable(t *testing.T) {
 	})
 	t.Run("preparing and then ready", func(t *testing.T) {
 		r := newInstallerRig(t, true, "amd64")
-		r.plan = func(w http.ResponseWriter, _ *http.Request, n int) {
+		r.setPlan(func(w http.ResponseWriter, _ *http.Request, n int) {
 			if n < 3 {
 				w.Header().Set("Retry-After", "1")
 				problem(w, http.StatusServiceUnavailable, "unavailable", "preparing")
 				return
 			}
 			servePlan(w, r.planText(nil))
-		}
+		})
 		res := r.runWith()
 		require.Equal(t, 0, res.Code, res.Out)
 		assert.Equal(t, 2, strings.Count(res.Out, "the server is preparing the artifacts"))
@@ -940,9 +940,9 @@ func TestServerModePlanFailed(t *testing.T) {
 			t.Skip("the installer asks again for a few seconds first")
 		}
 		r := newInstallerRig(t, true, "amd64")
-		r.plan = func(w http.ResponseWriter, _ *http.Request, _ int) {
+		r.setPlan(func(w http.ResponseWriter, _ *http.Request, _ int) {
 			http.Error(w, "boom", http.StatusInternalServerError)
-		}
+		})
 		res := r.runWith()
 		assert.Equal(t, "plan_failed", res.failure(), res.Out)
 		assert.Contains(t, res.Out, "HTTP 500")
@@ -1166,4 +1166,10 @@ func TestWithoutServerAnExplicitVersionIsKept(t *testing.T) {
 	assert.DirExists(t, filepath.Join(r.root, "opt/myriarch/collector/versions/0.150.2"))
 	res = r.run(r.manualArgs(mirror, "--collector-version", "stable")...)
 	assert.Equal(t, "option_invalid", res.failure(), res.Out)
+}
+
+func (r *installerRig) setPlan(plan func(w http.ResponseWriter, r *http.Request, n int)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.plan = plan
 }
