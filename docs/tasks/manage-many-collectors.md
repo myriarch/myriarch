@@ -26,11 +26,15 @@ v0.1.0) and go through the [production checklist](../operations/production-check
 Copy the starter in [gitops-template/](../../gitops-template/README.md) into an empty repository on your Git server, protect the
 default branch so that changes go through merge requests, and give the server a read-only token. The repository holds
 `blueprints/`, `fleets/`, `policies/`, `executors/` and `inventory/` below the path that you configure as `gitops.path`; the
-server reads every YAML file there as an object. See [Git as the source of truth](../concepts/gitops.md) for the layout and the rules.
+server reads every YAML file there as an object, except `samples/` directly below that path and directories whose name starts
+with a dot. The examples in steps 3 and 7 come from the complete example repository in
+[examples/quickstart](../../examples/quickstart/README.md); the starter template uses other names and values for sites and
+policies, so take the structure from the examples and the names from your own repository. See [Git as the source of truth](../concepts/gitops.md) for the layout and the rules.
 
 ## 3. Describe your fleets
 
-A fleet selects agents by their attributes and says what they run. This is the fleet `linux-hosts` of the example repository:
+A fleet selects agents by their attributes and says what they run. This is an excerpt of `examples/quickstart/fleets/linux-hosts.yaml`, shortened (it leaves out `description`, `displayName`,
+`parameters` and the selection frame for the UI):
 
 ```yaml
 apiVersion: myriarch.dev/v1alpha1
@@ -88,7 +92,7 @@ Windows hosts are experimental in v0.1.0. Collectors in Kubernetes run as contai
 ## 7. Change the fleet
 
 Edit a blueprint or a fleet in Git and merge. The server renders the fleets again and creates a configuration rollout for each fleet
-whose rendered configuration changed. With the example policy `config-canary`, the canary hosts get the change first, the rollout
+whose rendered configuration changed. With the quickstart policy `config-canary`, the canary hosts get the change first, the rollout
 waits for their health check and stops for approval before the rest of the fleet follows. If the failure threshold is reached,
 the policy decides between rolling back and pausing. [Roll out a configuration change](roll-out-a-config-change.md) shows the happy
 path and the failure path, and the actions you have in the UI and the API.
