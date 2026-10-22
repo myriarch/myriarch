@@ -100,6 +100,9 @@ type Engine struct {
 	// (store.PlannedTargetKey), so that the record is written when it changes only (guarded by fleetsMu). Run forgets
 	// it at the start of every term of leadership: another leader may have written the record in between.
 	lastPlanned map[string]string
+	// bridgeNoted is the target version for which each OpAMP Bridge was noted as
+	// left out of version rollouts (guarded by fleetsMu).
+	bridgeNoted map[domain.AgentID]string
 
 	// tzWarned holds the policy names the engine already warned about because
 	// their maintenance windows depend on rollouts.defaultTimezone.

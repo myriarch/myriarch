@@ -308,6 +308,14 @@ Files read, all in `cmd/operator-opamp-bridge/` at v0.161.0: [main.go](https://g
   the mode attribute in 0.157.0 ([#5424](https://github.com/open-telemetry/opentelemetry-operator/pull/5424)). A standalone
   client of a release before 0.157.0 therefore reports neither a recognisable name nor the attribute.
 
+- **Coexistence with the Operator.** The Operator and its Bridge stay the owner of the `OpenTelemetryCollector` resources.
+  Until a managing integration exists, myriarch recognises the Bridge, shows it read-only and sends it nothing that
+  changes a resource: no remote config in operator mode (with or without `spec.bridge.manage`), no restart command, no
+  version rollout. Versions change through `spec.image` in the deployment repository or a `gitops-pr` executor. In
+  standalone mode a fleet with `spec.bridge.manage: true` sends the rendered configuration under the key `myriarch.yaml`,
+  so the Bridge configuration has to name a config entry with that key. The server enforces this in the reconcile step
+  ([OpAMP server](opamp-server.md#bridge-agents)).
+
 ### Comparison in short
 
 Option a gives one agent per pod with full capabilities (component health, inventory, rollback, validation) and a small

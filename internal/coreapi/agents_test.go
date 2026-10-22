@@ -437,3 +437,26 @@ func TestDeleteAgent(t *testing.T) {
 		t.Fatalf("exactly one successful agent.delete audit event expected, got %d", success)
 	}
 }
+
+// An OpAMP Bridge is never restarted by the server, and the server keeps no
+// effective config of it (ADR-0037).
+func TestBridgeAgentRefusesRestartAndHasNoEffectiveConfig(t *testing.T) {
+	e := newEnv(t, nil)
+	bridge := e.seed(seed{host: "br", version: "0.162.0", online: true, kind: domain.AgentKindBridge})
+
+	r := e.do("operator", "POST", "/agents/"+bridge.String()+"/actions/restart", nil)
+	if r.Code != 412 || e.problemCode(r) != api.ErrorCodePreconditionFailed || !strings.Contains(string(r.Body), "Bridge") {
+		t.Fatalf("restart of a Bridge: %d %s", r.Code, r.Body)
+	}
+	if n := len(e.ctl.list()); n != 0 {
+		t.Fatalf("the restart of a Bridge must not reach the control: %v", e.ctl.list())
+	}
+	if r := e.get("/agents/" + bridge.String() + "/effective-config"); r.Code != 404 {
+		t.Fatalf("effective config of a Bridge: %d %s", r.Code, r.Body)
+	}
+	var d dto.AgentDetail
+	e.get("/agents/" + bridge.String()).into(&d)
+	if d.Agent.Kind != domain.AgentKindBridge || d.Outdated || d.LatestVersion != "" {
+		t.Fatalf("kind %q, outdated %v, latest %q", d.Agent.Kind, d.Outdated, d.LatestVersion)
+	}
+}

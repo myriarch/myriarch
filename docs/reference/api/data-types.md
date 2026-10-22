@@ -108,7 +108,7 @@ Type: `string`. Values:
 | `id` (required) | `integer` | Format `int64`. |
 | `agentId` (required) | `string` | Format `uuid`. |
 | `time` (required) | `string` | Format `date-time`. |
-| `type` (required) | `string` | One of `connected`, `disconnected`, `registered`, `description_changed`, `version_changed`, `health_changed`, `config_offered`, `config_applied`, `config_failed`, `assigned`, `package_offered`, `package_status`, `command`, `rollout_target`, `identity_conflict`. |
+| `type` (required) | `string` | One of `connected`, `disconnected`, `registered`, `description_changed`, `version_changed`, `health_changed`, `config_offered`, `config_applied`, `config_failed`, `assigned`, `package_offered`, `package_status`, `command`, `rollout_target`, `identity_conflict`, `bridge_locked`. |
 | `severity` (required) | `string` | One of `info`, `warning`, `error`. |
 | `message` (required) | `string` |  |
 | `details` | [AnyMap](#anymap) |  |
@@ -148,10 +148,13 @@ Type: `string`. Values:
 
 ## AgentKind
 
+bridge = the OpAMP Bridge of the OpenTelemetry Operator, recognised by the service.name io.opentelemetry.operator-opamp-bridge or the attribute opentelemetry.io/opamp.bridge.mode. The server sends it remote configuration only when a fleet sets spec.bridge.manage and the Bridge runs in standalone mode, never a restart command, and it is not part of version rollouts.
+
 Type: `string`. Values:
 
 - `collector`
 - `updater`
+- `bridge`
 - `unknown`
 
 ## AgentSummary

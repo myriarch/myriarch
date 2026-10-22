@@ -295,7 +295,7 @@ func (s *Service) markWritten(id domain.AgentID) {
 func (s *Service) assignOne(ctx context.Context, st *state, ag *domain.Agent, listedAt time.Time) (outcome, error) {
 	snap := st.snap
 	res := outcome{assignment: domain.Assignment{AgentID: ag.ID}}
-	if ag.Kind != domain.AgentKindCollector {
+	if ag.Kind != domain.AgentKindCollector && ag.Kind != domain.AgentKindBridge {
 		return res, nil
 	}
 	if s.staleSince(ag.ID, listedAt) {
@@ -361,6 +361,21 @@ func (s *Service) assignOne(ctx context.Context, st *state, ag *domain.Agent, li
 
 	fleet := match.Fleet
 	res.assignment.FleetName = fleet.Name
+	if ag.Kind == domain.AgentKindBridge {
+		// A Bridge is a member of the fleet that selects it, but is rendered a
+		// configuration only when the fleet opted in (ADR-0037). The opamp
+		// server holds the offer back as well.
+		if reason := domain.BridgeConfigLock(ag, fleet); reason != "" {
+			res.assignment.Error = reason
+			if err := write(store.AgentAssignmentUpdate{FleetName: fleet.Name, Error: reason}); err != nil {
+				return res, err
+			}
+			if prev.FleetName != fleet.Name {
+				s.fleetEvent(ctx, ag.ID, fleet.Name, prev.FleetName, snap.Commit, reason)
+			}
+			return res, nil
+		}
+	}
 	res.assignment.TargetVersion = st.targetVersion(fleet)
 
 	render, rerr := s.deps.Renderer.Render(blueprint.RenderInput{
@@ -557,7 +572,7 @@ func (s *Service) ReassignAll(ctx context.Context) error {
 	}
 	snap := st.snap
 	listedAt := time.Now()
-	agents, err := s.deps.Store.Agents().ListAll(ctx, store.AgentFilter{Kinds: []domain.AgentKind{domain.AgentKindCollector}})
+	agents, err := s.deps.Store.Agents().ListAll(ctx, store.AgentFilter{Kinds: []domain.AgentKind{domain.AgentKindCollector, domain.AgentKindBridge}})
 	if err != nil {
 		return fmt.Errorf("list agents: %w", err)
 	}

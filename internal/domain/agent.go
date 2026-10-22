@@ -23,6 +23,11 @@ const (
 	// AgentKindUpdater is a myriarch-updater host agent
 	// (service.name == UpdaterServiceName).
 	AgentKindUpdater AgentKind = "updater"
+	// AgentKindBridge is the OpAMP Bridge of the OpenTelemetry Operator: it
+	// speaks for many collectors, so a fleet configures it only with the opt-in
+	// spec.bridge.manage, and it never takes part in restarts, version
+	// rollouts or the fleet statistics (bridge.go, ADR-0037).
+	AgentKindBridge AgentKind = "bridge"
 	// AgentKindUnknown is any other OpAMP agent.
 	AgentKindUnknown AgentKind = "unknown"
 )
@@ -275,6 +280,9 @@ const (
 	AgentEventCommand          AgentEventType = "command"
 	AgentEventRolloutTarget    AgentEventType = "rollout_target"
 	AgentEventIdentityConflict AgentEventType = "identity_conflict"
+	// AgentEventBridgeLocked records an action that the server held back from an
+	// OpAMP Bridge (remote config, restart, version rollout; ADR-0037).
+	AgentEventBridgeLocked AgentEventType = "bridge_locked"
 )
 
 // AgentEvent is one entry of an agent's history (timeline in the UI).

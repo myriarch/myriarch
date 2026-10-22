@@ -111,6 +111,13 @@ func (s *Server) processDescription(ctx context.Context, sess *session, ci *conn
 			return fmt.Errorf("upsert description: %w", err)
 		}
 		sess.agent = a
+		if old != nil && old.Kind != domain.AgentKindBridge && a.Kind == domain.AgentKindBridge && !a.EffectiveConfigHash.IsZero() {
+			// the agent was taken for a collector before: forget its effective config
+			if err := s.deps.Store.Agents().SetEffectiveConfig(ctx, sess.id, nil, s.now()); err != nil {
+				return fmt.Errorf("clear effective config of a Bridge: %w", err)
+			}
+			a.EffectiveConfigHash, a.EffectiveConfigUpdatedAt = nil, nil
+		}
 		switch {
 		case created:
 			pr.change("created")
@@ -137,7 +144,9 @@ func (s *Server) processDescription(ctx context.Context, sess *session, ci *conn
 	a := sess.agent
 
 	switch a.Kind {
-	case domain.AgentKindCollector:
+	case domain.AgentKindCollector, domain.AgentKindBridge:
+		// a Bridge is matched like a collector, so that the opt-in of a fleet
+		// can take effect; what it may be sent is decided in bridgeConfigLocked
 		if s.deps.Assigner != nil && (old == nil || attrsChanged || a.Assignment.AssignedConfigHash.IsZero()) {
 			s.assign(ctx, sess, pr)
 		}
@@ -242,6 +251,12 @@ func (s *Server) processHealth(ctx context.Context, sess *session, h *protobufs.
 }
 
 func (s *Server) processEffectiveConfig(ctx context.Context, sess *session, ec *protobufs.EffectiveConfig, pr *processResult) error {
+	if sess.agent.Kind == domain.AgentKindBridge {
+		// the effective config of a Bridge holds the complete collector resources
+		// (environment variables, arguments) and the redaction rules were written
+		// for collector configurations: nothing is stored (ADR-0037)
+		return nil
+	}
 	body, ct, ok := effectiveConfigBody(ec)
 	if !ok || len(body) == 0 {
 		return nil

@@ -65,6 +65,7 @@ func (e *Engine) plan(ctx context.Context) error {
 			byFleet[a.Assignment.FleetName] = append(byFleet[a.Assignment.FleetName], a)
 		}
 	}
+	bridges := e.bridgesByFleet(ctx)
 	fleets := append([]domain.Fleet(nil), snap.Fleets...)
 	sort.SliceStable(fleets, func(i, j int) bool { return fleets[i].Name < fleets[j].Name })
 
@@ -76,6 +77,9 @@ func (e *Engine) plan(ctx context.Context) error {
 		sel := selByFleet[f.Name]
 		vt := domain.ResolveVersionTarget(f, sel)
 		e.syncTargetVersion(ctx, f, vt)
+		if versionRolloutsEnabled(f, vt) {
+			e.noteBridgesSkipped(ctx, bridges[f.Name], vt.Version)
+		}
 		versionOK := true
 		for _, kind := range []domain.RolloutKind{domain.RolloutKindConfig, domain.RolloutKindVersion} {
 			if err := e.planFleetKind(ctx, snap, f, kind, vt, byFleet[f.Name]); err != nil {
@@ -92,6 +96,53 @@ func (e *Engine) plan(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// bridgesByFleet lists the OpAMP Bridge agents by the fleet that selects them.
+// A Bridge is never the target of a rollout (ADR-0037); the planner only reads
+// them to say so. A failure is logged and planning goes on.
+func (e *Engine) bridgesByFleet(ctx context.Context) map[string][]*domain.Agent {
+	agents, err := e.deps.Store.Agents().ListAll(ctx, store.AgentFilter{Kinds: []domain.AgentKind{domain.AgentKindBridge}})
+	if err != nil {
+		e.log.Warn("cannot list OpAMP Bridge agents; their version rollouts are not noted", "error", err)
+		return nil
+	}
+	out := map[string][]*domain.Agent{}
+	for i := range agents {
+		if f := agents[i].Assignment.FleetName; f != "" {
+			out[f] = append(out[f], &agents[i])
+		}
+	}
+	return out
+}
+
+// noteBridgesSkipped records, once per agent and target version while this
+// engine runs, that a Bridge of the fleet is left out of the version rollout
+// and why.
+func (e *Engine) noteBridgesSkipped(ctx context.Context, bridges []*domain.Agent, version string) {
+	var evs []domain.AgentEvent
+	e.fleetsMu.Lock()
+	if e.bridgeNoted == nil {
+		e.bridgeNoted = map[domain.AgentID]string{}
+	}
+	for _, a := range bridges {
+		if e.bridgeNoted[a.ID] == version {
+			continue
+		}
+		e.bridgeNoted[a.ID] = version
+		evs = append(evs, domain.AgentEvent{
+			AgentID: a.ID, Time: e.now(), Type: domain.AgentEventBridgeLocked, Severity: "warning",
+			Message: "version rollout to " + version + " skips this agent: " + domain.BridgeVersionRefused,
+			Details: map[string]any{"action": "version_rollout", "reason": domain.BridgeVersionRefused, "fleet": a.Assignment.FleetName, "version": version},
+		})
+	}
+	e.fleetsMu.Unlock()
+	if len(evs) == 0 {
+		return
+	}
+	if err := e.deps.Store.Agents().AppendEvents(ctx, evs); err != nil {
+		e.log.Warn("cannot record that OpAMP Bridge agents are left out of a version rollout", "error", err)
+	}
 }
 
 func (e *Engine) setFleets(snap *domain.GitOpsSnapshot) {

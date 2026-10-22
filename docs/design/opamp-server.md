@@ -373,7 +373,8 @@ For each agent message, in this order:
   differs. An empty offer set is never sent because the client would delete its local packages. Download tokens are
   minted when the offer is sent (see [updater-protocol.md](updater-protocol.md#package-offers)).
 - A restart command is always a separate message, because a command replaces all other fields. It is sent only to agents
-  that accept it; otherwise the REST caller gets a precondition error.
+  that accept it; otherwise the REST caller gets a precondition error. An OpAMP Bridge is never sent one, and it is offered
+  remote config only under the rules of [Bridge agents](#bridge-agents).
 - Connection settings are not offered. The supervisor stores them only in memory and disables certificate checks when
   no certificate is offered.
 - For performance, heartbeats must not query the database. Each connection caches the desired and failed hashes, the
@@ -382,6 +383,39 @@ For each agent message, in this order:
   desired state, failed marker or offers must call `DesiredStateChanged`. A status that another replica stores is none of
   these events. The one decision that rests on the stored status is the offer for a stale `APPLYING` of a pooled HTTP
   session (see [Stale APPLYING after a reconnect](#stale-applying-after-a-reconnect)).
+
+### Bridge agents
+
+The OpAMP Bridge of the OpenTelemetry Operator speaks for many collector resources, and a configuration message that lacks
+the key of a resource deletes it (see the [upstream notes](upstream-notes.md#opamp-bridge-identity-modes-and-remote-config)
+and [ADR-0037](../adr/0037-opamp-bridge-agents-until-the-operator-integration.md)). The server therefore recognises a
+Bridge and holds back every action that changes something. All of it fails closed.
+
+- **Recognition** (`descriptionUpdate`, `internal/opamp/convert.go`). An agent is a Bridge when it reports the
+  `service.name` `io.opentelemetry.operator-opamp-bridge` or the attribute `opentelemetry.io/opamp.bridge.mode`, as an
+  identifying or a non-identifying attribute. The test comes before the capability test, so a Bridge is never a collector.
+  The kind `bridge` is stored in `agents.kind` (migration `00007_agent_kind_bridge.sql`) and shown as `kind` in the REST
+  API. An agent that was stored as a collector becomes a Bridge with its next description, and the effective configuration
+  stored before is forgotten.
+- **Assignment.** The assignment service matches a Bridge like a collector, so that it is a member of the fleet that selects
+  it. It renders a configuration for it, and sets the desired hash, only when `domain.BridgeConfigLock` finds no reason:
+  the fleet sets `spec.bridge.manage` and the Bridge reports the mode `standalone`. Otherwise the assignment keeps the fleet
+  name, stores the reason as the assignment error and sets no hash.
+- **Guard in the reconcile step** (`bridgeConfigLocked`, `internal/opamp/bridge.go`). Whatever the assignment did, reconcile
+  offers a Bridge no remote config unless `BridgeConfigLock` allows it. It reads the fleet of the agent from the stored
+  snapshot, so the opt-in applies at once, and a fleet that cannot be read locks the Bridge. Every offer goes through
+  reconcile (first message, heartbeat, push, resync, reconnect), so this is the one place that has to hold.
+- **No restart.** The REST action answers `412` (`internal/coreapi/agents.go`); `sendRestart` and the polling path of HTTP
+  agents refuse the command as well, in case a command was queued by another replica or an older release.
+- **No effective configuration.** `processEffectiveConfig` stores nothing for a Bridge, and the REST endpoint answers `404`.
+- **Version rollouts.** The planner reads only collectors, so a Bridge is never a target. It reads the Bridges of a fleet
+  that has an effective target version to say so once per agent and version (until the leader restarts) as an agent event.
+- **Events and audit.** Each held-back action is an agent event of the type `bridge_locked` (severity `warning`; details
+  `action`, `reason`) and an audit entry `agent.bridge_held_back`. A configuration offer is noted once per reason and
+  desired hash on a connection, not per message.
+- **Limits.** The recognition rests on what the agent reports, so it is a safeguard against mistakes, not an authentication
+  ([ADR-0037](../adr/0037-opamp-bridge-agents-until-the-operator-integration.md), "Limits"). During a rolling update the
+  replicas of an earlier release still treat a Bridge as a collector.
 
 ### Stale APPLYING after a reconnect
 

@@ -178,6 +178,7 @@
     "kind": {
       "collector": "Collector",
       "updater": "Updater",
+      "bridge": "OpAMP Bridge",
       "unknown": "Unknown"
     },
     "configSync": {
@@ -338,7 +339,8 @@
       "package_status": "Package status",
       "command": "Command",
       "rollout_target": "Rollout target",
-      "identity_conflict": "Identity conflict"
+      "identity_conflict": "Identity conflict",
+      "bridge_locked": "Held back (OpAMP Bridge)"
     },
     "actorType": {
       "user": "User",

@@ -77,7 +77,8 @@ selectors instead, so no agent is ambiguous.
 The OpAMP Bridge of the OpenTelemetry Operator connects as one agent for many collectors. In operator mode its remote
 configuration is the complete set of the collector resources it manages: an entry replaces a resource, and a message that
 lacks the entry of a managed resource deletes it. The server therefore does not treat it like a collector, and a fleet
-configures a Bridge only when you say so.
+configures a Bridge only when you say so. If you run the Operator, its Bridge keeps managing the collector resources in
+the cluster; myriarch shows it in the inventory and leaves its configuration alone.
 
 - **Recognition.** An agent is a Bridge when it reports the `service.name` `io.opentelemetry.operator-opamp-bridge`
   (operator mode) or the attribute `opentelemetry.io/opamp.bridge.mode` (`operator` or `standalone`; both modes since
@@ -93,6 +94,19 @@ configures a Bridge only when you say so.
   `DoesNotExist` conditions. The check matches the selector against a synthetic Bridge in each mode (the attributes the
   Bridge reports itself, the [inventory](inventory.md) applied) and against every sample agent that is a Bridge. It
   ignores priorities and cannot evaluate `labels.*` of enrollment tokens. With `--strict` the warning fails the check.
+- **What the server holds back.** The server stores a Bridge as its own agent kind, `bridge`, and enforces the rules
+  itself; the Git warning only helps you to find a selector that is too broad.
+  - *Remote configuration:* a Bridge is a member of the fleet that selects it, but it is offered no configuration unless
+    that fleet sets `spec.bridge.manage: true` and the Bridge runs in standalone mode. This holds whatever starts the
+    offer: the first message, a heartbeat, a push, a resync or a reconnect.
+  - *Restarts:* the restart command is refused for a Bridge, with and without the opt-in. The REST action answers `412`
+    and the audit log records the attempt. Restart the workloads through Kubernetes.
+  - *Version rollouts:* a Bridge is never a target. Change a version with `spec.image` of the collector resources in your
+    deployment repository, or with a `gitops-pr` executor in a fleet of collectors.
+  - *Effective configuration:* the server keeps none for a Bridge, because it holds the complete collector resources.
+  - Every action that is held back is an agent event of the type `bridge_locked` and an audit entry
+    (`agent.bridge_held_back`) that name the action and the reason. The server writes them once per reason and
+    configuration on a connection, not with every heartbeat.
 - **Keeping a Bridge out of a fleet.** Select on what a collector reports and a Bridge does not: `os.type`, `site.type`
   and the other `site.*` attributes. Or give the Bridge its own enrollment token and select on its `labels.*`.
 

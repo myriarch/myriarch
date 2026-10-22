@@ -53,7 +53,7 @@ func (s *Server) reconcile(sess *session, flags uint64) *protobufs.ServerToAgent
 	}
 
 	// ---- remote config
-	if domain.HasCapability(a.Capabilities, domain.CapAcceptsRemoteConfig) && !a.Assignment.DesiredConfigHash.IsZero() {
+	if domain.HasCapability(a.Capabilities, domain.CapAcceptsRemoteConfig) && !a.Assignment.DesiredConfigHash.IsZero() && !s.bridgeConfigLocked(sess, a) {
 		desired := a.Assignment.DesiredConfigHash
 		needs := sess.resync || configNeedsOffer(a, desired)
 		stale := confirmed && !needs && s.staleApplying(sess, a, desired, now)

@@ -56,10 +56,10 @@ func (h *handler) parseAgentFilter(r *http.Request) (store.AgentFilter, error) {
 
 	for _, k := range q["kind"] {
 		switch kind := domain.AgentKind(k); kind {
-		case domain.AgentKindCollector, domain.AgentKindUpdater, domain.AgentKindUnknown:
+		case domain.AgentKindCollector, domain.AgentKindUpdater, domain.AgentKindBridge, domain.AgentKindUnknown:
 			f.Kinds = append(f.Kinds, kind)
 		default:
-			return f, badRequest("unknown kind %q (collector, updater, unknown)", k)
+			return f, badRequest("unknown kind %q (collector, updater, bridge, unknown)", k)
 		}
 	}
 	for _, s := range q["status"] {
@@ -300,6 +300,10 @@ func (h *handler) getAgentEffectiveConfig(w http.ResponseWriter, r *http.Request
 		writeErr(w, r, err)
 		return
 	}
+	if a.Kind == domain.AgentKindBridge {
+		writeErr(w, r, fmt.Errorf("%w: agent %s is an OpAMP Bridge; the server keeps no effective config of a Bridge", domain.ErrNotFound, a.ID))
+		return
+	}
 	if a.EffectiveConfigHash.IsZero() {
 		writeErr(w, r, fmt.Errorf("%w: agent %s has not reported an effective config", domain.ErrNotFound, a.ID))
 		return
@@ -419,6 +423,8 @@ func (h *handler) restartAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	details := map[string]any{"hostname": a.Hostname}
 	switch {
+	case a.Kind == domain.AgentKindBridge:
+		err = fmt.Errorf("%w: agent %s is an OpAMP Bridge: %s", domain.ErrPrecondition, a.ID, domain.BridgeRestartRefused)
 	case !a.IsOnline():
 		err = fmt.Errorf("%w: agent %s is offline", domain.ErrPrecondition, a.ID)
 	case !domain.HasCapability(a.Capabilities, domain.CapAcceptsRestartCommand):
