@@ -1214,3 +1214,34 @@ I/O log of `sudo` (`log_input`), the history file of PSReadLine, PowerShell tran
 leaked. The variant `token_file` keeps the token out of the command, and fits production, automation and every host that records its input. The first installation
 trusts the server that displayed the command (trust on first use): the pinned hash shows that the host received the bundle that the server vouched for after it verified
 `checksums.txt`, not that the server is honest. The manual path of [Connect a host](../tasks/connect-a-host.md) stays for sites that cannot accept this.
+
+#### The installer on Linux (server mode)
+
+`deploy/scripts/install-linux.sh --server <origin> --token-file <file>` is what the command starts. The origin is `https://host[:port]` without a
+path (`http` only together with `--insecure`, the lab variant), and every request of the installer goes to it. The installer, in this order:
+
+1. validates its options (`option_conflict` for the ones that the plan decides: `--with-updater` and `--updater-*`, `--release-base-url`, `--supervisor-version`,
+   `--verify-signatures skip`, `--collector-version latest`), reads the token from the file, and checks the host (`conflicting_install`, before the server is asked, so
+   no token leaves a host that cannot be installed);
+2. asks `POST /api/v1/install/plan` with the platform, the attributes it would report (`host.name` when the name of the host is plain, the site options and the environment),
+   the fleet hint (`--fleet`) and the version it asks for (`--collector-version`), with the token as `Authorization: Bearer` read by `curl -K -` from standard input. It does
+   not follow a redirect by itself: a redirect is followed (at most three) only when its target is on the origin of `--server` and https, else it ends the run
+   (`https_required` for http, `plan_invalid` for another origin); a connection error and the statuses 408, 500, 502 and 504 are tried again for a few seconds, then
+   `plan_failed`. 503 `preparing` is awaited after `Retry-After` (1 to 60 s, 10 s without it) for `--plan-wait` seconds (900), then `plan_unavailable`; another 503 and 429 are
+   `plan_unavailable` at once; any other refusal is `plan_rejected` with the code of the first issue of the problem document (else the class, else `http_<status>`), shown only
+   if it has the shape of a code, with the next step for the codes of the server;
+3. reads the plan as data (`parse_plan`; `install.ParseText` is the reference): at most 8 KiB and 64 lines, only the characters of the grammar, `format=1` first, only the
+   eleven known keys, each once, each value against the pattern of its key; then the rules that need the origin: the URLs of collector and supervisor are on the origin of
+   `--server`, https (unless `--insecure`), with a plain path and the file name the installer expects (`otelcol-contrib_<v>_linux_<arch>.tar.gz`,
+   `opampsupervisor_<v>_linux_<arch>`); `opamp.endpoint` names the host and port of `--server` with the scheme that goes with it (`wss` or `https` for an https server), because the
+   token goes there next; the versions are plain `X.Y.Z[-pre]`; the fleet and the collector version equal what `--fleet` and `--collector-version` asked for (`plan_invalid`);
+4. takes the `myriarch-updater` that lies next to `deploy/` in the installer bundle (a regular, executable file, no link), copies it to the private working directory and uses the copy
+   as the verifier (`--verifier` overrides it; `sigstore_verifier_missing` without either) and, when the plan says `updater.install=true`, as the updater to install (hashed again
+   when it is copied into place). The TUF cache of the check is in the working directory, unless `--trusted-root` names a file;
+5. downloads collector and supervisor from the plan URLs with the grant of each as the bearer (retry policy of the other downloads, `download_failed`), checks `.sha256`, and verifies
+   the Sigstore bundle with the identity of the upstream release workflow at the tag of the plan's version, built by the installer. Then it continues as the manual path does: it
+   unpacks, installs, writes the configuration and starts the services; the supervisor file is checked at the end (`supervisor_missing`).
+
+The explicit `--opamp-endpoint` wins over the one of the plan. Without `--server`, the version is `--collector-version`, else the version the release was tested with
+(`DEFAULT_COLLECTOR_VERSION`, the `OTELCOL_VERSION` of `ci/versions.env`), and `latest` looks at the redirect of the releases page of the upstream project. The test
+`internal/install/installer_server_test.go` runs the script against a test server for every rule above.

@@ -17,14 +17,101 @@ The scripts deliberately do not use the packages of the upstream project (deb, r
 collector service of their own, and a supervisor from a package is another service in another place than the one that
 myriarch manages.
 
-This guide describes the installers of the release v0.1.0; what the installers of v0.2.0 do differently is marked *from
-v0.2.0* (they check the host before they change anything, see [When the installer stops](#when-the-installer-stops)). You
-collect the inputs, download and verify the installer yourself and run it with explicit options. Steps 1 to 3 are the same
-on both systems: [create an enrollment token](#1-create-an-enrollment-token), [download and verify the
+There are two ways to install a host:
+
+- **One command** (*from v0.2.0*, Linux; Windows follows): the server renders a command, you paste it into a root shell on the
+  host, and the host comes up healthy in the right fleet. The server tells the installer which version its fleet targets, and
+  the installer verifies everything it runs. [This is the way to start](#one-command-install-a-linux-host-from-the-server).
+- **The manual, verified path**: you collect the inputs, download and verify the installer yourself and run it with explicit
+  options. It stays supported, for sites that cannot accept the trust of the first command (see below), for hosts without access
+  to the server and for the installers of v0.1.0. The rest of this page describes it.
+
+The manual path describes the installers of the release v0.1.0; what the installers of v0.2.0 do differently is marked *from
+v0.2.0* (they check the host before they change anything, see [When the installer stops](#when-the-installer-stops), and on Linux
+the collector version has a default). Steps 1 to 3 are the same on both systems: [create an enrollment token](#1-create-an-enrollment-token), [download and verify the
 installer](#2-download-and-verify-the-installer) and
 [choose how the host verifies downloads](#3-choose-how-the-host-verifies-downloads). Step 4 [installs on
 Linux](#4-install-on-linux), step 5 [installs on Windows](#5-install-on-windows), and step 6 [checks the
 result](#6-check-the-result).
+
+## One command: install a Linux host from the server
+
+*Available from v0.2.0 (Linux, amd64 and arm64). The Windows command follows.* A fresh Linux host gets the collector, the
+supervisor and, when the fleet uses the updater, the `myriarch-updater` with one command. The server knows what the fleet
+targets, so you name neither a version nor an endpoint.
+
+**What you need.** A server of the project's release with `install.enabled` on (the default), a host with systemd, root, `curl`,
+`tar` with `gzip`, `sha256sum` and https access to the server and to the Sigstore TUF repository (or a local `trusted_root.json`,
+see [What you need](#what-you-need)), and a person who may create an enrollment token (`enrollment:manage`). The host reaches
+the server only; it downloads nothing from GitHub.
+
+1. **Create an enrollment token** as in [step 1](#1-create-an-enrollment-token). Give it the labels that your fleets select on, if any.
+2. **Get the command from the server.** It is rendered by `POST /api/v1/install/commands`
+   ([reference](../reference/api/install.md#render-the-install-commands-for-hosts-a-command-for-each-platform)); the *Add host*
+   dialog of the web UI shows the same text. The site options become the attributes of the host, and `site.type` and `site.id`
+   are required:
+
+   ```bash
+   curl -sS -X POST https://fleet.example.com/api/v1/install/commands \
+     -H "Authorization: Bearer $MYRIARCH_API_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"platforms":["linux/amd64"],"fleet":"linux-hosts","attributes":{"site.type":"edge","site.id":"042"}}' \
+     | jq -r '.commands[0].command'
+   ```
+
+   The command has the placeholder `@@MYRIARCH_ENROLLMENT_TOKEN@@` where the token goes; the server never sees a token. Replace
+   the placeholder with the token of step 1 (the dialog does this in the browser), or use the second variant below.
+3. **Paste the command into a shell on the host** (not as root: the command starts the privileged shell itself with `sudo`, and
+   asks for nothing else). It does this, and stops at the first failure:
+   - it writes the token into a private file below `/root` (mode 0600) and downloads the installer bundle from the server, with the
+     token only as a request header;
+   - it checks the SHA-256 that the command pins, **before** it unpacks anything, and unpacks the bundle in that private directory;
+   - the installer in the bundle checks the host (a collector or supervisor from a deb or rpm package of the upstream project stops
+     it with `conflicting_install`, and nothing is removed), asks the server for a plan, and reads the plan as data;
+   - it downloads the collector and the supervisor from the server with short-lived install grants and verifies each against its
+     SHA-256 and its Sigstore bundle, with an identity, issuer and trust root that the installer builds itself. The verifier is the
+     `myriarch-updater` of the bundle, so the host needs no `cosign`. Nothing runs before its check;
+   - it installs the units and the configuration, starts the services and deletes the private directory with the token file.
+4. **Check the result** as in [step 6](#6-check-the-result): the host appears under *Agents* in the fleet that the server chose, at
+   the target version of that fleet, with the configuration `in_sync`.
+
+The first host of a platform makes the server download about 112 MB, so the installer can wait for minutes ("the server is
+preparing the artifacts"); it asks again after every `Retry-After` and gives up after 15 minutes (`--plan-wait`).
+
+**Which version?** The effective target of the fleet, as [Fleets](../concepts/fleets.md#the-effective-target) describes it. While a
+version rollout of the fleet is *Pending*, *Running* or *Waiting for approval*, the host gets the version the fleet ran before, and
+the rollout adds it to its last wave. A fleet on hold, a paused or failed rollout and a host that no fleet selects are refused with
+a reason that the installer shows (`plan_rejected`). With `"collectorVersion"` in the request of step 2 you can ask for a version
+inside the frame that Git sets.
+
+**The token and the shell history.** The default command contains the token, and text that you paste is recorded by what records
+typed text: the clipboard, the shell history, the history file of PSReadLine, PowerShell transcription, PowerShell script block
+logging (event 4104) and the recording of a terminal session. Nothing that the command and the installer do puts the token into an
+argument list, a URL, a log or an error message, but these records are outside their control, and a token that a record kept counts
+as leaked: revoke it. On a host that records its sessions, in production and in automation use the **variant "token from a file"**:
+put the token into a file that only root can read (`install -m 0600 /dev/null /etc/myriarch/enrollment-token`, then write it from a
+machine you trust) and ask for `"variant":"token_file"` with `"tokenFiles":{"linux":"/etc/myriarch/enrollment-token"}`. That
+command contains no token and reads it from the file. A token is a separate token per channel or region
+([ADR-0012](../adr/0012-agent-access-via-enrollment-tokens.md)), and an existing token cannot be shown again, because the server keeps
+only its hash.
+
+**What you trust.** The first command has nothing on the host to verify the bundle with, so it pins the SHA-256 of the bundle, which
+the server shows after it verified the `checksums.txt` of its own release keyless. The first installation therefore trusts the server
+that displayed the command (trust on first use). After that, collector and supervisor carry the upstream signature and are checked
+on the host against an identity that the server does not control: a wrong server can at most choose another genuine upstream version,
+an older one included. A site that cannot accept this uses the manual path below; the pinned hash is the line of the archive in the
+signed `checksums.txt`, so you can compare it with the release before the first run
+([ADR-0046](../adr/0046-host-installation-from-the-server.md), [Security model](../security/model.md)).
+
+**When it stops.** The last line is `ERROR [<code>] <message>`; the message names the next step. The codes of this way of installing
+(`plan_failed`, `plan_invalid`, `plan_rejected`, `plan_unavailable`, `https_required`, `conflicting_install`, `supervisor_missing`) are in
+[Installing a Linux host from the server](../operations/troubleshooting.md#installing-a-linux-host-from-the-server). Without
+`--server` (for example when you run `install-linux.sh` from a verified archive yourself) the script installs the version that this
+release was tested with when you leave `--collector-version` out, and `--collector-version latest` asks GitHub for the newest
+release; the manual path below uses explicit versions.
+
+## The manual path
+
+The rest of this page is the manual, verified path.
 
 ## What you need
 
@@ -33,13 +120,13 @@ result](#6-check-the-result).
 | OpAMP endpoint | `--opamp-endpoint` | `-OpampEndpoint` | `wss://<server>/v1/opamp`, the address under which the host reaches `myriarchd`. *Settings*, tab *System*, shows it as "OpAMP endpoint". A plain `ws://` or `http://` endpoint needs `--insecure` and is for labs only |
 | Enrollment token | `--token-file` | `-TokenFile` | [Step 1](#1-create-an-enrollment-token). `--token` and `-Token` exist too, but an argument shows up in the process list |
 | Site type and ID | `--site-type`, `--site-id` | `-SiteType`, `-SiteId` | You choose them; the selectors of your fleets match on them (below) |
-| **Collector version** | `--collector-version` | `-CollectorVersion` | **Required**, without `v`: the version of `otelcol-contrib` to install, for example `0.162.0` (below) |
+| **Collector version** | `--collector-version` | `-CollectorVersion` | Without `v`: the version of `otelcol-contrib` to install, for example `0.162.0` (below). **Required** on Windows; `install-linux.sh` of v0.2.0 installs the version its release was tested with when you leave it out, and `latest` asks GitHub for the newest |
 | Installer release | none | none | The myriarch release whose archive you unpack, for example `0.1.0` ([step 2](#2-download-and-verify-the-installer)) |
 | Sigstore verifier | `--verifier` (or `--with-updater` with `--updater-sha256`) | `-Verifier` (or `-WithUpdater` with `-UpdaterSha256`) | [Step 3](#3-choose-how-the-host-verifies-downloads) |
 | Updater (optional) | `--with-updater`, `--updater-url` and a hash source | `-WithUpdater`, `-UpdaterUrl` and a hash source | [Step 3](#3-choose-how-the-host-verifies-downloads) and the commands of step 4 or 5 |
 | Sigstore trusted root (optional) | `--trusted-root` | `-TrustedRoot` | Only for a host that cannot reach the Sigstore TUF repository (below): a `trusted_root.json` that you fetched on a connected machine |
 
-**Which collector version?** The installer does not ask the server, so you name the version. Install the **target version
+**Which collector version?** On the manual path the installer does not ask the server, so you name the version (on Linux, from v0.2.0, leaving it out installs the tested default, which is rarely the target of your fleet). Install the **target version
 of the fleet** that the host should join: the page *Fleets* shows it (column *Target version*). It comes from
 `spec.collector.version` in the fleet file of your GitOps repository, unless an operator chose another version in the UI
 within the frame that Git sets ([Fleets](../concepts/fleets.md#the-effective-target)). Two cases need another answer:
@@ -89,6 +176,7 @@ self-reported `site.*` attributes only for coarse selection of fleets.
 The dialog that shows the secret also shows an install example. Treat it as a reminder of the options and take the complete
 commands from this page: in v0.1.0 the example leaves out the collector version and the Sigstore verifier, so the installer
 stops with `option_missing`, and the Windows example starts the script directly, which the default execution policy refuses.
+From v0.2.0 the command of the server replaces the example on Linux ([One command](#one-command-install-a-linux-host-from-the-server)).
 
 Tokens can also be declared in the server configuration (`opamp.enrollmentTokens`, fed from a mounted secret). See
 [Authentication](../operations/authentication.md) for that and for how people sign in.
@@ -372,7 +460,7 @@ to another credential".
 
 | Code or symptom | Cause | What to do |
 |---|---|---|
-| `option_missing` | A required option is absent, and the message names it: the site type, the site ID, the **collector version** (`--collector-version`, `-CollectorVersion`), the token (`--token-file`, `-TokenFile`) or, with `--with-updater`, `--updater-url`. A missing or malformed endpoint ends with `option_invalid`. | Add the option. The collector version is the input that is forgotten most often, because the install example of the token dialog of v0.1.0 leaves it out; see [What you need](#what-you-need). |
+| `option_missing` | A required option is absent, and the message names it: the site type, the site ID, the **collector version** on Windows (`-CollectorVersion`; `install-linux.sh` of v0.2.0 has a default), the OpAMP endpoint on Linux without `--server`, the token (`--token-file`, `-TokenFile`) or, with `--with-updater`, `--updater-url`. A missing or malformed endpoint ends with `option_invalid`. | Add the option. The collector version is the input that is forgotten most often, because the install example of the token dialog of v0.1.0 leaves it out; see [What you need](#what-you-need). |
 | `usage_error` (Linux) | An option is unknown or has no value, for example `--verifier ""` when a command substitution such as `$(command -v cosign)` expands to nothing because the host has no `cosign`. | Check the names and the values of the options (`./deploy/scripts/install-linux.sh --help` lists them). On Windows PowerShell rejects an unknown or valueless parameter itself, without a `[code]`. |
 | `updater_hash_source_missing` | `--with-updater` without `--updater-checksums-url` or `--updater-sha256`. | Add one of them ([step 3](#3-choose-how-the-host-verifies-downloads)). |
 | `sigstore_verifier_missing` | The installer found no Sigstore verifier: no `cosign` it may use, no installed updater and no updater verified by `--updater-sha256`. On Linux the `PATH` of root may not contain `cosign`. On Windows a `cosign.exe` in a folder that unprivileged accounts can write is ignored, with a warning. | Choose a verifier as in [step 3](#3-choose-how-the-host-verifies-downloads): pass `--verifier` or `-Verifier` with the full path of a `cosign` that only root (the administrators) can replace, or of the `myriarch-updater` of the verified archive, or add the updater with its SHA-256. |
