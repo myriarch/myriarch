@@ -54,6 +54,13 @@ POLICY = {
             # room for a second scenario
             ".cache/host-e2e/upload/one-command/results.txt",
             ".cache/host-e2e/upload/one-command/diag/journal-otelcol-supervisor.txt",
+            # the Windows host test (scripts/host-e2e/windows.ps1)
+            ".cache/host-e2e/upload/one-command/install-command.log",
+            ".cache/host-e2e/upload/one-command/myriarchd.out.log",
+            ".cache/host-e2e/upload/one-command/diag/status-otelcol-supervisor.txt",
+            ".cache/host-e2e/upload/one-command/diag/events-myriarch-updater.txt",
+            ".cache/host-e2e/upload/one-command/diag/acl.txt",
+            ".cache/host-e2e/upload/one-command/diag/updater-log.txt",
         ],
         "must_not_match": [
             ".cache/host-e2e/manual/enrollment-token",
@@ -75,6 +82,15 @@ POLICY = {
             ".cache/host-e2e/one-command/command.sh",
             ".cache/host-e2e/one-command/commands-response.json",
             ".cache/host-e2e/bundles/myriarch-updater_0.2.0_linux_amd64.tar.gz",
+            ".cache/host-e2e/bundles/myriarch-updater_0.2.0_windows_amd64.zip",
+            ".cache/host-e2e/one-command/command.ps1",
+            ".cache/host-e2e/one-command/gitops/fleets/windows-hosts.yaml",
+            ".cache/host-e2e/mirror/srv/mirror/cmd/opampsupervisor/v0.162.0/opampsupervisor_0.162.0_windows_amd64.exe",
+            ".cache/host-e2e/upload/one-command/command.ps1",
+            ".cache/host-e2e/upload/one-command/command.sh",
+            ".cache/host-e2e/upload/one-command/commands-response.json",
+            ".cache/host-e2e/upload/one-command/enrollment-token",
+            "bin/myriarchd.exe",
             # a stray secret that gets into the upload directory is not matched either (the second line of defence)
             ".cache/host-e2e/upload/manual/cookies",
             ".cache/host-e2e/upload/manual/enrollment-token",
@@ -331,12 +347,30 @@ def check_common(name, text, findings):
         findings.append("%s: it must not depend on ci-ok" % name)
 
 
-def check_timeouts(name, text, steps, findings):
+def job_blocks(text):
+    """The jobs of a workflow as (job id, text of the job): a job starts with its id at the indentation of two spaces below `jobs:`."""
+    head, sep, rest = text.partition("\njobs:\n")
+    if not sep:
+        return []
+    blocks = []
+    current = None
+    for line in rest.split("\n"):
+        m = re.match(r"^  ([A-Za-z0-9_-]+):[ \t]*(?:#.*)?$", line)
+        if m:
+            current = (m.group(1), [line])
+            blocks.append(current)
+        elif current is not None:
+            current[1].append(line)
+    return [(job, "\n".join(lines)) for job, lines in blocks]
+
+
+def check_timeouts(name, text, steps, findings, job=""):
     """`steps` are the (line, lines) pairs of the steps that run the test: each has a timeout of its own, and together they leave the
-    margin below the timeout of the job."""
+    margin below the timeout of the job. `text` is the text of one job."""
+    where = "%s%s" % (name, " (job %s)" % job if job else "")
     jobs = re.findall(r"^    timeout-minutes:[ \t]*(\S*)[ \t]*(?:#.*)?$", text, re.M)
     if len(jobs) != 1 or not jobs[0].isdigit():
-        findings.append("%s: the job must have one timeout-minutes, a number of minutes" % name)
+        findings.append("%s: the job must have one timeout-minutes, a number of minutes" % where)
         return
     limit = int(jobs[0])
     total = 0
@@ -345,13 +379,13 @@ def check_timeouts(name, text, steps, findings):
         if not value.isdigit() or int(value) < 1:
             findings.append("%s: the step `%s` needs a timeout-minutes of its own, a number of minutes, found `%s` (a job that runs out"
                             " of time is cancelled and uploads nothing, a step that runs out of time counts as failed)"
-                            % (name, step_value(lines, "name") or "?", value))
+                            % (where, step_value(lines, "name") or "?", value))
         else:
             total += int(value)
     if total and total + STEP_TIMEOUT_MARGIN > limit:
         findings.append("%s: the timeouts of the steps that run the test (%d minutes together) must stay at least %d minutes below that"
                         " of the job (%d minutes), so that the upload still runs when a step runs out of time"
-                        % (name, total, STEP_TIMEOUT_MARGIN, limit))
+                        % (where, total, STEP_TIMEOUT_MARGIN, limit))
 
 
 def check_host(text, findings):
@@ -368,12 +402,36 @@ def check_host(text, findings):
     for _, lines in scenario_steps:
         if not re.search(r"^[ \t]+HOST_E2E: '1'$", "\n".join(lines), re.M):
             findings.append("%s: a step that runs a scenario must set HOST_E2E: '1'" % name)
-    check_timeouts(name, text, scenario_steps, findings)
+    jobs = dict(job_blocks(text))
+    for job in ("linux", "windows"):
+        if job not in jobs:
+            findings.append("%s: the job %s is missing" % (name, job))
+    # every job that runs a scenario has the timeouts of its steps below its own
+    for job, block in job_blocks(text):
+        job_steps = [(number, lines) for number, lines in read_steps(block) if (step_value(lines, "run") or "").startswith("scripts/host-e2e/")]
+        if job_steps:
+            check_timeouts(name, block, job_steps, findings, job)
     if text.count("HOST_E2E:") != len(scenario_steps):
         findings.append("%s: HOST_E2E is set somewhere else than on the steps that run a scenario" % name)
     for runner in ("ubuntu-24.04", "ubuntu-24.04-arm"):
-        if runner not in text:
-            findings.append("%s: the matrix must contain %s" % (name, runner))
+        if runner not in jobs.get("linux", ""):
+            findings.append("%s: the matrix of the job linux must contain %s" % (name, runner))
+    windows = jobs.get("windows", "")
+    if windows:
+        if not re.search(r"^    runs-on: windows-\d{4}$", windows, re.M):
+            findings.append("%s: the job windows runs on one GitHub-hosted runner with a fixed image (windows-NNNN, never windows-latest)" % name)
+        if not re.search(r"^        shell: \[powershell, pwsh\]$", windows, re.M):
+            findings.append("%s: the job windows must run in Windows PowerShell 5.1 and in PowerShell 7 (matrix shell: [powershell, pwsh])" % name)
+        if not re.search(r"^[ \t]+run: scripts/host-e2e/windows\.ps1 one-command$", windows, re.M):
+            findings.append("%s: the job windows must call the scenario by name: scripts/host-e2e/windows.ps1 one-command" % name)
+        # GitHub allows an expression in the default shell of a job, not in the shell of a step
+        default = re.search(r"^    defaults:\n      run:\n        shell: (.+)$", windows, re.M)
+        job_shell = default.group(1).strip() if default else ""
+        for _, lines in read_steps(windows):
+            if (step_value(lines, "run") or "").startswith("scripts/host-e2e/"):
+                shell = step_value(lines, "shell") or job_shell
+                if shell != "${{ matrix.shell }}":
+                    findings.append("%s: the scenario step of the job windows must run in the shell of the matrix (defaults.run.shell: ${{ matrix.shell }}, no shell on the step)" % name)
     if re.search(r"self-hosted", text):
         findings.append("%s: the job installs as root: never a self-hosted runner" % name)
 

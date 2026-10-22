@@ -1,0 +1,30 @@
+# Fleet of the Windows host end-to-end test (scripts/host-e2e/windows.ps1). It takes the blueprint and the policies of
+# scripts/host-e2e/gitops (the script copies them next to this file). Git sets the frame (>=0.161.0, <=0.162.0) and the Git target
+# 0.161.0, and the test picks 0.162.0 like an operator in the UI. The selector matches the one host of the test by the attributes the
+# installer writes (-SiteType edge -SiteId host-e2e-win-01).
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: windows-hosts
+  description: Windows host of the host end-to-end test (service, supervisor, collector and myriarch-updater)
+spec:
+  displayName: Windows hosts (host end-to-end test)
+  priority: 100
+  selector:
+    matchAttributes:
+      site.type: edge
+      site.id: host-e2e-win-01
+  blueprint: host-e2e
+  collector:
+    distribution: otelcol-contrib
+    version: 0.161.0              # Git target; the UI selection overrides it with 0.162.0
+  update:
+    executor: updater
+    selection:
+      enabled: true
+      versionRange: ">=0.161.0, <=0.162.0"
+      allowDowngrade: false
+      requireReason: false
+  rollout:
+    configPolicy: host-e2e-config
+    versionPolicy: host-e2e-version

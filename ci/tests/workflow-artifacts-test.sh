@@ -67,16 +67,16 @@ if text.count(old) != count:
 open(path, "w").write(text.replace(old, new))
 ' "$1" "$2" "$3" "${4:-1}"
 }
-removed_line() { # file text: removes the line that contains the text
+removed_line() { # file text [count]: removes the lines that contain the text, exactly count of them (default 1)
   python3 -I -c '
 import sys
-path, needle = sys.argv[1], sys.argv[2]
+path, needle, count = sys.argv[1], sys.argv[2], int(sys.argv[3])
 lines = open(path).read().split("\n")
 kept = [l for l in lines if needle not in l]
-if len(kept) != len(lines) - 1:
-    sys.exit("removed_line: %r matches %d lines in %s" % (needle, len(lines) - len(kept), path))
+if len(kept) != len(lines) - count:
+    sys.exit("removed_line: %r matches %d lines in %s, expected %d" % (needle, len(lines) - len(kept), path, count))
 open(path, "w").write("\n".join(kept))
-' "$1" "$2"
+' "$1" "$2" "${3:-1}"
 }
 bites() { # name regex: the check on the broken tree fails and names the problem
   local name="$1" want="$2"
@@ -93,26 +93,30 @@ KIND="${T}/.github/workflows/e2e-kind.yml"
 
 fresh_tree; edit "${HOST}" '.cache/host-e2e/upload/**
 ' '.cache/host-e2e/**
-'
+' 2
 bites "host-e2e: an upload of the whole work directory is found" 'host-e2e.yml:[0-9]+: the upload matches \.cache/host-e2e/manual/enrollment-token'
 case "${OUT}" in *"tls/ca.key"*"data/postgres"* | *"data/postgres"*"tls/ca.key"*) ok "... together with the keys and the database" ;; *) printf '%s' "${OUT}" | grep -q 'ca.key' && printf '%s' "${OUT}" | grep -q 'PG_VERSION' && ok "... together with the keys and the database" || fail "the keys and the database are not named: ${OUT}" ;; esac
-fresh_tree; removed_line "${HOST}" '!.cache/host-e2e/upload/**/cookies*'
+fresh_tree; removed_line "${HOST}" '!.cache/host-e2e/upload/**/cookies*' 2
 bites "host-e2e: without the exclusion of cookie jars a stray jar in the upload directory is found" 'matches \.cache/host-e2e/upload/manual/cookies'
-fresh_tree; removed_line "${HOST}" '!.cache/host-e2e/upload/**/*token*'
+fresh_tree; removed_line "${HOST}" '!.cache/host-e2e/upload/**/*token*' 2
 bites "host-e2e: without the exclusion of token files a stray token file is found" 'matches \.cache/host-e2e/upload/manual/enrollment-token'
-fresh_tree; removed_line "${HOST}" '!.cache/host-e2e/upload/**/*.key'
+fresh_tree; removed_line "${HOST}" '!.cache/host-e2e/upload/**/*.key' 2
 bites "host-e2e: without the exclusion of keys a stray key is found" 'matches \.cache/host-e2e/upload/manual/ca\.key'
-fresh_tree; edit "${HOST}" 'if: failure()' 'if: always()'
+fresh_tree; removed_line "${HOST}" '!.cache/host-e2e/upload/**/command.*' 2
+bites "host-e2e: without the exclusion of the rendered command a stray command is found" 'matches \.cache/host-e2e/upload/one-command/command\.(sh|ps1)'
+fresh_tree; removed_line "${HOST}" '!.cache/host-e2e/upload/**/commands-response*' 2
+bites "host-e2e: without the exclusion of the response that holds the command a stray response is found" 'matches \.cache/host-e2e/upload/one-command/commands-response\.json'
+fresh_tree; edit "${HOST}" 'if: failure()' 'if: always()' 2
 bites "host-e2e: an upload for every run is found" 'must run only for a failed job'
-fresh_tree; removed_line "${HOST}" 'include-hidden-files: true'
+fresh_tree; removed_line "${HOST}" 'include-hidden-files: true' 2
 bites "host-e2e: an upload that skips the dot directory is found" 'include-hidden-files must be true'
-fresh_tree; edit "${HOST}" 'retention-days: 7' 'retention-days: 90'
+fresh_tree; edit "${HOST}" 'retention-days: 7' 'retention-days: 90' 2
 bites "host-e2e: a retention of 90 days is found" 'retention-days must be at most 7'
 fresh_tree; edit "${HOST}" "          HOST_E2E: '1'
         run: scripts/host-e2e/linux.sh manual" "        run: scripts/host-e2e/linux.sh manual"
 bites "host-e2e: the manual scenario step without HOST_E2E is found" "must set HOST_E2E: '1'"
 fresh_tree; edit "${HOST}" "          HOST_E2E: '1'
-          HOST_E2E_RELEASE_TAG" "          HOST_E2E_RELEASE_TAG"
+          HOST_E2E_RELEASE_TAG" "          HOST_E2E_RELEASE_TAG" 2
 bites "host-e2e: the one-command scenario step without HOST_E2E is found" "must set HOST_E2E: '1'"
 fresh_tree; edit "${HOST}" "  CI: 'true'
 " "  CI: 'true'
@@ -128,7 +132,7 @@ bites "host-e2e: a self-hosted runner is found" 'never a self-hosted runner'
 fresh_tree; edit "${HOST}" "      - '.github/workflows/host-e2e.yml'
 " ""
 bites "host-e2e: a path filter that does not name the workflow is found" 'path filter of pull requests must name the workflow itself'
-fresh_tree; edit "${HOST}" 'persist-credentials: false' 'persist-credentials: true'
+fresh_tree; edit "${HOST}" 'persist-credentials: false' 'persist-credentials: true' 2
 bites "host-e2e: a checkout that keeps its credentials is found" 'must not persist credentials'
 fresh_tree; edit "${HOST}" '          name: host-e2e-linux-${{ matrix.os }}' '          env:
             TOKEN: ${{ secrets.NAME }}
@@ -137,16 +141,16 @@ bites "host-e2e: a secret is found" 'must not use a secret'
 fresh_tree; edit "${HOST}" 'path: |
             .cache/host-e2e/upload/**' 'path: |
             .cache/host-e2e/upload/**
-            .cache/host-e2e/tls/ca.key'
+            .cache/host-e2e/tls/ca.key' 2
 bites "host-e2e: an extra path to a key is found" 'matches \.cache/host-e2e/tls/ca\.key'
 fresh_tree; edit "${HOST}" '.cache/host-e2e/upload/**
 ' '**
-'
+' 2
 bites "host-e2e: a path that matches everything is no allow-list" 'is not an allow-list'
 fresh_tree; rm "${HOST}"
 bites "host-e2e: a missing workflow is found" 'host-e2e.yml: the workflow does not exist'
 fresh_tree; removed_line "${HOST}" 'timeout-minutes: 35'
-bites "host-e2e: a scenario step without a timeout of its own is found" 'host-e2e.yml: the step `Scenario manual[^`]*` needs a timeout-minutes of its own'
+bites "host-e2e: a scenario step without a timeout of its own is found" 'host-e2e.yml \(job linux\): the step `Scenario manual[^`]*` needs a timeout-minutes of its own'
 fresh_tree; removed_line "${HOST}" '        timeout-minutes: 40'
 bites "host-e2e: the one-command step without a timeout of its own is found" 'the step `Scenario one-command[^`]*` needs a timeout-minutes of its own'
 fresh_tree; edit "${HOST}" '        timeout-minutes: 35' '        timeout-minutes: 46'
@@ -155,17 +159,38 @@ fresh_tree; edit "${HOST}" '        timeout-minutes: 35' '        timeout-minute
 expect_ok "host-e2e: a step timeout exactly 5 minutes below that of the job is fine" run_check "${T}"
 fresh_tree; edit "${HOST}" '        timeout-minutes: 35' '        timeout-minutes: soon'
 bites "host-e2e: a step timeout that is no number is found" 'needs a timeout-minutes of its own, a number of minutes, found `soon`'
-fresh_tree; removed_line "${HOST}" '    timeout-minutes: 90'
+fresh_tree; removed_line "${HOST}" '    timeout-minutes: 90' 2
 bites "host-e2e: a job without a timeout is found" 'the job must have one timeout-minutes'
 fresh_tree; edit "${HOST}" "    steps:
 " "    steps:
-      - name: A second scenario
+      - name: A third scenario
         timeout-minutes: 35
         env:
           HOST_E2E: '1'
         run: scripts/host-e2e/linux.sh one-command
-"
-bites "host-e2e: scenario steps whose timeouts together do not fit into the job are found" 'steps that run the test \(110 minutes together\)'
+" 2
+bites "host-e2e: scenario steps whose timeouts together do not fit into the job are found" 'job linux\): the timeouts of the steps that run the test \(110 minutes together\)'
+
+# ---- the job windows
+fresh_tree; edit "${HOST}" 'runs-on: windows-2025' 'runs-on: windows-latest'
+bites "host-e2e: a floating Windows image is found" 'never windows-latest'
+fresh_tree; edit "${HOST}" 'runs-on: windows-2025' 'runs-on: self-hosted'
+bites "host-e2e: a self-hosted Windows runner is found" 'never a self-hosted runner'
+fresh_tree; edit "${HOST}" 'shell: [powershell, pwsh]' 'shell: [pwsh]'
+bites "host-e2e: a Windows job that skips Windows PowerShell 5.1 is found" 'must run in Windows PowerShell 5.1 and in PowerShell 7'
+fresh_tree; edit "${HOST}" 'run: scripts/host-e2e/windows.ps1 one-command' 'run: echo skipped'
+bites "host-e2e: a Windows job that runs no scenario is found" 'must call the scenario by name: scripts/host-e2e/windows.ps1 one-command'
+fresh_tree; edit "${HOST}" "      - name: 'Scenario one-command: the command of the server, run unchanged in an administrator session'
+        timeout-minutes: 60" "      - name: 'Scenario one-command: the command of the server, run unchanged in an administrator session'
+        shell: bash
+        timeout-minutes: 60"
+bites "host-e2e: a Windows scenario step outside the shell of the matrix is found" 'must run in the shell of the matrix'
+fresh_tree; removed_line "${HOST}" 'timeout-minutes: 60'
+bites "host-e2e: a Windows scenario step without a timeout of its own is found" 'job windows\): the step `Scenario one-command[^`]*` needs a timeout-minutes of its own'
+fresh_tree; edit "${HOST}" '        timeout-minutes: 60' '        timeout-minutes: 86'
+bites "host-e2e: a Windows step timeout less than 5 minutes below that of the job is found" 'job windows\): the timeouts of the steps that run the test \(86 minutes together\)'
+fresh_tree; edit "${HOST}" '        timeout-minutes: 60' '        timeout-minutes: 85'
+expect_ok "host-e2e: a Windows step timeout exactly 5 minutes below that of the job is fine" run_check "${T}"
 
 fresh_tree; edit "${KIND}" '            .cache/kind/logs/**
             .cache/kind/diag/**' '            .cache/kind/**'
