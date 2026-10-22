@@ -76,12 +76,20 @@ expect() { # case description want got
   if [ "$3" != "$4" ]; then fail_case "$1" "$2: got '$4', want '$3'"; fi
 }
 
-# check_restricted <case>: the Pod Security level "restricted" and no fixed user ID, for every container of the workload
+# check_restricted <case>: the Pod Security level "restricted" (numeric 10001 identity as the overridable default), for every container
 check_restricted() {
-  local c="$1" n
-  if grep -Eq 'runAsUser|runAsGroup|privileged: true|hostNetwork|hostPID|hostIPC' "${out}/${c}.yaml"; then
-    fail_case "${c}" "the rendering contains a fixed user or group ID, a privileged container or a host namespace"
+  local c="$1" n profile="${2:-standard}"
+  if grep -Eq 'privileged: true|hostNetwork|hostPID|hostIPC' "${out}/${c}.yaml"; then
+    fail_case "${c}" "the rendering contains a privileged container or a host namespace"
   fi
+  if [ "${profile}" = standard ]; then
+    expect "${c}" "pod identity: runAsUser, runAsGroup and fsGroup 10001" "10001 10001 10001" \
+      "$(wl "${c}" '.spec.template.spec.securityContext | [.runAsUser, .runAsGroup, .fsGroup] | join(" ")')"
+  else
+    if grep -Eq 'runAsUser|runAsGroup|fsGroup' "${out}/${c}.yaml"; then fail_case "${c}" "the OpenShift profile renders a user, group or fsGroup"; fi
+  fi
+  expect "${c}" "no container overrides the pod identity" "0" \
+    "$(wl "${c}" '.spec.template.spec | (.initContainers + .containers) | map(select(.securityContext.runAsUser != null or .securityContext.runAsGroup != null)) | length')"
   n="$(wl "${c}" '.spec.template.spec | (.initContainers + .containers) | length')"
   expect "${c}" "containers (two init containers and the main container)" "3" "${n}"
   expect "${c}" "every container: restricted context" "3" \
@@ -184,7 +192,7 @@ if run_case daemonset-hostpath --set mode=daemonset --set persistence.hostPath.e
   expect "${c}" "the node logs are mounted read-only" "true" \
     "$(wl ${c} '.spec.template.spec.containers[0].volumeMounts[] | select(.name == "node-logs") | .readOnly')"
   expect "${c}" "toleration" "Exists" "$(wl ${c} '.spec.template.spec.tolerations[0].operator')"
-  if grep -Eq 'runAsUser|runAsGroup|privileged: true' "${out}/${c}.yaml"; then fail_case "${c}" "a fixed ID or a privileged container"; fi
+  if grep -Eq 'privileged: true' "${out}/${c}.yaml"; then fail_case "${c}" "a privileged container"; fi
 fi
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -276,7 +284,7 @@ done
 # ---------------------------------------------------------------------------------------------------------------------
 check_openshift() { # case
   local c="$1"
-  check_restricted "${c}"
+  check_restricted "${c}" openshift
   expect "${c}" "no fsGroup" "null" "$(wl "${c}" '.spec.template.spec.securityContext.fsGroup')"
   expect "${c}" "no fsGroupChangePolicy" "null" "$(wl "${c}" '.spec.template.spec.securityContext.fsGroupChangePolicy')"
   if grep -Eq 'fsGroup|runAsUser|runAsGroup' "${out}/${c}.yaml"; then fail_case "${c}" "the OpenShift profile renders a user, group or fsGroup"; fi
@@ -289,6 +297,15 @@ fi
 if run_case openshift-auto --set openshift.enabled=auto --api-versions security.openshift.io/v1; then check_openshift openshift-auto; fi
 if run_case auto-standard --set openshift.enabled=auto; then
   expect auto-standard "auto without the API renders the standard profile" "10001" "$(wl auto-standard '.spec.template.spec.securityContext.fsGroup')"
+fi
+
+# the identity is an overridable default: null leaves the fields out, a value replaces them
+if run_case identity-null --set podSecurityContext.runAsUser=null --set podSecurityContext.runAsGroup=null --set podSecurityContext.fsGroup=null; then
+  if grep -Eq 'runAsUser|runAsGroup|fsGroup:' "${out}/identity-null.yaml"; then fail_case identity-null "null did not leave the identity fields out"; fi
+fi
+if run_case identity-override --set podSecurityContext.runAsUser=20000 --set podSecurityContext.runAsGroup=20001; then
+  expect identity-override "overridden identity" "20000 20001 10001" \
+    "$(wl identity-override '.spec.template.spec.securityContext | [.runAsUser, .runAsGroup, .fsGroup] | join(" ")')"
 fi
 
 if [ "${status}" = 0 ]; then log "helm-conform-collector: all cases ok (${out})"; else log "helm-conform-collector: FAILED"; fi

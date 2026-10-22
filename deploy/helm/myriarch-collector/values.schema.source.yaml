@@ -252,7 +252,7 @@ properties:
       hostPath:
         description: >-
           DaemonSet - keep the identity on the node. A hostPath volume is not allowed by the Pod Security levels baseline and
-          restricted. The chart has no root init container: prepare a directory that the supervisor user can write.
+          restricted. The chart has no root init container: prepare a directory that the pod user (10001 by default) can write.
         type: object
         additionalProperties: false
         properties:
@@ -352,8 +352,8 @@ properties:
 
   podSecurityContext:
     description: >-
-      Security context of the pod, in the format of a Kubernetes pod. The chart sets no fixed user ID. The OpenShift profile drops
-      runAsUser, runAsGroup, fsGroup and fsGroupChangePolicy. Other fields are passed through and validated by the API server.
+      Security context of the pod, in the format of a Kubernetes pod. The standard profile defaults runAsUser, runAsGroup and fsGroup
+      to 10001 (null leaves a field out). The OpenShift profile drops runAsUser, runAsGroup, fsGroup and fsGroupChangePolicy. Other fields are passed through and validated by the API server.
     type: object
     additionalProperties: true
     properties:

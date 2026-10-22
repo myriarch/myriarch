@@ -74,9 +74,9 @@ The DaemonSet runs one collector per node with `site.type=k8s-node`. Without `pe
 `emptyDir`: a restarted pod is a new agent in the UI. Two options need a `hostPath` volume (see the next section):
 
 - `persistence.hostPath.enabled=true` keeps the instance UID on the node. The directory (default
-  `/var/lib/myriarch/<fullname>`) must be writable by the user of the supervisor image (UID 10001), because the chart has no root
+  `/var/lib/myriarch/<fullname>`) must be writable by the pod user (10001 by default, see Pod Security), because the chart has no root
   init container that changes the owner: create it on the nodes, for example with your node provisioning.
-- `nodeLogs.enabled=true` mounts the logs of the node (default `/var/log/pods`) **read-only** for a `filelog` receiver. The supervisor user must be able to
+- `nodeLogs.enabled=true` mounts the logs of the node (default `/var/log/pods`) **read-only** for a `filelog` receiver. The pod user must be able to
   read the files, and by default it cannot: containerd creates them as `0640 root:root`, CRI-O as `0600`. With containerd set
   `podSecurityContext.supplementalGroups: [0]` (a group ID, not a user ID). The OpenShift profile removes `supplementalGroups`, so grant the
   group through the SCC there. With CRI-O that is not enough. Not yet tested against a cluster.
@@ -103,8 +103,8 @@ The StatefulSet runs under the Pod Security level **`restricted`**; this is what
 
 | Setting | Value |
 |---|---|
-| user ID | none fixed: `runAsNonRoot: true`, and no `runAsUser` or `runAsGroup` (all three images have a numeric user) |
-| `fsGroup` | 10001 in the standard profile (a group ID, so that the PVC is writable for the supervisor user); dropped in the OpenShift profile |
+| user and group | `runAsNonRoot: true` with `runAsUser: 10001` and `runAsGroup: 10001` as overridable defaults (`null` leaves a field out). The supervisor image runs under a named user, so the kubelet could not check `runAsNonRoot` without a numeric ID; one identity for all containers also lets the init containers write what the main container reads. Dropped in the OpenShift profile |
+| `fsGroup` | 10001 in the standard profile (so that the PVC is writable); dropped in the OpenShift profile |
 | capabilities | `drop: [ALL]`, nothing added, never privileged |
 | privilege escalation | `allowPrivilegeEscalation: false` |
 | root file system | `readOnlyRootFilesystem: true`; writable are the storage volume, `/tmp` and, in container mode, the `binaries` volume |
@@ -129,7 +129,7 @@ The cluster needs a CNI that enforces NetworkPolicies.
 ## OpenShift
 
 `openshift.enabled=true` renders the OpenShift profile (`auto` looks for the API `security.openshift.io/v1`, and `helm template`
-needs `--api-versions security.openshift.io/v1` for it): the pod has no `runAsUser`, `runAsGroup` or `fsGroup`, and the SCC
+needs `--api-versions security.openshift.io/v1` for it): the pod renders no `runAsUser`, `runAsGroup` or `fsGroup`, and the SCC
 `restricted-v2` assigns them from the range of the project. The StatefulSet runs under `restricted-v2` without further grants. A
 DaemonSet with a `hostPath` volume needs an SCC that allows host paths for its ServiceAccount (the chart creates no binding), and
 the log files must be readable under the SELinux context of the pod.
@@ -178,6 +178,6 @@ kubectl -n observability logs otel-gateway-myriarch-collector-0 -c collector
 | `helm install` refuses a key | the values schema is strict: the key is misspelled or does not exist |
 | `ws:// sends the enrollment token in clear text` | use a `wss://` endpoint, or accept the risk with `server.allowInsecureTransport=true` |
 | the pod stays `Init:Error` at `seed-collector` | the two upstream images differ in architecture from the node, or the `shared` volume is too small (`sharedSizeLimit`) |
-| the collector cannot write its storage | the PVC or the `hostPath` directory is not writable for the supervisor user; check `fsGroup` and the storage class |
+| the collector cannot write its storage | the PVC or the `hostPath` directory is not writable for the pod user; check `fsGroup` and the storage class |
 | the agent appears with a new instance UID after every restart | the DaemonSet has no `persistence.hostPath`, or the volume is an `emptyDir` |
 | a node agent is `Pending` or refused by admission | the `hostPath` volumes of the node agent need a `privileged` namespace or an SCC |

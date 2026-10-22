@@ -227,11 +227,15 @@ initResources:
 # section first.
 terminationGracePeriodSeconds: 45
 
-# Security context of the pod. There are no fixed user IDs: the images run with the user of the image (numeric, checked by
-# runAsNonRoot) and OpenShift assigns one from the range of the project. fsGroup is the group ID of the supervisor image's user,
-# which makes the PVC writable for it; the OpenShift profile drops it, the SCC assigns the group.
+# Security context of the pod. The supervisor image runs under a named user, which the kubelet cannot check against runAsNonRoot
+# without a numeric ID, so the standard profile sets runAsUser, runAsGroup and fsGroup to 10001 for all containers: the init
+# containers and the main container then share one identity that can read and write /shared and the storage volume. These are
+# overridable defaults, not baked-in IDs: set a value to null to leave the field out. The OpenShift profile drops all three, the SCC
+# assigns them from the range of the project.
 podSecurityContext:
   runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
   fsGroup: 10001
   fsGroupChangePolicy: OnRootMismatch
   seccompProfile:
@@ -275,7 +279,7 @@ extraVolumeMounts: []
 # CAVEAT for auto: "helm template" has no cluster access and renders the STANDARD profile unless you pass
 # --api-versions security.openshift.io/v1.
 # The OpenShift profile drops runAsUser, runAsGroup and fsGroup from podSecurityContext (the SCC assigns them from the range of the
-# project; runAsNonRoot and the seccomp profile stay). The chart never sets a fixed user ID in either profile.
+# project; runAsNonRoot and the seccomp profile stay).
 openshift:
   enabled: false
 

@@ -60,10 +60,11 @@ Until it arrives, a fallback configuration with the `health_check` extension run
 
 ## Pod Security
 
-* **No fixed user ID.** `runAsNonRoot: true` makes the kubelet check that the user of the image is numeric and not 0 (all three
-  images are); the pod sets neither `runAsUser` nor `runAsGroup`. The OpenShift profile leaves the user, group and `fsGroup` to the SCC.
-* **`fsGroup`** is a group ID, not a user ID: the default `10001` is the group of the user of the supervisor image and makes the PVC
-  writable for it. The OpenShift profile drops it; set `podSecurityContext.fsGroup` to `null` for a storage class that needs none.
+* **User and group `10001`, as overridable defaults.** The supervisor image runs under a named user, so the kubelet cannot check
+  `runAsNonRoot: true` without a numeric ID. The standard profile therefore sets `runAsUser`, `runAsGroup` and `fsGroup` to `10001` on
+  the pod, so that the init containers and the main container share one identity that can read and write `/shared` and the
+  storage volume. Override a value, or set it to `null` to leave the field out. The OpenShift profile renders none of the three; the
+  SCC assigns them from the range of the project.
 * **Every container:** `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `readOnlyRootFilesystem: true`,
   `runAsNonRoot: true`; the pod has `seccompProfile: RuntimeDefault`. No Kubernetes API token is mounted
   (`serviceAccount.automountToken: false`).
@@ -72,8 +73,8 @@ Until it arrives, a fallback configuration with the `health_check` extension run
 * **The only `hostPath` volumes** exist in the DaemonSet and only when you ask for them: `nodeLogs.enabled` (read-only, for a
   `filelog` receiver) and `persistence.hostPath.enabled` (the identity of a node agent). The Pod Security levels `baseline` and
   `restricted` refuse a `hostPath` volume: label the namespace `privileged`, or use an exception of your admission policy. The
-  chart has **no root init container**: prepare the directory of `persistence.hostPath` on the nodes, writable for the user of the
-  supervisor image (UID 10001); the pod log files must be readable for that user. containerd creates them as `0640 root:root` and CRI-O as `0600`, so neither "others" nor
+  chart has **no root init container**: prepare the directory of `persistence.hostPath` on the nodes, writable for
+  the pod user (10001 by default); the pod log files must be readable for that user. containerd creates them as `0640 root:root` and CRI-O as `0600`, so neither "others" nor
   the user's group can read them: with containerd set `podSecurityContext.supplementalGroups: [0]` (a group ID, not a user ID; the OpenShift
   profile removes `supplementalGroups`, so grant the group through the SCC there); with CRI-O that is not enough.
 * **NetworkPolicy** (`networkPolicy.enabled`): the ports of the receivers are reachable from the release namespace and from the
@@ -181,8 +182,8 @@ schema and `values.yaml`; edit `values.schema.source.yaml`, never the schema or 
 | `initResources.limits` | object | `{"memory":"256Mi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
 | `terminationGracePeriodSeconds` | integer | `45` | Grace period of the pod on termination, in seconds. In container mode the pod gets at least 360. |
 | `podSecurityContext.runAsNonRoot` | boolean | `true` |  |
-| `podSecurityContext.runAsUser` | integer | unset |  |
-| `podSecurityContext.runAsGroup` | integer | unset |  |
+| `podSecurityContext.runAsUser` | integer | `10001` |  |
+| `podSecurityContext.runAsGroup` | integer | `10001` |  |
 | `podSecurityContext.fsGroup` | integer | `10001` |  |
 | `podSecurityContext.fsGroupChangePolicy` | enum | `"OnRootMismatch"` |  |
 | `podSecurityContext.seccompProfile.type` | enum | `"RuntimeDefault"` |  |
