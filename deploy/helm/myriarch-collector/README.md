@@ -12,7 +12,7 @@ The chart runs the **unchanged upstream images**. Nothing is built from them:
 | init `seed-collector` | `otel/opentelemetry-collector-contrib` | `/shared/myriarch-updater copy /otelcol-contrib /shared/` copies the collector binary (the image has no shell and no `cp`) |
 | `collector` | `otel/opentelemetry-collector-opampsupervisor` | the OpAMP Supervisor starts the collector from the shared volume |
 
-The pod has no fixed user ID, adds no capability, has a read-only root file system and runs under the Pod Security level
+The pod runs as user and group 10001 by default (overridable; the OpenShift profile sets no ID), adds no capability, has a read-only root file system and runs under the Pod Security level
 `restricted` (StatefulSet). The documentation for operators is in
 [Install the collector with Helm](../../../docs/operations/install-collector-helm.md); the design of the optional container mode is in
 [docs/design/container-mode.md](../../../docs/design/container-mode.md).

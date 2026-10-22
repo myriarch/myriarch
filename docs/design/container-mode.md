@@ -42,9 +42,11 @@ clone and the artifact cache there.
 What the chart sets for container mode: the second `volumeClaimTemplate` `binaries`; probes on `container.healthListen`
 (`:13135`: `/healthz` for startup and liveness, `/readyz` for readiness); `terminationGracePeriodSeconds` of at least 360 seconds,
 more than `container.stopTimeout` plus the critical section of an installation; and the Sigstore trusted root as a ConfigMap for
-the offline verification (rendering fails without it unless the verification is switched off on purpose). The pod runs without a
-fixed user ID under the Pod Security level `restricted`: `myriarch-updater` needs write access to the directories of the volumes
-only, and the volumes are writable through the `fsGroup` (standard profile) or the SCC (OpenShift profile). Container mode is a
+the offline verification (rendering fails without it unless the verification is switched off on purpose). The pod runs under the Pod Security level `restricted`
+with no ID built into the images: the standard profile sets `runAsUser`, `runAsGroup` and `fsGroup` to 10001 as overridable defaults
+(`null` leaves a field out), and the OpenShift profile sets none of the three and leaves the ID to the SCC. `myriarch-updater` needs
+write access to the directories of the volumes only, and the volumes are writable through the `fsGroup` (standard profile) or the
+SCC (OpenShift profile). Container mode is a
 StatefulSet feature, because every replica needs a claim of its own.
 
 ## Invocation

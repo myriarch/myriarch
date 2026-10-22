@@ -83,7 +83,7 @@
 #                                                            provide it); arm64 tags get the suffix "-arm64", so they never
 #                                                            overwrite the amd64 tag
 #   WITH_UPDATER      1 = also pack myriarch-updater            default 1
-#   UPDATER_VERSION   version string linked into myriarch-updater   default `git describe --tags --always --dirty` (the Makefile passes VERSION)
+#   UPDATER_VERSION   version string linked into myriarch-updater   default `git describe --tags --always --dirty`
 #   UPDATER_COMMIT    commit linked into myriarch-updater       default `git rev-parse --short HEAD`
 #   GO                go binary used to build myriarch-updater  default go
 #   SUPERVISOR_IMAGE  base image                             default OTELCOL_SUPERVISOR_IMAGE of ci/versions.env (reviewed digest) for

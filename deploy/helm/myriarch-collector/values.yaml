@@ -157,7 +157,7 @@ persistence:
   accessModes: [ReadWriteOnce]
   # DaemonSet: keep the identity of the node agent on the node. Without it the storage is an emptyDir and a restarted pod is a new
   # agent. A hostPath volume is not allowed by the Pod Security levels baseline and restricted and needs a privileged namespace (or
-  # on OpenShift an SCC that allows it). The directory must be writable by the user of the supervisor image: the chart has no root
+  # on OpenShift an SCC that allows it). The directory must be writable by the pod user (10001 by default): the chart has no root
   # init container that changes its owner, so prepare it on the nodes.
   hostPath:
     enabled: false

@@ -4,8 +4,8 @@
 
 # Helm conformance of the collector chart (deploy/helm/myriarch-collector): renders it for both modes, container mode, the OpenShift
 # profile and the option cases, validates every rendered manifest with kubeconform and asserts the contract of the chart: the
-# unchanged upstream images pinned as in ci/versions.env, the Pod Security level "restricted" for the StatefulSet, no fixed user ID
-# anywhere, the init containers, the identity volumes, the probes, and the guards that make rendering fail (ws:// without the opt-in,
+# unchanged upstream images pinned as in ci/versions.env, the Pod Security level "restricted" for the StatefulSet, the identity 10001
+# in the standard profile and none in the OpenShift profile, the init containers, the identity volumes, the probes, and the guards that make rendering fail (ws:// without the opt-in,
 # container mode on a DaemonSet, a missing trusted root, and the other rules of templates/_helpers.tpl "checks" and of the schema).
 # ci/helm-conform.sh runs this script at its end with the same Kubernetes version; it can also run on its own.
 #
