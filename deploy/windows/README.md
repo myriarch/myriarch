@@ -84,7 +84,9 @@ powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\deploy\scripts\i
   Sigstore bundle, against an identity, an issuer and a trust root that the installer builds itself (never ones that the server
   names). The verifier is the `myriarch-updater.exe` of the bundle (`verify-bundle`), which the installer copies into its working
   directory first; `-Verifier` replaces it for the checks (`cosign.exe` 3.0.4 or newer). The updater of the bundle is installed when
-  the plan says so (`updater.install=true`).
+  the plan says so (`updater.install=true`). The bundle must be in a directory that only SYSTEM and the administrators can write (the
+  command unpacks it into `C:\Program Files\myriarch-setup\package`); otherwise the installer stops with `directory_unsafe` before
+  the first request, because that updater verifies what is installed and runs as a SYSTEM service.
 - The supervisor goes to `C:\Program Files\Myriarch\supervisor\opampsupervisor.exe`, the path of the service. If the file is not
   there afterwards, the installer stops with `supervisor_missing`, names the path and the next step.
 - The working directory of the installer is made below `%ProgramFiles%` and restricted to SYSTEM and the administrators before the
@@ -299,7 +301,7 @@ is at the top of that script.
 | `collector_start_failed` | the new collector binary cannot be started |
 | `collector_version_mismatch` | the collector reports another version than requested |
 | `supervisor_missing` | (from v0.2.0) the supervisor is not there when its installation step is over: `C:\Program Files\Myriarch\supervisor\opampsupervisor.exe` does not exist, is not the file whose SHA-256 was verified, or is not a regular file (a directory, a link). It is also raised in place of `service_not_running` when the service is not running because the file of its binPath is gone. The message names the path and the next step. A file that is gone or changed is usually the work of a security tool that quarantined the unsigned binary: look at its protection history (Microsoft Defender: *Windows Security*, *Protection history*, or `Get-MpThreatDetection`), allow the folder and run the installer again, which fetches and verifies the file again. A directory or a link is not replaced by the installer, and a new run would stop at the same item without a download: remove it yourself, then run the installer again. `install-linux.sh` raises the code for a missing, non-executable or no regular file at `/opt/myriarch/supervisor/opampsupervisor` |
-| `directory_unsafe` | a data directory is a reparse point, has the wrong owner, has an unexpected ACE, or is not a directory; or `-Verifier` is in a directory that unprivileged accounts can change |
+| `directory_unsafe` | a data directory is a reparse point, has the wrong owner, has an unexpected ACE, or is not a directory; or `-Verifier`, or with `-Server` the installer bundle, is in a directory that unprivileged accounts can change |
 | `acl_failed` | `icacls` failed |
 | `service_config_failed` | `sc.exe` failed |
 | `updater_install_failed` | `myriarch-updater install` failed |

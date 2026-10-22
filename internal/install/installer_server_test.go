@@ -20,8 +20,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -43,17 +41,6 @@ import (
 //   - every error code of the server mode: plan_failed, plan_invalid, plan_rejected, plan_unavailable, https_required,
 //     conflicting_install and supervisor_missing,
 //   - that the token and the grants reach the server as request headers only.
-
-const (
-	rigCollectorGrant  = "myrd_collectorgrant.abc123"
-	rigSupervisorGrant = "myrd_supervisorgrant.def456"
-	rigVersion         = "0.162.0"
-)
-
-// recorded is one request that the test server saw.
-type recorded struct {
-	Method, Path, Auth, Body string
-}
 
 type installerRig struct {
 	t         *testing.T
@@ -159,34 +146,6 @@ func (r *installerRig) withSystemd(units ...string) {
 	require.NoError(r.t, os.WriteFile(filepath.Join(r.bin, "systemctl"), []byte(script), 0o755))
 }
 
-func repoRoot(t *testing.T) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	require.True(t, ok)
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-}
-
-func copyTree(t *testing.T, src, dst string) {
-	t.Helper()
-	require.NoError(t, filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		require.NoError(t, err)
-		rel, err := filepath.Rel(src, path)
-		require.NoError(t, err)
-		target := filepath.Join(dst, rel)
-		if info.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, b, info.Mode().Perm())
-	}))
-}
-
 // ----------------------------------------------------------------------- the server ----
 
 func (r *installerRig) collectorFile() string {
@@ -271,22 +230,6 @@ func (r *installerRig) serve(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func servePlan(w http.ResponseWriter, text string) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = io.WriteString(w, text)
-}
-
-// problem writes a problem document the way the server does: the class is the code, the reason the code of the first issue.
-func problem(w http.ResponseWriter, status int, class, reason string) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(status)
-	issues := ""
-	if reason != "" {
-		issues = fmt.Sprintf(`,"issues":[{"severity":"error","code":%q,"message":"the reason"}]`, reason)
-	}
-	_, _ = fmt.Fprintf(w, `{"type":"about:blank","title":"refused","status":%d,"detail":"the server says: %s","code":%q%s}`, status, reason, class, issues)
-}
-
 // planText is a valid plan for this server; over replaces the value of a key (or, with an empty value, drops the line).
 func (r *installerRig) planText(over map[string]string) string {
 	u := r.srv.URL
@@ -321,20 +264,6 @@ func (r *installerRig) seen() []recorded {
 }
 
 // ------------------------------------------------------------------------- running ----
-
-type installerResult struct {
-	Out  string
-	Code int
-}
-
-// failure is the code of the one-line error, or "".
-func (res installerResult) failure() string {
-	m := regexp.MustCompile(`\[myriarch-install\] ERROR \[([a-z][a-z0-9_]*)\]`).FindStringSubmatch(res.Out)
-	if m == nil {
-		return ""
-	}
-	return m[1]
-}
 
 func (r *installerRig) baseArgs() []string {
 	return []string{"--root", r.root, "--arch", r.arch, "--server", r.srv.URL, "--ca-file", r.caFile, "--token-file", r.tokenFile,
@@ -500,15 +429,6 @@ func (r *installerRig) endpointOfPlan() string {
 	return ""
 }
 
-// hostAttr is the host.name that the installer sends (the name of this machine when it has a plain one), as a JSON member.
-func hostAttr(body string) string {
-	m := regexp.MustCompile(`"host\.name":"([^"]*)"`).FindStringSubmatch(body)
-	if m == nil {
-		return ""
-	}
-	return fmt.Sprintf(`,"host.name":%q`, m[1])
-}
-
 func TestServerModeWithoutUpdaterInPlan(t *testing.T) {
 	r := newInstallerRig(t, true, "amd64")
 	r.answerWith(r.planText(map[string]string{KeyUpdaterInstall: "false"}))
@@ -616,15 +536,6 @@ func TestInstallerCasesCoverTheOptionsOfTheCommands(t *testing.T) {
 	for f := range flags {
 		assert.Regexp(t, `(?m)^\s+`+regexp.QuoteMeta(f)+`[ )|]`, string(script), "install-linux.sh handles %s", f)
 	}
-}
-
-func sortedFlags(m map[string]bool) []string {
-	var out []string
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // ----------------------------------------------------------------- the plan as data ----
