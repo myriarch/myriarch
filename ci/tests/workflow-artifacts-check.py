@@ -71,6 +71,10 @@ POLICY = {
             ".cache/host-e2e/mirror/srv/mirror/v0.162.0/otelcol-contrib_0.162.0_linux_amd64.tar.gz",
             ".cache/host-e2e/mirror-evil/v0.162.0/otelcol-contrib_0.162.0_linux_amd64.tar.gz",
             ".cache/host-e2e/one-command/enrollment-token",
+            # the rendered command holds the token, and the response of the server holds the command
+            ".cache/host-e2e/one-command/command.sh",
+            ".cache/host-e2e/one-command/commands-response.json",
+            ".cache/host-e2e/bundles/myriarch-updater_0.2.0_linux_amd64.tar.gz",
             # a stray secret that gets into the upload directory is not matched either (the second line of defence)
             ".cache/host-e2e/upload/manual/cookies",
             ".cache/host-e2e/upload/manual/enrollment-token",

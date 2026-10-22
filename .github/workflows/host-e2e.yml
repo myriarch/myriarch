@@ -7,6 +7,16 @@
 # a rollback and a retry, then the uninstallation and the proof that nothing is left. The scripts of scripts/host-e2e change the
 # machine they run on and refuse to run anywhere else.
 #
+# Two scenarios. "manual" runs the installer as docs/tasks/connect-a-host.md describes it. "one-command" is the installation from the
+# server (ADR-0046): it creates an enrollment token at run time, renders the command through the API and runs that command unchanged
+# as root, then checks the healthy agent in the expected fleet at the target version of the fleet, a configuration rollout, a version
+# update through the updater with a rollback, and the uninstallation. A commit has no signed release, so the scenario builds the
+# installer bundle from the commit and the development server serves it from a directory. A manual run (workflow_dispatch) can name a
+# release in release_tag (for example v0.2.0-rc.1): the scenario then installs from the published installer bundle of that release,
+# after it verified the checksums.txt of the release keyless, and only that scenario runs. It is how the board accepts a release
+# candidate on real runners. The token is masked in the log; the upload takes files of an allow-list, never the token file or the
+# rendered command.
+#
 # Not part of ci-ok: a pull request starts it only when it touches the installer, the updater, the templates of a host or the
 # harness; every night it runs against main; a manual run (workflow_dispatch) starts it on any branch. A new scenario is a new step
 # that calls it by name, with a timeout of its own (together the steps stay below the timeout of the job, see the step below); its
@@ -26,9 +36,14 @@ on:
       - 'deploy/supervisor/linux/**'
       - 'deploy/updater/linux/**'
       - 'deploy/systemd/**'
+      - 'deploy/release/goreleaser.yaml'
       - 'cmd/myriarch-updater/**'
+      - 'cmd/myriarchd/**'
       - 'internal/updater/**'
       - 'internal/artifact/**'
+      - 'internal/install/**'
+      - 'internal/testutil/linuxhost/**'
+      - 'VERSION'
       - 'scripts/host-e2e/**'
       - 'scripts/e2e/ui-updates/killer.sh'
       - 'scripts/build-mirror-image-crane.sh'
@@ -36,6 +51,12 @@ on:
   schedule:
     - cron: '27 2 * * *'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Install from the published installer bundle of this release (for example v0.2.0-rc.1) and run only the scenario one-command; empty: the bundle of this commit'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -56,7 +77,7 @@ jobs:
   linux:
     name: linux (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -83,10 +104,18 @@ jobs:
       # runs; a job that runs out of time is cancelled, and failure() is false for a cancelled job, so nothing would be uploaded.
       # ci/tests/workflow-artifacts-check.py holds the margin for the steps around it (checkout, toolchain, build and upload).
       - name: 'Scenario manual: the installer as the documentation describes it'
+        if: ${{ inputs.release_tag == '' }}
         timeout-minutes: 35
         env:
           HOST_E2E: '1'
         run: scripts/host-e2e/linux.sh manual
+      # The release tag reaches the script through the environment and is checked there (vX.Y.Z or vX.Y.Z-rc.N), never pasted into code.
+      - name: 'Scenario one-command: the command of the server, run unchanged'
+        timeout-minutes: 40
+        env:
+          HOST_E2E: '1'
+          HOST_E2E_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: scripts/host-e2e/linux.sh one-command
       # The upload directory is assembled by the harness from an allow-list of files and scrubbed; the exclusions are a second line.
       - name: Upload the logs of a failed run
         if: failure()

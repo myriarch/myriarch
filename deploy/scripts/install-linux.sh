@@ -35,6 +35,22 @@
 #
 # The templates live under deploy/ (--templates-dir, default: the directory above this script).
 #
+# Server mode (ADR-0046): with --server the installer takes the versions, the OpAMP endpoint and the artifacts from the server
+# instead of from the operator. The copied command of the web UI downloads the installer bundle of the server, checks its pinned
+# SHA-256, unpacks it and starts this script from it:
+#   install-linux.sh --server https://fleet.example.com --token-file ./enrollment-token --site-type edge --site-id 042
+# It asks POST <server>/api/v1/install/plan for a plan (the token only as a request header, read by curl from standard input) and
+# reads the answer strictly as data: known keys only, each value against a pattern, at most 64 lines and 8 KiB, URLs of the
+# origin of --server only, https only, redirects only to the same origin. Collector and supervisor are downloaded from the
+# server with the install grants of the plan and verified with SHA-256 and their Sigstore bundle against an identity that this
+# script builds itself (never one the server names); the verifier is the myriarch-updater of the same bundle (verify-bundle).
+# Nothing runs before its check. A plan that the server is still preparing (first use of a platform, a new target) is awaited
+# for --plan-wait seconds (default 900). The updater is installed from the bundle when the plan says so.
+#
+# Without --server and without --collector-version the tested version of this release is installed (DEFAULT_COLLECTOR_VERSION,
+# the OTELCOL_VERSION of ci/versions.env). --collector-version latest asks GitHub for the newest release and is used only on
+# request: it is not the version the installers were tested with.
+#
 # Trust model: all downloads use https only (redirects included). Collector and supervisor are
 # verified with SHA-256 AND a Sigstore bundle before they are executed (default: require; the
 # verifier is cosign 3.0.4 or newer, or myriarch-updater verify-bundle). The myriarch-updater (the
@@ -63,27 +79,39 @@
 # (^[a-z][a-z0-9_]*$); tools and tests match the code, never the message text.
 #
 #   usage_error                     unknown option, or an option without a value
-#   option_missing                  a required option is absent (site type/id, collector version, token or
+#   option_missing                  a required option is absent (site type/id, --opamp-endpoint without --server, token or
 #                                   token file, --updater-url with --with-updater)
 #   option_invalid                  malformed value (versions, arch, verify-signatures mode, SHA-256 format,
 #                                   control characters, token characters, endpoint scheme, no file name
 #                                   in --updater-url; a non-https --release-base-url raises https_required)
 #   option_removed                  a removed option (--signing-key, --updater-checksums-sig-url); the message
 #                                   names the replacement
-#   option_conflict                 mutually exclusive or dependent options (--token + --token-file;
+#   option_conflict                 mutually exclusive or dependent options (--token + --token-file; --fleet,
+#                                   --plan-wait or --collector-version latest without/with --server; --server with
+#                                   --with-updater, --updater-*, --release-base-url, --supervisor-version or
+#                                   --verify-signatures skip;
 #                                   updater options without --with-updater; --updater-bundle-url without
 #                                   checksums URL; --updater-version and the version in --updater-url differ;
 #                                   --updater-checksums-url with --verify-signatures skip)
 #   updater_hash_source_missing     --with-updater without --updater-sha256 or --updater-checksums-url
 #   insecure_required               plain ws/http endpoint or --verify-signatures skip without --insecure
-#   https_required                  non-https download URL (or redirect) without --insecure
+#   https_required                  non-https download URL, --server, plan URL or redirect without --insecure
 #   file_unreadable                 token file, CA file, trusted root or verifier is unusable
-#   tool_missing                    a required tool is absent (sha256sum/shasum, curl/wget, tar, gzip, install,
+#   tool_missing                    a required tool is absent (sha256sum/shasum, curl/wget, tar, gzip, install, awk, od,
 #                                   cmp, systemctl, useradd/adduser); the message names the tool
 #   sigstore_verifier_missing       no Sigstore verifier (cosign or an installed myriarch-updater)
 #   sigstore_verifier_outdated      cosign is older than 3.0.4 or reports no usable version
 #   privilege_required              not running as root
 #   unsupported_platform            not Linux, or unsupported CPU architecture
+#   plan_failed                     --server: the request for the plan did not get an answer (no connection, a TLS error,
+#                                   a server error); the message gives the cause and the next step
+#   plan_invalid                    --server: the plan or a redirect breaks the rules (unknown or repeated key, a value that
+#                                   does not match its pattern, too many lines or bytes, a URL outside the origin of --server,
+#                                   a version other than the one asked for)
+#   plan_rejected                   --server: the server refused the plan; the message carries the code of the server
+#                                   (for example fleet_mismatch, no_fleet, rollout_blocking, unauthorized) and what to do
+#   plan_unavailable                --server: the server cannot give a plan now (503 or 429), or it was still preparing the
+#                                   artifacts after --plan-wait seconds
 #   conflicting_install             otelcol-contrib.service or opampsupervisor.service of a deb or rpm package of the upstream
 #                                   project is active or enabled (Windows: a service otelcol-contrib or opampsupervisor of an
 #                                   MSI exists); the message names the unit or service and the next step, nothing is removed
@@ -125,10 +153,23 @@ readonly CERT_ISSUER="https://token.actions.githubusercontent.com"
 readonly RELEASE_REPOSITORY="myriarch/myriarch"
 readonly MIN_COSIGN_VERSION="3.0.4"
 readonly SERVICE_USER="otelcol"
+readonly UPDATER_BINARY_NAME="myriarch-updater"
+# The collector version that this release was tested with: the OTELCOL_VERSION of ci/versions.env. The default of an installation
+# without --server and without --collector-version; ci/tests/versions-test.sh keeps both in step.
+readonly DEFAULT_COLLECTOR_VERSION="0.162.0"
+# Where --collector-version latest asks: the redirect of this page names the newest release (no API, no rate limit).
+readonly LATEST_RELEASE_URL="https://github.com/open-telemetry/opentelemetry-collector-releases/releases/latest"
+# Limits of the plan of the server (ADR-0046, "Interface sketch"; internal/install/grammar.go).
+readonly PLAN_MAX_BYTES=8192
+readonly PLAN_MAX_LINES=64
 
 # bash >= 5.2 expands "&" in ${var//pat/repl}; turn that off so values stay literal
 shopt -u patsub_replacement 2>/dev/null || true
 
+SERVER=""                  # --server: https://host[:port], the origin of every request of the server mode
+FLEET=""
+PLAN_WAIT=900              # seconds to await a plan that the server is still preparing
+PLAN_WAIT_SET=0
 OPAMP_ENDPOINT=""
 TOKEN=""
 TOKEN_FILE=""
@@ -143,6 +184,7 @@ ENVIRONMENT="prod"
 COLLECTOR_VERSION=""
 SUPERVISOR_VERSION=""
 RELEASE_BASE_URL="${DEFAULT_RELEASE_BASE_URL}"
+RELEASE_BASE_SET=0
 UPDATER_URL=""
 UPDATER_SHA256=""
 UPDATER_VERSION=""
@@ -167,12 +209,24 @@ usage() {
 Usage: install-linux.sh [options]
 
 Required (installation):
-  --opamp-endpoint URL      wss://fleet.example.com/v1/opamp (ws|wss|http|https)
+  --opamp-endpoint URL      wss://fleet.example.com/v1/opamp (ws|wss|http|https); with --server it comes from the plan
   --token-file FILE         enrollment token (myre_...) read from a file (recommended: --token shows up in the
                             process list and in the shell history)   or   --token TOKEN
   --site-type TYPE          edge | datacenter | office | k8s-gateway | ...
   --site-id ID              site number (always a string, leading zeros are kept)
-  --collector-version X.Y.Z collector version (without "v")
+
+Server mode (versions, endpoint, collector and supervisor come from the server; the token goes to it as a header only):
+  --server URL              https://fleet.example.com (the origin of the server, no path)
+  --fleet NAME              the fleet you expect; the server decides and refuses another one
+  --plan-wait SECONDS       how long to await a plan that the server is still preparing (default 900)
+  --ca-file FILE            CA of the server, also used for the requests to it
+  The verifier is the myriarch-updater of the installer bundle this script runs from (--verifier overrides it). The
+  updater is installed when the plan says so.
+
+Without --server:
+  --collector-version X.Y.Z collector version (without "v"); default: the version this release was tested with
+                            (DEFAULT_COLLECTOR_VERSION); "latest" asks GitHub for the newest release, on request only
+                            With --server it asks the server for exactly that version (inside the frame of the fleet).
 
 Optional:
   --site-name NAME  --site-country NL  --site-region REGION  --site-timezone Europe/Amsterdam
@@ -224,6 +278,9 @@ need_arg() { [ "$#" -ge 2 ] && [ -n "$2" ] || die usage_error "option $1 require
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --server)             need_arg "$@"; SERVER="${2%/}"; shift 2 ;;
+    --fleet)              need_arg "$@"; FLEET="$2"; shift 2 ;;
+    --plan-wait)          need_arg "$@"; PLAN_WAIT="$2"; PLAN_WAIT_SET=1; shift 2 ;;
     --opamp-endpoint)     need_arg "$@"; OPAMP_ENDPOINT="$2"; shift 2 ;;
     --token)              need_arg "$@"; TOKEN="$2"; TOKEN_FROM_ARGV=1; shift 2 ;;
     --token-file)         need_arg "$@"; TOKEN_FILE="$2"; shift 2 ;;
@@ -236,7 +293,7 @@ while [ "$#" -gt 0 ]; do
     --environment)        need_arg "$@"; ENVIRONMENT="$2"; shift 2 ;;
     --collector-version)  need_arg "$@"; COLLECTOR_VERSION="${2#v}"; shift 2 ;;
     --supervisor-version) need_arg "$@"; SUPERVISOR_VERSION="${2#v}"; shift 2 ;;
-    --release-base-url)   need_arg "$@"; RELEASE_BASE_URL="${2%/}"; shift 2 ;;
+    --release-base-url)   need_arg "$@"; RELEASE_BASE_URL="${2%/}"; RELEASE_BASE_SET=1; shift 2 ;;
     --updater-url)        need_arg "$@"; UPDATER_URL="$2"; shift 2 ;;
     --updater-sha256)     need_arg "$@"; UPDATER_SHA256="$2"; shift 2 ;;
     --updater-version)    need_arg "$@"; UPDATER_VERSION="${2#v}"; shift 2 ;;
@@ -305,7 +362,7 @@ cert_identity_release() { # version
 require_https() { # url what
   case "$1" in
     https://?*) ;;
-    *) [ "${INSECURE}" = 1 ] || die https_required "$2 must be an https:// URL (--insecure only for lab/tests): $1" ;;
+    *) [ "${INSECURE}" = 1 ] || die https_required "$2 must be an https:// URL (--insecure only for lab/tests): $1 - use the https address of the server" ;;
   esac
 }
 
@@ -333,6 +390,10 @@ download() { # url dest
   local url="$1" dest="$2"
   require_https "${url}" "download URL"
   log "downloading ${url}"
+  if [ -n "${SERVER}" ]; then
+    download_from_server "${url}" "${dest}"
+    return 0
+  fi
   if have curl; then
     local proto=(--proto '=https' --proto-redir '=https' --tlsv1.2)
     [ "${INSECURE}" = 1 ] && proto=()
@@ -448,21 +509,55 @@ set_owner() { # owner:group paths...
   chown "${og}" "$@"
 }
 
-validate_inputs() {
+VERSION_RE='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
+
+# The scheme of the OpAMP endpoint: TLS, unless --insecure.
+check_endpoint_scheme() {
   case "${OPAMP_ENDPOINT}" in
     wss://?*|https://?*) ;;
     ws://?*|http://?*)
       [ "${INSECURE}" = 1 ] || die insecure_required "--opamp-endpoint without TLS (ws://, http://) is not allowed: the token would cross the network in clear text (--insecure only for lab/tests)" ;;
     *) die option_invalid "--opamp-endpoint must start with wss:// or https://" ;;
   esac
+}
+
+# The options of the server mode: the address of the server, the fleet hint, the time to wait, and the options that cannot be
+# combined with it (the plan decides what they would set).
+validate_server_options() {
+  local re_server='^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?$'
+  [[ "${SERVER}" =~ ${re_server} ]] || die option_invalid "--server must be the address of the server, https://host[:port] without a path"
+  require_https "${SERVER}" "--server"
+  [ "${WITH_UPDATER}" = 0 ] && [ -z "${UPDATER_URL}${UPDATER_SHA256}${UPDATER_VERSION}${UPDATER_CHECKSUMS_URL}${UPDATER_BUNDLE_URL}" ] \
+    || die option_conflict "--server decides whether the updater is installed and takes it from the installer bundle: --with-updater and the --updater-* options do not apply"
+  [ "${RELEASE_BASE_SET}" = 0 ] || die option_conflict "--server downloads collector and supervisor from the server: --release-base-url does not apply"
+  [ -z "${SUPERVISOR_VERSION}" ] || die option_conflict "--server takes the supervisor version from the plan: --supervisor-version does not apply"
+  [ "${VERIFY_SIGNATURES}" = require ] || die option_conflict "--server cannot be combined with --verify-signatures skip: everything the server provides is verified"
+  [ "${COLLECTOR_VERSION}" != latest ] || die option_conflict "--collector-version latest asks GitHub and does not apply with --server: leave the version out and the server gives the target of the fleet"
+  [[ "${PLAN_WAIT}" =~ ^[0-9]{1,5}$ ]] && [ "${PLAN_WAIT}" -gt 0 ] || die option_invalid "--plan-wait must be a number of seconds, 1 to 99999"
+  [ -z "${FLEET}" ] || [[ "${FLEET}" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || die option_invalid "--fleet is not the name of a fleet (lower case letters, digits and -)"
+  [ -z "${OPAMP_ENDPOINT}" ] || check_endpoint_scheme
+}
+
+validate_inputs() {
+  if [ -n "${SERVER}" ]; then
+    validate_server_options
+  else
+    [ -z "${FLEET}" ] || die option_conflict "--fleet only applies together with --server"
+    [ "${PLAN_WAIT_SET}" = 0 ] || die option_conflict "--plan-wait only applies together with --server"
+    [ -n "${OPAMP_ENDPOINT}" ] || die option_missing "--opamp-endpoint is missing (with --server it comes from the plan)"
+    check_endpoint_scheme
+  fi
   [ -n "${SITE_TYPE}" ] || die option_missing "--site-type is missing"
   [ -n "${SITE_ID}" ]   || die option_missing "--site-id is missing"
-  [ -n "${COLLECTOR_VERSION}" ] || die option_missing "--collector-version is missing"
-  [[ "${COLLECTOR_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]] || die option_invalid "invalid --collector-version: ${COLLECTOR_VERSION}"
-  [ -n "${SUPERVISOR_VERSION}" ] || SUPERVISOR_VERSION="${COLLECTOR_VERSION}"
-  [[ "${SUPERVISOR_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]] || die option_invalid "invalid --supervisor-version: ${SUPERVISOR_VERSION}"
+  # without --server the version is settled later: empty is the tested default, "latest" is looked up on request
+  if [ -n "${COLLECTOR_VERSION}" ] && [ "${COLLECTOR_VERSION}" != latest ]; then
+    [[ "${COLLECTOR_VERSION}" =~ ${VERSION_RE} ]] || die option_invalid "invalid --collector-version: ${COLLECTOR_VERSION}"
+  fi
+  if [ -n "${SUPERVISOR_VERSION}" ]; then
+    [[ "${SUPERVISOR_VERSION}" =~ ${VERSION_RE} ]] || die option_invalid "invalid --supervisor-version: ${SUPERVISOR_VERSION}"
+  fi
   local v
-  for v in "${SITE_TYPE}" "${SITE_ID}" "${SITE_NAME}" "${SITE_COUNTRY}" "${SITE_REGION}" "${SITE_TIMEZONE}" "${ENVIRONMENT}" "${OPAMP_ENDPOINT}" "${CA_FILE}"; do
+  for v in "${SITE_TYPE}" "${SITE_ID}" "${SITE_NAME}" "${SITE_COUNTRY}" "${SITE_REGION}" "${SITE_TIMEZONE}" "${ENVIRONMENT}" "${OPAMP_ENDPOINT}" "${CA_FILE}" "${FLEET}"; do
     if [[ "${v}" =~ [[:cntrl:]] ]]; then die option_invalid "control character in a parameter value"; fi
   done
   if [ -n "${TOKEN}" ] && [ -n "${TOKEN_FILE}" ]; then die option_conflict "--token and --token-file are mutually exclusive"; fi
@@ -545,7 +640,11 @@ check_prereqs() {
   have gzip || die tool_missing "gzip not found (tar needs it to unpack .tar.gz archives)"
   have install || die tool_missing "install not found"
   have cmp || die tool_missing "cmp not found"
-  have curl || { [ "${INSECURE}" = 1 ] && have wget; } || die tool_missing "curl is required (wget cannot restrict redirects to https; it is accepted only with --insecure)"
+  have curl || { [ -z "${SERVER}" ] && [ "${INSECURE}" = 1 ] && have wget; } || die tool_missing "curl is required (wget cannot restrict redirects to https; it is accepted only with --insecure, and not with --server)"
+  if [ -n "${SERVER}" ]; then
+    have awk || die tool_missing "awk is needed to read the answers of the server"
+    have od || die tool_missing "od is needed to read the plan of the server"
+  fi
   if [ -z "${TEMPLATES_DIR}" ]; then
     TEMPLATES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   fi
@@ -681,6 +780,9 @@ verify_signature() { # asset-file bundle-url identity-regexp version
   else
     local args=(verify-bundle --bundle "${bundle}" --artifact "${file}" --version "v${version}" --identity-regexp "${identity}" --issuer "${CERT_ISSUER}")
     [ -n "${TRUSTED_ROOT}" ] && args+=(--trusted-root "${TRUSTED_ROOT}")
+    # the verifier of the server mode is the updater of this release; its TUF cache lives in the private working directory, so
+    # that the check does not depend on the home directory of the account that runs the installer
+    [ -n "${SERVER}" ] && [ -z "${TRUSTED_ROOT}" ] && args+=(--tuf-cache "${TMP_DIR}/tuf-cache")
     "${VERIFIER}" "${args[@]}" >/dev/null 2>&1 || die sigstore_verification_failed "Sigstore verification of $(basename "${file}") failed"
   fi
   log "Sigstore signature of $(basename "${file}") ok"
@@ -697,6 +799,411 @@ fetch_verified() { # url dest
   got="$(sha256_of "${dest}")"
   [ "$(printf '%s' "${want}" | tr 'A-F' 'a-f')" = "${got}" ] || die checksum_mismatch "SHA-256 mismatch: ${url} (expected ${want}, got ${got})"
   log "SHA-256 ok: $(basename "${dest}")"
+}
+
+# ---------------------------------------------------------------- Server mode (ADR-0046)
+# The server provides data and the host verifies code. Every request goes to the origin of --server (https only, a redirect only to
+# that origin), the enrollment token reaches the server as a request header only, and the plan is read as data: nothing in it is
+# run, evaluated or used before a strict pattern accepted it.
+readonly PLAN_PATH="/api/v1/install/plan"
+readonly PLAN_RETRY_SECONDS=6      # a connection that fails is tried again for this long (the plan is asked again after "preparing" anyway)
+SERVER_HEADERS=""                  # the response headers of the last request
+CURL_RC=0                          # exit code of curl for the last request
+HTTP_STATUS=000                    # HTTP status of the last request
+DL_BEARER=""                       # the install grant for the artifact that is being downloaded
+PLAN_FORMAT="" PLAN_FLEET="" PLAN_SOURCE="" PLAN_OPAMP="" PLAN_COLLECTOR_VERSION="" PLAN_COLLECTOR_URL="" PLAN_COLLECTOR_GRANT=""
+PLAN_SUPERVISOR_VERSION="" PLAN_SUPERVISOR_URL="" PLAN_SUPERVISOR_GRANT="" PLAN_UPDATER=""
+BUNDLE_UPDATER_SHA=""              # SHA-256 of the myriarch-updater that was copied from the installer bundle
+
+json_escape() {
+  local v="$1"
+  v="${v//\\/\\\\}"
+  v="${v//\"/\\\"}"
+  printf '%s' "${v}"
+}
+
+# ,"name":"value" for the JSON object of the attributes, or nothing when the value is empty.
+json_attr() { # name value
+  [ -n "$2" ] || return 0
+  printf ',"%s":"%s"' "$1" "$(json_escape "$2")"
+}
+
+# The body of the plan request. It holds no secret: the platform, the attributes the host would report, the fleet the person
+# expects and the version they ask for.
+plan_request_body() {
+  local attrs host
+  host="$(hostname 2>/dev/null || true)"
+  [[ "${host}" =~ ^[A-Za-z0-9._-]{1,253}$ ]] || host=""
+  attrs="$(json_attr host.name "${host}")$(json_attr site.type "${SITE_TYPE}")$(json_attr site.id "${SITE_ID}")$(json_attr site.name "${SITE_NAME}")"
+  attrs="${attrs}$(json_attr site.country "${SITE_COUNTRY}")$(json_attr site.region "${SITE_REGION}")$(json_attr site.timezone "${SITE_TIMEZONE}")"
+  attrs="${attrs}$(json_attr deployment.environment.name "${ENVIRONMENT}")"
+  printf '{"os":"linux","arch":"%s","attributes":{%s}' "${ARCH}" "${attrs#,}"
+  [ -z "${FLEET}" ] || printf ',"fleet":"%s"' "$(json_escape "${FLEET}")"
+  [ -z "${COLLECTOR_VERSION}" ] || printf ',"collectorVersion":"%s"' "$(json_escape "${COLLECTOR_VERSION}")"
+  printf '}\n'
+}
+
+# Last value of a response header of the last request (names in lower case), without the line end.
+header_value() { # name
+  tr -d '\r' < "${SERVER_HEADERS}" | awk -v want="$1" '{
+    i = index($0, ":")
+    if (i > 0 && tolower(substr($0, 1, i - 1)) == want) { v = substr($0, i + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); r = v }
+  } END { print r }'
+}
+
+# Seconds to wait from Retry-After (a number; a date is not used), between 1 and 60; the default when it is absent or odd.
+retry_after_seconds() { # default
+  local v
+  v="$(header_value retry-after)"
+  if [[ "${v}" =~ ^[0-9]{1,4}$ ]] && [ "${v}" -ge 1 ]; then
+    [ "${v}" -le 60 ] || v=60
+    printf '%s' "${v}"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+# One request, redirects not followed. The token or grant is the bearer: curl reads it as a config line from standard input, so it
+# is in no argument list and no environment. Sets CURL_RC and HTTP_STATUS; the body is in out, the headers in SERVER_HEADERS.
+server_once() { # method url out body bearer maxsize maxtime
+  local method="$1" url="$2" out="$3" body="$4" bearer="$5" maxsize="$6" maxtime="$7"
+  local proto='=https' rc=0 code=""
+  [ "${INSECURE}" = 1 ] && proto='=http,https'
+  local args=(--silent --show-error --globoff --proto "${proto}" --tlsv1.2 --connect-timeout 20 --max-time "${maxtime}"
+    -D "${SERVER_HEADERS}" -o "${out}" -w '%{http_code}')
+  [ -z "${maxsize}" ] || args+=(--max-filesize "${maxsize}")
+  [ -z "${CA_FILE}" ] || args+=(--cacert "${CA_FILE}")
+  if [ "${method}" = POST ]; then
+    args+=(-X POST -H 'Content-Type: application/json' -H 'Accept: text/plain' --data-binary "@${body}")
+  fi
+  if [ -n "${bearer}" ]; then
+    code="$(printf 'header = "Authorization: Bearer %s"\n' "${bearer}" | curl -K - "${args[@]}" "${url}")" || rc=$?
+  else
+    code="$(curl "${args[@]}" "${url}")" || rc=$?
+  fi
+  CURL_RC="${rc}"
+  HTTP_STATUS="${code}"
+  [[ "${HTTP_STATUS}" =~ ^[0-9]{3}$ ]] || HTTP_STATUS=000
+  return 0
+}
+
+# The URL of a redirect, after the checks: https (unless --insecure) and the origin of --server, nothing else.
+redirect_target() {
+  local loc
+  loc="$(header_value location)"
+  [ -n "${loc}" ] || die plan_invalid "the server answered HTTP ${HTTP_STATUS} without a Location: it is not a server this installer can talk to"
+  case "${loc}" in *[!A-Za-z0-9._~:/@%+=?\&-]*) die plan_invalid "the server redirected to a URL with characters that a URL of this installation does not have" ;; esac
+  case "${loc}" in
+    //*) die plan_invalid "the server redirected to another origin (a URL without a scheme): the installer follows redirects only on the origin of --server" ;;
+    /*) loc="${SERVER}${loc}" ;;
+    https://* | http://*) ;;
+    *) die plan_invalid "the server redirected to something that is not a URL on its origin: the installer follows redirects only on the origin of --server" ;;
+  esac
+  require_https "${loc}" "the redirect of the server"
+  case "${loc}" in
+    "${SERVER}" | "${SERVER}/"* | "${SERVER}?"*) ;;
+    *) die plan_invalid "the server redirected to another origin: the installer follows redirects only on the origin of --server, because the request carries the enrollment token or a grant" ;;
+  esac
+  printf '%s' "${loc}"
+}
+
+# One request with the redirects that the rules allow (at most three).
+server_exchange() { # method url out body bearer maxsize maxtime
+  local method="$1" url="$2" hops=0
+  shift 2
+  while :; do
+    server_once "${method}" "${url}" "$@"
+    [ "${CURL_RC}" = 0 ] || return 0
+    case "${HTTP_STATUS}" in
+      301 | 302 | 303 | 307 | 308)
+        hops=$((hops + 1))
+        [ "${hops}" -le 3 ] || die plan_invalid "the server redirected more than three times"
+        url="$(redirect_target)" ;;
+      *) return 0 ;;
+    esac
+  done
+}
+
+# A request that is tried again while it fails in a way that can pass (the policy of download(): a connection that fails, and the
+# statuses in "transient"), for at most "window" seconds. The result is left in CURL_RC and HTTP_STATUS for the caller.
+server_call() { # window transient method url out body bearer maxsize maxtime
+  local window="$1" transient="$2" attempt=0 pause=1 start="${SECONDS}" elapsed why
+  shift 2
+  while :; do
+    attempt=$((attempt + 1))
+    server_exchange "$@"
+    if [ "${CURL_RC}" = 0 ]; then
+      case " ${transient} " in *" ${HTTP_STATUS} "*) why="HTTP ${HTTP_STATUS}" ;; *) return 0 ;; esac
+    else
+      download_transient "${CURL_RC}" 000 || return 0
+      why="curl exit code ${CURL_RC}"
+    fi
+    elapsed=$((SECONDS - start))
+    [ "${elapsed}" -lt "${window}" ] || return 0
+    [ $((elapsed + pause)) -le "${window}" ] || pause=$((window - elapsed))
+    log "attempt ${attempt} failed (${why}), next attempt in ${pause} s"
+    sleep "${pause}"
+    pause=$((pause * 2))
+  done
+}
+
+# The code of the reason in a problem document of the server: the code of the first issue, else the class. Printed only when it
+# has the shape of a code; the answer is untrusted data.
+problem_code() { # body-file
+  local text first rest issue top
+  text="$(head -c 65536 "$1" 2>/dev/null | tr -d '\r\n')"
+  first='"code"[[:space:]]*:[[:space:]]*"[a-z][a-z0-9_]*"'
+  top="$(printf '%s' "${text%%\"issues\"*}" | grep -o "${first}" | head -n 1 | sed 's/.*"\([a-z0-9_]*\)"$/\1/' || true)"
+  case "${text}" in
+    *'"issues"'*)
+      rest="${text#*\"issues\"}"
+      issue="$(printf '%s' "${rest}" | grep -o "${first}" | head -n 1 | sed 's/.*"\([a-z0-9_]*\)"$/\1/' || true)" ;;
+    *) issue="" ;;
+  esac
+  printf '%s' "${issue:-${top}}"
+}
+
+# The detail sentence of a problem document, cut to harmless characters: it is shown to the person who reads the message.
+problem_detail() { # body-file
+  head -c 65536 "$1" 2>/dev/null | tr -d '\r\n' | grep -o '"detail"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 \
+    | sed 's/^"detail"[[:space:]]*:[[:space:]]*"//; s/"$//' | LC_ALL=C tr -cd 'A-Za-z0-9 .,:;()/_=@+-' | cut -c1-300 || true
+}
+
+# What to do about a reason that the server gave for refusing the plan.
+plan_hint() { # code
+  case "$1" in
+    unauthorized) printf 'the enrollment token is unknown, revoked or expired, or it was not sent: create a new token in the web UI and run the command again' ;;
+    not_found) printf 'this server does not offer the installation (install.enabled is off) or --server does not name a myriarch server: check the address, or use the manual path of docs/tasks/connect-a-host.md' ;;
+    forbidden) printf 'the server does not allow this token to install: ask the administrator of the server' ;;
+    fleet_mismatch) printf 'the server assigns the host to another fleet than --fleet: leave --fleet out, or correct the site attributes and the labels of the enrollment token' ;;
+    no_fleet) printf 'no fleet selects this host: check --site-type, --site-id and the other site options and the labels of the enrollment token against the selectors of the fleets in Git' ;;
+    fleet_ambiguous) printf 'more than one fleet selects this host: give the fleets different priorities in Git or narrow their selectors' ;;
+    rollout_blocking) printf 'a version rollout of the fleet is paused, failed or rolling back: resolve it in the web UI, then run the command again' ;;
+    no_target_version) printf 'the fleet has no target version (it is on hold or none is set): set one in Git or choose one in the web UI, then run the command again' ;;
+    unsupported_distribution) printf 'the fleet uses a collector distribution that cannot be installed from the server: use the manual path of docs/tasks/connect-a-host.md' ;;
+    unknown_version | unknown_supervisor_version) printf 'the release tracker of the server does not know that release: wait for the next poll, or name a version the server knows (--collector-version)' ;;
+    version_not_allowed) printf 'the version is outside the frame of the fleet in Git: leave --collector-version out, or name a version inside the frame' ;;
+    invalid_value | unknown_attribute) printf 'the server did not accept a site option: check the values of --site-* and --environment' ;;
+    platform_not_supported) printf 'the server does not offer this platform: use the manual path of docs/tasks/connect-a-host.md' ;;
+    server_settings) printf 'the server is not set up for host installations (server.publicUrl, opamp.path, client certificates): ask its administrator' ;;
+    *) printf 'see docs/operations/troubleshooting.md, "When the installer stops", or use the manual path of docs/tasks/connect-a-host.md' ;;
+  esac
+}
+
+# Asks the server for the plan; waits while it prepares the artifacts. Result: the plan file.
+PLAN_FILE=""
+fetch_plan() {
+  local body="${TMP_DIR}/plan-request.json" deadline wait remaining code detail
+  PLAN_FILE="${TMP_DIR}/plan.txt"
+  SERVER_HEADERS="${TMP_DIR}/response.headers"
+  plan_request_body > "${body}"
+  deadline=$((SECONDS + PLAN_WAIT))
+  log "asking ${SERVER} for the plan"
+  while :; do
+    server_call "${PLAN_RETRY_SECONDS}" "408 500 502 504" POST "${SERVER}${PLAN_PATH}" "${PLAN_FILE}" "${body}" "${TOKEN}" 1048576 60
+    [ "${CURL_RC}" = 0 ] || die plan_failed "the request for the plan to ${SERVER} failed (curl exit code ${CURL_RC}): check the address, the network and the certificate of the server (--ca-file names the CA of a private server), then run the command again"
+    case "${HTTP_STATUS}" in
+      200) return 0 ;;
+      503)
+        code="$(problem_code "${PLAN_FILE}")"
+        if [ "${code}" = preparing ]; then
+          remaining=$((deadline - SECONDS))
+          [ "${remaining}" -gt 0 ] || die plan_unavailable "the server was still preparing the artifacts after ${PLAN_WAIT} s: run the command again later, or give --plan-wait more seconds; the log of the server tells whether a download fails"
+          wait="$(retry_after_seconds 10)"
+          [ "${wait}" -le "${remaining}" ] || wait="${remaining}"
+          log "the server is preparing the artifacts (the first request for a platform downloads about 112 MB); asking again in ${wait} s"
+          sleep "${wait}"
+          continue
+        fi
+        die plan_unavailable "the server cannot give a plan now (HTTP 503${code:+, ${code}}): run the command again in a minute; if it stays, look at the log of the server (database, release tracker)" ;;
+      429)
+        die plan_unavailable "the server limits the requests from this address (HTTP 429): run the command again after $(retry_after_seconds 60) s" ;;
+      408 | 500 | 502 | 504)
+        die plan_failed "the server answered HTTP ${HTTP_STATUS} for the plan: run the command again; if it stays, look at the log of the server" ;;
+      *)
+        code="$(problem_code "${PLAN_FILE}")"
+        detail="$(problem_detail "${PLAN_FILE}")"
+        [ -n "${code}" ] || code="http_${HTTP_STATUS}"
+        die plan_rejected "the server refused the plan: ${code} (HTTP ${HTTP_STATUS})${detail:+ - ${detail}}: $(plan_hint "${code}")" ;;
+    esac
+  done
+}
+
+# True when the value is the plan URL of an artifact: https (unless --insecure), on the origin of --server, no path tricks, and the
+# file name that the installer expects.
+check_plan_url() { # name url file
+  local name="$1" url="$2" file="$3" rest
+  require_https "${url}" "the ${name} URL of the plan"
+  case "${url}" in
+    "${SERVER}/"*) ;;
+    *) die plan_invalid "the ${name} URL of the plan is not on the origin of --server: the installer downloads from the server it was started for only" ;;
+  esac
+  rest="${url#"${SERVER}"}"
+  case "${rest}" in
+    *"//"* | *"/../"* | *"/./"* | */.. | */.) die plan_invalid "the ${name} URL of the plan has a path that is not plain" ;;
+  esac
+  [ "${url##*/}" = "${file}" ] || die plan_invalid "the ${name} URL of the plan does not end in the file name ${file}"
+}
+
+# The OpAMP endpoint of the plan names the host and port of --server (the server derives it from the same address), with the
+# scheme that goes with it: wss or https for an https server, ws or http for a lab server.
+check_plan_endpoint() {
+  local url="$1" scheme authority
+  scheme="${url%%://*}"
+  authority="${url#*://}"
+  authority="${authority%%/*}"
+  case "${SERVER%%://*}:${scheme}" in
+    https:wss | https:https | http:ws | http:http) ;;
+    *) die plan_invalid "opamp.endpoint of the plan does not use the scheme that goes with --server (wss:// or https:// for an https server)" ;;
+  esac
+  [ "${authority}" = "${SERVER#*://}" ] || die plan_invalid "opamp.endpoint of the plan names another host or port than --server: the enrollment token would go to a server that was not asked for"
+}
+
+plan_value_check() { # key value
+  local key="$1" value="$2" re_url re_version re_grant
+  re_url='^(https?|wss?)://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?(/[A-Za-z0-9._:/@+=-]*)?$'
+  re_version='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+  re_grant='^myrd_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$'
+  [ -n "${value}" ] || die plan_invalid "the plan has no value for ${key}"
+  case "${key}" in
+    format) [ "${value}" = 1 ] || die plan_invalid "the plan has the format ${value:0:20}, this installer reads format 1: use the installer bundle of the server" ;;
+    fleet) [[ "${value}" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || die plan_invalid "fleet in the plan is not the name of a fleet" ;;
+    version.source) case "${value}" in git | ui | rollout | request) ;; *) die plan_invalid "version.source in the plan is not a source this installer knows" ;; esac ;;
+    opamp.endpoint | collector.url | supervisor.url)
+      [[ "${value}" =~ ${re_url} ]] || die plan_invalid "${key} in the plan is not an http(s) or ws(s) URL of the allowed shape" ;;
+    collector.version | supervisor.version)
+      { [[ "${value}" =~ ${re_version} ]] && [ "${#value}" -le 64 ]; } || die plan_invalid "${key} in the plan is not a version" ;;
+    collector.grant | supervisor.grant) [[ "${value}" =~ ${re_grant} ]] || die plan_invalid "${key} in the plan is not an install grant" ;;
+    updater.install) case "${value}" in true | false) ;; *) die plan_invalid "updater.install in the plan must be true or false" ;; esac ;;
+  esac
+}
+
+# Reads the plan as data (ADR-0046, "Interface sketch"; internal/install/grammar.go is the reference): at most 8 KiB and 64
+# lines of "key=value", only the characters A-Z a-z 0-9 . _ : / @ + = - and the brackets of an IPv6 literal, the key "format" first
+# and equal to 1, only known keys, each exactly once, every value against the pattern of its key. Nothing in it is run.
+parse_plan() { # file
+  local f="$1" size good lines last line key value n=0 seen=" " known=" format fleet version.source opamp.endpoint collector.version collector.url collector.grant supervisor.version supervisor.url supervisor.grant updater.install "
+  size="$(wc -c < "${f}" | tr -d ' ')"
+  [ "${size}" -gt 0 ] || die plan_invalid "the plan of the server is empty"
+  [ "${size}" -le "${PLAN_MAX_BYTES}" ] || die plan_invalid "the plan of the server is longer than ${PLAN_MAX_BYTES} bytes"
+  good="$(LC_ALL=C tr -cd 'A-Za-z0-9._:/@+=\133\135\012-' < "${f}" | wc -c | tr -d ' ')"
+  [ "${good}" = "${size}" ] || die plan_invalid "the plan of the server holds a character that a plan may not have (only letters, digits and . _ : / @ + = - and the brackets of an IPv6 address)"
+  last="$(tail -c 1 "${f}" | od -An -tx1 | tr -d ' \n')"
+  [ "${last}" = 0a ] || die plan_invalid "the plan of the server does not end in a line end"
+  lines="$(wc -l < "${f}" | tr -d ' ')"
+  [ "${lines}" -le "${PLAN_MAX_LINES}" ] || die plan_invalid "the plan of the server has more than ${PLAN_MAX_LINES} lines"
+  while IFS= read -r line; do
+    n=$((n + 1))
+    case "${line}" in *=*) ;; *) die plan_invalid "line ${n} of the plan has no =" ;; esac
+    key="${line%%=*}"
+    value="${line#*=}"
+    if [ "${n}" = 1 ] && [ "${key}" != format ]; then die plan_invalid "the plan does not start with the key format"; fi
+    case "${known}" in *" ${key} "*) ;; *) die plan_invalid "line ${n} of the plan has a key this installer does not know: ${key:0:40}" ;; esac
+    case "${seen}" in *" ${key} "*) die plan_invalid "the key ${key} is repeated in the plan" ;; esac
+    seen="${seen}${key} "
+    plan_value_check "${key}" "${value}"
+    case "${key}" in
+      format) PLAN_FORMAT="${value}" ;;
+      fleet) PLAN_FLEET="${value}" ;;
+      version.source) PLAN_SOURCE="${value}" ;;
+      opamp.endpoint) PLAN_OPAMP="${value}" ;;
+      collector.version) PLAN_COLLECTOR_VERSION="${value}" ;;
+      collector.url) PLAN_COLLECTOR_URL="${value}" ;;
+      collector.grant) PLAN_COLLECTOR_GRANT="${value}" ;;
+      supervisor.version) PLAN_SUPERVISOR_VERSION="${value}" ;;
+      supervisor.url) PLAN_SUPERVISOR_URL="${value}" ;;
+      supervisor.grant) PLAN_SUPERVISOR_GRANT="${value}" ;;
+      updater.install) PLAN_UPDATER="${value}" ;;
+    esac
+  done < "${f}"
+  for key in format fleet version.source opamp.endpoint collector.version collector.url collector.grant supervisor.version supervisor.url supervisor.grant updater.install; do
+    case "${seen}" in *" ${key} "*) ;; *) die plan_invalid "the plan lacks the key ${key}" ;; esac
+  done
+}
+
+# Checks what the plan says against what this host asked for and against the origin of --server, and takes it over.
+apply_plan() {
+  local v
+  [ -z "${FLEET}" ] || [ "${PLAN_FLEET}" = "${FLEET}" ] || die plan_invalid "the plan names the fleet ${PLAN_FLEET}, not ${FLEET}: leave --fleet out, or correct the site options"
+  for v in "${PLAN_COLLECTOR_VERSION}" "${PLAN_SUPERVISOR_VERSION}"; do
+    [[ "${v}" =~ ${VERSION_RE} ]] || die plan_invalid "the plan names the version ${v:0:64}, which this installer cannot install (a plain X.Y.Z or X.Y.Z-pre.release)"
+  done
+  [ -z "${COLLECTOR_VERSION}" ] || [ "${PLAN_COLLECTOR_VERSION}" = "${COLLECTOR_VERSION}" ] \
+    || die plan_invalid "the plan names the collector version ${PLAN_COLLECTOR_VERSION}, not the ${COLLECTOR_VERSION} that --collector-version asked for"
+  check_plan_endpoint "${PLAN_OPAMP}"
+  check_plan_url collector "${PLAN_COLLECTOR_URL}" "${COLLECTOR_ASSET_PREFIX}_${PLAN_COLLECTOR_VERSION}_linux_${ARCH}.tar.gz"
+  check_plan_url supervisor "${PLAN_SUPERVISOR_URL}" "${SUPERVISOR_ASSET_PREFIX}_${PLAN_SUPERVISOR_VERSION}_linux_${ARCH}"
+  COLLECTOR_VERSION="${PLAN_COLLECTOR_VERSION}"
+  SUPERVISOR_VERSION="${PLAN_SUPERVISOR_VERSION}"
+  [ -n "${OPAMP_ENDPOINT}" ] || OPAMP_ENDPOINT="${PLAN_OPAMP}"
+  [ "${PLAN_UPDATER}" = true ] && WITH_UPDATER=1
+  log "plan: fleet ${PLAN_FLEET}, collector v${COLLECTOR_VERSION} and supervisor v${SUPERVISOR_VERSION} (version from ${PLAN_SOURCE}), updater: ${PLAN_UPDATER}"
+}
+
+# The verifier and the updater come from the installer bundle this script was started from: the myriarch-updater next to deploy/,
+# a regular file of the archive whose SHA-256 the command pinned. It is copied into the private working directory first and that
+# copy is used for the checks and installed, so that nothing can replace it in between (install_updater hashes it again).
+prepare_bundle_updater() {
+  local here root src copy
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  root="$(cd "${here}/../.." && pwd)"
+  src="${root}/${UPDATER_BINARY_NAME}"
+  if [ -f "${src}" ] && [ ! -L "${src}" ] && [ -x "${src}" ]; then
+    copy="${TMP_DIR}/${UPDATER_BINARY_NAME}"
+    cp "${src}" "${copy}"
+    chmod 0755 "${copy}"
+    BUNDLE_UPDATER_SHA="$(sha256_of "${copy}")"
+    UPDATER_BIN="${copy}"
+    [ -n "${VERIFIER}" ] || VERIFIER="${copy}"
+    return 0
+  fi
+  [ -z "${VERIFIER}" ] || [ "${WITH_UPDATER}" = 0 ] \
+    || die file_unreadable "the plan asks for the updater, but the installer bundle has no regular, executable file ${src}: run the installer from the unpacked installer bundle of the server"
+  [ -n "${VERIFIER}" ] \
+    || die sigstore_verifier_missing "no Sigstore verifier: the installer bundle has no regular, executable file ${src}; run the installer from the unpacked installer bundle of the server (the command of the web UI does), or pass --verifier <cosign ${MIN_COSIGN_VERSION} or newer>"
+}
+
+# The download of the server mode: only from the origin of --server, with the grant of the artifact as the bearer.
+download_from_server() { # url dest
+  local url="$1" dest="$2" why
+  SERVER_HEADERS="${TMP_DIR}/response.headers"
+  case "${url}" in
+    "${SERVER}/"*) ;;
+    *) die plan_invalid "a download outside the origin of --server was asked for: ${url}" ;;
+  esac
+  server_call "${DOWNLOAD_RETRY_SECONDS}" "408 429 500 502 503 504" GET "${url}" "${dest}" "" "${DL_BEARER}" "" 900
+  [ "${CURL_RC}" = 0 ] || die download_failed "download failed: ${url} (curl exit code ${CURL_RC}; check the network and the certificate of the server, --ca-file)"
+  case "${HTTP_STATUS}" in
+    200) return 0 ;;
+    401) why="the install grant was refused, it expired or the enrollment token was revoked: run the command again to get a new plan" ;;
+    404) why="the server has no such artifact: run the command again to get a new plan" ;;
+    *) why="run the command again; if it stays, look at the log of the server" ;;
+  esac
+  die download_failed "download failed: ${url} (HTTP ${HTTP_STATUS}; ${why})"
+}
+
+# --collector-version latest: the redirect of the page of the newest release names it. On request only.
+latest_collector_version() {
+  have curl || die tool_missing "curl is required to look up the newest collector release"
+  local head loc
+  head="$(curl --silent --show-error --head --proto '=https' --tlsv1.2 --connect-timeout 20 --max-time 60 "${LATEST_RELEASE_URL}" 2>/dev/null)" \
+    || die download_failed "could not ask GitHub for the newest collector release: name the version with --collector-version X.Y.Z"
+  loc="$(printf '%s\n' "${head}" | tr -d '\r' | awk 'tolower($1) == "location:" { v = $2 } END { print v }')"
+  [[ "${loc}" =~ ^https://github\.com/open-telemetry/opentelemetry-collector-releases/releases/tag/v([0-9]+\.[0-9]+\.[0-9]+)$ ]] \
+    || die download_failed "GitHub did not name the newest collector release in the expected form: name the version with --collector-version X.Y.Z"
+  printf '%s' "${BASH_REMATCH[1]}"
+}
+
+# Without --server: the version is the one given, the newest on request, else the tested one of this release.
+resolve_collector_version() {
+  if [ -z "${COLLECTOR_VERSION}" ]; then
+    COLLECTOR_VERSION="${DEFAULT_COLLECTOR_VERSION}"
+    log "no --collector-version: installing ${COLLECTOR_VERSION}, the version this release was tested with (--collector-version latest asks GitHub for the newest)"
+  elif [ "${COLLECTOR_VERSION}" = latest ]; then
+    COLLECTOR_VERSION="$(latest_collector_version)"
+    log "--collector-version latest: the newest collector release is ${COLLECTOR_VERSION}"
+  fi
+  [ -n "${SUPERVISOR_VERSION}" ] || SUPERVISOR_VERSION="${COLLECTOR_VERSION}"
 }
 
 # ---------------------------------------------------------------- Steps
@@ -721,6 +1228,8 @@ ensure_dirs() {
 install_collector() {
   local base="${RELEASE_BASE_URL}/v${COLLECTOR_VERSION}"
   local asset="${COLLECTOR_ASSET_PREFIX}_${COLLECTOR_VERSION}_linux_${ARCH}.tar.gz"
+  local url="${base}/${asset}"
+  [ -z "${SERVER}" ] || url="${PLAN_COLLECTOR_URL}"
   local vdir="${P_COLLECTOR}/versions/${COLLECTOR_VERSION}"
   local current=""
   if [ -L "${P_COLLECTOR}/current" ]; then current="$(basename "$(readlink "${P_COLLECTOR}/current")")"; fi
@@ -728,8 +1237,10 @@ install_collector() {
   if [ -x "${vdir}/${COLLECTOR_ASSET_PREFIX}" ] && [ -f "${vdir}/.myriarch-install.json" ]; then
     log "Collector v${COLLECTOR_VERSION} is already installed"
   else
-    fetch_verified "${base}/${asset}" "${TMP_DIR}/${asset}"
-    verify_signature "${TMP_DIR}/${asset}" "${base}/${asset}.sigstore.json" "$(cert_identity base-release "${COLLECTOR_VERSION}")" "${COLLECTOR_VERSION}"
+    DL_BEARER="${PLAN_COLLECTOR_GRANT}"
+    fetch_verified "${url}" "${TMP_DIR}/${asset}"
+    verify_signature "${TMP_DIR}/${asset}" "${url}.sigstore.json" "$(cert_identity base-release "${COLLECTOR_VERSION}")" "${COLLECTOR_VERSION}"
+    DL_BEARER=""
     # extract only the binary from the archive root (no path from the archive is used)
     local stage="${TMP_DIR}/collector-stage"
     rm -rf "${stage}"; mkdir -p "${stage}"
@@ -765,13 +1276,17 @@ install_collector() {
 install_supervisor_binary() {
   local asset="${SUPERVISOR_ASSET_PREFIX}_${SUPERVISOR_VERSION}_linux_${ARCH}"
   local base="${RELEASE_BASE_URL}/cmd/opampsupervisor/v${SUPERVISOR_VERSION}"
-  local target="${P_SUPERVISOR}/opampsupervisor"
+  local target="${P_SUPERVISOR}/opampsupervisor" url
+  url="${base}/${asset}"
+  [ -z "${SERVER}" ] || url="${PLAN_SUPERVISOR_URL}"
   if [ -x "${target}" ] && [ -f "${P_SUPERVISOR}/VERSION" ] && [ "$(cat "${P_SUPERVISOR}/VERSION")" = "${SUPERVISOR_VERSION}" ]; then
     log "Supervisor v${SUPERVISOR_VERSION} is already installed"
     return 0
   fi
-  fetch_verified "${base}/${asset}" "${TMP_DIR}/${asset}"
-  verify_signature "${TMP_DIR}/${asset}" "${base}/${asset}.sigstore.json" "$(cert_identity base-binary-release "${SUPERVISOR_VERSION}")" "${SUPERVISOR_VERSION}"
+  DL_BEARER="${PLAN_SUPERVISOR_GRANT}"
+  fetch_verified "${url}" "${TMP_DIR}/${asset}"
+  verify_signature "${TMP_DIR}/${asset}" "${url}.sigstore.json" "$(cert_identity base-binary-release "${SUPERVISOR_VERSION}")" "${SUPERVISOR_VERSION}"
+  DL_BEARER=""
   install -m 0755 "${TMP_DIR}/${asset}" "${target}.new"
   mv -f "${target}.new" "${target}"
   printf '%s\n' "${SUPERVISOR_VERSION}" > "${P_SUPERVISOR}/VERSION"
@@ -887,6 +1402,10 @@ install_updater() {
   [ "${WITH_UPDATER}" = 1 ] || return 0
   local target="${P_UPDATER}/myriarch-updater"
   local bin="${UPDATER_BIN}"
+  # the updater of the installer bundle is hashed again when it is copied: it is the file that was used as the verifier
+  if [ -n "${BUNDLE_UPDATER_SHA}" ] && [ "$(sha256_of "${bin}")" != "${BUNDLE_UPDATER_SHA}" ]; then
+    die checksum_mismatch "SHA-256 of the myriarch-updater of the installer bundle changed during the installation"
+  fi
   local trusted_value=""
   if [ -n "${TRUSTED_ROOT}" ]; then
     install -m 0644 "${TRUSTED_ROOT}" "${P_ETC}/trusted_root.json"
@@ -964,8 +1483,18 @@ main() {
   check_prereqs
   check_foreign_installations
   TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/myriarch-install.XXXXXX")"
+  if [ -n "${SERVER}" ]; then
+    fetch_plan
+    parse_plan "${PLAN_FILE}"
+    apply_plan
+    prepare_bundle_updater
+  else
+    resolve_collector_version
+  fi
   log "installing: collector v${COLLECTOR_VERSION}, supervisor v${SUPERVISOR_VERSION}, linux/${ARCH}, site ${SITE_TYPE}/${SITE_ID}"
-  if [ "${WITH_UPDATER}" = 1 ] && [ -n "${UPDATER_CHECKSUMS_URL}" ]; then
+  if [ -n "${SERVER}" ]; then
+    resolve_verifier
+  elif [ "${WITH_UPDATER}" = 1 ] && [ -n "${UPDATER_CHECKSUMS_URL}" ]; then
     # the verifier of checksums.txt must exist before the updater is downloaded, and it is never that updater
     resolve_verifier
     fetch_updater

@@ -11,7 +11,8 @@
 #   * lib.sh holds the harness: the guard, the results, a throwaway CA, an https file server, the mirror of the collector and
 #     supervisor files, the myriarchd server (he_server_start accepts extra flags), the REST helper, the host reset and the
 #     collection of the artifacts that CI uploads;
-#   * a scenario lives in a script of its own (linux.sh: "manual", the installer as docs/tasks/connect-a-host.md describes it);
+#   * a scenario lives in a script of its own (linux.sh: "manual", the installer as docs/tasks/connect-a-host.md describes it, and
+#     "one-command", the command that the server renders, run unchanged);
 #   * every scenario ends with `install-linux.sh --uninstall --purge` and the check that nothing is left (he_reset_host), and
 #     the workflow calls scenarios by name, so adding one means adding a function and a workflow step.
 #
@@ -31,6 +32,8 @@
 #
 # Environment: CI, HOST_E2E (guard), HOST_E2E_DIR (work directory), HOST_E2E_BIN_DIR (myriarchd, myriarch-updater and myrctl,
 # default bin/), HOST_E2E_DEPLOY_DIR (the deploy/ tree with the installer and templates, default the checkout),
+# HOST_E2E_RELEASE_TAG (the scenario "one-command" installs from the published installer bundle of this release, for example
+# v0.2.0-rc.1, instead of a bundle built from the checkout),
 # HOST_E2E_PORT_SERVER, _PG, _MIRROR, _EVIL (ports, defaults 18443, 54341, 19443, 19444).
 
 # shellcheck disable=SC2034  # the HE_* settings are used by the scripts that source this library
@@ -561,21 +564,107 @@ he_prepare_templates() {
   rm -rf "${dir}"
   mkdir -p "${dir}" || return 1
   cp -R "${HE_DEPLOY}/supervisor" "${HE_DEPLOY}/systemd" "${HE_DEPLOY}/updater" "${dir}/" || return 1
-  python3 -I -c '
-import re, sys
-path = sys.argv[1]
-text = open(path).read()
-if not re.search(r"^update:[ \t]*\n", text, re.M):
-    sys.exit("no update: block in " + path)
-for key, value in (("healthTimeout", "40s"), ("healthInterval", "2s"), ("failedRetryBackoff", "15s")):
-    pattern = re.compile(r"^(  " + key + r":).*$", re.M)
-    if pattern.search(text):
-        text = pattern.sub(lambda m: m.group(1) + " " + value, text, count=1)
-    else:
-        text = re.sub(r"^(update:[ \t]*\n)", lambda m: m.group(1) + "  " + key + ": " + value + "\n", text, count=1, flags=re.M)
-open(path, "w").write(text)
-' "${dir}/updater/linux/updater.yaml" || return 1
+  python3 -I "${HE_LIB_DIR}/tune-updater.py" "${dir}/updater/linux/updater.yaml" || return 1
   printf '%s' "${dir}"
+}
+
+# The same shortening for the updater that is installed (the scenario "one-command" installs the templates of the bundle unchanged, as
+# a person would, and tunes the configuration afterwards, as an operator may): the file is edited as root and the updater restarted.
+he_tune_installed_updater() {
+  he_sudo python3 -I "${HE_LIB_DIR}/tune-updater.py" /etc/myriarch/updater.yaml || return 1
+  he_sudo systemctl restart myriarch-updater.service
+}
+
+# ---------------------------------------------------------------------------------- installer bundle and command ---
+# The server serves the installer bundle (the updater archive of a release: scripts, templates and myriarch-updater) and renders the
+# command that downloads it. In the test the server is a development server that reads the bundle from a directory
+# (myriarchd dev --install-bundle-dir), because a commit has no signed release: the bundle is built from the checkout in the layout of
+# the release archive (deploy/release/goreleaser.yaml, id myriarch-updater), or, with HOST_E2E_RELEASE_TAG, it is the published
+# archive of that release, whose checksums.txt is verified keyless first (the check the server itself makes for a bundle of its release).
+HE_BUNDLES="${HE_WORK}/bundles"
+HE_BUNDLE_FILE=""
+HE_BUNDLE_SHA=""
+HE_RELEASE_TAG="${HOST_E2E_RELEASE_TAG:-}"
+
+he_bundle_build() {
+  local ver arch name stage="${HE_WORK}/bundle-stage" updater
+  ver="$(tr -d '[:space:]' < "${HE_ROOT}/VERSION")"
+  arch="$(he_arch)" || return 1
+  updater="$(he_brand UpdaterBinary)"
+  name="$(he_brand UpdaterBinary)_${ver}_linux_${arch}.tar.gz"
+  rm -rf "${stage}" "${HE_BUNDLES}"
+  mkdir -p "${stage}/deploy/scripts" "${HE_BUNDLES}" || return 1
+  cp "${HE_DEPLOY}/scripts/${HE_INSTALLER_NAME}" "${stage}/deploy/scripts/" || return 1
+  cp -R "${HE_DEPLOY}/supervisor" "${HE_DEPLOY}/systemd" "${HE_DEPLOY}/updater" "${stage}/deploy/" || return 1
+  cp "${HE_BIN}/${updater}" "${stage}/${updater}" || return 1
+  cp "${HE_ROOT}/LICENSE" "${stage}/" || return 1
+  chmod 755 "${stage}/deploy/scripts/${HE_INSTALLER_NAME}" "${stage}/${updater}"
+  tar -C "${stage}" --owner=0 --group=0 --numeric-owner -czf "${HE_BUNDLES}/${name}" . || return 1
+  rm -rf "${stage}"
+  HE_BUNDLE_FILE="${name}"
+}
+
+# The published bundle of a release: the archive, checksums.txt and its keyless Sigstore bundle from the release page; checksums.txt
+# is verified with the updater of this checkout against the release workflow of the tag (identity, issuer and tag are fixed here), and
+# the archive against its line.
+he_bundle_fetch_release() { # tag
+  local tag="$1" ver arch name base dir="${HE_WORK}/bundle-download" updater repo want got f
+  [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || { he_warn "the release tag '${tag}' is not of the form vX.Y.Z or vX.Y.Z-rc.N"; return 1; }
+  ver="${tag#v}"
+  arch="$(he_arch)" || return 1
+  updater="$(he_brand UpdaterBinary)"
+  repo="$(he_brand Repository)"
+  name="${updater}_${ver}_linux_${arch}.tar.gz"
+  base="${repo}/releases/download/${tag}"
+  rm -rf "${dir}" "${HE_BUNDLES}"
+  mkdir -p "${dir}" "${HE_BUNDLES}" || return 1
+  for f in "${name}" checksums.txt checksums.txt.sigstore.json; do
+    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --max-time 300 -o "${dir}/${f}" "${base}/${f}" || { he_warn "cannot download ${base}/${f}"; return 1; }
+  done
+  if ! "${HE_BIN}/${updater}" verify-bundle --bundle "${dir}/checksums.txt.sigstore.json" --artifact "${dir}/checksums.txt" --version "${tag}" \
+      --identity-regexp "^${repo//./\\.}/\\.github/workflows/release\\.yml@refs/tags/${tag//./\\.}\$" \
+      --issuer https://token.actions.githubusercontent.com --tuf-cache "${HE_WORK}/tuf-cache" > "${HE_WORK}/bundle-verify.log" 2>&1; then
+    he_warn "checksums.txt of ${tag} is not signed by the release workflow: $(tail -n 2 "${HE_WORK}/bundle-verify.log" | tr '\n' ' ')"
+    return 1
+  fi
+  want="$(awk -v n="${name}" '$2 == n || $2 == "*" n {print $1}' "${dir}/checksums.txt")"
+  got="$(he_sha256 "${dir}/${name}")"
+  if [ -z "${want}" ] || [ "${want}" != "${got}" ]; then he_warn "${name} does not match its line in the signed checksums.txt"; return 1; fi
+  mv "${dir}/${name}" "${HE_BUNDLES}/${name}" || return 1
+  HE_BUNDLE_FILE="${name}"
+}
+
+he_bundle_prepare() {
+  if [ -n "${HE_RELEASE_TAG}" ]; then he_bundle_fetch_release "${HE_RELEASE_TAG}" || return 1; else he_bundle_build || return 1; fi
+  HE_BUNDLE_SHA="$(he_sha256 "${HE_BUNDLES}/${HE_BUNDLE_FILE}")"
+}
+
+# Renders the command for this host through the API, as the dialog does: the variant with the token in the command (a placeholder, which
+# the dialog replaces in the browser), for the platform of this machine, with the fleet and the site of the scenario. Writes the response
+# to HE_DIR/commands-response.json (not in the allow-list of the artifacts: it holds the rendered command) and the command with the
+# token put in to a file (0600), which is never uploaded either. Prints nothing.
+he_command_render() { # fleet site-id token-file outfile
+  local fleet="$1" id="$2" tokenf="$3" out="$4" platform resp="${HE_DIR}/commands-response.json" body placeholder cmd token
+  platform="linux/$(he_arch)"
+  body="$(jq -n --arg p "${platform}" --arg fleet "${fleet}" --arg id "${id}" --arg ca "${HE_TLS}/ca.pem" \
+    '{variant: "token_inline", platforms: [$p], fleet: $fleet, caFile: $ca,
+      attributes: {"site.type": "edge", "site.id": $id, "site.name": "Host end-to-end test", "site.country": "NL", "site.timezone": "Europe/Amsterdam"}}')" || return 1
+  ( umask 077; he_api POST /install/commands "${body}" > "${resp}" ) || return 1
+  placeholder="$(jq -r '.tokenPlaceholder // empty' "${resp}")"
+  cmd="$(jq -r --arg p "${platform}" '[.commands[]? | select(.platform == $p)][0].command // empty' "${resp}")"
+  [ -n "${placeholder}" ] && [ -n "${cmd}" ] || return 1
+  token="$(tr -d '\r\n' < "${tokenf}")"
+  [ -n "${token}" ] || return 1
+  # a shell builtin does the replacement: the token appears in no argument list
+  shopt -u patsub_replacement 2>/dev/null || true
+  ( umask 077; printf '%s\n' "${cmd//"${placeholder}"/${token}}" > "${out}" )
+}
+
+# Runs the rendered command unchanged, the way a person pastes it: as the user of the test, so the command starts the privileged shell
+# itself. The output goes to a log; the token is neither in the command line nor in the output.
+he_command_run() { # commandfile logfile
+  he_require_ci
+  bash "$1" > "$2" 2>&1
 }
 
 # What the host looks like, for the artifacts of a failed run. Names, modes and logs; never the content of myriarch.env or of

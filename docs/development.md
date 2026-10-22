@@ -1109,6 +1109,41 @@ The scenario `manual` is the installation of [Connect a host](tasks/connect-a-ho
 8. `retry-failed`: the update succeeds (download, verification, installation, restart, health check, health wait).
 9. `install-linux.sh --uninstall --purge`, and nothing is left: no file, user, unit, process or listener of the installation.
 
+The scenario `one-command` is the installation from the server ([ADR-0046](adr/0046-host-installation-from-the-server.md), [Connect a
+host](tasks/connect-a-host.md#one-command-install-a-linux-host-from-the-server)): the command that the server renders, run unchanged.
+
+1. The installer bundle. A commit has no signed release, so the harness builds the bundle from the checkout in the layout of the release
+   archive of the updater (`myriarch-updater_<VERSION>_linux_<arch>.tar.gz`: `deploy/scripts/install-linux.sh`, the templates and units,
+   and the `myriarch-updater` built from the commit; `he_bundle_build`). With `HOST_E2E_RELEASE_TAG` (the input `release_tag` of a manual
+   run, for example `v0.2.0-rc.1`) the harness downloads the published archive of that release instead, verifies `checksums.txt` against
+   its Sigstore bundle with the identity of the release workflow at that tag (the updater of the checkout does it, the identity is fixed in
+   `he_bundle_fetch_release`), and checks the archive against its line. Only this scenario runs then; it is how the board accepts a
+   release candidate on real runners.
+2. `myriarchd` as in `manual`, plus `--install-bundle-dir` (the development server serves the archives of a directory,
+   `source: directory`) and `install.platforms` set to the platform of the runner.
+3. An enrollment token through the API at run time (a file with mode 0600, masked in the log with `::add-mask::`, never printed).
+4. The command, rendered with `POST /api/v1/install/commands` the way the dialog does it: the variant `token_inline`, the platform of the
+   runner, the fleet `host-e2e`, the site `edge/host-e2e-01` and the CA file of the throwaway CA. The response holds no token; the
+   harness puts the token into a copy of the command (a file with mode 0600, deleted right after the run, never uploaded).
+5. That command, run unchanged by the user of the test: it starts the privileged shell itself, writes the token to a private
+   directory below `/root`, downloads the bundle from the server, checks the pinned SHA-256, unpacks it and starts `install-linux.sh
+   --server`. The installer asks for the plan, downloads collector and supervisor from the server with install grants and verifies
+   them with the `myriarch-updater` of the bundle against the upstream identity and, over TUF, the public trusted root. The test
+   checks the log, both units, the files, and that the private directory is gone.
+6. The host registers: a healthy collector in the fleet `host-e2e` at the target version of the fleet, `in_sync`, the updater linked.
+   Then the waits of the installed updater are shortened in `/etc/myriarch/updater.yaml` (the same values as in `manual`, through the
+   same `scripts/host-e2e/tune-updater.py`), so that the rollback and the retry take minutes.
+7. A configuration rollout: the blueprint of the GitOps fixture changes, `POST /gitops/actions/sync`, the configuration rollout
+   completes, the collector is `in_sync` again and reports the changed configuration.
+8. The update to 0.162.0 with a failure, the rollback by the updater and the retry, as in steps 7 and 8 of `manual`
+   (`he_update_with_rollback`).
+9. `install-linux.sh --uninstall --purge`, nothing is left (also no working directory of the command below `/root`).
+
+Nothing in the log or the upload may hold the token: the harness masks it, the installer and the command never print it, and the
+upload takes the allow-list of files only, never the token file, `command.sh` or `commands-response.json`. The test of the script
+itself without a host is `internal/install/installer_server_test.go`: it runs `install-linux.sh --server` in staging mode against a
+test server and covers the options of the rendered commands, the limits of the plan and every error code of the server mode.
+
 **What the scripts refuse and protect.** The scripts install a service user, units and files below `/etc`, `/opt` and `/var`. They
 refuse to run unless `CI=true` and `HOST_E2E=1` are set (the workflow sets the second one on the step that runs a scenario only), on
 Linux, as a user other than root (the embedded PostgreSQL refuses root; the harness uses `sudo` for every change of the host, through
@@ -1129,8 +1164,8 @@ planting each of these forms in a copy of the scripts and requiring the report.
 start (`he_server_start`, which passes extra flags on to `myriarchd dev`), the REST helper (`he_api`), the host reset (`he_reset_host`:
 uninstall and the proof that nothing is left) and the collection of the artifacts. A scenario is a function in a script of its own
 (`linux.sh`: `scenario_manual`) that `he_run_scenario` runs; the workflow calls it by name (`scripts/host-e2e/linux.sh manual`), and
-every scenario ends with `he_reset_host`. A second scenario, for example the installation from a command of the UI, is a function, a
-call in the workflow, and nothing else: its files go to `.cache/host-e2e/upload/<scenario>/`, which the upload step already covers.
+every scenario ends with `he_reset_host`. A further scenario is a function, a call in the workflow, and nothing else (`one-command` was
+added that way): its files go to `.cache/host-e2e/upload/<scenario>/`, which the upload step already covers.
 State that the server derives is read after `he_settle`, never at a fixed moment: the engine of the rollouts derives the phase and
 the steps of a target on its tick, up to `rollouts.tickInterval` after the last report of the updater, and the API returns the stored
 copy ([Target progress](design/version-selection.md#target-progress)); the package status of an updater is a message of its own.
@@ -1155,6 +1190,7 @@ to at least five minutes below that of the job, with copies of the workflow that
 | `HOST_E2E_DIR` | work directory (default `.cache/host-e2e`) |
 | `HOST_E2E_BIN_DIR` | the directory with `myriarchd`, `myriarch-updater` and `myrctl` (default `bin/`; `make build` makes them) |
 | `HOST_E2E_DEPLOY_DIR` | the `deploy/` tree with the installer and the templates (default the checkout) |
+| `HOST_E2E_RELEASE_TAG` | for `one-command`: install from the published installer bundle of this release (`vX.Y.Z` or `vX.Y.Z-rc.N`) instead of a bundle built from the checkout |
 | `HOST_E2E_PORT_SERVER`, `_PG`, `_MIRROR`, `_EVIL` | ports of `myriarchd`, its PostgreSQL, the mirror and the tampered mirror (18443, 54341, 19443, 19444) |
 
 A failed run: download the artifact `host-e2e-linux-<runner>` of the run; `results.txt` lists every check, `diag/journal-*.txt` the
