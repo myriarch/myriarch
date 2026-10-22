@@ -322,9 +322,13 @@ function Test-TransientDownloadError {
   $names = @()
   for ($e = $Exception; $e; $e = $e.InnerException) { $names += $e.GetType().FullName }
   if ($names -contains 'System.Security.Authentication.AuthenticationException') { return $false }
-  if ($Exception -is [System.Net.WebException]) {
-    return (@('Timeout', 'ConnectFailure', 'NameResolutionFailure', 'ProxyNameResolutionFailure', 'ConnectionClosed',
-        'ReceiveFailure', 'SendFailure', 'KeepAliveFailure', 'PipelineFailure') -contains $Exception.Status.ToString())
+  # the WebException of .NET Framework has no inner exception, and a method call of PowerShell may wrap it
+  for ($e = $Exception; $e; $e = $e.InnerException) {
+    if ($e -is [System.Net.WebException]) {
+      if (@('Timeout', 'ConnectFailure', 'NameResolutionFailure', 'ProxyNameResolutionFailure', 'ConnectionClosed',
+          'ReceiveFailure', 'SendFailure', 'KeepAliveFailure', 'PipelineFailure') -contains $e.Status.ToString()) { return $true }
+      break
+    }
   }
   foreach ($n in @('System.Net.Http.HttpRequestException', 'System.Net.Http.HttpIOException', 'System.Net.Sockets.SocketException',
       'System.TimeoutException', 'System.Threading.Tasks.TaskCanceledException')) {
@@ -470,8 +474,11 @@ function Send-ServerRequest {
     }
   } catch {
     # a transport failure after an answer began counts as no answer: the caller must not read a partial body
+    # Windows PowerShell 5.1 wraps what a .NET method throws in a MethodInvocationException: the retry policy needs the WebException
+    $ex = $_.Exception
+    while ($ex -is [Management.Automation.MethodInvocationException] -and $ex.InnerException) { $ex = $ex.InnerException }
     $result.Status = 0
-    $result.Exception = $_.Exception
+    $result.Exception = $ex
   } finally {
     if ($out) { $out.Dispose() }
     if ($in) { $in.Dispose() }
@@ -782,11 +789,26 @@ function Use-Plan {
 # The verifier and the updater come from the installer bundle this script was started from: the myriarch-updater.exe next to deploy\,
 # a regular file of the archive whose SHA-256 the command pinned. It is copied into the private working directory first and that copy
 # is used for the checks and installed, so that nothing can replace it in between (Copy-VerifiedFile hashes it again).
-function Use-BundleUpdater {
-  param([string]$TmpDir)
+function Get-BundleUpdaterPath {
   $here = $PSScriptRoot
   if (-not $here) { $here = Split-Path -Parent $MyInvocation.MyCommand.Path }
-  $src = [IO.Path]::Combine((Split-Path -Parent (Split-Path -Parent $here)), 'myriarch-updater.exe')
+  return [IO.Path]::Combine((Split-Path -Parent (Split-Path -Parent $here)), 'myriarch-updater.exe')
+}
+
+# The updater of the bundle checks everything that is installed and is itself installed as a SYSTEM service, so the bundle must sit
+# where unprivileged accounts cannot change it (the command unpacks it under %ProgramFiles%\myriarch-setup). Checked before the first
+# request, like a -Verifier. The copy and the second hash protect the file only from the moment of the copy.
+function Assert-BundleDirectory {
+  if ($script:StagingMode -or -not (Test-AclEnforced)) { return }
+  $dir = Split-Path -Parent (Get-BundleUpdaterPath)
+  if (-not (Test-AdminOnlyDirectory -Path $dir)) {
+    Stop-Install 'directory_unsafe' "the installer bundle is in $dir, which unprivileged accounts can change, and its myriarch-updater.exe verifies and runs as SYSTEM what is installed; unpack the bundle into a directory only Administrators can write (the command of the web UI uses C:\Program Files\myriarch-setup\package) and run the installer from there"
+  }
+}
+
+function Use-BundleUpdater {
+  param([string]$TmpDir)
+  $src = Get-BundleUpdaterPath
   $item = Get-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
   if ($item -and -not $item.PSIsContainer -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) {
     $copy = Join-Path $TmpDir 'myriarch-updater.exe'
@@ -1753,6 +1775,7 @@ function Invoke-Main {
   $tmpDir = New-WorkDirectory -Staging $staging
   try {
     if ($script:ServerMode) {
+      Assert-BundleDirectory
       $script:Plan = @{}
       Use-Plan -Plan (Read-Plan -Path (Get-PlanFile -Arch $arch -TmpDir $tmpDir)) -Arch $arch
       Use-BundleUpdater -TmpDir $tmpDir

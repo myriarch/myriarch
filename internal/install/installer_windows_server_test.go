@@ -1,8 +1,6 @@
 // Copyright The Myriarch Authors
 // SPDX-License-Identifier: Apache-2.0
 
-//go:build !windows
-
 package install
 
 import (
@@ -14,6 +12,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -33,8 +32,10 @@ import (
 // These tests run deploy/scripts/install-windows.ps1 in its server mode (-Server) in PowerShell 7 against a test server that plays
 // the install API of this package: the plan, and the artifacts with the install grants. The script runs in staging mode (-Root), so
 // it changes nothing on the machine; its verifier is a stand-in for the myriarch-updater.exe of the installer bundle (the script takes
-// the verifier from the bundle it runs from). What needs Windows (services, ACLs, the registry) is not part of staging mode and is
-// tested on a Windows host (scripts/host-e2e). They check
+// the verifier from the bundle it runs from) and the collector is a stand-in too: both are one small Go program, built when the tests
+// start, so that the same rig runs on Unix and on Windows. On Windows every case runs with Windows PowerShell 5.1 (powershell.exe,
+// which the command of the web UI always starts) and with PowerShell 7; elsewhere with PowerShell 7. What needs a real Windows
+// host (services, ACLs, the registry, Group Policy, App Control) is not part of staging mode. They check
 //   - that every option which the rendered commands (the golden files) pass is accepted, and that the whole run works,
 //   - that the plan is read as data (ADR-0046): unknown keys, too many lines or bytes, a URL of another origin, http, a redirect to
 //     another origin are all refused, and nothing is installed when the plan is refused,
@@ -42,9 +43,9 @@ import (
 //     conflicting_install, supervisor_missing and language_mode_unsupported,
 //   - that the token and the grants reach the server as request headers only.
 //
-// The tests skip without PowerShell 7 (MYRIARCH_PWSH, the pinned tool of make tools, or pwsh in the PATH). A test that needs a TLS
-// server runs on Linux only: PowerShell trusts the CA of the test server there through SSL_CERT_FILE, and on macOS it would need the
-// keychain.
+// The tests skip without PowerShell (MYRIARCH_PWSH, the pinned tool of make tools, or pwsh in the PATH; powershell.exe on Windows).
+// A test that needs a TLS server runs on Linux only: PowerShell trusts the CA of the test server there through SSL_CERT_FILE, and
+// elsewhere it would need the certificate store of the machine.
 
 type winRig struct {
 	t         *testing.T
@@ -75,7 +76,7 @@ func newWinRig(t *testing.T, secure bool) *winRig {
 	if secure && runtime.GOOS != "linux" {
 		t.Skip("a TLS server of a test is trusted through SSL_CERT_FILE on Linux only")
 	}
-	r := &winRig{t: t, pwsh: findPwsh(t), secure: secure, token: testToken}
+	r := &winRig{t: t, pwsh: findWinShell(t), secure: secure, token: testToken}
 	dir := t.TempDir()
 	r.root, r.bundle, r.logs, r.tmp, r.home = filepath.Join(dir, "root"), filepath.Join(dir, "bundle"), filepath.Join(dir, "logs"), filepath.Join(dir, "tmp"), filepath.Join(dir, "home")
 	for _, d := range []string{r.root, r.logs, r.tmp, r.home} {
@@ -122,19 +123,8 @@ func (r *winRig) buildBundle() {
 	for _, rel := range []string{"deploy/scripts/install-windows.ps1", "deploy/supervisor", "deploy/updater", "deploy/windows"} {
 		copyTree(r.t, filepath.Join(root, rel), filepath.Join(r.bundle, rel))
 	}
-	// The stand-in for verify-bundle: it writes down where it runs from and its arguments, and refuses a bundle file that says TAMPERED.
-	stub := `#!/bin/sh
-printf '%s %s\n' "$0" "$*" >> "$LOGDIR/updater.argv"
-[ "$1" = verify-bundle ] || exit 2
-bundle=
-while [ $# -gt 0 ]; do
-  [ "$1" = --bundle ] && bundle=$2
-  shift
-done
-if grep -q TAMPERED "$bundle" 2>/dev/null; then echo "bundle refused"; exit 1; fi
-exit 0
-`
-	require.NoError(r.t, os.WriteFile(filepath.Join(r.bundle, "myriarch-updater.exe"), []byte(stub), 0o755))
+	// The stand-in for verify-bundle (see standInSource); the installer takes it as the verifier and as the updater to install.
+	require.NoError(r.t, os.WriteFile(filepath.Join(r.bundle, "myriarch-updater.exe"), standInBinary(r.t), 0o755))
 }
 
 func (r *winRig) collectorFile() string {
@@ -148,10 +138,10 @@ func (r *winRig) collectorArchive() []byte {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
-	// a shell script: the installer of the test runs on Unix, where PowerShell starts it like a program
-	body := "#!/bin/sh\necho \"otelcol-contrib version " + rigVersion + "\"\n"
+	// a program that prints its version, like the collector does
+	body := standInBinary(r.t)
 	require.NoError(r.t, tw.WriteHeader(&tar.Header{Name: "otelcol-contrib.exe", Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg}))
-	_, err := tw.Write([]byte(body))
+	_, err := tw.Write(body)
 	require.NoError(r.t, err)
 	require.NoError(r.t, tw.Close())
 	require.NoError(r.t, gz.Close())
@@ -268,8 +258,20 @@ func (r *winRig) seen() []recorded {
 // env is the environment of every PowerShell process of the rig: nothing of the machine's profile, a private temporary directory
 // (the working directory of a staging run is made there) and the CA of the test server.
 func (r *winRig) env() []string {
-	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + r.home, "TMPDIR=" + r.tmp, "LOGDIR=" + r.logs, "LANG=C", "NO_PROXY=127.0.0.1,localhost",
-		"POWERSHELL_TELEMETRY_OPTOUT=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_NOLOGO=1"}
+	var env []string
+	if runtime.GOOS == "windows" {
+		// Windows PowerShell and .NET need SystemRoot, the PATH and more; the profile and the temporary directory are the rig's
+		for _, kv := range os.Environ() {
+			k := strings.ToUpper(strings.SplitN(kv, "=", 2)[0])
+			if k != "TEMP" && k != "TMP" && k != "USERPROFILE" && k != "HOME" && k != "APPDATA" && k != "LOCALAPPDATA" && !strings.HasPrefix(k, "SSL_") {
+				env = append(env, kv)
+			}
+		}
+		env = append(env, "TEMP="+r.tmp, "TMP="+r.tmp, "USERPROFILE="+r.home, "HOME="+r.home, "APPDATA="+r.home, "LOCALAPPDATA="+r.home, "LOGDIR="+r.logs)
+	} else {
+		env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + r.home, "TMPDIR=" + r.tmp, "LOGDIR=" + r.logs, "LANG=C", "NO_PROXY=127.0.0.1,localhost"}
+	}
+	env = append(env, "POWERSHELL_TELEMETRY_OPTOUT=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_NOLOGO=1", "NO_PROXY=127.0.0.1,localhost")
 	if r.secure {
 		env = append(env, "SSL_CERT_FILE="+r.caFile)
 	}
@@ -366,7 +368,7 @@ func (r *winRig) assertSecretsOnlyInHeaders(out string) {
 
 // ------------------------------------------------------------------------ the tests ----
 
-func TestWindowsServerModeInstallsFromThePlan(t *testing.T) {
+func testWindowsServerModeInstallsFromThePlan(t *testing.T) {
 	r := newWinRig(t, false)
 	res := r.runWith("-Fleet", "windows-hosts", "-SiteName", `Edge "north"`, "-Environment", "prod")
 	require.Equal(t, 0, res.Code, res.Out)
@@ -431,6 +433,10 @@ func TestWindowsServerModeInstallsFromThePlan(t *testing.T) {
 	assert.Contains(t, res.Out, "Collector v0.162.0 is already installed")
 }
 
+func TestWindowsServerModeInstallsFromThePlan(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeInstallsFromThePlan)
+}
+
 // resolvedTmp is the temporary directory the way PowerShell reports it (on macOS /var is a link to /private/var).
 func resolvedTmp(t *testing.T, dir string) string {
 	t.Helper()
@@ -448,7 +454,7 @@ func winEndpointOfPlan(r *winRig) string {
 	return ""
 }
 
-func TestWindowsServerModeWithoutUpdaterInPlan(t *testing.T) {
+func testWindowsServerModeWithoutUpdaterInPlan(t *testing.T) {
 	r := newWinRig(t, false)
 	r.answerWith(r.planText(map[string]string{KeyUpdaterInstall: "false"}))
 	res := r.runWith()
@@ -458,7 +464,11 @@ func TestWindowsServerModeWithoutUpdaterInPlan(t *testing.T) {
 	assert.FileExists(t, r.pf("supervisor/opampsupervisor.exe"))
 }
 
-func TestWindowsServerModeAsksForTheVersionOfTheOperator(t *testing.T) {
+func TestWindowsServerModeWithoutUpdaterInPlan(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeWithoutUpdaterInPlan)
+}
+
+func testWindowsServerModeAsksForTheVersionOfTheOperator(t *testing.T) {
 	r := newWinRig(t, false)
 	res := r.runWith("-CollectorVersion", "v"+rigVersion)
 	require.Equal(t, 0, res.Code, res.Out)
@@ -472,12 +482,20 @@ func TestWindowsServerModeAsksForTheVersionOfTheOperator(t *testing.T) {
 	assert.False(t, r2.installed())
 }
 
-func TestWindowsServerModeTheFleetOfThePlanMustBeTheOneAskedFor(t *testing.T) {
+func TestWindowsServerModeAsksForTheVersionOfTheOperator(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeAsksForTheVersionOfTheOperator)
+}
+
+func testWindowsServerModeTheFleetOfThePlanMustBeTheOneAskedFor(t *testing.T) {
 	r := newWinRig(t, false)
 	r.answerWith(r.planText(map[string]string{KeyFleet: "other-hosts"}))
 	res := r.runWith("-Fleet", "windows-hosts")
 	assert.Equal(t, "plan_invalid", res.failure(), res.Out)
 	assert.False(t, r.installed())
+}
+
+func TestWindowsServerModeTheFleetOfThePlanMustBeTheOneAskedFor(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeTheFleetOfThePlanMustBeTheOneAskedFor)
 }
 
 // goldenWindowsOptions reads the options that the rendered Windows command hands to the installer after -Server and -TokenFile.
@@ -497,7 +515,7 @@ func goldenWindowsOptions(t *testing.T, command string) []string {
 //	powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File <installer> -Server <server> -TokenFile <file> <options>
 //
 // and every option that they pass has to be accepted by the script: this runs the script with the options of each golden file.
-func TestWindowsInstallerAcceptsEveryOptionOfTheRenderedWindowsCommands(t *testing.T) {
+func testWindowsInstallerAcceptsEveryOptionOfTheRenderedWindowsCommands(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join("testdata", "commands", "*_windows_*.txt"))
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(files), 3, "the golden files of the Windows commands")
@@ -528,6 +546,10 @@ func TestWindowsInstallerAcceptsEveryOptionOfTheRenderedWindowsCommands(t *testi
 			r.assertSecretsOnlyInHeaders(res.Out)
 		})
 	}
+}
+
+func TestWindowsInstallerAcceptsEveryOptionOfTheRenderedWindowsCommands(t *testing.T) {
+	eachWinShell(t, testWindowsInstallerAcceptsEveryOptionOfTheRenderedWindowsCommands)
 }
 
 // Every option that the commands can pass is a parameter of the script.
@@ -561,7 +583,7 @@ func TestWindowsInstallerParametersCoverTheOptionsOfTheCommands(t *testing.T) {
 
 // ----------------------------------------------------------------- the plan as data ----
 
-func TestWindowsServerModeRefusesAPlanThatBreaksTheRules(t *testing.T) {
+func testWindowsServerModeRefusesAPlanThatBreaksTheRules(t *testing.T) {
 	long := strings.Repeat("a", 9000)
 	var many strings.Builder
 	for i := 0; i < 65; i++ {
@@ -655,8 +677,12 @@ func TestWindowsServerModeRefusesAPlanThatBreaksTheRules(t *testing.T) {
 	}
 }
 
+func TestWindowsServerModeRefusesAPlanThatBreaksTheRules(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeRefusesAPlanThatBreaksTheRules)
+}
+
 // A plan is text: the same words in the form of JSON or HTML are not a plan.
-func TestWindowsServerModeDoesNotReadAPlanThatIsNotText(t *testing.T) {
+func testWindowsServerModeDoesNotReadAPlanThatIsNotText(t *testing.T) {
 	r := newWinRig(t, false)
 	r.answerWith(`{"format":1,"fleet":"windows-hosts"}` + "\n")
 	res := r.runWith()
@@ -664,7 +690,11 @@ func TestWindowsServerModeDoesNotReadAPlanThatIsNotText(t *testing.T) {
 	assert.False(t, r.installed())
 }
 
-func TestWindowsServerModeRefusesAnArtifactOverHTTP(t *testing.T) {
+func TestWindowsServerModeDoesNotReadAPlanThatIsNotText(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeDoesNotReadAPlanThatIsNotText)
+}
+
+func testWindowsServerModeRefusesAnArtifactOverHTTP(t *testing.T) {
 	r := newWinRig(t, true)
 	r.answerWith(r.planText(map[string]string{KeyCollectorURL: "http://" + strings.SplitN(r.srv.URL, "://", 2)[1] + "/api/v1/artifacts/c0/content/" + r.collectorFile()}))
 	res := r.runWith()
@@ -672,7 +702,11 @@ func TestWindowsServerModeRefusesAnArtifactOverHTTP(t *testing.T) {
 	assert.False(t, r.installed())
 }
 
-func TestWindowsServerModeAnEndpointWithoutTLSIsRefused(t *testing.T) {
+func TestWindowsServerModeRefusesAnArtifactOverHTTP(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeRefusesAnArtifactOverHTTP)
+}
+
+func testWindowsServerModeAnEndpointWithoutTLSIsRefused(t *testing.T) {
 	r := newWinRig(t, true)
 	r.answerWith(r.planText(map[string]string{KeyOpAMPEndpoint: "ws://" + strings.SplitN(r.srv.URL, "://", 2)[1] + "/v1/opamp"}))
 	res := r.runWith()
@@ -680,7 +714,11 @@ func TestWindowsServerModeAnEndpointWithoutTLSIsRefused(t *testing.T) {
 	assert.Contains(t, res.Out, "scheme")
 }
 
-func TestWindowsServerModeHTTPServerNeedsInsecure(t *testing.T) {
+func TestWindowsServerModeAnEndpointWithoutTLSIsRefused(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeAnEndpointWithoutTLSIsRefused)
+}
+
+func testWindowsServerModeHTTPServerNeedsInsecure(t *testing.T) {
 	r := newWinRig(t, false)
 	res := r.run("-Root", r.root, "-Arch", "amd64", "-Server", r.srv.URL, "-TokenFile", r.tokenFile, "-SiteType", "edge", "-SiteId", "042")
 	assert.Equal(t, "https_required", res.failure(), res.Out)
@@ -691,9 +729,13 @@ func TestWindowsServerModeHTTPServerNeedsInsecure(t *testing.T) {
 	assert.Equal(t, 0, res.Code, res.Out)
 }
 
+func TestWindowsServerModeHTTPServerNeedsInsecure(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeHTTPServerNeedsInsecure)
+}
+
 // ---------------------------------------------------------------------- redirects ----
 
-func TestWindowsServerModeRedirects(t *testing.T) {
+func testWindowsServerModeRedirects(t *testing.T) {
 	t.Run("to another origin", func(t *testing.T) {
 		other := newWinRig(t, false)
 		r := newWinRig(t, false)
@@ -786,9 +828,11 @@ func TestWindowsServerModeRedirects(t *testing.T) {
 	})
 }
 
+func TestWindowsServerModeRedirects(t *testing.T) { eachWinShell(t, testWindowsServerModeRedirects) }
+
 // ---------------------------------------------------------------- the error codes ----
 
-func TestWindowsServerModePlanRejected(t *testing.T) {
+func testWindowsServerModePlanRejected(t *testing.T) {
 	cases := []struct {
 		status        int
 		class, reason string
@@ -861,7 +905,11 @@ func TestWindowsServerModePlanRejected(t *testing.T) {
 	})
 }
 
-func TestWindowsServerModePlanUnavailable(t *testing.T) {
+func TestWindowsServerModePlanRejected(t *testing.T) {
+	eachWinShell(t, testWindowsServerModePlanRejected)
+}
+
+func testWindowsServerModePlanUnavailable(t *testing.T) {
 	t.Run("a server that is down", func(t *testing.T) {
 		r := newWinRig(t, false)
 		r.setPlan(func(w http.ResponseWriter, _ *http.Request, _ int) {
@@ -911,7 +959,11 @@ func TestWindowsServerModePlanUnavailable(t *testing.T) {
 	})
 }
 
-func TestWindowsServerModePlanFailed(t *testing.T) {
+func TestWindowsServerModePlanUnavailable(t *testing.T) {
+	eachWinShell(t, testWindowsServerModePlanUnavailable)
+}
+
+func testWindowsServerModePlanFailed(t *testing.T) {
 	t.Run("a server that does not answer", func(t *testing.T) {
 		if testing.Short() {
 			t.Skip("the installer asks again for a few seconds first")
@@ -957,7 +1009,9 @@ func TestWindowsServerModePlanFailed(t *testing.T) {
 	})
 }
 
-func TestWindowsServerModeVerifiesBeforeItInstallsAnything(t *testing.T) {
+func TestWindowsServerModePlanFailed(t *testing.T) { eachWinShell(t, testWindowsServerModePlanFailed) }
+
+func testWindowsServerModeVerifiesBeforeItInstallsAnything(t *testing.T) {
 	r := newWinRig(t, false)
 	r.mu.Lock()
 	r.tampered = true
@@ -970,7 +1024,11 @@ func TestWindowsServerModeVerifiesBeforeItInstallsAnything(t *testing.T) {
 	assert.NoFileExists(t, r.pf("updater/myriarch-updater.exe"))
 }
 
-func TestWindowsServerModeChecksTheSHA256OfTheArtifact(t *testing.T) {
+func TestWindowsServerModeVerifiesBeforeItInstallsAnything(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeVerifiesBeforeItInstallsAnything)
+}
+
+func testWindowsServerModeChecksTheSHA256OfTheArtifact(t *testing.T) {
 	r := newWinRig(t, false)
 	r.mu.Lock()
 	r.wrongSHA = true
@@ -980,7 +1038,11 @@ func TestWindowsServerModeChecksTheSHA256OfTheArtifact(t *testing.T) {
 	assert.NoFileExists(t, r.pf("supervisor/opampsupervisor.exe"))
 }
 
-func TestWindowsServerModeAnExpiredGrantStopsTheDownload(t *testing.T) {
+func TestWindowsServerModeChecksTheSHA256OfTheArtifact(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeChecksTheSHA256OfTheArtifact)
+}
+
+func testWindowsServerModeAnExpiredGrantStopsTheDownload(t *testing.T) {
 	r := newWinRig(t, false)
 	r.answerWith(r.planText(map[string]string{KeyCollectorGrant: "myrd_expired.grant"}))
 	res := r.runWith()
@@ -990,7 +1052,11 @@ func TestWindowsServerModeAnExpiredGrantStopsTheDownload(t *testing.T) {
 	assert.NotContains(t, res.Out, "myrd_expired")
 }
 
-func TestWindowsServerModeNeedsTheUpdaterOfTheBundleAsVerifier(t *testing.T) {
+func TestWindowsServerModeAnExpiredGrantStopsTheDownload(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeAnExpiredGrantStopsTheDownload)
+}
+
+func testWindowsServerModeNeedsTheUpdaterOfTheBundleAsVerifier(t *testing.T) {
 	r := newWinRig(t, false)
 	require.NoError(t, os.Remove(filepath.Join(r.bundle, "myriarch-updater.exe")))
 	res := r.runWith()
@@ -998,24 +1064,29 @@ func TestWindowsServerModeNeedsTheUpdaterOfTheBundleAsVerifier(t *testing.T) {
 	assert.Contains(t, res.Out, "installer bundle")
 	assert.False(t, r.installed())
 
-	// a link is not the updater of the archive
+	// a link is not the updater of the archive (creating a link needs a privilege on Windows: without it this part is not run)
 	target := filepath.Join(t.TempDir(), "elsewhere")
-	require.NoError(t, os.WriteFile(target, []byte("#!/bin/sh\nexit 0\n"), 0o755))
-	require.NoError(t, os.Symlink(target, filepath.Join(r.bundle, "myriarch-updater.exe")))
-	res = r.runWith()
-	assert.Equal(t, "sigstore_verifier_missing", res.failure(), res.Out)
+	require.NoError(t, os.WriteFile(target, []byte("not the updater"), 0o755))
+	if err := os.Symlink(target, filepath.Join(r.bundle, "myriarch-updater.exe")); err == nil {
+		res = r.runWith()
+		assert.Equal(t, "sigstore_verifier_missing", res.failure(), res.Out)
+	}
 
 	// a verifier of the operator replaces the one of the bundle for the checks, but the updater that the plan asks for has to come
 	// from the bundle
 	require.NoError(t, os.Remove(filepath.Join(r.bundle, "myriarch-updater.exe")))
 	verifier := filepath.Join(t.TempDir(), "cosign")
-	require.NoError(t, os.WriteFile(verifier, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	require.NoError(t, os.WriteFile(verifier, []byte("not a cosign"), 0o755))
 	res = r.runWith("-Verifier", verifier)
 	assert.Equal(t, "file_unreadable", res.failure(), res.Out)
 	assert.False(t, r.installed())
 }
 
-func TestWindowsServerModeOptionsThatDoNotCombine(t *testing.T) {
+func TestWindowsServerModeNeedsTheUpdaterOfTheBundleAsVerifier(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeNeedsTheUpdaterOfTheBundleAsVerifier)
+}
+
+func testWindowsServerModeOptionsThatDoNotCombine(t *testing.T) {
 	r := newWinRig(t, false)
 	for _, tc := range []struct {
 		name string
@@ -1051,7 +1122,11 @@ func TestWindowsServerModeOptionsThatDoNotCombine(t *testing.T) {
 	assert.Equal(t, "option_conflict", res.failure(), res.Out)
 }
 
-func TestWindowsServerModeNeedsTheSiteAndTheToken(t *testing.T) {
+func TestWindowsServerModeOptionsThatDoNotCombine(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeOptionsThatDoNotCombine)
+}
+
+func testWindowsServerModeNeedsTheSiteAndTheToken(t *testing.T) {
 	r := newWinRig(t, false)
 	res := r.run("-Root", r.root, "-Insecure", "-Server", r.srv.URL, "-TokenFile", r.tokenFile, "-SiteId", "1")
 	assert.Equal(t, "option_missing", res.failure(), res.Out)
@@ -1063,8 +1138,12 @@ func TestWindowsServerModeNeedsTheSiteAndTheToken(t *testing.T) {
 	assert.Empty(t, r.seen())
 }
 
+func TestWindowsServerModeNeedsTheSiteAndTheToken(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeNeedsTheSiteAndTheToken)
+}
+
 // The token is a header and nothing else: a token with a character that a header cannot carry is refused before it is sent.
-func TestWindowsServerModeRefusesATokenThatCouldSplitAHeader(t *testing.T) {
+func testWindowsServerModeRefusesATokenThatCouldSplitAHeader(t *testing.T) {
 	r := newWinRig(t, false)
 	for _, tok := range []string{"myre_abc\r\nX-Evil: 1", "myre abc", "myre_abc\"", "myre_abc\nmyre_def"} {
 		res := r.run("-Root", r.root, "-Arch", "amd64", "-Insecure", "-Server", r.srv.URL, "-SiteType", "edge", "-SiteId", "042", "-Token", tok)
@@ -1076,10 +1155,14 @@ func TestWindowsServerModeRefusesATokenThatCouldSplitAHeader(t *testing.T) {
 	assert.Empty(t, r.seen())
 }
 
+func TestWindowsServerModeRefusesATokenThatCouldSplitAHeader(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeRefusesATokenThatCouldSplitAHeader)
+}
+
 // ---------------------------------------------- the checks that run before the server is asked ----
 
 // The language mode is the first check of the run, in server mode as well: nothing is read, asked or written in it.
-func TestWindowsServerModeStopsFirstInConstrainedLanguageMode(t *testing.T) {
+func testWindowsServerModeStopsFirstInConstrainedLanguageMode(t *testing.T) {
 	r := newWinRig(t, false)
 	var quoted []string
 	for _, a := range r.baseArgs() {
@@ -1096,10 +1179,14 @@ func TestWindowsServerModeStopsFirstInConstrainedLanguageMode(t *testing.T) {
 	assert.False(t, r.installed())
 }
 
+func TestWindowsServerModeStopsFirstInConstrainedLanguageMode(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeStopsFirstInConstrainedLanguageMode)
+}
+
 // The services of the upstream packages stop the run before the server is asked, a work directory is made or a token is sent. The
 // run is the real Invoke-Main with a Get-Service that lists the service of a made-up host, and with every function that talks to the
 // server or writes something replaced by one that fails.
-func TestWindowsServerModeConflictingInstallStopsBeforeTheServerIsAsked(t *testing.T) {
+func testWindowsServerModeConflictingInstallStopsBeforeTheServerIsAsked(t *testing.T) {
 	r := newWinRig(t, false)
 	harness := `
 param([Parameter(Mandatory)][string]$Installer, [Parameter(Mandatory)][string]$Templates, [Parameter(Mandatory)][string]$TokenFile, [Parameter(Mandatory)][string]$Server)
@@ -1113,6 +1200,8 @@ function Get-Service {
   [CmdletBinding()] param([string]$Name)
   if ($Name -eq $env:MYRIARCH_TEST_SERVICE) { return [pscustomobject]@{ Name = $Name; Status = 'Running' } }
 }
+
+func TestWindowsServerModeConflictingInstallStopsBeforeTheServerIsAsked(t *testing.T) { eachWinShell(t, testWindowsServerModeConflictingInstallStopsBeforeTheServerIsAsked) }
 foreach ($name in @('New-WorkDirectory', 'Get-PlanFile', 'Send-ServerRequest', 'Invoke-Download', 'Stop-ServiceAndWait', 'Resolve-Verifier', 'Initialize-DataDirectories',
     'Install-Collector', 'Install-SupervisorBinary', 'Install-SupervisorService')) {
   Set-Item -Path "function:$name" -Value ([scriptblock]::Create("param() [void]` + "`" + `$script:Calls.Add('$name'); throw ('unexpected call of $name')"))
@@ -1142,7 +1231,7 @@ Write-Host ('calls: ' + $script:Calls.Count)
 // The supervisor of the server mode goes to the path of the service, and the run stops with supervisor_missing when a security tool
 // took it away right after the copy: the file that was verified has to be the one that is there. The copy is replaced by one that
 // removes its target, the way a quarantine does.
-func TestWindowsServerModeSupervisorMissing(t *testing.T) {
+func testWindowsServerModeSupervisorMissing(t *testing.T) {
 	r := newWinRig(t, false)
 	harness := `
 param([Parameter(Mandatory)][string]$Installer, [Parameter(Mandatory)][string]$Templates, [Parameter(Mandatory)][string]$TokenFile, [Parameter(Mandatory)][string]$Server, [Parameter(Mandatory)][string]$Root)
@@ -1156,6 +1245,8 @@ function Copy-VerifiedFile {
   & $original -Source $Source -Destination $Destination -ExpectedHash $ExpectedHash
   if ($Destination -like '*opampsupervisor.exe') { Remove-Item -LiteralPath $Destination -Force }
 }
+
+func TestWindowsServerModeSupervisorMissing(t *testing.T) { eachWinShell(t, testWindowsServerModeSupervisorMissing) }
 try { Invoke-Main; Write-Host 'result: ok' } catch { Write-Host ('result: ' + $_.Exception.Message) }
 `
 	script := filepath.Join(t.TempDir(), "missing.ps1")
@@ -1180,7 +1271,7 @@ try { Invoke-Main; Write-Host 'result: ok' } catch { Write-Host ('result: ' + $_
 
 // The rules for URLs and redirects, run against the functions of the installer for an https server: no TLS server is needed, so they
 // run on every platform where PowerShell 7 does (the tests with a TLS server above run on Linux only).
-func TestWindowsServerModeRulesOfHTTPSAndOrigin(t *testing.T) {
+func testWindowsServerModeRulesOfHTTPSAndOrigin(t *testing.T) {
 	r := newWinRig(t, false)
 	harness := `
 param([Parameter(Mandatory)][string]$Installer, [Parameter(Mandatory)][string]$Templates, [Parameter(Mandatory)][string]$TokenFile)
@@ -1232,4 +1323,227 @@ if ($script:failures -gt 0) { exit 1 }
 	assert.Equal(t, 0, res.Code, res.Out)
 	assert.NotContains(t, res.Out, "FAIL")
 	assert.Contains(t, res.Out, "checks: failures 0")
+}
+
+func TestWindowsServerModeRulesOfHTTPSAndOrigin(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeRulesOfHTTPSAndOrigin)
+}
+
+// ------------------------------------------------------------------------ the shells and the stand-ins ----
+
+// eachWinShell runs a test with every shell that the installer meets: PowerShell 7 and, on Windows, Windows PowerShell 5.1 (the
+// powershell.exe that the command of the web UI starts). newWinRig reads the shell from the name of the test.
+func eachWinShell(t *testing.T, fn func(*testing.T)) {
+	t.Helper()
+	shells := []string{"pwsh"}
+	if runtime.GOOS == "windows" {
+		shells = []string{"powershell.exe", "pwsh"}
+	}
+	for _, name := range shells {
+		t.Run(name, fn)
+	}
+}
+
+func findWinShell(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return findPwsh(t)
+	}
+	if strings.Contains(t.Name(), "/powershell.exe") {
+		p, err := exec.LookPath("powershell.exe")
+		if err != nil {
+			t.Skip("powershell.exe is not found")
+		}
+		return p
+	}
+	if p := os.Getenv("MYRIARCH_PWSH"); p != "" {
+		return p
+	}
+	p, err := exec.LookPath("pwsh")
+	if err != nil {
+		t.Skip("pwsh is not installed: the cases with PowerShell 7 are not run")
+	}
+	return p
+}
+
+// standInSource is the program behind the stand-ins: as myriarch-updater.exe it writes down where it runs from and its arguments and
+// refuses a Sigstore bundle file that says TAMPERED (the verify-bundle of the real updater); as otelcol-contrib.exe it prints a version.
+const standInSource = `package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+func main() {
+	if strings.HasPrefix(filepath.Base(os.Args[0]), "otelcol") {
+		fmt.Println("otelcol-contrib version @VERSION@")
+		return
+	}
+	if dir := os.Getenv("LOGDIR"); dir != "" {
+		if f, err := os.OpenFile(filepath.Join(dir, "updater.argv"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			fmt.Fprintf(f, "%s %s\n", os.Args[0], strings.Join(os.Args[1:], " "))
+			f.Close()
+		}
+	}
+	if len(os.Args) < 2 || os.Args[1] != "verify-bundle" {
+		os.Exit(2)
+	}
+	for i, a := range os.Args {
+		if a == "--bundle" && i+1 < len(os.Args) {
+			if b, err := os.ReadFile(os.Args[i+1]); err == nil && strings.Contains(string(b), "TAMPERED") {
+				fmt.Println("bundle refused")
+				os.Exit(1)
+			}
+		}
+	}
+}
+`
+
+var standIn struct {
+	once sync.Once
+	dir  string
+	exe  string
+	err  error
+}
+
+// standInBinary builds the stand-in program once for all tests and returns its content.
+func standInBinary(t *testing.T) []byte {
+	t.Helper()
+	standIn.once.Do(func() {
+		standIn.dir, standIn.err = os.MkdirTemp("", "myriarch-standin-")
+		if standIn.err != nil {
+			return
+		}
+		src := strings.ReplaceAll(standInSource, "@VERSION@", rigVersion)
+		if standIn.err = os.WriteFile(filepath.Join(standIn.dir, "main.go"), []byte(src), 0o600); standIn.err != nil {
+			return
+		}
+		if standIn.err = os.WriteFile(filepath.Join(standIn.dir, "go.mod"), []byte("module standin\n\ngo 1.21\n"), 0o600); standIn.err != nil {
+			return
+		}
+		standIn.exe = filepath.Join(standIn.dir, "standin.exe")
+		cmd := exec.Command("go", "build", "-o", standIn.exe, ".")
+		cmd.Dir = standIn.dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			standIn.err = fmt.Errorf("build the stand-in: %w: %s", err, out)
+		}
+	})
+	require.NoError(t, standIn.err)
+	b, err := os.ReadFile(standIn.exe)
+	require.NoError(t, err)
+	return b
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if standIn.dir != "" {
+		_ = os.RemoveAll(standIn.dir)
+	}
+	os.Exit(code)
+}
+
+// ------------------------------------------------------------------------ the retry policy and the bundle directory ----
+
+// Windows PowerShell 5.1 wraps what a .NET method throws in a MethodInvocationException, and the WebException of .NET Framework has no
+// inner exception: a timeout or a failed name resolution is retried only when the policy sees the WebException.
+func testWindowsServerModeRetriesWhatTheShellWraps(t *testing.T) {
+	r := newWinRig(t, false)
+	// a port nobody listens on
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	closed := l.Addr().String()
+	require.NoError(t, l.Close())
+	harness := `
+param([Parameter(Mandatory)][string]$Installer, [Parameter(Mandatory)][string]$Templates, [Parameter(Mandatory)][string]$TokenFile, [Parameter(Mandatory)][string]$Closed)
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+. $Installer -Server https://fleet.example.com -TokenFile $TokenFile -SiteType edge -SiteId 1 -Arch amd64 -TemplatesDir $Templates
+$ErrorActionPreference = 'Stop'
+$script:failures = 0
+function Check { param([string]$Title, [bool]$Ok) if ($Ok) { Write-Host "  ok    $Title" } else { $script:failures++; Write-Host "  FAIL  $Title" } }
+function Web { param([string]$Status) return New-Object System.Net.WebException('failed', [System.Net.WebExceptionStatus]$Status) }
+function Wrap { param($Inner) return New-Object System.Management.Automation.MethodInvocationException('Exception calling "GetResponse" with "0" argument(s): failed', $Inner) }
+
+foreach ($status in @('Timeout', 'NameResolutionFailure', 'ConnectFailure', 'ConnectionClosed')) {
+  Check "a WebException $status is retried" (Test-TransientDownloadError (Web $status))
+  Check "a wrapped WebException $status is retried" (Test-TransientDownloadError (Wrap (Web $status)))
+}
+Check 'a WebException TrustFailure is not retried' (-not (Test-TransientDownloadError (Web 'TrustFailure')))
+Check 'a wrapped WebException TrustFailure is not retried' (-not (Test-TransientDownloadError (Wrap (Web 'TrustFailure'))))
+
+$r = Send-ServerRequest -Method GET -Url "http://$Closed/x" -OutFile (Join-Path ([IO.Path]::GetTempPath()) 'answer.bin') -Bearer '' -MaxBytes 1024 -TimeoutSeconds 10
+Check 'a request to a closed port has no answer' ($r.Status -eq 0)
+Check 'the exception of that request is not wrapped by the shell' (-not ($r.Exception -is [System.Management.Automation.MethodInvocationException]))
+Check 'a refused connection is retried' (Test-TransientDownloadError $r.Exception)
+
+Write-Host "checks: failures $($script:failures)"
+if ($script:failures -gt 0) { exit 1 }
+`
+	script := filepath.Join(t.TempDir(), "retry.ps1")
+	require.NoError(t, os.WriteFile(script, []byte(harness), 0o600))
+	cmd := exec.Command(r.pwsh, "-NoProfile", "-NonInteractive", "-File", script, "-Installer", r.script(), "-Templates", filepath.Join(r.bundle, "deploy"), "-TokenFile", r.tokenFile, "-Closed", closed)
+	cmd.Env = r.env()
+	res := runWithin(t, cmd, time.Minute)
+	assert.Equal(t, 0, res.Code, res.Out)
+	assert.NotContains(t, res.Out, "FAIL")
+	assert.Contains(t, res.Out, "checks: failures 0")
+}
+
+func TestWindowsServerModeRetriesWhatTheShellWraps(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeRetriesWhatTheShellWraps)
+}
+
+// The updater of the bundle verifies what a SYSTEM run installs and is installed as a SYSTEM service: the bundle has to be in a
+// directory that unprivileged accounts cannot change, checked before the server is asked, outside staging mode.
+func testWindowsServerModeBundleDirectoryMustBeAdminOnly(t *testing.T) {
+	r := newWinRig(t, false)
+	harness := `
+param([Parameter(Mandatory)][string]$Installer, [Parameter(Mandatory)][string]$Templates, [Parameter(Mandatory)][string]$TokenFile)
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+. $Installer -Server https://fleet.example.com -TokenFile $TokenFile -SiteType edge -SiteId 1 -Arch amd64 -TemplatesDir $Templates
+$ErrorActionPreference = 'Stop'
+$script:failures = 0
+function Check { param([string]$Title, [bool]$Ok) if ($Ok) { Write-Host "  ok    $Title" } else { $script:failures++; Write-Host "  FAIL  $Title" } }
+function Message-Of { param([scriptblock]$Block) try { & $Block; return '' } catch { return $_.Exception.Message } }
+$script:AdminOnly = $false
+$script:Checked = ''
+function Test-AclEnforced { return $true }
+function Test-AdminOnlyDirectory { param([string]$Path) $script:Checked = $Path; return $script:AdminOnly }
+
+$script:StagingMode = $false
+$msg = Message-Of { Assert-BundleDirectory }
+Check 'a bundle in a directory that others can change is directory_unsafe' ($msg -match '^\[directory_unsafe\] ')
+Check 'the message names the directory and the next step' ($msg.Contains($script:Checked) -and $msg -match 'only Administrators can write')
+Check 'the directory is the one of myriarch-updater.exe' ((Get-BundleUpdaterPath) -ceq (Join-Path $script:Checked 'myriarch-updater.exe'))
+$script:AdminOnly = $true
+Check 'a bundle in an administrators-only directory is accepted' ((Message-Of { Assert-BundleDirectory }) -eq '')
+$script:AdminOnly = $false
+$script:StagingMode = $true
+Check 'staging mode does not check the directory' ((Message-Of { Assert-BundleDirectory }) -eq '')
+
+Write-Host "checks: failures $($script:failures)"
+if ($script:failures -gt 0) { exit 1 }
+`
+	script := filepath.Join(t.TempDir(), "bundledir.ps1")
+	require.NoError(t, os.WriteFile(script, []byte(harness), 0o600))
+	cmd := exec.Command(r.pwsh, "-NoProfile", "-NonInteractive", "-File", script, "-Installer", r.script(), "-Templates", filepath.Join(r.bundle, "deploy"), "-TokenFile", r.tokenFile)
+	cmd.Env = r.env()
+	res := runWithin(t, cmd, time.Minute)
+	assert.Equal(t, 0, res.Code, res.Out)
+	assert.NotContains(t, res.Out, "FAIL")
+	assert.Contains(t, res.Out, "checks: failures 0")
+
+	// the check comes before the work directory and the first request of the run
+	text, err := os.ReadFile(r.script())
+	require.NoError(t, err)
+	main := string(text[strings.Index(string(text), "function Invoke-Main"):])
+	assert.Less(t, strings.Index(main, "Assert-BundleDirectory"), strings.Index(main, "Get-PlanFile -Arch"))
+}
+
+func TestWindowsServerModeBundleDirectoryMustBeAdminOnly(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeBundleDirectoryMustBeAdminOnly)
 }

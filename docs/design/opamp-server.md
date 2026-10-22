@@ -1144,7 +1144,7 @@ the constant script followed by the values in a hashtable. It uses cmdlets and n
    with write rights to the new directory (which could set a reparse point) can exist. Users may read there, so the command replaces its DACL with
    `icacls.exe /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F` (SYSTEM and the administrators) **before the first download** (`acl_failed`) and makes the
    administrators its owner (`icacls.exe /setowner *S-1-5-32-544`, also `acl_failed`). The directory is removed in a `finally`. This sequence can be checked on real Windows only
-   (the `host-e2e` workflow); the tests of the command cover its structure and its order;
+   (an end-to-end test on a Windows host, which does not exist yet); the tests of the command cover its structure and its order;
 3. writes the token to a file of the working directory with `Set-Content` (variant `token_inline`) and downloads the bundle with `Invoke-WebRequest -Headers`, without following a redirect
    (`download_failed`); .NET has to negotiate TLS 1.2, which Windows 10 and Windows Server 2019 and newer do by default;
 4. checks the SHA-256 with `Get-FileHash` before it unpacks (`checksum_mismatch`), unpacks with `Expand-Archive`, runs `Unblock-File` on the verified script and starts it
@@ -1215,5 +1215,11 @@ updater release, with `myriarch-updater.exe` in the root of the archive). It fol
    administrators before the first download (a temporary folder admits standard users). The supervisor goes to the path of the service and is checked there
    (`supervisor_missing`).
 
-The test `internal/install/installer_windows_server_test.go` runs the script in PowerShell 7 in staging mode (`-Root`) against a test server for every rule above and for every
-error code; what needs Windows (ACLs, services, the registry, Windows PowerShell 5.1) is checked by the end-to-end test on a Windows host.
+6. Before the first request, outside staging mode, it checks that the directory of the installer bundle (the one of `myriarch-updater.exe`) can be changed by SYSTEM, the
+   administrators and TrustedInstaller only, as it does for a `-Verifier` (`directory_unsafe`): the updater of the bundle verifies what a SYSTEM run installs and is itself
+   installed as a SYSTEM service. The command unpacks the bundle below `%ProgramFiles%`, which meets the condition.
+
+The test `internal/install/installer_windows_server_test.go` runs the script in staging mode (`-Root`) against a test server for every rule above and for every error code.
+Its stand-ins for the verifier and the collector are one small Go program built when the tests start, so the same tests run on Windows, where each case runs with Windows
+PowerShell 5.1 (`powershell.exe`) and with PowerShell 7, and elsewhere with PowerShell 7. What staging mode leaves out (ACLs, services, the registry, Group Policy, App Control)
+and the tests with a TLS test server (Linux only) need a real Windows host; the end-to-end test on a Windows host is a follow-up task.
