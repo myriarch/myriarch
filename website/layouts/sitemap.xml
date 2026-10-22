@@ -11,7 +11,7 @@ scripts/check-seo.py fails on it.
 */ -}}
 {{ printf "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>" | safeHTML }}
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  {{- range .Data.Pages }}
+  {{- range where .Data.Pages "Sitemap.Disable" "ne" true }}
   {{- if .Permalink }}
   <url>
     <loc>{{ .Permalink }}</loc>

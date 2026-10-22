@@ -12,9 +12,9 @@ reports the new `service.version`.
 
 ## Why the supervisor is not enough
 
-As of October 2026, the README of the upstream supervisor lists "Updates the Collector binary" without a checkmark, tracked in
-[issue #33947](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/33947), and the OpAMP capabilities
-`AcceptsPackages` and `ReportsPackageStatuses` as not implemented, tracked in
+As of October 2026, the README of the upstream supervisor lists "Updates the Collector binary" without a checkmark and links
+[issue #33947](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/33947) (closed as not planned), and the
+OpAMP capabilities `AcceptsPackages` and `ReportsPackageStatuses` as not implemented, with the work tracked in
 [issue #47272](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/47272) (read on 22 October 2026, see the
 [upstream notes](../design/upstream-notes.md) for the sources and the reviewed versions). Without an executor, fleets end up with
 many versions and hand-made update procedures.
@@ -37,7 +37,9 @@ See [Executors](../concepts/executors.md).
 ## 2. Set the target version
 
 In the fleet file, `spec.collector.version` is the target (without the `v`). Change it, validate with
-`myrctl validate` and merge. The planner creates a version rollout for the fleet:
+`myrctl validate` and merge. The planner creates a version rollout for the fleet. The excerpt follows
+`examples/quickstart/fleets/linux-hosts.yaml`; the policy names are those of that example repository, and your own repository
+may name its policies differently:
 
 ```yaml
 spec:
@@ -61,10 +63,10 @@ With the `updater` executor the server fetches the release archive, verifies the
 offers the file to the updater of each host. The updater downloads and verifies it again, swaps the binary, restarts the supervisor
 service and checks the health of the collector. If the new version does not become healthy, the updater restores the previous one.
 
-The version policy sets the pace: the example policy `canary-then-all` starts targets only inside a maintenance window and, on a
+The version policy sets the pace: the quickstart policy `canary-then-all` starts targets only inside a maintenance window and, on a
 failure, pauses so that a person decides to resume, retry the failed hosts, abort or roll back. The rollout page shows each target;
 the actions are buttons in the UI and API calls. Details, including the limits on the host side (`update.minimumVersion`,
-downgrades refused by default) are in [Roll out a collector version](roll-out-a-collector-version.md).
+downgrades other than the step back to the previous version are refused by default) are in [Roll out a collector version](roll-out-a-collector-version.md).
 
 ## 4. Hosts without internet access
 

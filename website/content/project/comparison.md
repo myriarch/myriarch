@@ -28,14 +28,15 @@ rendering from Git, rollouts in waves, collector version updates through executo
 | | OpAMP Supervisor alone | Own server on opamp-go | Myriarch |
 |---|---|---|---|
 | What it is | Upstream process next to each collector (a client) | A Go library with client and server parts of the protocol | A server with web UI, REST API, GitOps syncer and rollout engine |
-| Needs an OpAMP server | Yes, from somewhere else | You write it | Included (`myriarchd`, needs PostgreSQL) |
+| Needs an OpAMP server | Yes, an existing OpAMP server that you run or buy elsewhere | You write it | Included (`myriarchd`, needs PostgreSQL) |
 | Remote configuration | Accepts it from a server | You implement what the server sends | Renders it from blueprints in Git, one per collector |
-| Rollouts in waves, approvals, rollback | Not among its documented features | You build them | Included |
+| Rollouts in waves and approvals | Not among its documented features | You build them | Included |
+| Rollback of a bad configuration | Optional automatic rollback to the last working remote configuration on the host (off by default) | You build it | Per policy, across the fleet: pause, abort or roll back |
 | Collector binary updates | Not implemented upstream (see below) | You build them | Through executors: `myriarch-updater`, a webhook or AWX |
 | Source of truth | Not part of its scope | Yours to decide | A Git repository |
 | Audit of operator actions | Not among its documented features | You build it | Included |
-| Maturity | Alpha, per the upstream README | The repository calls itself work in progress | Alpha |
-| Effort for you | Low per host, but no fleet view | Highest: you own a server | Run one server and a database |
+| Maturity | Alpha, per the upstream README | README of opamp-go: "work-in-progress"; README of the supervisor: "production-ready client and server implementations in Go" | Alpha |
+| Effort for you | One process per host, plus an OpAMP server from elsewhere; no fleet view of its own | You write and run the server | Run one server and a database |
 
 The rows for the supervisor and opamp-go rest on the sources below; the rows for Myriarch rest on this site's
 [documentation](/docs/).
@@ -51,7 +52,8 @@ The rows for the supervisor and opamp-go rest on the sources below; the rows for
   [issue #47272](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/47272). Our own review of the
   supervisor sources, with dates, is in the [upstream notes](/docs/design/upstream-notes/).
 - **opamp-go** ([README](https://github.com/open-telemetry/opamp-go), read 22 October 2026): a Go implementation of OpAMP with
-  `client` and `server` parts. The README describes the repository as "work-in-progress of an OpAMP implementation in Go". A
+  `client` and `server` parts. The README of opamp-go describes the repository as "work-in-progress of an OpAMP implementation in Go", while the supervisor README
+  (read 22 October 2026) points to it for "production-ready client and server implementations in Go". We quote both and do not rate either. A
   library implements the protocol; storage, rendering, rollouts, a user interface and access control above it are for you to build.
 - **Bindplane** ([documentation](https://docs.bindplane.com/), read 22 October 2026): describes itself as an
   "OpenTelemetry-native telemetry pipeline" and uses OpAMP to send configuration to collectors. The documentation describes a
@@ -63,8 +65,8 @@ These are not all options. Other products and open-source servers exist; the lis
 ## When does what fit?
 
 **The supervisor alone fits** when you manage few collectors, you already have configuration management for the hosts, and you are
-content to update collector binaries with the tools you use today. You get no fleet view and no rollouts, but also nothing
-more to run.
+content to update collector binaries with the tools you use today. You get no fleet view and no rollouts of its own, and you
+still need an OpAMP server to point it at.
 
 **An own server on opamp-go fits** when your requirements differ from any existing server, you can staff and maintain a server,
 and you want to decide every behavior yourself. Expect to build and secure everything above the protocol.
