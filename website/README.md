@@ -212,7 +212,7 @@ description of fewer than 70 or more than 160 characters, and when a URL of `sit
 - **Title.** `layouts/_partials/seo/title.html` writes `<title>`: the home title, a title from `data/seo_titles.yaml` (key: the URL path
   of the page, value: the title without the suffix), `<title> API` for the pages of the REST API reference below `/docs/reference/api/`
   (their titles are the tags of the OpenAPI contract and would equal those of the concept pages), or the title of the page; then
-  ` | myriarch`. The H1 and the navigation keep the title of the page, so a short name such as "Agents" can get a title that says more in a
+  the suffix "| myriarch". The H1 and the navigation keep the title of the page, so a short name such as "Agents" can get a title that says more in a
   list of results. A listed title has at most 49 characters, so that the whole title stays within 60; the gate does not enforce this, and the
   titles of the decision records are longer. `docs/` pages cannot carry another front matter key, which is why the map is a data file.
 - **Description.** The `description` of the front matter (`repo_pages.yaml` for the root files). The generated references and the decision
