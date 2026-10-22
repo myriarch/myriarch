@@ -367,11 +367,6 @@ func NewRootCommand() *cobra.Command {
 			if !filepath.IsAbs(args[0]) {
 				return fmt.Errorf("directory %q must be an absolute path", args[0])
 			}
-			if fi, err := os.Stat(args[0]); err != nil {
-				return fmt.Errorf("directory: %w", err)
-			} else if !fi.IsDir() {
-				return fmt.Errorf("%q is not a directory", args[0])
-			}
 			dst, err := installSelf(args[0])
 			if err != nil {
 				return err

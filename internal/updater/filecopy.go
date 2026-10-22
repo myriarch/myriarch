@@ -48,7 +48,14 @@ func copyRegularFile(src, dst string, dstIsFile, forceExec bool) (string, error)
 	if !filepath.IsAbs(dst) {
 		return "", fmt.Errorf("destination %q must be an absolute path", dst)
 	}
-	in, err := os.Open(src)
+	// Refuse anything that is not a regular file before opening it: opening a named pipe without a writer blocks
+	// forever and an init container would hang. The check on the opened file below stays the authoritative one.
+	if pre, err := os.Stat(src); err != nil {
+		return "", fmt.Errorf("open source: %w", err)
+	} else if !pre.Mode().IsRegular() {
+		return "", fmt.Errorf("source %q is not a regular file (%s)", src, kindOf(pre.Mode()))
+	}
+	in, err := os.OpenFile(src, os.O_RDONLY|openNonblock, 0)
 	if err != nil {
 		return "", fmt.Errorf("open source: %w", err)
 	}
@@ -92,23 +99,36 @@ func copyRegularFile(src, dst string, dstIsFile, forceExec bool) (string, error)
 }
 
 // writeAtomic streams r into a new temporary file next to target, syncs it and renames it over target. The directory of
-// target must exist; it is not created.
+// target must exist and must not be a symlink; it is not created. It is opened once and the temporary file, the rename
+// and the clean-up all go through that handle, so a swap of the directory entry afterwards changes nothing.
 func writeAtomic(target string, r io.Reader, mode os.FileMode) (err error) {
 	dir := filepath.Dir(target)
-	if di, derr := os.Stat(dir); derr != nil {
-		return fmt.Errorf("destination directory: %w", derr)
-	} else if !di.IsDir() {
-		return fmt.Errorf("destination directory %q is not a directory", dir)
+	li, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("destination directory: %w", err)
 	}
-	tmp := filepath.Join(dir, "."+filepath.Base(target)+".tmp-"+randSuffix())
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if !li.IsDir() {
+		return fmt.Errorf("destination directory %q is not a directory (%s)", dir, kindOf(li.Mode()))
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("open destination directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	if ri, rerr := root.Stat("."); rerr != nil || !os.SameFile(li, ri) {
+		return fmt.Errorf("destination directory %q changed while it was opened", dir)
+	}
+
+	name := filepath.Base(target)
+	tmp := "." + name + ".tmp-" + randSuffix()
+	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("create temporary file: %w", err)
 	}
 	defer func() {
 		if err != nil {
 			_ = f.Close()
-			_ = os.Remove(tmp)
+			_ = root.Remove(tmp)
 		}
 	}()
 	if _, err = io.Copy(f, r); err != nil {
@@ -124,10 +144,13 @@ func writeAtomic(target string, r io.Reader, mode os.FileMode) (err error) {
 	if err = f.Close(); err != nil {
 		return fmt.Errorf("close %q: %w", target, err)
 	}
-	if err = os.Rename(tmp, target); err != nil {
+	if err = root.Rename(tmp, name); err != nil {
 		return fmt.Errorf("rename into place: %w", err)
 	}
-	syncDir(dir)
+	if d, derr := root.Open("."); derr == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
 	return nil
 }
 

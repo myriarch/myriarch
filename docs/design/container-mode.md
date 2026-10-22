@@ -58,12 +58,16 @@ Both write a temporary file in the destination directory (created with `O_EXCL`,
 place, so a reader never sees a half-written file and a failed write leaves the old file and no temporary file. The rules
 that keep the commands from being turned against the volume:
 
-- Paths must be absolute. The destination directory must exist; it is not created.
+- Paths must be absolute. The destination directory must exist; it is not created. It is checked with `lstat` and a
+  symlink is refused (for `install-self <dir>` and for `copy <src> <dir>/<name>` alike). It is then opened once, and the
+  temporary file, the rename and the clean-up go through that handle. Higher components of the path are resolved
+  normally and must be trusted, for example the mount point of the volume.
 - A destination that exists must be a regular file. A symlink (also a dangling one, and a symlink to a directory), a
   directory used as the target file and a device are refused, so a link planted on the volume cannot redirect the write.
   The rename replaces the entry itself and never follows it.
 - The source may be a symlink (a mounted ConfigMap is one) but must resolve to a regular file; the type is checked on the
-  opened file. A directory, a device or a pipe is refused. Source and destination must not be the same file.
+  opened file. A directory, a device or a pipe is refused before the file is opened, so a pipe without a writer cannot
+  hang the command. Source and destination must not be the same file.
 - An error names the path and the reason on stderr and ends with exit code 1.
 
 An init container runs as the user and the volume of the main container (`runAsNonRoot`, a read-only root file system and
