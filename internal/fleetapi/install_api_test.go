@@ -730,3 +730,23 @@ func TestWantsJSON(t *testing.T) {
 		assert.Equal(t, c.want, wantsJSON(r), "%q", c.accept)
 	}
 }
+
+// A fleet on hold has no version to install: 412 no_target_version, and nothing is prepared or delivered.
+func TestInstallPlanOfAFleetOnHoldIsRefusedWith412(t *testing.T) {
+	e := newAPIEnv(t)
+	secret, _ := e.auth.newToken(nil)
+	_, err := e.st.FleetVersions().Put(context.Background(), domain.FleetVersionSelection{
+		Fleet: "datacenter", Version: "0.163.0", State: domain.SelectionInvalidated, StateReason: "outside the frame", GitVersion: "0.162.0",
+		SelectedBy: "user:x", SelectedAt: time.Now(),
+	}, nil)
+	require.NoError(t, err)
+	_, err = e.assigner.Reload(context.Background())
+	require.NoError(t, err)
+	r := e.planRequest(secret, datacenterHost())
+	require.Equal(t, http.StatusPreconditionFailed, r.Code, r.Body.String())
+	doc := asMap(t, e.expect(r, "getInstallPlan", http.StatusPreconditionFailed))
+	assert.Equal(t, "precondition_failed", doc["code"])
+	assert.Equal(t, "no_target_version", asMap(t, doc["issues"].([]any)[0])["code"])
+	assert.NotContains(t, r.Body.String(), secret)
+	assert.Equal(t, 1.0, e.counter("no_target_version"))
+}

@@ -763,3 +763,30 @@ func TestDownloadInstallBundleConcurrently(t *testing.T) {
 	wg.Wait()
 	assert.Equal(t, 30.0, e.bundleCounter("ok"))
 }
+
+// Every character class that could end a quotation or start a substitution is refused over HTTP with 422 and without
+// a command, in the attributes and in the fleet name, and the answer repeats nothing of what was refused.
+func TestRenderInstallCommandsRefusesQuotesAndShellCharacters(t *testing.T) {
+	e := newAPIEnv(t)
+	ab := e.withBundles(t, "0.2.0", false)
+	ab.ready(t)
+
+	values := map[string]string{
+		"single quote": "a'b", "double quote": `a"b`, "backtick": "a`b", "dollar": "a$b", "semicolon": "a;b", "newline": "a\nb", "nul": "a\x00b",
+		"escape": "a\x1bb", "delete": "a\x7fb", "left single quote": "a‘b", "right single quote": "a’b", "single low-9": "a‚b",
+		"single high-reversed-9": "a‛b", "left double quote": "a“b", "right double quote": "a”b", "double low-9": "a„b",
+		"overlong": strings.Repeat("a", 4096),
+	}
+	for name, v := range values {
+		for field, body := range map[string]map[string]any{
+			"site.id": edgeSite(func(b map[string]any) { b["attributes"] = map[string]string{"site.type": "edge", "site.id": v} }),
+			"fleet":   edgeSite(func(b map[string]any) { b["fleet"] = v }),
+		} {
+			r := e.renderCommands("admin", body)
+			require.Equal(t, http.StatusUnprocessableEntity, r.Code, name+" in "+field+": "+r.Body.String())
+			e.expect(r, "renderInstallCommands", http.StatusUnprocessableEntity)
+			assert.NotContains(t, r.Body.String(), "sudo sh -c", name+" in "+field)
+			assert.NotContains(t, r.Body.String(), v, name+" in "+field+": the answer repeats the refused value")
+		}
+	}
+}
