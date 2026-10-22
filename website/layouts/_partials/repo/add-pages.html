@@ -7,7 +7,8 @@ SPDX-License-Identifier: Apache-2.0
   Call: partial "repo/add-pages.html" (dict "adapter" . "section" "project")
   Each entry names a repository file (source, mounted as assets/repo/<source>), the slug, title, weight and description of the page.
   The leading H1 of the file is dropped because the title replaces it. params.sourcePath records the repository path for the link
-  render hook and the "edit this page" links.
+  render hook and the "edit this page" links. The date of a page (lastmod) is the date of the last commit that changed its source file
+  (repo/source-dates.html).
 */ -}}
 {{ $adapter := .adapter -}}
 {{ $entries := index hugo.Data.repo_pages .section -}}
@@ -21,6 +22,7 @@ SPDX-License-Identifier: Apache-2.0
         "title" $entry.title
         "weight" $entry.weight
         "description" $entry.description
+        "dates" (partial "repo/source-dates.html" $entry.source)
         "params" (dict "sourcePath" $entry.source)
         "content" (dict "mediaType" "text/markdown" "value" $body) -}}
     {{ with $entry.linkTitle }}{{ $page = merge $page (dict "params" (dict "sourcePath" $entry.source "linkTitle" .)) }}{{ end -}}

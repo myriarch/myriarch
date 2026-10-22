@@ -1,7 +1,7 @@
 ---
 title: "Connect a host"
 weight: 10
-description: "Enroll a Linux or Windows host with the installation scripts: the inputs they need, how to download and verify the installer, the exact commands and what to do when the installer stops."
+description: "Enroll a Linux or Windows host with the installation scripts: the inputs they need, the exact commands and what to do when the installer stops."
 ---
 
 A managed host runs three pieces: the upstream **OpAMP Supervisor** (the service `otelcol-supervisor`), the **collector**

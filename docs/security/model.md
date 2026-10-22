@@ -1,7 +1,7 @@
 ---
 title: "Security model"
 weight: 10
-description: "Trust boundaries and security controls of myriarchd, its agents and the myriarch-updater, with the setting and default of each control and the risk that remains."
+description: "Trust boundaries and security controls of myriarchd, its agents and the myriarch-updater, with the setting, default and remaining risk of each control."
 ---
 
 This page describes what the system does to protect itself and what is left to the operator. For each area it names the control, the setting that governs it with its default, and the residual risk. It is a description of controls, not a guide for attackers. Settings are keys of the `myriarchd` configuration file (`myriarchd.yaml`); keys can also be set through environment variables named `MYRIARCH_<PATH>` (for example `MYRIARCH_SERVER_PUBLICURL`).

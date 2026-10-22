@@ -1,0 +1,16 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  The "dates" of a page of a content adapter: lastmod is the date of the last commit that changed the repository file the page is
+  rendered from. Hugo has no commit for such a page (it is no file of the site), so scripts/source-dates.py writes the dates before the
+  build to data/source_dates.json (ci/website.sh). A file without an entry (not committed yet, or the script did not run) gets no date,
+  and scripts/check-seo.py reports the page in the sitemap.
+  Call: partial "repo/source-dates.html" "docs/adr/0001-single-server-binary.md"; the result goes to the "dates" key of AddPage.
+*/ -}}
+{{- $dates := dict -}}
+{{- with index (default dict hugo.Data.source_dates) . -}}
+  {{- $dates = dict "lastmod" (time.AsTime .) -}}
+{{- end -}}
+{{- return $dates -}}
