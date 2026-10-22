@@ -5,14 +5,14 @@ Operations artifacts. All supervisor configurations use exactly the keys of opam
 
 | Directory | Contents |
 |---|---|
-| [`supervisor/`](supervisor) | Supervisor configuration templates `linux/`, `windows/`, `k8s/`, each with `supervisor.yaml` and `fallback.yaml` |
+| [`supervisor/`](supervisor) | Supervisor configuration templates `linux/` and `windows/`, each with `supervisor.yaml` and `fallback.yaml` |
 | [`scripts/`](scripts) | `install-linux.sh` (bash) and `install-windows.ps1` (PowerShell 5.1+) |
 | [`systemd/`](systemd) | `otelcol-supervisor.service` (user `otelcol`), `myriarch-updater.service` (root) |
 | [`updater/`](updater) | `updater.yaml` templates for Linux and Windows |
 | [`windows/`](windows) | Services, paths, troubleshooting, `Set-ServiceEnvironment.ps1` (collector secrets) |
 | [`helm/myriarch/`](helm/myriarch) | Helm chart for myriarchd (HA, WebSocket ingress, external PostgreSQL) |
-| [`k8s/collector/`](k8s/collector) | Image (supervisor + otelcol-contrib + myriarch-updater), gateway StatefulSet, node DaemonSet, ConfigMaps; container mode of the myriarch-updater |
-| [`updater/container/`](updater/container) | `updater.yaml` for container mode (`myriarch-updater container`) |
+| [`helm/myriarch-collector/`](helm/myriarch-collector) | Helm chart for collectors in Kubernetes: the unchanged upstream images (supervisor, `otelcol-contrib`) plus the `myriarch-updater` image ([installation](../docs/operations/install-collector-helm.md)) |
+| [`../contrib/legacy-kubernetes-collector/`](../contrib/legacy-kubernetes-collector) | Deprecated since v0.2.0, replaced by the chart above: Kustomize base, combined collector image (Dockerfile and crane script), `supervisor/` and `updater/` templates for Kubernetes |
 | [`compose/`](compose) | docker-compose: `docker-compose.yaml` builds PostgreSQL 17 + myriarchd (+ optional myriarch-sim) from source for development; `quickstart.yaml` runs the same system from the release images for an evaluation |
 | [`docker/`](docker) | `myriarchd.Dockerfile` (Node 24 + pnpm -> Go `-tags embedui` -> distroless) and `myriarch-sim.Dockerfile`, for local builds. The published images are not built from Dockerfiles (see "Published images") |
 | [`release/`](release) | `goreleaser.yaml` (release matrix, SBOMs, Windows hook; no signing key), `windows-signed.sh`, `sbom.sh`, `README.md` (release build, SBOMs, Windows signing hook) |
@@ -196,8 +196,10 @@ variants and the layout of the release image are described in `scripts/build-ima
 
 ## Collector in Kubernetes
 
-See [`k8s/collector/README.md`](k8s/collector/README.md) (supervisor and collector in the same container, identity on a
-PVC/hostPath, version changes through the image tag).
+Use the Helm chart [`helm/myriarch-collector`](helm/myriarch-collector); see
+[Installing collectors with Helm](../docs/operations/install-collector-helm.md). The earlier Kustomize base and the combined
+collector image are deprecated and live in
+[`contrib/legacy-kubernetes-collector`](../contrib/legacy-kubernetes-collector/README.md).
 
 ## Release build
 
@@ -216,7 +218,7 @@ in [`release/README.md`](release/README.md).
   Dockerfiles (maintenance: `ci/versions.env`, `ci/pin-images.sh`). The upstream
   images of the collector image are bound to the signed upstream release binaries
   (`contrib/enterprise-mirror/verify-upstream-images.sh`; the supervisor image is not signed with cosign upstream).
-  `scripts/build-collector-image-crane.sh` runs this verification by default when it pushes (`VERIFY_UPSTREAM=0` skips
+  `contrib/legacy-kubernetes-collector/build-collector-image-crane.sh` runs this verification by default when it pushes (`VERIFY_UPSTREAM=0` skips
   it for a lab build), uses the reviewed digests of `ci/versions.env` for the pinned version and refuses upstream image
   overrides that are not pinned by digest (`ALLOW_UNPINNED_IMAGES=1` allows a tag for a lab build).
   `scripts/build-image-crane.sh` in its default mode (build from source) refuses `ghcr.io/myriarch/*` for every variant
@@ -325,9 +327,9 @@ with every artifact that is built here, except the mirror image (see below):
 * **Images.** Every image built from this repository holds `/usr/share/licenses/myriarch/LICENSE` and
   `/usr/share/licenses/myriarch/THIRD_PARTY_NOTICES` (mode 0644, `root:root`): the published server and updater images
   (`scripts/build-image-crane.sh` with `IMAGE_SOURCE=dist`), the crane image built from source, `docker/myriarchd.Dockerfile`,
-  `docker/myriarch-sim.Dockerfile` and the collector image (`k8s/collector/Dockerfile`,
-  `scripts/build-collector-image-crane.sh`). `scripts/build-image-crane.sh layout` and
-  `scripts/build-collector-image-crane.sh layout` print the paths of the data and license files of the layer without building
+  `docker/myriarch-sim.Dockerfile` and the collector image (`contrib/legacy-kubernetes-collector/kustomize/Dockerfile`,
+  `contrib/legacy-kubernetes-collector/build-collector-image-crane.sh`). `scripts/build-image-crane.sh layout` and
+  `contrib/legacy-kubernetes-collector/build-collector-image-crane.sh layout` print the paths of the data and license files of the layer without building
   anything, and `scripts/build-image-crane.sh layout-dirs` prints its directories with mode and owner (a test checks them:
   `ci/tests/image-crane-test.sh`).
   The mirror image (`scripts/build-mirror-image-crane.sh`) is the exception: it holds busybox and the OpenTelemetry release
@@ -362,7 +364,7 @@ directory because the simulator writes nothing. A test (`internal/updater/deploy
 Dockerfile, the Compose file, the build script and the Helm chart against each other; the Docker build itself is not run by
 the tests.
 
-**Collector image.** `k8s/collector/Dockerfile` and `scripts/build-collector-image-crane.sh` add the files of the upstream
+**Collector image.** `contrib/legacy-kubernetes-collector/kustomize/Dockerfile` and `contrib/legacy-kubernetes-collector/build-collector-image-crane.sh` add the files of the upstream
 OpenTelemetry software next to the project files: `/usr/share/licenses/opentelemetry-collector/LICENSE` (the Apache-2.0 text;
 it equals the upstream `LICENSE` of `opentelemetry-collector-contrib` and `opentelemetry-collector-releases` at v0.162.0 apart
 from one leading empty line) and `/usr/share/licenses/opentelemetry-collector/README`, which names `otelcol-contrib` and

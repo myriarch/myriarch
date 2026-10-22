@@ -68,8 +68,8 @@ func TestImagesRunAsOneUID(t *testing.T) {
 	assert.Equal(t, 65532, values.PodSecurityContext.FSGroup)
 
 	// the documented exception
-	assert.Regexp(t, `(?m)^USER 10001:10001$`, string(readDeploy(t, "k8s/collector/Dockerfile")), "collector image: the user of the upstream supervisor image")
-	assert.Contains(t, readRepoFile(t, "scripts/build-collector-image-crane.sh"), "10001")
+	assert.Regexp(t, `(?m)^USER 10001:10001$`, string(readDeploy(t, legacyKustomize+"/Dockerfile")), "collector image: the user of the upstream supervisor image")
+	assert.Contains(t, readRepoFile(t, "contrib/legacy-kubernetes-collector/build-collector-image-crane.sh"), "10001")
 }
 
 func TestReleaseImageKindsMatchTheReleaseArchives(t *testing.T) {
@@ -95,7 +95,7 @@ func TestReleaseImageKindsMatchTheReleaseArchives(t *testing.T) {
 	// the collector Dockerfile chooses the stage "updater" as updater-${UPDATER_SOURCE}: every documented value must name a stage
 	// that writes /out/myriarch-updater (the next stage copies that path), and the stage for the published image reads the
 	// updater at the path of its entrypoint from a stage that is FROM ${UPDATER_IMAGE}
-	collectorFile := string(readDeploy(t, "k8s/collector/Dockerfile"))
+	collectorFile := string(readDeploy(t, legacyKustomize+"/Dockerfile"))
 	stages := dockerStages(collectorFile)
 	assert.Contains(t, collectorFile, "ARG UPDATER_SOURCE=build", "the default source is the build context")
 	selector, ok := stages["updater"]
@@ -122,7 +122,7 @@ func TestReleaseImageKindsMatchTheReleaseArchives(t *testing.T) {
 			}
 		}
 	}
-	assert.Contains(t, string(readDeploy(t, "k8s/collector/Dockerfile")), "ARG UPDATER_IMAGE=scratch", "no default image: the digest of a release is passed on purpose")
+	assert.Contains(t, string(readDeploy(t, legacyKustomize+"/Dockerfile")), "ARG UPDATER_IMAGE=scratch", "no default image: the digest of a release is passed on purpose")
 
 	// the archives that the builder reads: <binary>_<version>_<os>_<arch>.tar.gz of the goreleaser archives
 	assert.Contains(t, oci, `"%s_%s_%s_%s.tar.gz" % (program, args.version, os_name, arch)`)

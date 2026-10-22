@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Verifies the upstream images pinned by digest (ci/versions.env: OTELCOL_CONTRIB_IMAGE, OTELCOL_SUPERVISOR_IMAGE) before
-# the collector image (deploy/k8s/collector/Dockerfile) is built from them:
+# the collector image (contrib/legacy-kubernetes-collector/kustomize/Dockerfile) is built from them:
 #
 #   The binaries in the image must be bit-identical to the upstream release artifacts, and these must be valid
 #   (SHA-256 from <asset>.sha256 AND Sigstore bundle <asset>.sigstore.json against the identity of the release workflow

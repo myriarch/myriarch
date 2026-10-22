@@ -31,7 +31,8 @@ on:
       - 'deploy/helm/**'
       - 'deploy/updater/**'
       - 'deploy/supervisor/**'
-      - 'deploy/k8s/**'
+      - 'contrib/legacy-kubernetes-collector/**'
+      - 'deploy/examples/production/**'
       - 'cmd/myriarch-updater/**'
       - 'internal/updater/**'
       - 'internal/leader/**'
@@ -39,7 +40,7 @@ on:
       - 'examples/sim/**'
       # the images of the probe: the build scripts, what they source, and the labels they read
       - 'scripts/build-image-crane.sh'
-      - 'scripts/build-collector-image-crane.sh'
+      - 'contrib/legacy-kubernetes-collector/build-collector-image-crane.sh'
       - 'scripts/lib/image-common.sh'
       - 'scripts/lib/oci_image.py'
       - 'ci/image-labels.env'

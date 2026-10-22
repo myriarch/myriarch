@@ -71,7 +71,7 @@
 #                     default is ~/.docker
 #   SOURCE_URL        org.opencontainers.image.source          default: https form of `git remote get-url origin`, else LABEL_SOURCE
 #                                                              of ci/image-labels.env, else no label
-#   CRANE, GO, KEEP_WORK  as in scripts/build-collector-image-crane.sh
+#   CRANE, GO, KEEP_WORK  as in contrib/legacy-kubernetes-collector/build-collector-image-crane.sh
 #
 # Labels that are the same for every image of the project (vendor, licenses, titles) come from ci/image-labels.env.
 #

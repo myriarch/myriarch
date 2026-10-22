@@ -7,7 +7,7 @@
 #  - tool modules in ci/tools/<tool>: go.mod matches the version in ci/versions.env
 #  - image digests: golang/distroless identical across the Dockerfiles, every FROM and the postgres of both compose files pinned by
 #    digest (the postgres service of ci.yml uses the same digest)
-#  - OTELCOL_* pins agree with each other and with deploy/k8s/collector/Dockerfile
+#  - OTELCOL_* pins agree with each other and with contrib/legacy-kubernetes-collector/kustomize/Dockerfile
 #  - reuse (ci/tools/reuse): requirements.in and requirements.txt pin the version of ci/versions.env, the build
 #    requirements pin poetry-core, and every pinned package carries hashes
 #  - .node-version holds one exact Node.js release of 22 or newer, and the web stage of myriarchd.Dockerfile uses its major
@@ -128,15 +128,15 @@ for f in hack/kind/manifests/*.yaml; do
   grep -E '^[[:space:]]*(- )?image:' "${f}" | grep -Evq 'image: "@@[A-Z_]+@@"$' && bad "${f}: an image is not an @@PLACEHOLDER@@"
 done
 
-grep -q "^ARG OTELCOL_VERSION=${OTELCOL_VERSION}\$" deploy/k8s/collector/Dockerfile || bad "OTELCOL_VERSION (${OTELCOL_VERSION}) does not match the default in deploy/k8s/collector/Dockerfile"
+grep -q "^ARG OTELCOL_VERSION=${OTELCOL_VERSION}\$" contrib/legacy-kubernetes-collector/kustomize/Dockerfile || bad "OTELCOL_VERSION (${OTELCOL_VERSION}) does not match the default in contrib/legacy-kubernetes-collector/kustomize/Dockerfile"
 # the image arguments of the collector Dockerfile default to the reviewed digests (same as ci/versions.env and the Go image of the other Dockerfiles)
-grep -Fxq "ARG COLLECTOR_IMAGE=${OTELCOL_CONTRIB_IMAGE}" deploy/k8s/collector/Dockerfile || bad "deploy/k8s/collector/Dockerfile: ARG COLLECTOR_IMAGE is not OTELCOL_CONTRIB_IMAGE of ci/versions.env"
-grep -Fxq "ARG SUPERVISOR_IMAGE=${OTELCOL_SUPERVISOR_IMAGE}" deploy/k8s/collector/Dockerfile || bad "deploy/k8s/collector/Dockerfile: ARG SUPERVISOR_IMAGE is not OTELCOL_SUPERVISOR_IMAGE of ci/versions.env"
-g3="$(digest_in deploy/k8s/collector/Dockerfile '^ARG GO_IMAGE=golang:')"
-{ [ -n "${g3}" ] && [ "${g3}" = "${g1}" ]; } || bad "deploy/k8s/collector/Dockerfile: ARG GO_IMAGE (${g3:-no digest}) is not the golang digest of the other Dockerfiles (${g1:-none})"
+grep -Fxq "ARG COLLECTOR_IMAGE=${OTELCOL_CONTRIB_IMAGE}" contrib/legacy-kubernetes-collector/kustomize/Dockerfile || bad "contrib/legacy-kubernetes-collector/kustomize/Dockerfile: ARG COLLECTOR_IMAGE is not OTELCOL_CONTRIB_IMAGE of ci/versions.env"
+grep -Fxq "ARG SUPERVISOR_IMAGE=${OTELCOL_SUPERVISOR_IMAGE}" contrib/legacy-kubernetes-collector/kustomize/Dockerfile || bad "contrib/legacy-kubernetes-collector/kustomize/Dockerfile: ARG SUPERVISOR_IMAGE is not OTELCOL_SUPERVISOR_IMAGE of ci/versions.env"
+g3="$(digest_in contrib/legacy-kubernetes-collector/kustomize/Dockerfile '^ARG GO_IMAGE=golang:')"
+{ [ -n "${g3}" ] && [ "${g3}" = "${g1}" ]; } || bad "contrib/legacy-kubernetes-collector/kustomize/Dockerfile: ARG GO_IMAGE (${g3:-no digest}) is not the golang digest of the other Dockerfiles (${g1:-none})"
 # UPDATER_IMAGE is the one exception: its default is the empty placeholder "scratch" (a release passes the published updater image by digest)
-grep -Fxq 'ARG UPDATER_IMAGE=scratch' deploy/k8s/collector/Dockerfile || bad "deploy/k8s/collector/Dockerfile: ARG UPDATER_IMAGE must default to the placeholder scratch, not to a tag"
-grep -E '^ARG [A-Z_]*IMAGE=' deploy/k8s/collector/Dockerfile | grep -Fvx 'ARG UPDATER_IMAGE=scratch' | grep -Evq '@sha256:[0-9a-f]{64}$' && bad "deploy/k8s/collector/Dockerfile: an ARG ...IMAGE default without digest"
+grep -Fxq 'ARG UPDATER_IMAGE=scratch' contrib/legacy-kubernetes-collector/kustomize/Dockerfile || bad "contrib/legacy-kubernetes-collector/kustomize/Dockerfile: ARG UPDATER_IMAGE must default to the placeholder scratch, not to a tag"
+grep -E '^ARG [A-Z_]*IMAGE=' contrib/legacy-kubernetes-collector/kustomize/Dockerfile | grep -Fvx 'ARG UPDATER_IMAGE=scratch' | grep -Evq '@sha256:[0-9a-f]{64}$' && bad "contrib/legacy-kubernetes-collector/kustomize/Dockerfile: an ARG ...IMAGE default without digest"
 for v in SHELLCHECK_SHA256_DARWIN_ARM64 SHELLCHECK_SHA256_DARWIN_AMD64 SHELLCHECK_SHA256_LINUX_ARM64 SHELLCHECK_SHA256_LINUX_AMD64 \
          KUBECTL_SHA256_DARWIN_ARM64 KUBECTL_SHA256_DARWIN_AMD64 KUBECTL_SHA256_LINUX_ARM64 KUBECTL_SHA256_LINUX_AMD64 \
          HUGO_SHA256_DARWIN_UNIVERSAL HUGO_SHA256_LINUX_ARM64 HUGO_SHA256_LINUX_AMD64 \

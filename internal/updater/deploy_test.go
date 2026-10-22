@@ -29,6 +29,22 @@ import (
 
 const deployDir = "../../deploy"
 
+// The deprecated Kubernetes collector (Kustomize base, Dockerfile, supervisor templates) lives in contrib/, outside deploy/;
+// the paths are relative to deployDir so that readDeploy reaches them.
+const (
+	legacyKustomize  = "../contrib/legacy-kubernetes-collector/kustomize"
+	legacySupervisor = "../contrib/legacy-kubernetes-collector/supervisor"
+)
+
+// supervisorTemplateDir is the directory of the supervisor templates of a platform, relative to deployDir; the "k8s"
+// templates belong to the deprecated Kubernetes collector.
+func supervisorTemplateDir(platform string) string {
+	if platform == "k8s" {
+		return legacySupervisor
+	}
+	return "supervisor/" + platform
+}
+
 func readDeploy(t *testing.T, rel string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(deployDir, rel))
@@ -73,7 +89,7 @@ func TestSupervisorConfigTemplatesUseExactSupervisorKeys(t *testing.T) {
 	for _, platform := range []string{"linux", "windows", "k8s"} {
 		t.Run(platform, func(t *testing.T) {
 			var cfg map[string]any
-			require.NoError(t, yaml.Unmarshal(readDeploy(t, "supervisor/"+platform+"/supervisor.yaml"), &cfg))
+			require.NoError(t, yaml.Unmarshal(readDeploy(t, supervisorTemplateDir(platform)+"/supervisor.yaml"), &cfg))
 			assertSubset(t, "top level", keysOf(cfg), supTop)
 			server := cfg["server"].(map[string]any)
 			assertSubset(t, "server", keysOf(server), supServer)
@@ -127,7 +143,7 @@ func TestSupervisorConfigTemplatesUseExactSupervisorKeys(t *testing.T) {
 func TestFallbackConfigsAreValidCollectorConfigs(t *testing.T) {
 	for _, platform := range []string{"linux", "windows", "k8s"} {
 		var cfg map[string]any
-		require.NoError(t, yaml.Unmarshal(readDeploy(t, "supervisor/"+platform+"/fallback.yaml"), &cfg), platform)
+		require.NoError(t, yaml.Unmarshal(readDeploy(t, supervisorTemplateDir(platform)+"/fallback.yaml"), &cfg), platform)
 		assert.Contains(t, cfg, "service")
 		ext := cfg["extensions"].(map[string]any)
 		assert.Contains(t, ext, "health_check", "the myriarch-updater health check needs the collector health endpoint")

@@ -165,7 +165,7 @@ func TestCLIFetchTrustedRootRequiresOut(t *testing.T) {
 // The documented container template must parse and validate (strict keys, container section).
 func TestContainerTemplateIsValid(t *testing.T) {
 	t.Setenv("MYRIARCH_ENROLLMENT_TOKEN", "myre_test")
-	cfg, err := LoadConfig(filepath.Join("..", "..", "deploy", "updater", "container", "updater.yaml"))
+	cfg, err := LoadConfig(filepath.Join("..", "..", "contrib", "legacy-kubernetes-collector", "updater", "updater.yaml"))
 	require.NoError(t, err)
 	require.NoError(t, cfg.ValidateContainer())
 	assert.Equal(t, "myre_test", cfg.Server.Token)

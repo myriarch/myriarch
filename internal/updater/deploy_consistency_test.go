@@ -90,15 +90,15 @@ func TestHelmChartHasRequiredTemplatesAndSettings(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(deployDir, "helm/myriarch/examples/ingress-openshift.yaml"))
 }
 
-// The ConfigMap in deploy/k8s/collector embeds the same files as deploy/supervisor/k8s.
+// The ConfigMap in contrib/legacy-kubernetes-collector/kustomize embeds the same files as contrib/legacy-kubernetes-collector/supervisor.
 func TestK8sConfigMapMatchesSupervisorTemplates(t *testing.T) {
 	var cm struct {
 		Data map[string]string `yaml:"data"`
 	}
-	require.NoError(t, yaml.Unmarshal(readDeploy(t, "k8s/collector/supervisor-configmap.yaml"), &cm))
+	require.NoError(t, yaml.Unmarshal(readDeploy(t, legacyKustomize+"/supervisor-configmap.yaml"), &cm))
 	for _, name := range []string{"supervisor.yaml", "fallback.yaml"} {
-		want := string(readDeploy(t, "supervisor/k8s/"+name))
-		assert.Equal(t, want, cm.Data[name], "%s in supervisor-configmap.yaml is out of sync with deploy/supervisor/k8s/%s", name, name)
+		want := string(readDeploy(t, legacySupervisor+"/"+name))
+		assert.Equal(t, want, cm.Data[name], "%s in supervisor-configmap.yaml is out of sync with contrib/legacy-kubernetes-collector/supervisor/%s", name, name)
 	}
 }
 
@@ -124,24 +124,24 @@ func TestK8sManifestsParseAndUseIdentityPersistence(t *testing.T) {
 		}
 		return out
 	}
-	gw := read("k8s/collector/gateway.yaml")
+	gw := read(legacyKustomize + "/gateway.yaml")
 	var kinds []string
 	for _, d := range gw {
 		kinds = append(kinds, d.Kind)
 	}
 	assert.Equal(t, []string{"Service", "Service", "StatefulSet"}, kinds)
-	raw := string(readDeploy(t, "k8s/collector/gateway.yaml"))
+	raw := string(readDeploy(t, legacyKustomize+"/gateway.yaml"))
 	assert.Contains(t, raw, "volumeClaimTemplates", "gateway: PVC for a stable supervisor identity")
 	assert.Contains(t, raw, "K8S_POD_NAME")
 	assert.Contains(t, raw, "fieldPath: spec.nodeName")
 	assert.Contains(t, raw, "mountPath: /var/lib/otelcol/supervisor")
-	ds := string(readDeploy(t, "k8s/collector/daemonset.yaml"))
+	ds := string(readDeploy(t, legacyKustomize+"/daemonset.yaml"))
 	assert.Contains(t, ds, "hostPath", "daemonset: hostPath storage")
 	assert.Contains(t, ds, "kind: DaemonSet")
 	for _, f := range []string{"namespace.yaml", "site-configmap.yaml", "secret.example.yaml", "kustomization.yaml", "Dockerfile"} {
-		assert.FileExists(t, filepath.Join(deployDir, "k8s/collector", f))
+		assert.FileExists(t, filepath.Join(deployDir, legacyKustomize, f))
 	}
-	df := string(readDeploy(t, "k8s/collector/Dockerfile"))
+	df := string(readDeploy(t, legacyKustomize+"/Dockerfile"))
 	assert.Contains(t, df, "otel/opentelemetry-collector-opampsupervisor")
 	assert.Contains(t, df, "otel/opentelemetry-collector-contrib")
 	assert.Contains(t, df, "/usr/local/bin/otelcol-contrib", "matches agent.executable in the k8s supervisor config")
@@ -184,7 +184,7 @@ func TestDockerfiles(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join(deployDir, "docker", "*.Dockerfile"))
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
-	dockerfiles := map[string]bool{"k8s/collector/Dockerfile": true}
+	dockerfiles := map[string]bool{legacyKustomize + "/Dockerfile": true}
 	for _, f := range files {
 		dockerfiles["docker/"+filepath.Base(f)] = true
 	}
@@ -209,9 +209,9 @@ func TestDockerfiles(t *testing.T) {
 		assert.Containsf(t, string(readDeploy(t, "docker/"+filepath.Base(f))), `org.opencontainers.image.licenses="`+string(m[1])+`"`,
 			"%s sets the licenses label to LABEL_LICENSES of ci/image-labels.env", filepath.Base(f))
 	}
-	assert.NotContains(t, string(readDeploy(t, "k8s/collector/Dockerfile")), "org.opencontainers.image.licenses")
+	assert.NotContains(t, string(readDeploy(t, legacyKustomize+"/Dockerfile")), "org.opencontainers.image.licenses")
 	// the collector image also carries the Apache-2.0 text and the README of the OpenTelemetry software
-	collector := string(readDeploy(t, "k8s/collector/Dockerfile"))
+	collector := string(readDeploy(t, legacyKustomize+"/Dockerfile"))
 	c, found := copyTo(dockerCopies(collector), "/usr/share/licenses/opentelemetry-collector/LICENSE")
 	if assert.True(t, found, "collector image: LICENSE of the OpenTelemetry software") {
 		assert.Equal(t, []string{"LICENSE"}, c.srcs)
@@ -277,7 +277,7 @@ func TestNoImageCarriesReleaseFixtures(t *testing.T) {
 	for _, f := range files {
 		all = append(all, "docker/"+filepath.Base(f))
 	}
-	all = append(all, "k8s/collector/Dockerfile")
+	all = append(all, legacyKustomize+"/Dockerfile")
 	for _, rel := range all {
 		assert.NotContainsf(t, strings.ToLower(string(readDeploy(t, rel))), "fixtures", "%s must not mention release fixtures", rel)
 	}
@@ -404,7 +404,7 @@ func TestVersionLdflagsUseOnePackage(t *testing.T) {
 	// (a) the definitions
 	assert.Equal(t, want, definition("Makefile", versionDefMakefile), "Makefile: VERSION_PKG")
 	assert.Equal(t, want, definition("scripts/lib/image-common.sh", versionDefShell), "scripts/lib/image-common.sh: VERSION_PKG")
-	dockerfiles := []string{"deploy/docker/myriarchd.Dockerfile", "deploy/docker/myriarch-sim.Dockerfile", "deploy/k8s/collector/Dockerfile"}
+	dockerfiles := []string{"deploy/docker/myriarchd.Dockerfile", "deploy/docker/myriarch-sim.Dockerfile", "contrib/legacy-kubernetes-collector/kustomize/Dockerfile"}
 	for _, f := range dockerfiles {
 		assert.Equal(t, want, definition(f, versionDefDocker), "%s: ARG VERSION_PKG", f)
 	}
@@ -412,11 +412,11 @@ func TestVersionLdflagsUseOnePackage(t *testing.T) {
 	// (b) and (c): every use names the package through the definition of its build system (or spells out the same
 	// literal), and each file sets all three variables
 	uses := map[string]string{ // file -> variable reference its definition provides ("" = literal only)
-		"Makefile":                               "$(VERSION_PKG)",
-		"deploy/release/goreleaser.yaml":         "",
-		"scripts/build-image-crane.sh":           "${VERSION_PKG}",
-		"scripts/build-collector-image-crane.sh": "${VERSION_PKG}",
-		"ci/tests/release-smoke-test.sh":         "${VERSION_PKG}", // builds the binaries that its docker double runs; derives the package from go.mod
+		"Makefile":                       "$(VERSION_PKG)",
+		"deploy/release/goreleaser.yaml": "",
+		"scripts/build-image-crane.sh":   "${VERSION_PKG}",
+		"contrib/legacy-kubernetes-collector/build-collector-image-crane.sh": "${VERSION_PKG}",
+		"ci/tests/release-smoke-test.sh":                                     "${VERSION_PKG}", // builds the binaries that its docker double runs; derives the package from go.mod
 	}
 	for _, f := range dockerfiles {
 		uses[f] = "${VERSION_PKG}"
@@ -465,7 +465,7 @@ func TestDeployReadmeListsEverything(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(deployDir, "README.md"))
 	require.NoError(t, err)
 	s := string(data)
-	for _, dir := range []string{"helm/myriarch", "k8s/collector", "compose", "docker", "supervisor", "scripts", "systemd", "windows", "release", "updater"} {
+	for _, dir := range []string{"helm/myriarch", "helm/myriarch-collector", "contrib/legacy-kubernetes-collector", "compose", "docker", "supervisor", "scripts", "systemd", "windows", "release", "updater"} {
 		assert.True(t, strings.Contains(s, dir), "deploy/README.md should mention %s", dir)
 	}
 	for _, want := range []string{"## License files", "THIRD_PARTY_NOTICES", "/usr/share/licenses/myriarch/", "IMAGE_VARIANT", "/usr/share/licenses/opentelemetry-collector/", "GPL-2.0"} {
@@ -574,8 +574,8 @@ func TestContainerImagesArePinnedByDigest(t *testing.T) {
 			}
 		}
 	}
-	assert.Regexp(t, re, string(readDeploy(t, "k8s/collector/daemonset.yaml")), "the root init container image is pinned")
-	assert.Contains(t, string(readDeploy(t, "k8s/collector/Dockerfile")), "COLLECTOR_IMAGE", "upstream images can be pinned by digest at build time")
+	assert.Regexp(t, re, string(readDeploy(t, legacyKustomize+"/daemonset.yaml")), "the root init container image is pinned")
+	assert.Contains(t, string(readDeploy(t, legacyKustomize+"/Dockerfile")), "COLLECTOR_IMAGE", "upstream images can be pinned by digest at build time")
 }
 
 func TestHelmChartShipsNetworkPolicyAndRequiresIngressTLS(t *testing.T) {
@@ -593,7 +593,7 @@ func TestHelmChartShipsNetworkPolicyAndRequiresIngressTLS(t *testing.T) {
 }
 
 func TestK8sCollectorNetworkPolicy(t *testing.T) {
-	dec := yaml.NewDecoder(bytes.NewReader(readDeploy(t, "k8s/collector/networkpolicy.yaml")))
+	dec := yaml.NewDecoder(bytes.NewReader(readDeploy(t, legacyKustomize+"/networkpolicy.yaml")))
 	var names []string
 	for {
 		var d struct {
@@ -609,7 +609,7 @@ func TestK8sCollectorNetworkPolicy(t *testing.T) {
 		names = append(names, d.Metadata.Name)
 	}
 	assert.Equal(t, []string{"otel-gateway", "otel-agent"}, names)
-	assert.Contains(t, string(readDeploy(t, "k8s/collector/kustomization.yaml")), "networkpolicy.yaml")
+	assert.Contains(t, string(readDeploy(t, legacyKustomize+"/kustomization.yaml")), "networkpolicy.yaml")
 }
 
 func TestUpdaterUnitIsSandboxed(t *testing.T) {
@@ -833,7 +833,7 @@ func TestCollectorPodsMountNoServiceAccountTokenAndDoNotChownRecursively(t *test
 		} `yaml:"spec"`
 	}
 	pods := 0
-	for _, dir := range []string{"k8s/collector", "examples/production/collector"} {
+	for _, dir := range []string{legacyKustomize, "examples/production/collector"} {
 		var files []string
 		require.NoError(t, filepath.WalkDir(filepath.Join(deployDir, dir), func(p string, d os.DirEntry, err error) error {
 			if err == nil && !d.IsDir() && strings.HasSuffix(p, ".yaml") {

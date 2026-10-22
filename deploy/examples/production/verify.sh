@@ -47,7 +47,7 @@ STANDALONE="$HERE/myriarchd.yaml"
 OVERLAY="$HERE/collector"
 COMPONENT="$OVERLAY/components/external-gateway"
 SECRETS_SCRIPT="$HERE/create-secrets.example.sh"
-SUPERVISOR_TEMPLATE="$ROOT/deploy/supervisor/k8s/supervisor.yaml"
+SUPERVISOR_TEMPLATE="$ROOT/contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml"
 
 HELM="${HELM:-helm}"
 YQ="${YQ:-yq}"
@@ -241,13 +241,13 @@ if $KUSTOMIZE build "$OVERLAY" > "$COLLECTOR" 2> "$COLLECTOR.err"; then
     "$YQ" -e 'select(.kind == "StatefulSet") | .spec.template.spec.containers[0].volumeMounts[] | select(.mountPath == "'"$(dirname "$cafile")"'" and .name == "internal-ca")' "$COLLECTOR" >/dev/null 2>&1 \
       || fail "ca_file $cafile is not covered by a volumeMount of the internal-ca ConfigMap"
   fi
-  # supervisor.yaml must equal the template deploy/supervisor/k8s/supervisor.yaml with exactly server.tls.ca_file set
+  # supervisor.yaml must equal the template contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml with exactly server.tls.ca_file set
   # (compared structurally: comments and key order are ignored)
   "$YQ" '.server.tls.ca_file = "/etc/myriarch/ca/ca.crt"' "$SUPERVISOR_TEMPLATE" > "$VERIFY_OUT/supervisor.expected.yaml"
   if diff -u <(normalize "$VERIFY_OUT/supervisor.expected.yaml") <(normalize "$VERIFY_OUT/supervisor.rendered.yaml") > "$VERIFY_OUT/supervisor.diff"; then
-    note "ok: overlay supervisor.yaml = template deploy/supervisor/k8s/supervisor.yaml + ca_file"
+    note "ok: overlay supervisor.yaml = template contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml + ca_file"
   else
-    fail "overlay supervisor.yaml deviates from deploy/supervisor/k8s/supervisor.yaml (apart from server.tls.ca_file); update collector/supervisor-configmap-patch.yaml:"
+    fail "overlay supervisor.yaml deviates from contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml (apart from server.tls.ca_file); update collector/supervisor-configmap-patch.yaml:"
     cat "$VERIFY_OUT/supervisor.diff" >&2
   fi
   if [ "$("$YQ" 'select(.kind == "ConfigMap" and .metadata.name == "otel-supervisor-config") | .data["fallback.yaml"] | length > 0' "$COLLECTOR")" != "true" ]; then

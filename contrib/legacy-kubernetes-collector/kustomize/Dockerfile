@@ -6,11 +6,11 @@
 # There is no official image with both binaries: the supervisor image (alpine, UID 10001) contains only the
 # supervisor, the contrib image (scratch) only the collector. Supervisor and collector must have the same version.
 #
-#   docker build -f deploy/k8s/collector/Dockerfile --build-arg OTELCOL_VERSION=0.162.0 \
+#   docker build -f contrib/legacy-kubernetes-collector/kustomize/Dockerfile --build-arg OTELCOL_VERSION=0.162.0 \
 #       --build-arg UPDATER_VERSION=$(git describe --tags --always) --build-arg UPDATER_COMMIT=$(git rev-parse --short HEAD) \
 #       -t registry.example.com/observability/otel-supervisor-collector:0.162.0 .
 #
-# The build context is the repository root (myriarch-updater is built as well; container mode: deploy/k8s/collector/README.md).
+# The build context is the repository root (myriarch-updater is built as well; container mode: contrib/legacy-kubernetes-collector/kustomize/README.md).
 #
 # myriarch-updater: by default it is compiled from the build context. To take the released binary instead, pass the published
 # updater image by digest (the release notes name it; the binary is the one in the signed release archive):
@@ -18,7 +18,7 @@
 # The image is FROM scratch with /usr/local/bin/myriarch-updater. A build with UPDATER_SOURCE=image and no UPDATER_IMAGE fails
 # at the COPY. The Dockerfile builds for the platform of the build host (linux/amd64 when compiled from source).
 #
-# Without a container runtime (CI systems without Docker, developer Mac): scripts/build-collector-image-crane.sh <version> builds
+# Without a container runtime (CI systems without Docker, developer Mac): contrib/legacy-kubernetes-collector/build-collector-image-crane.sh <version> builds
 # the same image with crane (same contract: numeric user 10001, group 0 writable, ENTRYPOINT/CMD); change both together.
 #
 # ENTRYPOINT/CMD remain the supervisor (older manifests run unchanged). Version changes in Kubernetes:
@@ -81,7 +81,7 @@ ARG OTELCOL_VERSION
 ARG COLLECTOR_IMAGE
 ARG SUPERVISOR_IMAGE
 # No OCI licenses label (image.licenses): the alpine base of the supervisor image brings packages under other licenses
-# (scripts/build-collector-image-crane.sh omits the label for the same reason).
+# (contrib/legacy-kubernetes-collector/build-collector-image-crane.sh omits the label for the same reason).
 LABEL org.opencontainers.image.title="myriarch collector (opampsupervisor + otelcol-contrib)" \
       org.opencontainers.image.version="${OTELCOL_VERSION}"
 COPY --from=collector --chmod=0755 /otelcol-contrib /usr/local/bin/otelcol-contrib
@@ -95,7 +95,7 @@ COPY --chmod=0644 LICENSE /usr/share/licenses/myriarch/LICENSE
 COPY --chmod=0644 THIRD_PARTY_NOTICES /usr/share/licenses/myriarch/THIRD_PARTY_NOTICES
 COPY --chmod=0644 LICENSE /usr/share/licenses/opentelemetry-collector/LICENSE
 USER root
-# README of the upstream software: the same text as scripts/build-collector-image-crane.sh writes (there the image references are
+# README of the upstream software: the same text as contrib/legacy-kubernetes-collector/build-collector-image-crane.sh writes (there the image references are
 # the digests it pinned; here they are the build arguments as given - pin them by digest in the release pipeline).
 RUN printf '%s\n' \
       "OpenTelemetry Collector and OpAMP Supervisor in this image" \

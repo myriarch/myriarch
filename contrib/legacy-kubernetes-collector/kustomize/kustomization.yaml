@@ -1,4 +1,4 @@
-# kubectl apply -k deploy/k8s/collector
+# kubectl apply -k contrib/legacy-kubernetes-collector/kustomize
 # Secrets (secret.example.yaml) do NOT belong in this list - create them separately.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

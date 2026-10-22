@@ -11,7 +11,7 @@ updates that `myriarchd` offers. The installation scripts set up exactly this, i
 - Linux with systemd: [`deploy/scripts/install-linux.sh`](../../deploy/scripts/install-linux.sh) (bash). Support level: beta.
 - Windows: [`deploy/scripts/install-windows.ps1`](../../deploy/scripts/install-windows.ps1) (PowerShell 5.1 or newer, run as
   Administrator). Support level: experimental.
-- Kubernetes: the collector runs as a container; see [deploy/k8s/collector/README.md](../../deploy/k8s/collector/README.md).
+- Kubernetes: the collector runs as a container; see [Installing collectors with Helm](../operations/install-collector-helm.md).
 
 The scripts deliberately do not use the packages of the upstream project (deb, rpm and MSI): the contrib packages start a
 collector service of their own, and a supervisor from a package is another service in another place than the one that

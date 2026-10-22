@@ -53,7 +53,7 @@ the registry container and the work directory), `make kind-probe`.
 |---|---|---|
 | kind cluster | | One control plane, two workers, fixed pod and service subnets. Node image pinned by digest in `versions.env`. |
 | Registry | (Docker) | Container `myriarch-kind-registry`, `127.0.0.1:5001`, reachable from the nodes as `localhost:5001` through `hosts.toml`. |
-| Images | | `scripts/build-image-crane.sh` and `scripts/build-collector-image-crane.sh` for the node architecture (`IMAGE_PLATFORM`), pushed with crane. |
+| Images | | `scripts/build-image-crane.sh` and `contrib/legacy-kubernetes-collector/build-collector-image-crane.sh` for the node architecture (`IMAGE_PLATFORM`), pushed with crane. |
 | PostgreSQL 17, SSH Git server | `probe-infra` | The GitOps source must be `ssh://` or `https://` in `serve` mode, so the fixture lives on a real Git server. |
 | myriarch chart | `myriarch` | Pod Security `restricted` is enforced. First with only the required values, then with the full configuration. |
 | Simulator | `myriarch` | 20 collectors (`examples/sim/small.yaml`), registered with the declared token `kind-sim`. |

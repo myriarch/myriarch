@@ -2,7 +2,7 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Shared helpers of the crane image scripts (scripts/build-image-crane.sh, scripts/build-collector-image-crane.sh,
+# Shared helpers of the crane image scripts (scripts/build-image-crane.sh, contrib/legacy-kubernetes-collector/build-collector-image-crane.sh,
 # scripts/build-mirror-image-crane.sh). Sourced, not executed.
 #
 # The caller defines die/warn/log BEFORE sourcing this file (each script has its own message prefix) and ROOT (the
