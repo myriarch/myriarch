@@ -470,6 +470,27 @@ func TestServerModeInstallsFromThePlan(t *testing.T) {
 	assert.Contains(t, res.Out, "Collector v0.162.0 is already installed")
 }
 
+func TestServerModeAcceptsATrustedRootFile(t *testing.T) {
+	r := newInstallerRig(t, true, "amd64")
+	file := filepath.Join(t.TempDir(), "trusted_root.json")
+	require.NoError(t, os.WriteFile(file, []byte(`{"mediaType":"rig"}`), 0o600))
+	res := r.runWith("--trusted-root", file)
+	require.Equal(t, 0, res.Code, res.Out)
+
+	// both checks use the file and neither uses a TUF cache
+	calls := r.updaterCalls()
+	assert.Equal(t, 2, strings.Count(calls, "--trusted-root "+file))
+	assert.NotContains(t, calls, "--tuf-cache")
+
+	// the updater keeps verifying against a copy of the file
+	got, err := os.ReadFile(filepath.Join(r.root, "etc/myriarch/trusted_root.json"))
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"mediaType":"rig"}`, string(got))
+	cfg, err := os.ReadFile(filepath.Join(r.root, "etc/myriarch/updater.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(cfg), `trustedRootFile: "/etc/myriarch/trusted_root.json"`)
+}
+
 func (r *installerRig) endpointOfPlan() string {
 	for _, l := range strings.Split(r.planText(nil), "\n") {
 		if v, ok := strings.CutPrefix(l, KeyOpAMPEndpoint+"="); ok {
