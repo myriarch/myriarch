@@ -2,11 +2,13 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Packages the server chart (deploy/helm/myriarch) for a release with the digest of the signed server image written into it, and
-# checks such a package (job `push-chart` and job `verify-chart` of the release workflow, ADR-0035). It needs no network and no
-# registry: helm only packages and renders. The same script is the local check of the chart package (ci/tests/chart-package-test.sh).
+# Packages the server chart (deploy/helm/myriarch) for a release with the digest of the signed server image written into it, turns the
+# package into an OCI layout, and checks such a package (job `chart` and job `verify-chart` of the release workflow, ADR-0035). It needs
+# no network and no real registry: helm only packages and renders, and the layout comes from a throwaway registry on 127.0.0.1. The same
+# script is the local check of the chart package (ci/tests/chart-package-test.sh).
 #
 #   TOOLS_BIN=... ci/release/chart-package.sh package --chart DIR --version X.Y.Z[-rc.N] --image-digest sha256:<64 hex> --out DIR
+#   TOOLS_BIN=... ci/release/chart-package.sh layout --package FILE --out DIR
 #   TOOLS_BIN=... ci/release/chart-package.sh verify --package FILE --image-digest sha256:<64 hex> [--version X.Y.Z[-rc.N]]
 #
 # package  copies the chart, writes the digest into the value image.digest of the copy and into the entry of the annotation
@@ -14,17 +16,22 @@
 #          `helm package --version V --app-version V` (the chart version is the app version is the tag without v). Then it
 #          verifies the result. OUT must be new or empty. stdout: CHART_PACKAGE=<OUT>/myriarch-<V>.tgz
 #            [chart_dir] [chart_digest_slot] [chart_annotation_slot]
+# layout   pushes the package with `helm push --plain-http` to a throwaway registry (`crane registry serve` on 127.0.0.1, an ephemeral
+#          port, stopped at the end) and pulls the manifest by digest into the OCI layout OUT, which must be new or empty. The layout
+#          holds exactly what `helm push` writes to ghcr.io, so its digest is the digest of the published chart; push-chart.sh pushes it
+#          by digest, without a tag. stdout: chart-digest=<digest> (a GITHUB_OUTPUT line).  [chart_dir] [layout_failed]
 # verify   renders the package with `helm template` for the default values and for the OpenShift profile and requires that every
-#          `image:` of the output is <repository>@<digest> with exactly this digest, at least one image per rendering, that the
-#          annotation artifacthub.io/images names the digest, and, with --version, that the chart version and the app version are
-#          VERSION. A package without a digest fails here [image_not_digest]. [package_invalid] [chart_version]
+#          `image:` of the output is RELEASE_IMAGE_SERVER@<digest> with exactly this digest, at least one image per rendering, that
+#          the annotation artifacthub.io/images names that reference, and, with --version, that the chart version and the app version
+#          are VERSION. A package without a digest, or with the digest of another repository, fails here [image_not_digest]
+#          [package_invalid] [chart_version]
 #
 # Exit status: 0 ok, 1 refused or failed, 2 usage error.
 set -euo pipefail
 # shellcheck source=ci/release/common.sh
 . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-USAGE="chart-package.sh package --chart DIR --version VERSION --image-digest DIGEST --out DIR | verify --package FILE --image-digest DIGEST [--version VERSION]"
+USAGE="chart-package.sh package --chart DIR --version VERSION --image-digest DIGEST --out DIR | layout --package FILE --out DIR | verify --package FILE --image-digest DIGEST [--version VERSION]"
 [ "$#" -ge 1 ] || usage_err "${USAGE}"
 cmd="$1"
 shift
@@ -40,13 +47,17 @@ while [ "$#" -gt 0 ]; do
     *) usage_err "${USAGE}" ;;
   esac
 done
-[ -n "${digest}" ] || usage_err "${USAGE}"
-check_match digest_invalid "--image-digest" "${digest}" "${DIGEST_RE}"
+if [ "${cmd}" != layout ]; then
+  [ -n "${digest}" ] || usage_err "${USAGE}"
+  check_match digest_invalid "--image-digest" "${digest}" "${DIGEST_RE}"
+fi
 [ -z "${version}" ] || check_match version_invalid "--version" "${version}" "${VERSION_RE}"
+load_identity
 need_tool helm
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/myriarch-chart.XXXXXX")"
-trap 'rm -rf "${work}"' EXIT
+regpid=""
+trap '[ -z "${regpid}" ] || kill "${regpid}" 2> /dev/null || true; rm -rf "${work}"' EXIT
 
 # render_images <package> <helm template arguments...>: the images of one rendering, one per line
 render_images() {
@@ -70,18 +81,18 @@ do_verify() {
     n=0
     while IFS= read -r ref; do
       [ -n "${ref}" ] || continue
-      [[ "${ref}" == *"@${digest}" ]] && [[ "${ref}" =~ ^[a-z0-9.:/_-]+@sha256:[0-9a-f]{64}$ ]] \
-        || err image_not_digest "the ${profile} rendering references an image that is not <repository>@${digest}: ${ref}"
+      [ "${ref}" = "${RELEASE_IMAGE_SERVER}@${digest}" ] \
+        || err image_not_digest "the ${profile} rendering references an image that is not ${RELEASE_IMAGE_SERVER}@${digest}: ${ref}"
       n=$((n + 1))
     done <<EOT
 ${images}
 EOT
     [ "${n}" -gt 0 ] || err image_not_digest "the ${profile} rendering of ${pkg} references no image"
-    info "${profile} rendering: ${n} image reference(s), all by the digest ${digest}"
+    info "${profile} rendering: ${n} image reference(s), all ${RELEASE_IMAGE_SERVER}@${digest}"
   done
   chart_yaml="$("${TOOLS_BIN}/helm" show chart "${pkg}" 2> "${work}/helm.err")" || err package_invalid "helm show chart failed for ${pkg}"
-  if ! printf '%s\n' "${chart_yaml}" | grep -Eq "^[[:space:]]+image: [a-z0-9.:/_-]+@${digest}\$"; then
-    err chart_annotation_slot "the annotation artifacthub.io/images of ${pkg} does not name the digest ${digest}"
+  if ! printf '%s\n' "${chart_yaml}" | awk -v want="image: ${RELEASE_IMAGE_SERVER}@${digest}" '{ sub(/^[ \t]+/, "") } $0 == want { found = 1 } END { exit !found }'; then
+    err chart_annotation_slot "the annotation artifacthub.io/images of ${pkg} does not name ${RELEASE_IMAGE_SERVER}@${digest}"
   fi
   if [ -n "${want_version}" ]; then
     printf '%s\n' "${chart_yaml}" | grep -Fxq "version: ${want_version}" || err chart_version "the chart version of ${pkg} is not ${want_version}"
@@ -137,6 +148,45 @@ PY
     [ -f "${out}/myriarch-${version}.tgz" ] || err package_invalid "helm package did not write myriarch-${version}.tgz"
     do_verify "${out}/myriarch-${version}.tgz" "${version}"
     printf 'CHART_PACKAGE=%s\n' "${out}/myriarch-${version}.tgz"
+    ;;
+  layout)
+    [ -n "${package}" ] && [ -n "${out}" ] || usage_err "${USAGE}"
+    check_text chart_dir "--package" "${package}"
+    check_text chart_dir "--out" "${out}"
+    need_tool crane
+    [ -f "${package}" ] || err chart_dir "${package} is not a file"
+    if [ -d "${out}" ] && [ -n "$(ls -A "${out}")" ]; then err chart_dir "${out} exists and is not empty"; fi
+    # a throwaway registry on an ephemeral port of the loopback interface; it holds the chart in memory and ends with this script
+    "${TOOLS_BIN}/crane" registry serve --address 127.0.0.1:0 > /dev/null 2> "${work}/registry.log" &
+    regpid=$!
+    disown "${regpid}" 2> /dev/null || true
+    port=""
+    for _ in $(seq 1 50); do
+      port="$(sed -n 's/.*serving on port \([0-9][0-9]*\).*/\1/p' "${work}/registry.log" | head -n 1)"
+      [ -z "${port}" ] || break
+      kill -0 "${regpid}" 2> /dev/null || break
+      sleep 0.2
+    done
+    [ -n "${port}" ] || err layout_failed "the throwaway registry did not start: $(grep -v '^[[:space:]]*$' "${work}/registry.log" | tail -n 1 | cut -c 1-300)"
+    : > "${work}/registry-config.json"
+    HELM_REGISTRY_CONFIG="${work}/registry-config.json" "${TOOLS_BIN}/helm" push "${package}" "oci://127.0.0.1:${port}/charts" --plain-http > "${work}/push.out" 2> "${work}/helm.err" \
+      || err layout_failed "helm push to the throwaway registry failed: $(grep -v '^[[:space:]]*$' "${work}/helm.err" | tail -n 1 | cut -c 1-300)"
+    pushed="$(sed -n 's/^Digest: //p' "${work}/push.out" | head -n 1)"
+    check_match layout_failed "the digest that helm push printed" "${pushed}" "${DIGEST_RE}"
+    mkdir -p "$(dirname "${out}")"
+    "${TOOLS_BIN}/crane" pull --format oci "127.0.0.1:${port}/charts/myriarch@${pushed}" "${out}" > /dev/null 2> "${work}/crane.err" \
+      || err layout_failed "crane could not pull the chart as a layout: $(grep -v '^[[:space:]]*$' "${work}/crane.err" | tail -n 1 | cut -c 1-300)"
+    python3 -I - "${out}" "${pushed}" <<'PY' || exit 1
+import json, sys
+
+out, want = sys.argv[1:3]
+index = json.load(open(out + "/index.json", encoding="utf-8"))
+manifests = index.get("manifests") or []
+if len(manifests) != 1 or manifests[0].get("digest") != want:
+    print("[chart-package] ERROR [layout_failed] the layout must hold exactly the manifest %s" % want, file=sys.stderr)
+    sys.exit(1)
+PY
+    printf 'chart-digest=%s\n' "${pushed}"
     ;;
   verify)
     [ -n "${package}" ] || usage_err "${USAGE}"

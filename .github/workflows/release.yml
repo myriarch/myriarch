@@ -5,7 +5,8 @@
 # images, signs checksums.txt and the images keyless with the OIDC token of this workflow, attests the build provenance, creates
 # a draft release, verifies everything before the release exists for the public, and publishes it only after a second approval.
 # Smoke tests of the published release run at the end of the same workflow. The server chart is packaged with the digest of the signed
-# server image, pushed to ghcr.io/myriarch/charts/myriarch, signed and attested like the images, and verified before publication.
+# server image, pushed by digest to ghcr.io/myriarch/charts/myriarch, signed and attested like the images, verified before publication
+# and tagged by finalize after approval 2.
 #
 # Rules that this file keeps (ci/check-workflows.py rule R13 and ci/tests/release-workflow-test.sh enforce them):
 #   - The signing identity is frozen from v0.1.0 on: https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/v*
@@ -28,7 +29,8 @@
 #     only that file. DOCKER_CONFIG is never set.
 #   - Pushes, signatures and attestations for one image digest run as strictly sequential steps of the job push-images, and those of
 #     the chart digest (the Helm chart as an OCI artifact, which references the server image by digest) as strictly sequential steps
-#     of the job push-chart, which runs after push-images.
+#     of the job push-chart, which runs after push-images. The chart is packaged in the job chart (no write scope) and, like the images, gets
+#     its version tag only in finalize.
 name: release
 
 on:
@@ -728,23 +730,21 @@ jobs:
       - name: Log out of ghcr.io
         run: ci/release/registry-login.sh logout
 
-  # Packages the server chart with the digest of the signed server image (chart version = app version = the tag without v), pushes it
-  # to ghcr.io/myriarch/charts/myriarch, signs it keyless and attests its provenance, strictly in sequence. The chart references the
-  # server image by digest only, so the signature of the chart covers the image that a user pulls. Like the images, the package is
-  # private until an organization owner makes it public. helm package and push come with the signing tool set and run inside the
-  # scripts below ci/release.
-  push-chart:
-    name: push-chart
-    needs: [guard, signing-tools, images, push-images, sign-windows]
+  # Packages the server chart with the digest of the server image (chart version = app version = the tag without v) and turns the package
+  # into an OCI layout, exactly what helm push would write to a registry. No registry access, no write scope: only the layout and its
+  # SHA-256 leave this job, like the layouts of the images. helm and crane come with the signing tool set and run inside the scripts
+  # below ci/release.
+  chart:
+    name: chart
+    needs: [guard, signing-tools, images, sign-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read # check out the repository and read the files of the tagged commit
-      id-token: write # mint the OIDC token of release.yml at the tag for keyless signing (the frozen identity of ADR-0035)
-      attestations: write # store the attestation in GitHub's attestation API
-      packages: write # write the packages of this repository in ghcr.io
     outputs:
-      chart-digest: ${{ steps.push.outputs.chart-digest }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+      chart-digest: ${{ steps.layout.outputs.chart-digest }}
     steps:
       - name: Check out the release scripts and the chart
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -775,6 +775,74 @@ jobs:
           RELEASE_VERSION: ${{ needs.guard.outputs.version }}
           IMAGE_DIGEST: ${{ needs.images.outputs.server-index }}
         run: ci/release/chart-package.sh package --chart deploy/helm/myriarch --version "${RELEASE_VERSION}" --image-digest "${IMAGE_DIGEST}" --out "${RUNNER_TEMP}/chart"
+      - name: Build the OCI layout of the chart
+        id: layout
+        env:
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+        run: ci/release/chart-package.sh layout --package "${RUNNER_TEMP}/chart/myriarch-${RELEASE_VERSION}.tgz" --out "${RUNNER_TEMP}/chart-layout/chart" >> "${GITHUB_OUTPUT}"
+      - name: Pack chart-layout
+        id: pack
+        run: ci/release/artifact.sh pack --dir "${RUNNER_TEMP}/chart-layout" --out "${RUNNER_TEMP}/out/chart-layout.tar" >> "${GITHUB_OUTPUT}"
+      - name: Upload chart-layout
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/out/chart-layout.tar
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: false
+
+  # Pushes the chart by digest (no tag: finalize sets the version tag after approval 2, like the image tags), signs it keyless and
+  # attests its provenance, strictly in sequence. The chart references the server image by digest only, so the signature of the chart
+  # covers the image that a user pulls. Like the images, the package is private until an organization owner makes it public. helm is
+  # not needed here: the chart was packaged and rendered in the job chart.
+  push-chart:
+    name: push-chart
+    needs: [guard, signing-tools, chart, push-images, sign-windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+      id-token: write # mint the OIDC token of release.yml at the tag for keyless signing (the frozen identity of ADR-0035)
+      attestations: write # store the attestation in GitHub's attestation API
+      packages: write # write the packages of this repository in ghcr.io
+    outputs:
+      chart-digest: ${{ steps.push.outputs.chart-digest }}
+    steps:
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+          sparse-checkout-cone-mode: false
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      - name: Download chart-layout
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.chart.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/chart-layout
+          digest-mismatch: error
+      - name: Unpack chart-layout
+        env:
+          TAR_SHA256: ${{ needs.chart.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/chart-layout/chart-layout.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/chart-layout"
       # Default HOME, no DOCKER_CONFIG: actions/attest reads only $HOME/.docker/config.json.
       - name: Log in to ghcr.io
         env:
@@ -785,11 +853,10 @@ jobs:
         id: push
         env:
           TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
-          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+          CHART_DIGEST: ${{ needs.chart.outputs.chart-digest }}
           RELEASE_TAG: ${{ needs.guard.outputs.tag }}
           RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
-          IMAGE_DIGEST: ${{ needs.images.outputs.server-index }}
-        run: ci/release/push-chart.sh --package "${RUNNER_TEMP}/chart/myriarch-${RELEASE_VERSION}.tgz" --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}" >> "${GITHUB_OUTPUT}"
+        run: ci/release/push-chart.sh --layout "${RUNNER_TEMP}/chart-layout/chart" --digest "${CHART_DIGEST}" --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}" >> "${GITHUB_OUTPUT}"
       - name: Attest the provenance of the chart
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:

@@ -169,7 +169,7 @@ func contains(list []string, s string) bool {
 	return false
 }
 
-// renderDefault prints the value of values.yaml as compact JSON in code font, or nothing when values.yaml does not set it.
+// renderDefault prints the value of values.yaml as compact JSON in code font, or "unset" when values.yaml does not set it.
 func renderDefault(n *yaml.Node) string {
 	if n == nil {
 		return "unset"

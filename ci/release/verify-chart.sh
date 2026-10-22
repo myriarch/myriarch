@@ -7,7 +7,8 @@
 #
 #   TOOLS_BIN=... GH_TOKEN=... ci/release/verify-chart.sh --tag TAG --commit SHA --digest CHART_DIGEST --image-digest SERVER_INDEX_DIGEST
 #
-# 1. tag        RELEASE_CHART:<version> resolves to --digest, and the repository has no tag latest and no tag besides version tags and
+# 1. tag        RELEASE_CHART@--digest exists, the version tag does not exist yet (finalize.sh sets it after the second approval) or, in
+#               a re-run after finalize, resolves to --digest, and the repository has no tag latest and no tag besides version tags and
 #               sha256-<64 hex> signature tags                                          [chart_digest_mismatch] [chart_tag_unexpected]
 # 2. content    the chart layer (media type application/vnd.cncf.helm.chart.content.v1.tar+gzip) of RELEASE_CHART@--digest is fetched BY
 #               DIGEST and ci/release/chart-package.sh verify runs on it: every image of the default and the OpenShift rendering is
@@ -45,14 +46,20 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/myriarch-verify-chart.XXXXXX")"
 trap 'rm -rf "${work}"' EXIT
 
 # --- 1. tag ------------------------------------------------------------------------------------------------------------------
-got="$("${TOOLS_BIN}/crane" digest "${RELEASE_CHART}:${version}" 2> "${work}/crane.err")" || err chart_digest_mismatch "crane could not read ${RELEASE_CHART}:${version}"
-[ "${got}" = "${digest}" ] || err chart_digest_mismatch "${RELEASE_CHART}:${version} is ${got}, this run pushed ${digest}"
+got="$("${TOOLS_BIN}/crane" digest "${RELEASE_CHART}@${digest}" 2> "${work}/crane.err")" || err chart_digest_mismatch "crane could not read ${RELEASE_CHART}@${digest}"
+[ "${got}" = "${digest}" ] || err chart_digest_mismatch "${RELEASE_CHART}@${digest} is reported as ${got}"
 tags="$("${TOOLS_BIN}/crane" ls "${RELEASE_CHART}" 2> "${work}/crane.err")" || err chart_tag_unexpected "crane could not list the tags of ${RELEASE_CHART}"
 while IFS= read -r t; do
   [ -n "${t}" ] || continue
   [ "${t}" != latest ] || err chart_tag_unexpected "${RELEASE_CHART} has the tag latest, which must not exist during v0.x"
   [[ "${t}" =~ ^sha256-[0-9a-f]{64}(\.sig)?$ ]] && continue
-  [[ "${t}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]] && continue
+  if [[ "${t}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]]; then
+    if [ "${t}" = "${version}" ]; then
+      got="$("${TOOLS_BIN}/crane" digest "${RELEASE_CHART}:${t}" 2> "${work}/crane.err")" || err chart_digest_mismatch "crane could not read ${RELEASE_CHART}:${t}"
+      [ "${got}" = "${digest}" ] || err chart_digest_mismatch "${RELEASE_CHART}:${t} is ${got}, this run pushed ${digest}: a chart tag is never moved"
+    fi
+    continue
+  fi
   err chart_tag_unexpected "${RELEASE_CHART} has the tag '${t}', which is neither a version tag nor a sha256-<hex> signature tag"
 done <<EOT
 ${tags}

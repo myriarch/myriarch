@@ -13,8 +13,8 @@
 #     the digest check, and every download is followed by an unpack against the SHA-256 that the producing job reported;
 #   - no ${{ }} expression in a run text, no write to GITHUB_ENV or GITHUB_PATH, no DOCKER_CONFIG, no secret, no cache;
 #   - the registry writes: push, cosign sign and the six attestations of both images run as strictly sequential steps of the job
-#     push-images, each attestation after the signature of its image; the chart is packaged with the index digest of the server image,
-#     pushed and signed by one script and attested in the job push-chart; no other job pushes, signs or attests images;
+#     push-images, each attestation after the signature of its image; the chart is packaged with the index digest of the server image
+#     in the job chart (no write scope), pushed by digest and signed by one script and attested in the job push-chart; no other job pushes, signs or attests images;
 #   - the pins: the six GitHub-owned actions at the SHAs the other workflows use (actions/attest is new);
 #   - tool resolution: the pinned tools are reached only through TOOLS_BIN (the workflow never writes GITHUB_PATH). Every step that
 #     calls a script or a program that needs a pinned tool sets TOOLS_BIN to the directory of a tool set that the same job unpacked
@@ -88,7 +88,8 @@ JOBS = {
     "images": (["guard", "build-tools", "signing-tools", "package"], CR, None, 30, U),
     "sign-blobs": (["guard", "signing-tools", "package", "sign-windows"], {"contents": "read", "id-token": "write", "attestations": "write"}, None, 15, U),
     "push-images": (["guard", "signing-tools", "images", "sign-windows"], {"contents": "read", "id-token": "write", "attestations": "write", "packages": "write"}, None, 30, U),
-    "push-chart": (["guard", "signing-tools", "images", "push-images", "sign-windows"], {"contents": "read", "id-token": "write", "attestations": "write", "packages": "write"}, None, 15, U),
+    "chart": (["guard", "signing-tools", "images", "sign-windows"], CR, None, 15, U),
+    "push-chart": (["guard", "signing-tools", "chart", "push-images", "sign-windows"], {"contents": "read", "id-token": "write", "attestations": "write", "packages": "write"}, None, 15, U),
     "draft": (["guard", "signing-tools", "package", "images", "sign-windows", "sign-blobs", "push-images"], {"contents": "write"}, None, 20, U),
     "verify": (["guard", "signing-tools", "package", "images", "sign-blobs", "push-images"], {"contents": "read", "packages": "read", "attestations": "read"}, None, 30, U),
     "verify-images": (["guard", "signing-tools", "images", "push-images"], {"contents": "read", "packages": "read"}, None, 15, UA),
@@ -101,7 +102,7 @@ JOBS = {
     "smoke-kind": (["guard", "images", "finalize"], CR, None, 45, U),
 }
 MATRIX_JOBS = {"verify-images", "smoke-linux"}
-PRODUCERS = {"signing-tools", "build-tools", "ui", "build-windows", "sign-windows", "package", "images", "sign-blobs", "verify"}
+PRODUCERS = {"signing-tools", "build-tools", "ui", "build-windows", "sign-windows", "package", "images", "chart", "sign-blobs", "verify"}
 # the only steps that may set TOOLS_NO_CACHE (it would make a consumer of the tools artifact ignore the stamps of the tools)
 TOOLS_NO_CACHE_STEPS = {("signing-tools", "Build the signing tools"), ("build-tools", "Build the build tools"), ("ui", "Install go-licenses"),
                         ("smoke-kind", "Install kind, kubectl and helm")}
@@ -321,7 +322,7 @@ for jid, steps in steps_of.items():
 # The jobs with id-token, attestations, packages or contents write (and the Windows jobs) execute only the signing set, which is built on a
 # runner of its own before anything else is installed or run there; the build set (goreleaser, syft, yq, go-winres, osslsigncode, which
 # needs apt packages and a C compiler) reaches only jobs with contents: read.
-SIGNING_USERS = {"images", "sign-blobs", "push-images", "push-chart", "draft", "verify", "verify-images", "verify-chart", "finalize", "smoke-assets", "smoke-linux", "smoke-windows"}
+SIGNING_USERS = {"images", "sign-blobs", "push-images", "chart", "push-chart", "draft", "verify", "verify-images", "verify-chart", "finalize", "smoke-assets", "smoke-linux", "smoke-windows"}
 BUILD_USERS = {"build-windows", "package", "images"}
 for jid, (needs, perms, env, _, _) in JOBS.items():
     uses_signing, uses_build = "signing-tools" in needs, "build-tools" in needs
@@ -352,8 +353,8 @@ ENTRIES = [
     (r"registry-login\.sh login", {"crane"}),
     (r"sign-checksums\.sh sign", {"cosign"}),
     (r"sign-image\.sh", {"cosign"}),
-    (r"chart-package\.sh", {"helm"}),
-    (r"push-chart\.sh", {"helm", "cosign", "crane"}),
+    (r"chart-package\.sh", {"helm", "crane"}),
+    (r"push-chart\.sh", {"cosign", "crane"}),
     (r"verify-chart\.sh", {"helm", "cosign", "crane", "gh"}),
     (r"ci/release/draft\.sh", {"gh"}),
     (r"ci/release/verify\.sh", {"gh", "cosign", "crane"}),
@@ -462,7 +463,7 @@ OWNERS = {
     
     "windows-sign-hook.sh": {"sign-windows"}, "ci/release/stage-assets.sh": {"package"}, "ci/release/images.sh": {"images"},
     "sign-checksums.sh": {"sign-blobs"}, "push-images.sh": {"push-images"}, "sign-image.sh": {"push-images"},
-    "chart-package.sh": {"push-chart"}, "push-chart.sh": {"push-chart"}, "verify-chart.sh": {"verify-chart"},
+    "chart-package.sh": {"chart"}, "push-chart.sh": {"push-chart"}, "verify-chart.sh": {"verify-chart"},
     "ci/release/notes.sh": {"draft"}, "ci/release/draft.sh": {"draft"}, "ci/release/verify.sh": {"verify"},
     "ci/release/finalize.sh": {"finalize"},
 }
@@ -543,7 +544,29 @@ for k in ("server", "updater"):
     want += ["push:%s" % k, "sign:%s" % k, "provenance:%s" % k, "sbom:%s:amd64" % k, "sbom:%s:arm64" % k]
 want.append("logout")
 check(sequence == want, "push-images: the steps must run in the order %s (found %s)" % (want, sequence))
-# push-chart: the chart is packaged with the server index digest, pushed and signed by one script, then attested, strictly in sequence
+# chart: the chart is packaged with the server index digest and turned into a layout; no registry step, no signature
+ch = steps_of.get("chart", [])
+check("strategy" not in mp(jobs.get("chart")), "chart must not use a matrix")
+chart_seq = []
+for s in ch:
+    run, uses, env = tx(s.get("run")) or "", tx(s.get("uses")) or "", mp(s.get("env"))
+    if "chart-package.sh package" in run:
+        chart_seq.append("package")
+        check(tx(env.get("IMAGE_DIGEST")) == "${{ needs.images.outputs.server-index }}", "chart: the chart is packaged with the index digest of the server image")
+    elif "chart-package.sh layout" in run:
+        chart_seq.append("layout")
+        check(tx(s.get("id")) == "layout", "chart: the layout step has the id layout")
+    elif "artifact.sh pack" in run:
+        chart_seq.append("pack")
+    elif uses.startswith("actions/upload-artifact"):
+        chart_seq.append("upload")
+    elif uses in (CHECKOUT, DOWNLOAD) or "artifact.sh unpack" in run:
+        pass
+    else:
+        chart_seq.append("other")
+check(chart_seq == ["package", "layout", "pack", "upload"], "chart: the steps must run in the order package, layout, pack, upload (found %s)" % chart_seq)
+check(tx(mp(mp(jobs.get("chart")).get("outputs")).get("chart-digest")) == "${{ steps.layout.outputs.chart-digest }}", "chart: the output chart-digest is the one of the layout step")
+# push-chart: the layout is pushed by digest and signed by one script, then attested, strictly in sequence
 pc = steps_of.get("push-chart", [])
 check("strategy" not in mp(jobs.get("push-chart")), "push-chart must not use a matrix")
 sequence = []
@@ -554,12 +577,11 @@ for s in pc:
         sequence.append("login")
     elif "registry-login.sh logout" in run:
         sequence.append("logout")
-    elif "chart-package.sh package" in run:
+    elif "chart-package.sh" in run:
         sequence.append("package")
-        check(tx(env.get("IMAGE_DIGEST")) == "${{ needs.images.outputs.server-index }}", "push-chart: the chart is packaged with the index digest of the server image")
     elif "push-chart.sh" in run:
         sequence.append("push")
-        check(tx(env.get("IMAGE_DIGEST")) == "${{ needs.images.outputs.server-index }}", "push-chart: the push checks the package against the index digest of the server image")
+        check(tx(env.get("CHART_DIGEST")) == "${{ needs.chart.outputs.chart-digest }}", "push-chart: the push takes the chart digest of the job chart")
         check(tx(s.get("id")) == "push", "push-chart: the push step has the id push")
     elif uses == ATTEST:
         check(tx(w.get("subject-name")) == CHART and tx(w.get("subject-digest")) == "${{ steps.push.outputs.chart-digest }}"
@@ -570,8 +592,7 @@ for s in pc:
         pass
     else:
         sequence.append("other")
-check(sequence == ["package", "login", "push", "provenance", "logout"] or sequence == ["login", "package", "push", "provenance", "logout"],
-      "push-chart: the steps must run in the order package, login, push, provenance, logout (found %s)" % sequence)
+check(sequence == ["login", "push", "provenance", "logout"], "push-chart: the steps must run in the order login, push, provenance, logout (found %s)" % sequence)
 check(tx(mp(jobs.get("push-chart")).get("outputs") and mp(mp(jobs.get("push-chart")).get("outputs")).get("chart-digest")) == "${{ steps.push.outputs.chart-digest }}", "push-chart: the output chart-digest is the one of the push step")
 # no image repository outside the literals
 repos = set(re.findall(r"ghcr\.io/[A-Za-z0-9._/-]+", code))
@@ -702,7 +723,7 @@ expect_fail "another image repository is refused" 'image repositories in the fil
   mutated 'subject-name: ghcr.io/myriarch/myriarch-updater' 'subject-name: ghcr.io/example/other'
 expect_fail "an attestation of the chart with another digest is refused" 'push-chart: the attestation takes the chart digest' \
   mutated 'subject-digest: ${{ steps.push.outputs.chart-digest }}' 'subject-digest: ${{ needs.images.outputs.server-index }}'
-expect_fail "a chart packaged with another digest is refused" 'push-chart: the chart is packaged with the index digest' \
+expect_fail "a chart packaged with another digest is refused" 'chart: the chart is packaged with the index digest' \
   mutated $'          IMAGE_DIGEST: ${{ needs.images.outputs.server-index }}\n        run: ci/release/chart-package.sh' $'          IMAGE_DIGEST: ${{ needs.images.outputs.updater-index }}\n        run: ci/release/chart-package.sh'
 expect_fail "a changed timeout is refused" 'job finalize: timeout-minutes' \
   mutated $'    timeout-minutes: 20\n    environment: release\n' $'    timeout-minutes: 25\n    environment: release\n'

@@ -154,13 +154,14 @@ the release the way a user does.
 | `images` | Builds the OCI layouts of both images from the release archives and their SBOMs. | |
 | `sign-blobs` | Signs `checksums.txt` keyless and attests the build provenance of its 39 files. | |
 | `push-images` | Pushes both images by digest (no release tags), signs them and attaches provenance and SBOM attestations. | |
-| `push-chart` | Packages the server chart with the digest of the signed server image written into `image.digest` (`ci/release/chart-package.sh`; chart version = app version = the tag without `v`), pushes it to `ghcr.io/myriarch/charts/myriarch`, signs it keyless and attaches the provenance attestation. It runs after `push-images`. | |
+| `chart` | Packages the server chart with the digest of the server image written into `image.digest` (`ci/release/chart-package.sh`; chart version = app version = the tag without `v`), checks the rendering, and turns the package into an OCI layout (exactly what `helm push` writes). It holds `contents: read` only and hands the layout on as an artifact. | |
+| `push-chart` | Pushes the layout to `ghcr.io/myriarch/charts/myriarch` by digest, without a tag, signs it keyless and attaches the provenance attestation. It runs after `push-images`. The version tag of the chart is set by `finalize`, like the tags of the images. | |
 | `draft` | Renders the release notes and creates the draft release with 42 assets. It holds `contents: write` and runs before gate 2. | |
 | `verify` | Verifies signatures, provenance and images, and the files from which the draft was created (not the draft itself); writes the verified manifest and a summary. | |
 | `verify-images` | Runs both images on amd64 and arm64. | |
-| `verify-chart` | Verifies the pushed chart by digest: the tag, the chart layer (every image of the `helm template` rendering is the server image of this run), the signature and the provenance. | |
+| `verify-chart` | Verifies the pushed chart by digest: that the version tag does not exist yet (or, in a re-run after `finalize`, points at this digest), the chart layer (every image of the `helm template` rendering is the server image of this run), the signature and the provenance. | |
 | `verify-windows` | Checks version resources and Authenticode state of the Windows files on a Windows runner. | |
-| `finalize` | Binds the draft to the verified files (GitHub's asset digests), checks that the tag still points at the tagged commit and that all three packages (both images and the chart) are public, tags the images, reads the draft again directly before it publishes, publishes the release, compares the published release with the verified files once more and checks that it is immutable. | **Gate 2** |
+| `finalize` | Binds the draft to the verified files (GitHub's asset digests), checks that the tag still points at the tagged commit and that all three packages (both images and the chart) are public, tags the images and the chart (`X.Y.Z[-rc.N]`), reads the draft again directly before it publishes, publishes the release, compares the published release with the verified files once more and checks that it is immutable. | **Gate 2** |
 | `smoke-assets`, `smoke-linux`, `smoke-windows`, `smoke-kind` | Anonymous downloads and verification, installers on amd64 and arm64, Windows staging, `docker run`, the Helm chart on kind. | |
 
 Rules that hold for all of it:
@@ -376,7 +377,7 @@ Other files of the repository, such as `deploy/README.md`, are not in an archive
 | `signing-tools`, `build-tools`, `ui`, `build-windows`, `package`, `images` | A build, a gate (dependencies, licenses, notices) or an artifact check failed | Fix it in a pull request and tag the next candidate. |
 | `sign-windows` | The signing provider failed (v0.1.0: only the copy of the files) | Re-run. A provider issue is handled in the provider's change. |
 | `sign-blobs`, `push-images` | Sigstore or ghcr.io unavailable, a token problem | Re-run failed jobs. |
-| `push-chart` | Sigstore or ghcr.io unavailable, a token problem; `chart_tag_exists` after a re-run of the job | Re-run failed jobs. `helm push` always sets the tag of the chart, and the script never overwrites it: if the job failed after the push (for example in the signature), an organization owner deletes the version `X.Y.Z-rc.N` of the package `charts/myriarch` in the package settings, and the re-run pushes again. |
+| `push-chart` | Sigstore or ghcr.io unavailable, a token problem | Re-run failed jobs. The chart is pushed by digest and has no tag yet, so pushing the same digest again changes nothing and no manual deletion is needed. |
 | `draft` | `release_exists` or `draft_foreign` | A published release of the tag exists, or someone else made a draft of it: tag the next candidate (the next patch version for a final tag), or delete the foreign draft by hand and re-run. |
 | `verify`, `verify-images`, `verify-chart`, `verify-windows` | A verification failed | **Do not approve gate 2.** Fix forward with the next candidate. |
 | `finalize`, `ghcr_not_public` | A package is still private | Make all packages public (step 6 above), then "Re-run failed jobs". |

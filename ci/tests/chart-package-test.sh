@@ -3,20 +3,24 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Test of the chart package of the release (ci/release/chart-package.sh, push-chart.sh, verify-chart.sh; ADR-0035). No network, no
-# registry, no ports:
-#  1. chart-package.sh runs with the REAL pinned helm (.cache/bin/helm, `make tools`): the digest lands in the copy and not in the chart of
-#     the repository, `helm template` references every image by the digest, a package without the digest fails the check, and so does a
-#     chart with one more image that has a tag. Without the binary the case is skipped locally and FAILS when CI=true.
-#  2. push-chart.sh and verify-chart.sh run with stand-ins for helm push, crane, cosign and gh (the pinned helm does the rendering).
+# Test of the chart package of the release (ci/release/chart-package.sh, push-chart.sh, verify-chart.sh; ADR-0035). No network and no
+# real registry; the only listener is a throwaway registry of the pinned crane on 127.0.0.1 (ephemeral port):
+#  1. chart-package.sh runs with the REAL pinned helm and crane (.cache/bin, `make tools`): the digest lands in the copy and not in the
+#     chart of the repository, `helm template` references every image by RELEASE_IMAGE_SERVER@digest, a package without the digest, with
+#     the digest of another repository, or with one more image that has a tag fails the check, and the OCI layout of the package pushes
+#     by digest without a tag and with the digest that helm push printed. Without the binaries the case is skipped locally and FAILS
+#     when CI=true.
+#  2. push-chart.sh and verify-chart.sh run with stand-ins for crane push, cosign and gh (the layout of part 1 is real, the pinned helm
+#     does the rendering).
 # shellcheck source=ci/tests/lib-test.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
 set -u
 
 REL="${ROOT}/ci/release"
 HELM_BIN="${ROOT}/.cache/bin/helm"
-if [ ! -x "${HELM_BIN}" ]; then
-  if [ "${CI:-}" = true ]; then fail "the pinned helm is missing (ci/install-tools.sh helm)"; else printf '  skip  the pinned helm is missing: run make tools\n'; fi
+CRANE_BIN="${ROOT}/.cache/bin/crane"
+if [ ! -x "${HELM_BIN}" ] || [ ! -x "${CRANE_BIN}" ]; then
+  if [ "${CI:-}" = true ]; then fail "the pinned helm or crane is missing (ci/install-tools.sh helm crane)"; else printf '  skip  the pinned helm or crane is missing: run make tools\n'; fi
   finish_tests chart-package-test
   exit $?
 fi
@@ -53,6 +57,12 @@ expect_fail "verify: another version" "chart_version" cp_run verify --package "$
 mkdir -p "${W}/plain"
 "${HELM_BIN}" package "${CHART}" --version 0.2.0 --app-version 0.2.0 --destination "${W}/plain" >/dev/null
 expect_fail "verify: a package without a digest fails" "image_not_digest.*ghcr.io/myriarch/myriarch:0.2.0" cp_run verify --package "${W}/plain/myriarch-0.2.0.tgz" --image-digest "${D1}"
+cp -R "${CHART}" "${W}/c-repo" && python3 -I -c '
+import sys
+p = sys.argv[1] + "/values.yaml"
+t = open(p).read().replace("  repository: myriarch/myriarch\n", "  repository: example/other\n", 1)
+open(p, "w").write(t)' "${W}/c-repo"
+expect_fail "package: the digest of another repository is refused" "image_not_digest.*ghcr.io/example/other@${D1}" cp_run package --chart "${W}/c-repo" --version 0.2.0 --image-digest "${D1}" --out "${W}/o6"
 expect_fail "verify: a missing file" "package_invalid" cp_run verify --package "${W}/nothing.tgz" --image-digest "${D1}"
 
 expect_fail "package: a version with v" "version_invalid" cp_run package --chart "${CHART}" --version v0.2.0 --image-digest "${D1}" --out "${W}/o1"
@@ -81,6 +91,35 @@ cp -R "${CHART}" "${W}/c-extra"
 printf 'apiVersion: v1\nkind: Pod\nmetadata:\n  name: extra\nspec:\n  containers:\n    - name: x\n      image: ghcr.io/example/tools:1.0\n' > "${W}/c-extra/templates/extra.yaml"
 expect_fail "package: a second image that has a tag" "image_not_digest.*ghcr.io/example/tools:1.0" cp_run package --chart "${W}/c-extra" --version 0.2.0 --image-digest "${D1}" --out "${W}/o5"
 expect_fail "usage: the digest is required" "usage:" cp_run verify --package "${W}/final/myriarch-0.2.0.tgz"
+PKG0="${W}/final/myriarch-0.2.0.tgz"
+
+# layout: the package as an OCI layout, pushed by digest to a throwaway registry of the pinned crane, like push-chart.sh does to ghcr.io
+expect_ok "layout: the package" cp_run layout --package "${PKG0}" --out "${W}/lay/chart"
+LAYDIG="$(printf '%s\n' "${OUT}" | sed -n 's/^chart-digest=//p')"
+[[ "${LAYDIG}" =~ ^sha256:[0-9a-f]{64}$ ]] && ok "layout: prints chart-digest" || fail "layout: no chart-digest line: ${OUT}"
+eq "layout: index.json holds exactly the manifest of the digest" "${LAYDIG}" "$(python3 -I -c 'import json,sys; m=json.load(open(sys.argv[1]))["manifests"]; print(m[0]["digest"] if len(m)==1 else "n/a")' "${W}/lay/chart/index.json")"
+expect_fail "layout: an output directory with files" "chart_dir.*not empty" cp_run layout --package "${PKG0}" --out "${W}/lay/chart"
+expect_fail "layout: a missing package" "chart_dir" cp_run layout --package "${W}/nothing.tgz" --out "${W}/lay/o2"
+"${CRANE_BIN}" registry serve --address 127.0.0.1:0 > /dev/null 2> "${W}/reg.log" &
+REGPID=$!
+REGPORT=""
+for _ in $(seq 1 50); do REGPORT="$(sed -n 's/.*serving on port \([0-9][0-9]*\).*/\1/p' "${W}/reg.log" | head -n 1)"; [ -z "${REGPORT}" ] || break; sleep 0.2; done
+if [ -n "${REGPORT}" ]; then
+  REG="127.0.0.1:${REGPORT}/charts/myriarch"
+  "${CRANE_BIN}" push "${W}/lay/chart" "${REG}@${LAYDIG}" > /dev/null 2>&1 && ok "layout: crane push by digest" || fail "layout: crane push by digest failed"
+  eq "layout: the pushed digest is the digest that helm push printed" "${LAYDIG}" "$("${CRANE_BIN}" digest "${REG}@${LAYDIG}" 2>/dev/null)"
+  eq "layout: a push by digest sets no tag" "" "$("${CRANE_BIN}" ls "${REG}" 2>/dev/null)"
+  "${CRANE_BIN}" validate --remote "${REG}@${LAYDIG}" > /dev/null 2>&1 && ok "layout: the pushed chart validates" || fail "layout: the pushed chart does not validate"
+  "${CRANE_BIN}" tag "${REG}@${LAYDIG}" 0.2.0 > /dev/null 2>&1 || true
+  eq "layout: crane tag sets the version tag afterwards" "0.2.0" "$("${CRANE_BIN}" ls "${REG}" 2>/dev/null)"
+  mkdir -p "${W}/pulled"
+  ( cd "${W}" && "${HELM_BIN}" pull "oci://127.0.0.1:${REGPORT}/charts/myriarch" --version 0.2.0 --plain-http --destination "${W}/pulled" > /dev/null 2>&1 ) \
+    && ok "layout: helm pulls the chart by the version tag" || fail "layout: helm cannot pull the chart by the version tag"
+else
+  fail "layout: the throwaway registry did not start"
+fi
+kill "${REGPID}" 2>/dev/null || true
+wait "${REGPID}" 2>/dev/null || true
 
 # ==== 2. push-chart.sh and verify-chart.sh ===================================================================================
 S="${W}/stubs"; SB="${W}/stubbin"; HOME_DIR="${W}/home"
@@ -91,12 +130,7 @@ cat > "${SB}/helm" <<STUB
 #!/usr/bin/env bash
 set -u
 d="\${STUB_DIR:?}"
-if [ "\${1:-}" = push ]; then
-  { printf '%s\n' "\$@"; echo "HELM_REGISTRY_CONFIG=\${HELM_REGISTRY_CONFIG-unset}"; echo '----'; } >> "\${d}/calls/helm.log"
-  [ ! -f "\${d}/helm.push.fail" ] || { echo "Error: push failed" >&2; exit 1; }
-  printf 'Pushed: %s/myriarch:0.2.0\nDigest: %s\n' "\${2%/*}" "\$(cat "\${d}/chart.digest")"
-  exit 0
-fi
+{ printf '%s\n' "\$@"; echo '----'; } >> "\${d}/calls/helm.log"
 exec "${HELM_BIN}" "\$@"
 STUB
 cat > "${SB}/crane" <<'STUB'
@@ -106,8 +140,12 @@ d="${STUB_DIR:?}"
 if [ "${1:-}" = version ]; then echo v0.22.1; exit 0; fi
 { printf '%s\n' "$@"; echo '----'; } >> "${d}/calls/crane.log"
 case "$1" in
+  push) if [ -f "${d}/crane.push.fail" ]; then echo "Error: push failed" >&2; exit 1; fi ;;
   ls) if [ -f "${d}/crane.ls.err" ]; then cat "${d}/crane.ls.err" >&2; exit 1; fi; cat "${d}/tags" 2>/dev/null ;;
-  digest) if [ -f "${d}/crane.digest.override" ]; then cat "${d}/crane.digest.override"; else cat "${d}/chart.digest"; fi ;;
+  digest)
+    if [[ "$2" == *:* ]] && [[ "$2" != *@* ]] && [ -f "${d}/crane.digest.tag.override" ]; then cat "${d}/crane.digest.tag.override"
+    elif [ -f "${d}/crane.digest.override" ]; then cat "${d}/crane.digest.override"
+    else cat "${d}/chart.digest"; fi ;;
   validate) [ ! -f "${d}/crane.validate.fail" ] || exit 1 ;;
   manifest) cat "${d}/manifest.json" ;;
   blob) cat "${d}/chart.tgz" ;;
@@ -147,39 +185,37 @@ done
 
 TAG=v0.2.0; VER=0.2.0
 PKG="${W}/final/myriarch-${VER}.tgz"
-CD="sha256:$(printf 'd4%.0s' $(seq 32))"
+LAY="${W}/lay/chart"
+CD="${LAYDIG}"
 REF_WF="myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG}"
-reset() { rm -rf "${S}/calls"; mkdir -p "${S}/calls"; find "${S}" -maxdepth 1 -type f -exec rm -f {} +; printf '%s' "${CD}" > "${S}/chart.digest"; }
+reset() { rm -rf "${S}/calls"; mkdir -p "${S}/calls"; find "${S}" -maxdepth 1 -type f -exec rm -f {} +; printf '%s' "${CD}" > "${S}/chart.digest"; cp "${LAY}/blobs/sha256/${CD#sha256:}" "${S}/manifest.json"; }
 run_priv() { ( export PATH="${RB}" TOOLS_BIN="${SB}" STUB_DIR="${S}" HOME="${HOME_DIR}" GITHUB_WORKFLOW_REF="${REF_WF}" IMAGE_DIGEST="${D1}" GH_TOKEN=t; unset DOCKER_CONFIG; "$@" ); }
-pc() { run_priv "${REL}/push-chart.sh" --package "${PKG}" --tag "${TAG}" --commit "${C40}"; }
+pc() { run_priv "${REL}/push-chart.sh" --layout "${LAY}" --digest "${CD}" --tag "${TAG}" --commit "${C40}"; }
 calls() { cat "${S}/calls/$1.log" 2>/dev/null || true; }
 count() { calls "$1" | tr '\n' ' ' | sed 's/ ---- /\n/g' | grep -Ec -- "$2" || true; }
 
 reset
 expect_ok "push-chart: the chart" pc
 case "${OUT}" in *"chart-digest=${CD}"*) ok "push-chart: prints chart-digest" ;; *) fail "push-chart: no chart-digest line: ${OUT}" ;; esac
-eq "push-chart: helm push to the parent of the chart repository" "1" "$(count helm "^push ${PKG} oci://ghcr.io/myriarch/charts HELM_REGISTRY_CONFIG=${HOME_DIR}/.docker/config.json")"
+eq "push-chart: the layout is pushed by digest" "1" "$(count crane "^push ${LAY} ghcr.io/myriarch/charts/myriarch@${CD}\$")"
+eq "push-chart: no tag is set and no tag list is read" "0" "$(count crane '^(tag|ls)')"
+eq "push-chart: no push of a reference without a digest" "0" "$(count crane '^push .* ghcr.io/myriarch/charts/myriarch(:[^@]*)?$')"
+eq "push-chart: helm is not called" "0" "$(count helm '.')"
 eq "push-chart: keyless signature of the chart digest" "1" "$(count cosign "^sign --yes ghcr.io/myriarch/charts/myriarch@${CD}")"
 eq "push-chart: verify with the exact identity" "1" "$(count cosign "^verify --certificate-identity https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG} --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-github-workflow-repository myriarch/myriarch --certificate-github-workflow-ref refs/tags/${TAG} --certificate-github-workflow-sha ${C40} --certificate-github-workflow-trigger push ghcr.io/myriarch/charts/myriarch@${CD}")"
 eq "push-chart: the digest is read back and the image is validated" "1" "$(count crane "^validate --remote ghcr.io/myriarch/charts/myriarch@${CD}")"
 eq "push-chart: no recursive signature" "0" "$(count cosign "recursive")"
 
-reset; printf '0.1.0\n0.2.0\n' > "${S}/tags"
-expect_fail "push-chart: an existing chart tag is never overwritten" "chart_tag_exists" pc
-eq "push-chart: nothing was pushed" "0" "$(count helm '^push')"
-reset; printf '0.1.0\n' > "${S}/tags"
-expect_ok "push-chart: other tags do not matter" pc
-reset; echo 'Error: NAME_UNKNOWN: repository name not known to registry' > "${S}/crane.ls.err"
-expect_ok "push-chart: the first chart ever (repository unknown)" pc
-reset; echo 'Error: connection refused' > "${S}/crane.ls.err"
-expect_fail "push-chart: a failure to list the tags" "push_failed.*connection refused" pc
-eq "push-chart: nothing was pushed after the listing failed" "0" "$(count helm '^push')"
-reset; touch "${S}/helm.push.fail"
-expect_fail "push-chart: helm push fails" "push_failed" pc
+reset; printf '0.2.0\n' > "${S}/tags"
+expect_ok "push-chart: a re-run for a tagged chart pushes the same digest again" pc
+reset; touch "${S}/crane.push.fail"
+expect_fail "push-chart: crane push fails" "push_failed" pc
 eq "push-chart: nothing is signed after a failed push" "0" "$(count cosign '^sign')"
 reset; printf '%s' "sha256:$(printf 'e5%.0s' $(seq 32))" > "${S}/crane.digest.override"
 expect_fail "push-chart: the registry reports another digest" "chart_digest_mismatch" pc
 eq "push-chart: nothing is signed after a digest mismatch" "0" "$(count cosign '^sign')"
+reset; printf 'x' >> "${S}/manifest.json"
+expect_fail "push-chart: the registry serves another manifest" "chart_digest_mismatch.*hashes to another digest" pc
 reset; touch "${S}/crane.validate.fail"
 expect_fail "push-chart: an incomplete chart in the registry" "chart_digest_mismatch" pc
 reset; echo 'sign' > "${S}/cosign.fail"
@@ -187,15 +223,19 @@ expect_fail "push-chart: the signature fails" "sign_failed" pc
 reset; echo '^verify' > "${S}/cosign.fail"
 expect_fail "push-chart: the verification of the signature fails" "signature_invalid" pc
 reset
-expect_fail "push-chart: outside the release workflow" "workflow_ref" run_priv env GITHUB_WORKFLOW_REF=myriarch/myriarch/.github/workflows/ci.yml@refs/heads/main "${REL}/push-chart.sh" --package "${PKG}" --tag "${TAG}" --commit "${C40}"
-expect_fail "push-chart: a workflow at another tag" "workflow_ref" run_priv env GITHUB_WORKFLOW_REF=myriarch/myriarch/.github/workflows/release.yml@refs/tags/v0.2.1 "${REL}/push-chart.sh" --package "${PKG}" --tag "${TAG}" --commit "${C40}"
-expect_fail "push-chart: a package of another version" "package_invalid" run_priv "${REL}/push-chart.sh" --package "${W}/rc/myriarch-0.2.0-rc.1.tgz" --tag "${TAG}" --commit "${C40}"
-expect_fail "push-chart: a package without the digest" "image_not_digest" run_priv "${REL}/push-chart.sh" --package "${W}/plain/myriarch-0.2.0.tgz" --tag "${TAG}" --commit "${C40}"
-expect_fail "push-chart: a package of another image digest" "image_not_digest" run_priv env IMAGE_DIGEST="${D2}" "${REL}/push-chart.sh" --package "${PKG}" --tag "${TAG}" --commit "${C40}"
-expect_fail "push-chart: no IMAGE_DIGEST" "digest_invalid" run_priv env -u IMAGE_DIGEST "${REL}/push-chart.sh" --package "${PKG}" --tag "${TAG}" --commit "${C40}"
-expect_fail "push-chart: a malformed tag" "tag_invalid" run_priv "${REL}/push-chart.sh" --package "${PKG}" --tag 0.2.0 --commit "${C40}"
-expect_fail "push-chart: a malformed commit" "commit_invalid" run_priv "${REL}/push-chart.sh" --package "${PKG}" --tag "${TAG}" --commit abc
-expect_fail "push-chart: no login" "push_failed.*registry-login" run_priv env HOME="${W}/nohome" "${REL}/push-chart.sh" --package "${PKG}" --tag "${TAG}" --commit "${C40}"
+expect_fail "push-chart: outside the release workflow" "workflow_ref" run_priv env GITHUB_WORKFLOW_REF=myriarch/myriarch/.github/workflows/ci.yml@refs/heads/main "${REL}/push-chart.sh" --layout "${LAY}" --digest "${CD}" --tag "${TAG}" --commit "${C40}"
+expect_fail "push-chart: a workflow at another tag" "workflow_ref" run_priv env GITHUB_WORKFLOW_REF=myriarch/myriarch/.github/workflows/release.yml@refs/tags/v0.2.1 "${REL}/push-chart.sh" --layout "${LAY}" --digest "${CD}" --tag "${TAG}" --commit "${C40}"
+eq "push-chart: nothing was pushed by the refused runs" "0" "$(count crane '^push')"
+expect_fail "push-chart: a digest that is not the manifest of the layout" "layout_invalid.*exactly the image manifest" run_priv "${REL}/push-chart.sh" --layout "${LAY}" --digest "${D2}" --tag "${TAG}" --commit "${C40}"
+expect_fail "push-chart: a malformed digest" "digest_invalid" run_priv "${REL}/push-chart.sh" --layout "${LAY}" --digest abc --tag "${TAG}" --commit "${C40}"
+expect_fail "push-chart: a layout that is no directory" "layout_invalid" run_priv "${REL}/push-chart.sh" --layout "${W}/nothing" --digest "${CD}" --tag "${TAG}" --commit "${C40}"
+cp -R "${LAY}" "${W}/lay-bad"
+lbl="$(python3 -I -c 'import json,sys; m=json.load(open(sys.argv[1])); print([l["digest"] for l in m["layers"]][0][7:])' "${LAY}/blobs/sha256/${CD#sha256:}")"
+printf 'tampered' >> "${W}/lay-bad/blobs/sha256/${lbl}"
+expect_fail "push-chart: a chart layer that does not match its digest" "layout_invalid.*does not match" run_priv "${REL}/push-chart.sh" --layout "${W}/lay-bad" --digest "${CD}" --tag "${TAG}" --commit "${C40}"
+expect_fail "push-chart: a malformed tag" "tag_invalid" run_priv "${REL}/push-chart.sh" --layout "${LAY}" --digest "${CD}" --tag 0.2.0 --commit "${C40}"
+expect_fail "push-chart: a malformed commit" "commit_invalid" run_priv "${REL}/push-chart.sh" --layout "${LAY}" --digest "${CD}" --tag "${TAG}" --commit abc
+expect_fail "push-chart: no login" "push_failed.*registry-login" run_priv env HOME="${W}/nohome" "${REL}/push-chart.sh" --layout "${LAY}" --digest "${CD}" --tag "${TAG}" --commit "${C40}"
 expect_fail "push-chart: usage" "usage:" run_priv "${REL}/push-chart.sh"
 
 # verify-chart.sh: the manifest of the chart in the registry is served by the stand-in and must hash to the digest
@@ -216,8 +256,13 @@ expect_ok "verify-chart: the chart" vc
 eq "verify-chart: the signature is verified for the chart digest" "1" "$(count cosign "^verify .* ghcr.io/myriarch/charts/myriarch@${MDIGEST}\$")"
 eq "verify-chart: the provenance is verified from the registry with the identity of the run" "1" "$(count gh "^attestation verify oci://ghcr.io/myriarch/charts/myriarch@${MDIGEST} --repo myriarch/myriarch --bundle-from-oci --cert-identity https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG} --source-ref refs/tags/${TAG} --source-digest ${C40} --deny-self-hosted-runners\$")"
 eq "verify-chart: the layer is fetched by its digest" "1" "$(count crane "^blob ghcr.io/myriarch/charts/myriarch@sha256:")"
+reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; printf 'sha256-%s\n' "${MDIGEST#sha256:}" > "${S}/tags"
+expect_ok "verify-chart: the version tag does not exist before finalize" vc
+eq "verify-chart: the chart is read by its digest" "1" "$(count crane "^digest ghcr.io/myriarch/charts/myriarch@${MDIGEST}\$")"
+reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; printf '%s' "sha256:$(printf 'f6%.0s' $(seq 32))" > "${S}/crane.digest.tag.override"
+expect_fail "verify-chart: the version tag points to another digest" "chart_digest_mismatch.*never moved" vc
 reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; printf '%s' "sha256:$(printf 'f6%.0s' $(seq 32))" > "${S}/crane.digest.override"
-expect_fail "verify-chart: the tag points to another digest" "chart_digest_mismatch" vc
+expect_fail "verify-chart: the registry reports another digest" "chart_digest_mismatch" vc
 reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; printf '0.2.0\nlatest\n' > "${S}/tags"
 expect_fail "verify-chart: a tag latest" "chart_tag_unexpected.*latest" vc
 reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; printf '0.2.0\nnightly\n' > "${S}/tags"
