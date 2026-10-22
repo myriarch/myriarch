@@ -124,7 +124,15 @@ function AddHostModal({ onClose, freshToken }: { onClose: () => void; freshToken
   const inline = form.variant === 'token_inline';
   const token = mode === 'fresh' ? (freshToken ?? '') : mode === 'create' ? created : pasted.trim();
   const tokenOk = mode === 'paste' ? looksLikeToken(token) : token !== '';
-  const ready = form.siteType.trim() !== '' && form.siteId.trim() !== '' && selected.length > 0;
+  const needsLinuxFile = selected.some((p) => !p.startsWith('windows/'));
+  const needsWindowsFile = selected.some((p) => p.startsWith('windows/'));
+  // The server wants a token file path for every operating system of the rendered platforms.
+  const filesOk =
+    inline ||
+    ((!needsLinuxFile || form.linuxTokenFile.trim() !== '') &&
+      (!needsWindowsFile || form.windowsTokenFile.trim() !== ''));
+  const ready =
+    form.siteType.trim() !== '' && form.siteId.trim() !== '' && selected.length > 0 && filesOk;
 
   const submit = () => {
     setLastKey(key);
@@ -361,18 +369,24 @@ function AddHostModal({ onClose, freshToken }: { onClose: () => void; freshToken
           </Stack>
         ) : (
           <Group grow align="flex-start">
-            <TextInput
-              label={t('addHost.tokenFileLinux')}
-              placeholder="/etc/myriarch/enrollment-token"
-              value={form.linuxTokenFile}
-              onChange={(e) => set('linuxTokenFile', e.currentTarget.value)}
-            />
-            <TextInput
-              label={t('addHost.tokenFileWindows')}
-              placeholder="C:\ProgramData\Secrets\myriarch-token.txt"
-              value={form.windowsTokenFile}
-              onChange={(e) => set('windowsTokenFile', e.currentTarget.value)}
-            />
+            {needsLinuxFile && (
+              <TextInput
+                label={t('addHost.tokenFileLinux')}
+                placeholder="/etc/myriarch/enrollment-token"
+                value={form.linuxTokenFile}
+                onChange={(e) => set('linuxTokenFile', e.currentTarget.value)}
+                required
+              />
+            )}
+            {needsWindowsFile && (
+              <TextInput
+                label={t('addHost.tokenFileWindows')}
+                placeholder="C:\ProgramData\Secrets\myriarch-token.txt"
+                value={form.windowsTokenFile}
+                onChange={(e) => set('windowsTokenFile', e.currentTarget.value)}
+                required
+              />
+            )}
           </Group>
         )}
 
@@ -419,7 +433,7 @@ function AddHostModal({ onClose, freshToken }: { onClose: () => void; freshToken
         </Group>
 
         {showError && <RenderError error={showError} onRetry={submit} />}
-        {shown && <Commands data={shown} token={inline ? token : ''} />}
+        {shown && <Commands data={shown} token={inline && tokenOk ? token : ''} />}
       </Stack>
     );
   }
@@ -464,7 +478,7 @@ function RenderError({ error, onRetry }: { error: unknown; onRetry: () => void }
       data-testid="add-host-error"
     >
       <Text fz="sm">{t(`addHost.error.${kind}.text`)}</Text>
-      {kind === 'bundleFailed' &&
+      {(kind === 'bundleFailed' || kind === 'serverSettings') &&
         issues.map((i, idx) => (
           <Text key={idx} fz="sm" c="dimmed">
             {i.message}

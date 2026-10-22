@@ -1476,8 +1476,8 @@
     "variantFile": "Token from a file",
     "variantInlineHint": "Quickest for one host: the command writes the token into a private file and deletes it after the run.",
     "variantFileHint": "For production, automation and hosts that record their input: the command does not contain the token, it reads it from a file that you place on the host.",
-    "tokenFileLinux": "Token file on Linux (optional)",
-    "tokenFileWindows": "Token file on Windows (optional)",
+    "tokenFileLinux": "Token file on Linux",
+    "tokenFileWindows": "Token file on Windows",
     "mtlsNote": "Installation with mutual TLS but without an enrollment token is not supported. A server that requires client certificates (opamp.requireClientCert) cannot give install commands.",
     "show": "Show commands",
     "retry": "Try again",
@@ -1533,9 +1533,9 @@
         "next": "Use the manual path of the guide “Connect a host”, or run a release of myriarchd."
       },
       "serverSettings": {
-        "title": "The server requires client certificates",
-        "text": "The routes of the installation ask for a client certificate too, and the commands cannot present one. Installation with mutual TLS but without a token is not supported.",
-        "next": "Use the manual path of the guide “Connect a host”, or ask the operator whether opamp.requireClientCert can be turned off."
+        "title": "The server cannot give install commands",
+        "text": "The server refused the request because of its own settings. A common cause is that the client certificates are required (opamp.requireClientCert; installation with mutual TLS but without a token is not supported). Another is that server.publicUrl is missing, is not an https address or has credentials, a query or characters that a command cannot carry.",
+        "next": "Read the message of the server below, ask the operator to correct that setting, or use the manual path of the guide “Connect a host”."
       },
       "preparing": {
         "title": "The installer bundles are being prepared",
@@ -1554,8 +1554,8 @@
       },
       "variantNotAvailable": {
         "title": "This variant is not available",
-        "text": "A command that carries the token needs server.publicUrl to be an https address.",
-        "next": "Choose “Token from a file”, or ask the operator to set an https server.publicUrl."
+        "text": "The variant “lab” (plain http) exists on development servers only.",
+        "next": "Choose “Token in the command” or “Token from a file”."
       },
       "disabled": {
         "title": "Installing hosts from the server is turned off",

@@ -54,6 +54,13 @@ async function openDialog(role: Role = 'admin') {
 const showCommands = (user: ReturnType<typeof userEvent.setup>) =>
   user.click(screen.getByRole('button', { name: 'Show commands' }));
 
+/** Chooses "Token from a file" and gives the path of both operating systems, as the server requires. */
+async function chooseTokenFiles(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByText('Token from a file'));
+  await user.type(screen.getByLabelText(/Token file on Linux/), '/etc/myriarch/token');
+  await user.type(screen.getByLabelText(/Token file on Windows/), 'C:\\Secrets\\token.txt');
+}
+
 async function createToken(user: ReturnType<typeof userEvent.setup>, name = 'new-host') {
   await user.type(screen.getByLabelText('Name of the new token'), name);
   await user.click(screen.getByRole('button', { name: 'Create token' }));
@@ -73,7 +80,7 @@ describe('Add host dialog: permissions', () => {
     expect(within(dialog).queryByRole('button', { name: 'Create token' })).toBeNull();
     expect(within(dialog).queryByText('Create a token')).toBeNull();
     // Without any token the commands cannot be copied.
-    await user.click(within(dialog).getByText('Token from a file'));
+    await chooseTokenFiles(user);
     await showCommands(user);
     const cmd = await screen.findByTestId('command-linux/amd64');
     expect(within(cmd).getByText(/token_file|read from the token file/)).toBeTruthy();
@@ -100,6 +107,21 @@ describe('Add host dialog: permissions', () => {
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).not.toContain(PASTED);
     expect(bodies[0]).not.toContain('myre_');
+  });
+
+  it('locks the copy button when the pasted value stops being a valid token after rendering', async () => {
+    const { user, dialog } = await openDialog('viewer');
+    await user.click(within(dialog).getByText('Token in the command'));
+    const field = within(dialog).getByLabelText(/^Enrollment token/);
+    await user.type(field, PASTED);
+    await user.click(screen.getByRole('button', { name: 'Show commands' }));
+    const cmd = await screen.findByTestId('command-linux/amd64');
+    await user.clear(field);
+    await user.type(field, 'x; rm -rf /');
+    const copy = within(cmd).getByRole('button', { name: 'Copy command' });
+    expect(copy.hasAttribute('disabled')).toBe(true);
+    await user.click(copy);
+    expect(await navigator.clipboard.readText()).not.toContain('rm -rf');
   });
 
   it('rejects a pasted value that is not an enrollment token', async () => {
@@ -137,6 +159,21 @@ describe('Add host dialog: the token', () => {
     expect(JSON.stringify({ ...localStorage })).not.toContain(token);
     expect(JSON.stringify({ ...sessionStorage })).not.toContain(token);
     expect(linux.textContent).not.toContain(token);
+  });
+
+  it('Escape in the dialog Add host leaves the one-time token dialog open', async () => {
+    renderApp({ route: '/settings/tokens' });
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole('button', { name: 'Create token' }))[0]!);
+    await user.type(await screen.findByLabelText('Name'), 'esc-test');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await screen.findByTestId('token-secret');
+    await user.click(screen.getByRole('button', { name: 'Add host with this token' }));
+    await screen.findByRole('dialog', { name: 'Add host' });
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add host' })).toBeNull());
+    expect(screen.getByTestId('token-secret')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'I have saved the token' })).toBeTruthy();
   });
 
   it('drops the token when the dialog closes', async () => {
@@ -181,13 +218,12 @@ describe('Add host dialog: states and errors', () => {
   it('the variant "token from a file" renders without a token and sends the file paths', async () => {
     const bodies = recordRenderBodies();
     const { user, dialog } = await openDialog('admin');
-    await user.click(within(dialog).getByText('Token from a file'));
-    await user.type(within(dialog).getByLabelText(/Token file on Linux/), '/etc/myriarch/token');
+    await chooseTokenFiles(user);
     await showCommands(user);
     await screen.findByTestId('add-host-commands');
     expect(JSON.parse(bodies[0]!)).toMatchObject({
       variant: 'token_file',
-      tokenFiles: { linux: '/etc/myriarch/token' },
+      tokenFiles: { linux: '/etc/myriarch/token', windows: 'C:\\Secrets\\token.txt' },
       attributes: { 'site.type': 'edge', 'site.id': 'site-1' },
     });
     expect(within(dialog).queryByTestId('add-host-warning')).toBeNull();
@@ -226,7 +262,7 @@ describe('Add host dialog: states and errors', () => {
       }),
     );
     const { user } = await openDialog('admin');
-    await user.click(screen.getByText('Token from a file'));
+    await chooseTokenFiles(user);
     await showCommands(user);
     const err = await screen.findByTestId('add-host-error');
     expect(err.textContent).toMatch(/being prepared/);
@@ -239,19 +275,57 @@ describe('Add host dialog: states and errors', () => {
   it.each([
     [412, 'precondition_failed', 'local_build', /local build/],
     [412, 'precondition_failed', 'server_settings', /client certificates/],
-    [422, 'validation_failed', 'variant_not_available', /https/],
+    [422, 'validation_failed', 'variant_not_available', /development servers only/],
     [422, 'validation_failed', 'platform_not_supported', /platform is not supported/],
     [503, 'unavailable', 'bundle_failed', /failed/],
     [409, 'conflict', undefined, /conflicts with the state/],
   ] as const)('explains %i %s %s with a next step', async (status, code, reason, text) => {
     server.use(http.post('/api/v1/install/commands', () => problem(status, code, reason)));
     const { user } = await openDialog('admin');
-    await user.click(screen.getByText('Token from a file'));
+    await chooseTokenFiles(user);
     await showCommands(user);
     const err = await screen.findByTestId('add-host-error');
     expect(err.textContent).toMatch(text);
     expect(err.textContent!.length).toBeGreaterThan(60);
     expect(screen.queryByTestId('add-host-commands')).toBeNull();
+  });
+
+  it('names the cause that the server reports for a refused server setting (412)', async () => {
+    server.use(
+      http.post('/api/v1/install/commands', () =>
+        problem(
+          412,
+          'precondition_failed',
+          'server_settings',
+          'server.publicUrl must be an https address',
+        ),
+      ),
+    );
+    const { user } = await openDialog('admin');
+    await chooseTokenFiles(user);
+    await showCommands(user);
+    const err = await screen.findByTestId('add-host-error');
+    expect(err.textContent).toMatch(/server\.publicUrl must be an https address/);
+    expect(err.textContent).not.toMatch(/The server requires client certificates/);
+  });
+
+  it('needs a token file path for every operating system that is rendered', async () => {
+    const bodies = recordRenderBodies();
+    const { user } = await openDialog('viewer');
+    await user.click(screen.getByText('Token from a file'));
+    const show = screen.getByRole('button', { name: 'Show commands' });
+    expect(show.hasAttribute('disabled')).toBe(true);
+    await user.type(screen.getByLabelText(/Token file on Linux/), '/etc/myriarch/token');
+    // Windows is among the selected platforms and has no path yet.
+    expect(show.hasAttribute('disabled')).toBe(true);
+    await user.type(screen.getByLabelText(/Token file on Windows/), 'C:\\Secrets\\token.txt');
+    expect(show.hasAttribute('disabled')).toBe(false);
+    await user.click(show);
+    await screen.findByTestId('add-host-commands');
+    expect(JSON.parse(bodies[0]!).tokenFiles).toEqual({
+      linux: '/etc/myriarch/token',
+      windows: 'C:\\Secrets\\token.txt',
+    });
   });
 
   it('shows the issues of a refused input (422)', async () => {
@@ -266,7 +340,7 @@ describe('Add host dialog: states and errors', () => {
       ),
     );
     const { user } = await openDialog('admin');
-    await user.click(screen.getByText('Token from a file'));
+    await chooseTokenFiles(user);
     await showCommands(user);
     expect(await screen.findByText(/a quotation mark is not allowed/)).toBeTruthy();
   });

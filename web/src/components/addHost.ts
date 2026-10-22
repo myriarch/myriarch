@@ -45,8 +45,10 @@ export function buildRequest(f: AddHostForm): InstallCommandsRequest {
   if (f.fleet.trim()) req.fleet = f.fleet.trim();
   if (f.variant === 'token_file') {
     const tokenFiles: { linux?: string; windows?: string } = {};
-    if (f.linuxTokenFile.trim()) tokenFiles.linux = f.linuxTokenFile.trim();
-    if (f.windowsTokenFile.trim()) tokenFiles.windows = f.windowsTokenFile.trim();
+    const windows = f.platforms.some((p) => p.startsWith('windows/'));
+    const linux = f.platforms.some((p) => !p.startsWith('windows/'));
+    if (linux && f.linuxTokenFile.trim()) tokenFiles.linux = f.linuxTokenFile.trim();
+    if (windows && f.windowsTokenFile.trim()) tokenFiles.windows = f.windowsTokenFile.trim();
     if (tokenFiles.linux || tokenFiles.windows) req.tokenFiles = tokenFiles;
   }
   return req;

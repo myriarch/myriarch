@@ -97,6 +97,8 @@ function SecretDialog({
       title={t('settings.tokens.secretTitle')}
       size="lg"
       closeOnClickOutside={false}
+      // Escape closes the dialog on top only: the secret is shown once and must be confirmed.
+      closeOnEscape={!addHostOpen}
     >
       {secret && (
         <Stack gap="md">
@@ -303,7 +305,7 @@ function ApiTokensSection() {
 function EnrollmentTokensSection() {
   const { t } = useTranslation();
   const { data, isPending, error, refetch } = useEnrollmentTokens();
-  const create = useCreateEnrollmentToken();
+  const create = useCreateEnrollmentToken({ discard: true });
   const revoke = useRevokeEnrollmentToken();
   const [open, dlg] = useDisclosure(false);
   const [name, setName] = useState('');
@@ -324,6 +326,7 @@ function EnrollmentTokensSection() {
       {
         onSuccess: (res) => {
           setSecret(res.secret);
+          create.reset();
           dlg.close();
           setName('');
           setLabels([]);

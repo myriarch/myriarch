@@ -40,7 +40,7 @@ not need steps 1 to 5 by hand. Open *Agents*, button *Add host* (or *Settings*, 
 2. Choose how the token reaches the host. **Token in the command** (the default) is the quickest way for one host: create a token in the
    dialog (an administrator with the permission `enrollment:manage`), use the one that you have just created, or paste an existing one
    (`myre_...`). **Token from a file** leaves the token out of the command: the command reads it from a file that you place on the host, for
-   example `/etc/myriarch/enrollment-token` on Linux. Use it for production, for automation and for every host that records its input. A user
+   example `/etc/myriarch/enrollment-token` on Linux. The dialog needs the path of that file for every operating system of the platforms that you selected (Linux and Windows), because the command names it. Use it for production, for automation and for every host that records its input. A user
    without `enrollment:manage` can open the dialog and render commands, but cannot create a token: they paste a token that an administrator
    gave them, or use the variant with the file.
 3. Select *Show commands*, copy the command for the host and run it: on Linux in a terminal (it starts with `sudo`), on Windows in an
@@ -63,8 +63,8 @@ The dialog explains what it cannot do:
 | This server has no installer bundles; *local build* | The server is a build from a Git checkout, not a release | Use the manual steps below, or run a release of `myriarchd` |
 | The installer bundles are being prepared | The server fetches and verifies the bundles of its release (usually a few seconds after the start) | Wait and select *Try again* |
 | An installer bundle failed | The server could not fetch it from `install.bundleSourceBaseUrl`; it tries again after a minute | Ask the operator to check that address |
-| The server requires client certificates | `opamp.requireClientCert` is on, and the commands cannot present a certificate. Installation with mutual TLS but without a token is not supported | Use the manual steps below |
-| This variant is not available | A command with the token needs an https `server.publicUrl` | Choose *Token from a file*, or set the https address |
+| The server cannot give install commands | The server refused because of its own settings, and the dialog shows its message. `opamp.requireClientCert` is on (the commands cannot present a certificate; installation with mutual TLS but without a token is not supported), or `server.publicUrl` is not set, is plain `http` (both variants need https), or has credentials, a query or characters that a command cannot carry | Ask the operator to correct the setting (an https `server.publicUrl`), or use the manual steps below |
+| This variant is not available | The variant `lab` (plain http) exists on development servers only; the dialog does not offer it | Choose *Token in the command* or *Token from a file* |
 | Installing hosts from the server is turned off | `install.enabled` is `false` | Use the manual steps below |
 
 ## One command: install a Linux host from the server

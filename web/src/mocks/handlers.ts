@@ -430,6 +430,7 @@ export const handlers: HttpHandler[] = [
         variant?: string;
         platforms?: string[];
         attributes?: Record<string, string>;
+        tokenFiles?: { linux?: string; windows?: string };
       };
       const issues: NonNullable<Problem['issues']> = [];
       for (const k of ['site.type', 'site.id']) {
@@ -442,13 +443,26 @@ export const handlers: HttpHandler[] = [
           });
         }
       }
-      if (issues.length) {
-        return problem(422, 'validation_failed', 'Validation failed', 'invalid request', issues);
-      }
       const variant = body.variant ?? 'token_inline';
       const bundles = mockInstallBundles().items.filter(
         (b) => !body.platforms?.length || body.platforms.includes(`${b.os}/${b.arch}`),
       );
+      // Like the server: the variant token_file needs a path for every operating system it renders.
+      if (variant === 'token_file') {
+        for (const os of ['linux', 'windows'] as const) {
+          if (bundles.some((b) => b.os === os) && !body.tokenFiles?.[os]) {
+            issues.push({
+              severity: 'error',
+              code: 'invalid_value',
+              message: `a token file path for ${os} is required`,
+              path: `tokenFiles.${os}`,
+            });
+          }
+        }
+      }
+      if (issues.length) {
+        return problem(422, 'validation_failed', 'Validation failed', 'invalid request', issues);
+      }
       const commands = bundles.map((bundle) => {
         const windows = bundle.os === 'windows';
         const token =

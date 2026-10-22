@@ -1476,8 +1476,8 @@
     "variantFile": "Token aus Datei",
     "variantInlineHint": "Am schnellsten für einen Host: Der Befehl schreibt das Token in eine private Datei und löscht sie nach dem Lauf.",
     "variantFileHint": "Für Produktion, Automatisierung und Hosts, die Eingaben aufzeichnen: Der Befehl enthält das Token nicht, sondern liest es aus einer Datei, die du auf dem Host ablegst.",
-    "tokenFileLinux": "Token-Datei unter Linux (optional)",
-    "tokenFileWindows": "Token-Datei unter Windows (optional)",
+    "tokenFileLinux": "Token-Datei unter Linux",
+    "tokenFileWindows": "Token-Datei unter Windows",
     "mtlsNote": "Installation mit mTLS ohne Enrollment-Token wird nicht unterstützt. Ein Server, der Client-Zertifikate verlangt (opamp.requireClientCert), kann keine Install-Befehle liefern.",
     "show": "Befehle anzeigen",
     "retry": "Erneut versuchen",
@@ -1533,9 +1533,9 @@
         "next": "Nimm den manuellen Weg der Anleitung „Connect a host“ oder betreibe ein Release von myriarchd."
       },
       "serverSettings": {
-        "title": "Der Server verlangt Client-Zertifikate",
-        "text": "Die Routen der Installation verlangen ebenfalls ein Client-Zertifikat, und die Befehle können keines vorzeigen. Installation mit mTLS ohne Token wird nicht unterstützt.",
-        "next": "Nimm den manuellen Weg der Anleitung „Connect a host“ oder frage den Betrieb, ob opamp.requireClientCert abgeschaltet werden kann."
+        "title": "Der Server kann keine Install-Befehle liefern",
+        "text": "Der Server hat die Anfrage wegen seiner eigenen Einstellungen abgelehnt. Häufig verlangt er Client-Zertifikate (opamp.requireClientCert; Installation mit mTLS ohne Token wird nicht unterstützt). Es kann auch sein, dass server.publicUrl fehlt, keine https-Adresse ist oder Zugangsdaten, eine Query oder Zeichen enthält, die ein Befehl nicht tragen kann.",
+        "next": "Lies die Meldung des Servers unten, bitte den Betrieb, die Einstellung zu korrigieren, oder nimm den manuellen Weg der Anleitung „Connect a host“."
       },
       "preparing": {
         "title": "Die Installer-Bundles werden vorbereitet",
@@ -1554,8 +1554,8 @@
       },
       "variantNotAvailable": {
         "title": "Diese Variante ist nicht verfügbar",
-        "text": "Ein Befehl mit dem Token braucht eine https-Adresse als server.publicUrl.",
-        "next": "Wähle „Token aus Datei“ oder bitte den Betrieb, eine https-Adresse als server.publicUrl zu setzen."
+        "text": "Die Variante „lab“ (einfaches http) gibt es nur auf Entwicklungsservern.",
+        "next": "Wähle „Token im Befehl“ oder „Token aus Datei“."
       },
       "disabled": {
         "title": "Die Installation von Hosts vom Server ist ausgeschaltet",
