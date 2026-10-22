@@ -300,7 +300,7 @@ Development mode weakens these controls, and `--allow-nonlocal` exposes all of t
 | The temporary file is created with `O_EXCL` and mode 0600, then synced and renamed. The final mode is 0755 or 0644, never with set-user-ID, set-group-ID or sticky bits. A failure removes the temporary file and keeps the old file. | Fixed in code. |
 | The commands make no network access and read no secret. | Fixed in code. |
 
-Residual risk: the directory of the destination is checked, but higher components of the path are resolved normally and are trusted, for example the mount point of the volume. The commands run under the account of the init container, which is the account of the main container (see "Container mode shares one account" under Residual risks).
+Residual risk: the directory of the destination is checked, but higher components of the path are resolved normally and are trusted, for example the mount point of the volume. The commands run under the account of the init container, which is the account of the main container (see "Container mode shares one account" under [Known limitations](#known-limitations)).
 
 ## Health check and Helm test
 

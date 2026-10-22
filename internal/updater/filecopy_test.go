@@ -182,6 +182,7 @@ func TestCopyIntoReadOnlyDirectoryFailsCleanly(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(ro, 0o700) })
 	_, err := runCLI(t, "copy", src, filepath.Join(ro, "f"))
 	require.ErrorContains(t, err, "create temporary file")
+	require.ErrorContains(t, err, ro)
 	entries, _ := os.ReadDir(ro)
 	assert.Empty(t, entries)
 }

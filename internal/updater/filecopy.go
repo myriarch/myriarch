@@ -123,7 +123,7 @@ func writeAtomic(target string, r io.Reader, mode os.FileMode) (err error) {
 	tmp := "." + name + ".tmp-" + randSuffix()
 	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return fmt.Errorf("create temporary file: %w", err)
+		return fmt.Errorf("create temporary file in %q: %w", dir, err)
 	}
 	defer func() {
 		if err != nil {
@@ -145,7 +145,7 @@ func writeAtomic(target string, r io.Reader, mode os.FileMode) (err error) {
 		return fmt.Errorf("close %q: %w", target, err)
 	}
 	if err = root.Rename(tmp, name); err != nil {
-		return fmt.Errorf("rename into place: %w", err)
+		return fmt.Errorf("rename into place %q: %w", target, err)
 	}
 	if d, derr := root.Open("."); derr == nil {
 		_ = d.Sync()
