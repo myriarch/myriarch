@@ -45,10 +45,15 @@ targets, so you name neither a version nor an endpoint.
 the server only; it downloads nothing from GitHub.
 
 A host that cannot reach the TUF repository passes a `trusted_root.json` instead. Create it on a machine that can reach the
-repository with `myriarch-updater fetch-trusted-root --out trusted_root.json`, copy it to the host, and append
-`'--trusted-root' '<path of the file>'` to the options of the command, after the last option and before the line
-`<<'MYRIARCH_TOKEN_END'`. Without it, the host verifies through TUF and stops with `sigstore_verification_failed` when it cannot
-reach the repository.
+repository with `myriarch-updater fetch-trusted-root --out trusted_root.json`, transfer it by a channel you trust and put it
+where only root can write, for example below `/root`; the option takes an absolute path. Do not name
+`/etc/myriarch/trusted_root.json`: the installer copies the file there. The file replaces TUF as the trust anchor of the
+Sigstore check, so whoever can change it before or during the run decides which signatures count. Append
+`'--trusted-root' '<absolute path of the file>'` to the options of the command: on the same line, before
+`<<'MYRIARCH_TOKEN_END'`, or at the end of the command in the variant token from a file. Without it, the host verifies
+through TUF and stops with `sigstore_verification_failed` when it cannot reach the repository. A fleet with the updater keeps
+using the copy in `/etc/myriarch/trusted_root.json` for every later update, so renew the file when Sigstore rotates its keys
+([Verify releases](../security/verify-releases.md#offline-and-behind-a-proxy)).
 
 1. **Create an enrollment token** as in [step 1](#1-create-an-enrollment-token). Give it the labels that your fleets select on, if any.
 2. **Get the command from the server.** It is rendered by `POST /api/v1/install/commands`
