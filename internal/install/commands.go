@@ -259,6 +259,12 @@ func (p *Planner) checkCommands(req *CommandsRequest) (*commandInput, error) {
 				add(path, "a platform is written os/arch, for example linux/amd64")
 				continue
 			}
+			// the raw value is checked before it is normalized: the normalization drops white space at the edges
+			// and must not hide it. Upper case and the aliases of an architecture (x86_64) stay accepted.
+			if why := rawProblem(raw); why != "" {
+				add(path, "a platform %s", why)
+				continue
+			}
 			plat := NormalizePlatform(os, arch)
 			found := false
 			for _, s := range p.platforms {
@@ -286,9 +292,10 @@ func (p *Planner) checkCommands(req *CommandsRequest) (*commandInput, error) {
 		}
 		in.fleet = req.Fleet
 	}
-	if v := req.CollectorVersion; v != "" {
-		v = domain.NormalizeVersion(v)
-		if _, err := semver.StrictNewVersion(v); err != nil || len(v) > 64 || !versionValue.MatchString(v) {
+	if raw := req.CollectorVersion; raw != "" {
+		if why := rawProblem(raw); why != "" {
+			add("collectorVersion", "collectorVersion %s", why)
+		} else if v := domain.NormalizeVersion(raw); !validCommandVersion(v) {
 			add("collectorVersion", "collectorVersion must be a version such as 0.162.0")
 		} else {
 			in.collectorVersion = v
@@ -406,6 +413,23 @@ func checkPath(v string, re *regexp.Regexp, sep string) string {
 		if seg == ".." || seg == "." {
 			return "the path must not contain \".\" or \"..\" segments"
 		}
+	}
+	return ""
+}
+
+func validCommandVersion(v string) bool {
+	_, err := semver.StrictNewVersion(v)
+	return err == nil && len(v) <= 64 && versionValue.MatchString(v)
+}
+
+// rawProblem is forbidden plus white space, for a value that is normalized (trimmed) before it is checked: it has to
+// be looked at as it came, or a control character or a space at the edge would vanish before the check.
+func rawProblem(v string) string {
+	if why := forbidden(v); why != "" {
+		return why
+	}
+	if strings.ContainsFunc(v, unicode.IsSpace) {
+		return "must not contain white space"
 	}
 	return ""
 }
@@ -622,12 +646,20 @@ if ($TokenFile) {
 if (-not $Token) { throw '[{{LOG}}] ERROR [option_missing] the enrollment token is empty' }
 if ($Token -match '@@') { throw '[{{LOG}}] ERROR [option_missing] the placeholder of the enrollment token was not replaced' }
 if ($Token -notmatch '^[A-Za-z0-9_.~+/=-]+\z') { throw '[{{LOG}}] ERROR [option_invalid] the enrollment token contains characters that a token cannot have' }
-$d = Join-Path $env:ProgramData ('{{SETUP_DIR}}-' + (New-Guid).Guid)
-New-Item -ItemType Directory -Path $d | Out-Null
+$base = Join-Path $env:ProgramData ('{{SETUP_DIR}}-' + (New-Guid).Guid)
+New-Item -ItemType Directory -Path $base | Out-Null
 try {
-  icacls.exe $d /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+  # %ProgramData% lets standard users create entries, so the new directory starts with rights that they may hold. It is
+  # restricted and made safe first and only holds the working directory: that one is made after the restriction and
+  # inherits nothing but SYSTEM and the administrators, so nothing that was opened or planted before can reach it.
+  icacls.exe $base /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
   if ($LASTEXITCODE -ne 0) { throw '[{{LOG}}] ERROR [acl_failed] icacls could not restrict the working directory to SYSTEM and the administrators' }
-  if (@(Get-ChildItem -LiteralPath $d -Force).Count -ne 0) { throw '[{{LOG}}] ERROR [directory_unsafe] the new working directory is not empty' }
+  icacls.exe $base /setowner '*S-1-5-32-544' | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw '[{{LOG}}] ERROR [acl_failed] icacls could not make the administrators the owner of the working directory' }
+  if ((Get-Item -LiteralPath $base -Force).Attributes -match 'ReparsePoint') { throw '[{{LOG}}] ERROR [directory_unsafe] the new working directory is a reparse point' }
+  if (@(Get-ChildItem -LiteralPath $base -Force).Count -ne 0) { throw '[{{LOG}}] ERROR [directory_unsafe] the new working directory is not empty' }
+  $d = Join-Path $base 'work'
+  New-Item -ItemType Directory -Path $d | Out-Null
   if (-not $TokenFile) {
     $TokenFile = Join-Path $d 'enrollment-token.txt'
     Set-Content -LiteralPath $TokenFile -Value $Token -NoNewline
@@ -650,8 +682,8 @@ try {
   & powershell.exe @run
   if ($LASTEXITCODE -ne 0) { throw "[{{LOG}}] ERROR [installer_failed] the installer ended with exit code $LASTEXITCODE; its message is above" }
 } finally {
-  Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
-  if (Test-Path -LiteralPath $d) { Write-Warning "[{{LOG}}] the working directory $d could not be removed: delete it by hand, it holds the installer bundle and may hold the enrollment token" }
+  Remove-Item -LiteralPath $base -Recurse -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath $base) { Write-Warning "[{{LOG}}] the working directory $base could not be removed: delete it by hand, it holds the installer bundle and may hold the enrollment token" }
 }
 `
 

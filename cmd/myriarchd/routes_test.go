@@ -431,3 +431,34 @@ func TestVersionSelectionRoutesRequireCSRFAndPermission(t *testing.T) {
 		}
 	}
 }
+
+// The route that renders install commands is a POST for a person with a cookie session: it sits behind the CSRF check
+// of every mutating route (the check runs before the handler, so the route does not need the installation to be on).
+func TestRenderInstallCommandsRequiresCSRFForACookieSession(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv, err := httpserver.New(config.ServerConfig{}, httpserver.Deps{
+		Auth: csrfAuth{role: domain.RoleViewer}, Modules: fleetapi.New(fleetapi.Deps{Logger: quiet}), Logger: quiet,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	do := func(headers map[string]string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/install/commands", strings.NewReader(`{"fleet":"edge-nl"}`))
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if got := do(nil); got != http.StatusUnauthorized {
+		t.Errorf("anonymous: %d, want 401", got)
+	}
+	if got := do(map[string]string{"Cookie": "s=1"}); got != http.StatusForbidden {
+		t.Errorf("cookie session without CSRF token: %d, want 403", got)
+	}
+	if got := do(map[string]string{"Cookie": "s=1", "X-CSRF-Token": "good"}); got == http.StatusForbidden || got == http.StatusUnauthorized {
+		t.Errorf("cookie session with CSRF token: %d, a viewer (permission read) may render", got)
+	}
+}

@@ -1095,7 +1095,9 @@ its path (`invalid_value`, `unknown_attribute`, `platform_not_supported`, `varia
 
 Refused everywhere: quotation marks of every kind (`'`, `"` and the typographic ones of U+2018 to U+201E and U+00AB, U+00BB, which PowerShell reads as quotes), the backtick,
 `$`, `;`, control characters, everything outside printable ASCII, `@@`, a value that looks like a token (`myre_`, `myra_`, `myrd_`), a leading dash (it could pass
-for an option) and a value above its length. A second check refuses to quote a value that has a quote, so the quoting needs no escape.
+for an option) and a value above its length. A second check refuses to quote a value that has a quote, so the quoting needs no escape. The check looks at the value as it came, before any normalization: `collectorVersion` and each platform are refused (422) with white space or a control
+character anywhere, also at the edges. A platform may be written in upper case or with the alias of an architecture (`LINUX/x86_64`), and a version with a leading `v`; the plan
+request (`getInstallPlan`) trims and folds its values the same way, because it renders nothing: the planner only compares them with what the server knows.
 
 **What the Linux command does.** `sudo sh -c '<script>' sh <values> <<'MYRIARCH_TOKEN_END'` followed by the placeholder, for a root shell (bash or
 another POSIX shell; the here document does not exist in fish). The script, in this order:
@@ -1121,9 +1123,13 @@ the constant script followed by the values in a hashtable. It uses cmdlets and n
    agents, which run the variant `token_file`; an administrator who is not elevated has Medium and is refused, although the group Administrators is in the token "for deny
    only") and unless Group Policy leaves room for a script: a policy of the scopes `MachinePolicy` or `UserPolicy` that is `AllSigned` or `Restricted` wins over `-ExecutionPolicy`
    and would stop the unsigned installer later, so the command says so first (`execution_policy_blocked`); then it checks the token as above;
-2. makes a directory below `%ProgramData%` with a name that cannot be guessed, replaces its DACL with `icacls.exe /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F`
-   (SYSTEM and the administrators) **before the first download** (`acl_failed`), stops if anything is in it (`directory_unsafe`), and removes it in a `finally`;
-3. writes the token to a file in it with `Set-Content` (variant `token_inline`) and downloads the bundle with `Invoke-WebRequest -Headers`, without following a redirect
+2. makes a directory below `%ProgramData%` with a name that cannot be guessed. `%ProgramData%` lets standard users create entries, so that directory only holds the working
+   directory and is never trusted before it is safe: it replaces its DACL with `icacls.exe /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F`
+   (SYSTEM and the administrators) **before the first download** (`acl_failed`), makes the administrators its owner (`icacls.exe /setowner *S-1-5-32-544`, also `acl_failed`),
+   stops if it is a reparse point or if anything is in it (`directory_unsafe`), and only then makes the working directory in it, which inherits nothing but the restricted
+   DACL. A handle that was opened or an entry that was planted while the directory still had the inherited rights cannot reach the working directory. The outer directory is removed in a
+   `finally`. This sequence can be checked on real Windows only (the `host-e2e` workflow); the tests of the command cover its structure and its order;
+3. writes the token to a file of the working directory with `Set-Content` (variant `token_inline`) and downloads the bundle with `Invoke-WebRequest -Headers`, without following a redirect
    (`download_failed`); .NET has to negotiate TLS 1.2, which Windows 10 and Windows Server 2019 and newer do by default;
 4. checks the SHA-256 with `Get-FileHash` before it unpacks (`checksum_mismatch`), unpacks with `Expand-Archive`, runs `Unblock-File` on the verified script and starts it
    as `powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File install-windows.ps1 -Server ... -TokenFile ...`: the policy is set for that process only, never

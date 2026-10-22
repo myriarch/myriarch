@@ -932,3 +932,38 @@ func TestScriptMarkersAreFilled(t *testing.T) {
 		assert.Contains(t, s, brand.InstallSetupDir, name)
 	}
 }
+
+// A value that is trimmed or folded before it is checked must be looked at as it came: a control character or white
+// space at the edge of the version or of a platform is refused, at the start and at the end.
+func TestCommandsRefuseWhiteSpaceAndControlAtTheEdges(t *testing.T) {
+	e := newCommandsEnv(t)
+	edges := []string{"\n", "\t", "\r", "\u0085", " ", " ", "\x00", "\x7f"}
+	for _, c := range edges {
+		for _, pos := range []string{"before", "after"} {
+			wrap := func(v string) string {
+				if pos == "before" {
+					return c + v
+				}
+				return v + c
+			}
+			req := site()
+			req.CollectorVersion = wrap("0.162.0")
+			cmd, err := e.render(req)
+			require.Nil(t, cmd, "version %q %s", c, pos)
+			invalid(t, err, CodeInvalidValue, "collectorVersion")
+
+			req = site()
+			req.Platforms = []string{wrap("linux/amd64")}
+			cmd, err = e.render(req)
+			require.Nil(t, cmd, "platform %q %s", c, pos)
+			invalid(t, err, CodeInvalidValue, "platforms[0]")
+		}
+	}
+	// the written forms that stay accepted: upper case, the alias of an architecture, a leading "v"
+	req := site()
+	req.CollectorVersion = "v0.162.0"
+	req.Platforms = []string{"LINUX/x86_64"}
+	cmd, err := e.render(req)
+	require.NoError(t, err)
+	require.Len(t, cmd.Commands, 1)
+}

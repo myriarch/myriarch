@@ -118,6 +118,7 @@ function icacls.exe {
   if ($env:MOCK_ICACLS_PLANT -eq '1') { Microsoft.PowerShell.Management\Set-Content -LiteralPath (Join-Path $args[0] 'planted.txt') -Value 'x' }
   $global:LASTEXITCODE = 0
   if ($env:MOCK_ICACLS_FAIL -eq '1') { $global:LASTEXITCODE = 5 }
+  if ($env:MOCK_SETOWNER_FAIL -eq '1' -and $args -contains '/setowner') { $global:LASTEXITCODE = 5 }
 }
 function Set-Content {
   param($LiteralPath, $Value, [switch]$NoNewline)
@@ -310,7 +311,11 @@ func TestPowerShellCommandInstallsTheHost(t *testing.T) {
 			}
 			work := strings.Fields(r.called("icacls ")[0])[1]
 			assert.True(t, strings.HasPrefix(work, filepath.Join(e.programs, brand.InstallSetupDir+"-")), work)
-			assert.Equal(t, "icacls "+work+" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F", r.called("icacls ")[0])
+			assert.Equal(t, []string{
+				"icacls " + work + " /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F",
+				"icacls " + work + " /setowner *S-1-5-32-544",
+			}, r.called("icacls "), "the directory is restricted and owned by the administrators before anything is made in it")
+			assert.Less(t, r.index("icacls "), r.index("set-content "))
 			assert.Equal(t, []string{"iwr https://fleet.example.com/api/v1/install/bundles/" + windowsName() + " basic=True redirects=0"}, r.called("iwr "))
 			assert.Equal(t, "Bearer "+testToken+"\n", e.file(".auth"), "the token travels in a header")
 
@@ -321,7 +326,7 @@ func TestPowerShellCommandInstallsTheHost(t *testing.T) {
 			assert.Equal(t, []string{"-NoProfile", "-ExecutionPolicy", "RemoteSigned", "-File"}, args[:4])
 			assert.True(t, strings.HasSuffix(args[4], "install-windows.ps1"), args[4])
 			assert.Equal(t, []string{"-Server", "https://fleet.example.com", "-TokenFile"}, args[5:8])
-			assert.Equal(t, filepath.Join(work, "enrollment-token.txt"), args[8])
+			assert.Equal(t, filepath.Join(work, "work", "enrollment-token.txt"), args[8])
 			assert.Equal(t, []string{"-Fleet", "linux-hosts", "-CollectorVersion", "0.162.0", "-SiteType", "edge", "-SiteId", "042", "-SiteName", "Edge site 42 (north)",
 				"-SiteCountry", "NL", "-SiteRegion", "north", "-SiteTimezone", "Europe/Amsterdam", "-Environment", "prod"}, args[9:])
 			assert.NotContains(t, ps[0], "Bypass")
@@ -460,6 +465,7 @@ func TestPowerShellCommandRemovesTheDirectoryWhenAStepFails(t *testing.T) {
 		after string // the step that must not have run
 	}{
 		"icacls fails":          {[]string{"MOCK_ICACLS_FAIL=1"}, "acl_failed", "set-content "},
+		"setowner fails":        {[]string{"MOCK_SETOWNER_FAIL=1"}, "acl_failed", "set-content "},
 		"something was planted": {[]string{"MOCK_ICACLS_PLANT=1"}, "directory_unsafe", "set-content "},
 		"the download fails":    {[]string{"MOCK_IWR_FAIL=1"}, "download_failed", "expand "},
 		"the installer fails":   {[]string{"MOCK_INSTALLER_EXIT=7"}, "installer_failed", ""},
@@ -563,7 +569,7 @@ func TestPowerShellScriptUsesCmdletsAndNativesOnly(t *testing.T) {
 		cmdlets[m] = true
 	}
 	allowed := []string{
-		"Select-String", "Get-ExecutionPolicy", "Where-Object", "Test-Path", "Get-Content", "Join-Path", "New-Guid", "New-Item", "Out-Null", "Get-ChildItem",
+		"Select-String", "Get-ExecutionPolicy", "Where-Object", "Test-Path", "Get-Content", "Join-Path", "New-Guid", "New-Item", "Out-Null", "Get-ChildItem", "Get-Item",
 		"Set-Content", "Write-Host", "Invoke-WebRequest", "Get-FileHash", "Expand-Archive", "Unblock-File", "Remove-Item", "Write-Warning",
 	}
 	var got []string
@@ -589,6 +595,10 @@ func TestPowerShellScriptUsesCmdletsAndNativesOnly(t *testing.T) {
 	for _, m := range regexp.MustCompile(`\[[A-Za-z][A-Za-z.]*(?:\[\])?\]`).FindAllString(script, -1) {
 		assert.Equal(t, "[hashtable]", m, "a type literal other than the type of the parameter")
 	}
+	// the directory that is made in a place where standard users can create entries is restricted, owned by the
+	// administrators and checked before the working directory (the only place for the token and the bundle) is made
+	assert.Regexp(t, regexp.MustCompile(`(?s)New-Item -ItemType Directory -Path \$base.*?icacls\.exe \$base /inheritance:r.*?icacls\.exe \$base /setowner '\*S-1-5-32-544'.*?ReparsePoint.*?Get-ChildItem -LiteralPath \$base -Force.*?\$d = Join-Path \$base 'work'\s+New-Item -ItemType Directory -Path \$d.*?\$TokenFile = Join-Path \$d`), script)
+	assert.Equal(t, 1, strings.Count(script, "New-Item -ItemType Directory -Path $d"), "the working directory is made once, after the checks")
 	// the policy is set for the process that runs the installer, to RemoteSigned and nowhere else
 	assert.Equal(t, 1, strings.Count(script, "'-ExecutionPolicy', 'RemoteSigned'"))
 	assert.NotContains(t, script, "-Scope")
