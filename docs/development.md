@@ -392,7 +392,7 @@ that run the tests which need a machine of their own:
   smoke test (by calling `e2e.yml`) and the aggregate job `ci-ok`.
 - `.github/workflows/e2e.yml` runs `scripts/e2e.sh` (the smoke test, called from `ci.yml`), and nightly the load run with
   1,000 simulated collectors and `make e2e-ui-updates`. A manual run (`workflow_dispatch`) picks the mode.
-- `.github/workflows/host-e2e.yml` runs the installer and the `myriarch-updater` on a fresh runner VM
+- `.github/workflows/host-e2e.yml` runs the installer and the `myriarch-updater` on a fresh runner VM, Linux and Windows
   ([Host end-to-end test](#host-end-to-end-test)), and `.github/workflows/e2e-kind.yml` runs the Kubernetes probe of `hack/kind` on
   a kind cluster on a runner ([Kubernetes probe on kind](#kubernetes-probe-on-kind-hackkind)). Both run nightly, for pull requests
   that touch what they test (a path filter) and on a manual run; neither is part of `ci-ok`, because they need a machine that
@@ -1087,6 +1087,10 @@ back to nothing. `scripts/host-e2e/linux.sh` does: on a fresh Ubuntu runner VM o
 again. It runs in CI only, in `.github/workflows/host-e2e.yml`: every night, for pull requests that touch the installer, the updater,
 the templates of a host or the harness, and on a manual run. It is not part of `ci-ok`.
 
+The job `windows` of the same workflow does the same for Windows with `scripts/host-e2e/windows.ps1`; it has its own subsection
+([Windows](#windows)) below, and everything that follows in this section about the artifacts, the guard and the structure holds for it
+as well, unless that subsection says otherwise.
+
 The scenario `manual` is the installation of [Connect a host](tasks/connect-a-host.md), step by step:
 
 1. `myriarchd` in dev mode with TLS (a throwaway CA, `outbound.caFile`), the GitOps fixture `scripts/host-e2e/gitops` (fleet
@@ -1144,6 +1148,57 @@ upload takes the allow-list of files only, never the token file, `command.sh` or
 itself without a host is `internal/install/installer_server_test.go`: it runs `install-linux.sh --server` in staging mode against a
 test server and covers the options of the rendered commands, the limits of the plan and every error code of the server mode.
 
+#### Windows
+
+`scripts/host-e2e/windows.ps1 one-command` is the same scenario for a Windows host: `install-windows.ps1` as an administrator, the
+two Windows services (`otelcol-supervisor` under its virtual account `NT SERVICE\otelcol-supervisor`, `myriarch-updater` as
+LocalSystem), the registry value with the enrollment token, the ACLs below `C:\Program Files\Myriarch` and `C:\ProgramData\Myriarch`,
+an update with a rollback, and the uninstallation. It runs in the job `windows` of `.github/workflows/host-e2e.yml` on `windows-2025`
+(amd64), twice at the same time: in Windows PowerShell 5.1 (`shell: powershell`) and in PowerShell 7 (`shell: pwsh`). The PowerShell of
+the run is the administrator session in which the command of the server is pasted and the one that starts the uninstaller; the
+installer itself always runs in the `powershell.exe` that the command starts. The runner is pinned to an image and not to
+`windows-latest`, like the Linux job to `ubuntu-24.04`: services, ACLs and registry are the subject of the test, and the label moves
+only in a commit. The job needs only the read-only token, has no secret and never runs on a self-hosted runner; the workflow builds the
+three binaries with the tag `devpg` (the same flags as `make build`, with the extension `.exe`).
+
+The steps are those of `one-command` above, with the differences that the platform makes:
+
+1. The bundle is a zip (`myriarch-updater_<VERSION>_windows_amd64.zip`: `deploy\scripts\install-windows.ps1`, the templates,
+   `myriarch-updater.exe`), built by `New-BundleFromCheckout`; with `HOST_E2E_RELEASE_TAG` the published zip, after the keyless check of
+   `checksums.txt`.
+2. The mirror is built by the script itself (`New-Mirror`: download, SHA-256 and the offline Sigstore check of the Windows files of both
+   versions with `myriarch-updater verify-bundle`), the fleet is `windows-hosts` (`scripts/host-e2e/gitops-windows/fleets`, the
+   blueprint and the policies are those of the Linux fixture), the site `edge/host-e2e-win-01`.
+3. The server certificate is checked by the installer against the certificate store of the machine (the command of the server has no CA
+   option on Windows), so the script puts the throwaway CA into `Cert:\LocalMachine\Root` for the duration of the scenario and removes
+   it again at the end (`Add-CaTrust`, `Remove-CaTrust`); the final check says that it is gone.
+4. The command is run unchanged in an administrator session: the script evaluates the text of the rendered command with
+   `Invoke-Expression` in a new process of the PowerShell that runs the script, the way a person pastes it. The test checks the log,
+   both services (state, start type, account), the registry key of the supervisor (only SYSTEM and the administrators), that no ACL on
+   the data directories lets users, everyone or authenticated users in, that the value of the service environment exists (without
+   printing it), and that the working directory below `C:\Program Files` is gone.
+5. The fault injector is `scripts/host-e2e/killer.ps1`: the updater activates a version on Windows by copying it to
+   `collector\bin\otelcol-contrib.exe`, so the path of the process never names the version; the helper kills the collector while the
+   active copy has the size of the new version's binary. After the rollback `current-version` and the active copy are the old version
+   again.
+6. Uninstall: `install-windows.ps1 -Uninstall -Purge`, then the proof that no service, no file, no registry key below
+   `HKLM\SYSTEM\CurrentControlSet\Services`, no process, no listener on port 13133 or 13134 and no working directory of the command is
+   left.
+
+The guard of the script: `CI=true`, `HOST_E2E=1`, Windows, an elevated session, `RUNNER_ENVIRONMENT=github-hosted` inside GitHub Actions,
+and a host without a trace of an installation (no `Myriarch` directory, no service of either method of installing the programs, no
+registry key, process or listener). Windows has no `sudo`, so the single gate of the Linux script does not exist here; every call that
+runs the installer goes through `Invoke-HostScript`, which checks the guard again. A failed run uploads `host-e2e-windows-<shell>`:
+`results.txt`, the logs of `myriarchd` and the installer runs, `diag\status-*.txt` (`sc.exe query`, `qc`, `qfailure`),
+`diag\events-*.txt` (the Application event log of both services), `diag\files.txt`, `diag\acl.txt` (never the registry value of the
+service environment), `diag\updater-log.txt` and the snapshots of the API; the scrubber and the allow-list are those of the Linux
+scenario, written in PowerShell (`Invoke-Scrub`, `Export-Artifacts`).
+
+`ci/tests/host-e2e-test.sh` runs what needs no Windows host, under `pwsh` (`ci/install-tools.sh pwsh`): the parse of both files, the
+helpers and the guard (`ci/tests/host-e2e-windows.ps1`), and `myrctl validate --strict` of the Windows fixture. **The scenario has run
+only on a runner; the first green run decides that the Windows support level can leave "experimental"** (the documentation pass sets
+it).
+
 **What the scripts refuse and protect.** The scripts install a service user, units and files below `/etc`, `/opt` and `/var`. They
 refuse to run unless `CI=true` and `HOST_E2E=1` are set (the workflow sets the second one on the step that runs a scenario only), on
 Linux, as a user other than root (the embedded PostgreSQL refuses root; the harness uses `sudo` for every change of the host, through
@@ -1193,7 +1248,7 @@ to at least five minutes below that of the job, with copies of the workflow that
 | `HOST_E2E_RELEASE_TAG` | for `one-command`: install from the published installer bundle of this release (`vX.Y.Z` or `vX.Y.Z-rc.N`) instead of a bundle built from the checkout |
 | `HOST_E2E_PORT_SERVER`, `_PG`, `_MIRROR`, `_EVIL` | ports of `myriarchd`, its PostgreSQL, the mirror and the tampered mirror (18443, 54341, 19443, 19444) |
 
-A failed run: download the artifact `host-e2e-linux-<runner>` of the run; `results.txt` lists every check, `diag/journal-*.txt` the
+A failed run: download the artifact `host-e2e-linux-<runner>` (Windows: `host-e2e-windows-<shell>`) of the run; `results.txt` lists every check, `diag/journal-*.txt` the
 journal of the services, `install-*.log` the output of each installer run, `myriarchd.log` the server, `mirror.log` the requests to
 the mirror. The harness runs on a Mac too as far as it needs no host (`ci/tests/host-e2e-test.sh` covers the guard with stand-ins
 for `uname`, `id`, `sudo` and `systemctl`, the scrubber and the allow-list, the CA, the file server and the fixture); the scenario

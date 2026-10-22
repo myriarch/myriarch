@@ -614,4 +614,48 @@ grep -q "versionRange: \">=${OLD}, <=${NEW}\"" "${HE}/gitops/fleets/host-e2e.yam
 grep -q 'COMPONENTS="contrib supervisor"' "${LIB}" && grep -q 'VERIFIER_BIN=' "${LIB}" && ok "the mirror is built with the supervisor and the updater of this checkout" || fail "he_mirror_build does not pass COMPONENTS and VERIFIER_BIN"
 [ -x "${HE}/linux.sh" ] && [ -x "${HE}/httpsd.py" ] && ok "linux.sh and httpsd.py are executable" || fail "a script of scripts/host-e2e is not executable"
 
+# ---- the Windows test: fixture, versions, parse, helpers and guard --------------------------------------------------------------------
+# scripts/host-e2e/windows.ps1 runs on a Windows runner of GitHub Actions only. What needs no Windows host is checked here: the fleet of its
+# GitOps fixture with the blueprint and the policies it borrows, the two versions, the parse of both PowerShell files, the helpers
+# (ci/tests/host-e2e-windows.ps1, in PowerShell 7) and the guard.
+WIN="${HE}/windows.ps1"
+[ -f "${WIN}" ] && [ -f "${HE}/killer.ps1" ] && [ -f "${HE}/gitops-windows/fleets/windows-hosts.yaml" ] && ok "windows.ps1, killer.ps1 and the Windows fleet exist" || fail "a file of the Windows host test is missing"
+WFLEET="${HE}/gitops-windows/fleets/windows-hosts.yaml"
+grep -q "versionRange: \">=${OLD}, <=${NEW}\"" "${WFLEET}" && grep -q "^    version: ${OLD} " "${WFLEET}" \
+  && ok "the frame and the Git target of the Windows fleet are the two versions of the test" || fail "the Windows fleet does not match ${OLD} and ${NEW}"
+[ "$(sed -n "s/^\$script:VersionOld = '\(.*\)'\$/\1/p" "${WIN}")" = "${OLD}" ] && [ "$(sed -n "s/^\$script:VersionNew = '\(.*\)'\$/\1/p" "${WIN}")" = "${NEW}" ] \
+  && ok "windows.ps1 uses the same two versions as lib.sh" || fail "windows.ps1 and lib.sh name other versions"
+grep -q '^  name: windows-hosts$' "${WFLEET}" || grep -q '^  name: windows-hosts$' <(sed 's/^metadata:/&/' "${WFLEET}") && ok "the Windows fleet is called windows-hosts" || fail "the Windows fleet is not called windows-hosts"
+if [ -x "${BIN}/myrctl" ]; then
+  mkdir -p "${W}/wfixture"
+  cp -R "${HE}/gitops/blueprints" "${HE}/gitops/policies" "${W}/wfixture/"
+  cp -R "${HE}/gitops-windows/fleets" "${W}/wfixture/"
+  t_wfixture() { "${BIN}/myrctl" validate --strict --components "${ROOT}/examples/sim/components-otelcol-contrib-0.162.0.json" "${W}/wfixture"; }
+  expect_ok "the GitOps fixture of the Windows host test passes myrctl validate --strict" t_wfixture
+fi
+if have pwsh; then
+  cat > "${W}/parse.ps1" <<'EOF_PS'
+$bad = 0
+foreach ($f in ($env:PARSE_FILES -split '\|')) {
+  $e = $null; $t = $null
+  [void][System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$t, [ref]$e)
+  if ($e.Count) { $e | ForEach-Object { "${f}: $_" }; $bad++ }
+}
+exit $bad
+EOF_PS
+  t_parse() { PARSE_FILES="${WIN}|${HE}/killer.ps1|${CI_DIR}/tests/host-e2e-windows.ps1" pwsh -NoProfile -NonInteractive -File "${W}/parse.ps1"; }
+  expect_ok "windows.ps1, killer.ps1 and the test of the helpers parse" t_parse
+  t_helpers() { pwsh -NoProfile -NonInteractive -File "${CI_DIR}/tests/host-e2e-windows.ps1" -Script "${WIN}" -Work "${W}/winwork" 2>&1; }
+  HOUT="$(t_helpers)"
+  printf '%s\n' "${HOUT}" | sed -n 's/^ok /ok    windows: /p'
+  if printf '%s\n' "${HOUT}" | grep -q '^FAIL '; then
+    printf '%s\n' "${HOUT}" | grep '^FAIL ' | while IFS= read -r line; do fail "windows: ${line#FAIL }"; done
+  fi
+  PASS=$((PASS + $(printf '%s\n' "${HOUT}" | grep -c '^ok ')))
+  if ! printf '%s\n' "${HOUT}" | grep -q '^ok '; then fail "the test of the helpers of windows.ps1 printed no result: ${HOUT}"; fi
+else
+  echo "  note  pwsh not found: the parse check, the helpers and the guard of windows.ps1 are skipped (ci/install-tools.sh pwsh)"
+  if [ "${CI:-}" = true ]; then fail "pwsh is required in CI for the tests of windows.ps1"; fi
+fi
+
 finish_tests "host-e2e-test"

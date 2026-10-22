@@ -575,6 +575,16 @@ guidance after each item names what to do.
     a command stands, so a call behind `env`, a wrapper function, `bash -c` or an assignment is found too. The
     reset at the end of a scenario runs only after the proof that the host was fresh, so it never removes an installation that
     was there before. `ci/tests/host-e2e-test.sh` covers every refusal.
+  - *The Windows host script has the same guard, and one trust change that it undoes.* `scripts/host-e2e/windows.ps1` installs two
+    services, files below `C:\Program Files` and `C:\ProgramData`, and a registry value with the enrollment token, as an administrator.
+    It stops unless `CI=true` and `HOST_E2E=1` are set (on the step that runs the scenario only), on Windows, in an elevated session,
+    on a GitHub-hosted runner when it runs in GitHub Actions (`RUNNER_ENVIRONMENT=github-hosted`) and on a host without any trace of an
+    installation (files, services of either way of installing the programs, registry keys, processes, listeners); the function that
+    runs the installer checks the guard again. The server certificate of the command is checked against the certificate store of the
+    machine (the command has no CA option on Windows), so the script puts the throwaway CA, valid for two days, into the store of the
+    machine for the duration of the scenario and removes it again at the end; the run fails if the CA is still there. The test checks
+    what it promises about the result: the supervisor runs under its virtual account and not as LocalSystem, the registry key that holds
+    the token grants SYSTEM and the administrators only, and no data directory lets users, everyone or authenticated users in.
   - *The test takes the strict path.* The throwaway CA (EC key, valid for two days) stays in a directory of the user and is never
     uploaded; only the process of the installer trusts it (`CURL_CA_BUNDLE`), and the trust store of the host is not touched. The
     installer runs without `--insecure`: https only, SHA-256 and Sigstore verification offline against the trusted root. The
@@ -597,7 +607,8 @@ guidance after each item names what to do.
     404 or a 501, for example), a certificate error, a checksum that differs from the pin and a failed module verification end it at
     once, and every check after a download is unchanged.
 
-  Residual risk: the host test runs the code of the commit with `sudo` on the runner VM, as every job runs the code of the commit.
+  Residual risk: the host test runs the code of the commit with `sudo` (Windows: as an administrator) on the runner VM, as every job
+  runs the code of the commit.
   The isolation is that of a GitHub-hosted runner (a fresh VM for each job). A self-hosted runner that is not recreated for each job
   must not run these workflows: the check for a fresh host finds a leftover installation, not other state. The cluster test pulls
   its images anonymously and has no way to log in; the pull limit of a registry can fail a run, but not weaken a check.
