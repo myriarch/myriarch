@@ -1067,14 +1067,15 @@ func testWindowsServerModeNeedsTheUpdaterOfTheBundleAsVerifier(t *testing.T) {
 	// a link is not the updater of the archive (creating a link needs a privilege on Windows: without it this part is not run)
 	target := filepath.Join(t.TempDir(), "elsewhere")
 	require.NoError(t, os.WriteFile(target, []byte("not the updater"), 0o755))
-	if err := os.Symlink(target, filepath.Join(r.bundle, "myriarch-updater.exe")); err == nil {
+	link := filepath.Join(r.bundle, "myriarch-updater.exe")
+	if err := os.Symlink(target, link); err == nil {
 		res = r.runWith()
 		assert.Equal(t, "sigstore_verifier_missing", res.failure(), res.Out)
+		require.NoError(t, os.Remove(link))
 	}
 
 	// a verifier of the operator replaces the one of the bundle for the checks, but the updater that the plan asks for has to come
 	// from the bundle
-	require.NoError(t, os.Remove(filepath.Join(r.bundle, "myriarch-updater.exe")))
 	verifier := filepath.Join(t.TempDir(), "cosign")
 	require.NoError(t, os.WriteFile(verifier, []byte("not a cosign"), 0o755))
 	res = r.runWith("-Verifier", verifier)
@@ -1201,7 +1202,6 @@ function Get-Service {
   if ($Name -eq $env:MYRIARCH_TEST_SERVICE) { return [pscustomobject]@{ Name = $Name; Status = 'Running' } }
 }
 
-func TestWindowsServerModeConflictingInstallStopsBeforeTheServerIsAsked(t *testing.T) { eachWinShell(t, testWindowsServerModeConflictingInstallStopsBeforeTheServerIsAsked) }
 foreach ($name in @('New-WorkDirectory', 'Get-PlanFile', 'Send-ServerRequest', 'Invoke-Download', 'Stop-ServiceAndWait', 'Resolve-Verifier', 'Initialize-DataDirectories',
     'Install-Collector', 'Install-SupervisorBinary', 'Install-SupervisorService')) {
   Set-Item -Path "function:$name" -Value ([scriptblock]::Create("param() [void]` + "`" + `$script:Calls.Add('$name'); throw ('unexpected call of $name')"))
@@ -1228,6 +1228,10 @@ Write-Host ('calls: ' + $script:Calls.Count)
 	assert.False(t, r.installed(), "nothing is created")
 }
 
+func TestWindowsServerModeConflictingInstallStopsBeforeTheServerIsAsked(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeConflictingInstallStopsBeforeTheServerIsAsked)
+}
+
 // The supervisor of the server mode goes to the path of the service, and the run stops with supervisor_missing when a security tool
 // took it away right after the copy: the file that was verified has to be the one that is there. The copy is replaced by one that
 // removes its target, the way a quarantine does.
@@ -1246,7 +1250,6 @@ function Copy-VerifiedFile {
   if ($Destination -like '*opampsupervisor.exe') { Remove-Item -LiteralPath $Destination -Force }
 }
 
-func TestWindowsServerModeSupervisorMissing(t *testing.T) { eachWinShell(t, testWindowsServerModeSupervisorMissing) }
 try { Invoke-Main; Write-Host 'result: ok' } catch { Write-Host ('result: ' + $_.Exception.Message) }
 `
 	script := filepath.Join(t.TempDir(), "missing.ps1")
@@ -1267,6 +1270,10 @@ try { Invoke-Main; Write-Host 'result: ok' } catch { Write-Host ('result: ' + $_
 	assert.Equal(t, "supervisor_missing", res2.failure(), res2.Out)
 	assert.Contains(t, res2.Out, "is not a regular file")
 	assert.Contains(t, res2.Out, "remove the item")
+}
+
+func TestWindowsServerModeSupervisorMissing(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeSupervisorMissing)
 }
 
 // The rules for URLs and redirects, run against the functions of the installer for an https server: no TLS server is needed, so they
@@ -1541,7 +1548,10 @@ if ($script:failures -gt 0) { exit 1 }
 	text, err := os.ReadFile(r.script())
 	require.NoError(t, err)
 	main := string(text[strings.Index(string(text), "function Invoke-Main"):])
-	assert.Less(t, strings.Index(main, "Assert-BundleDirectory"), strings.Index(main, "Get-PlanFile -Arch"))
+	check := strings.Index(main, "Assert-BundleDirectory")
+	assert.Less(t, strings.Index(main, "Assert-NoConflictingInstall"), check)
+	assert.Less(t, check, strings.Index(main, "New-WorkDirectory -Staging"))
+	assert.Less(t, check, strings.Index(main, "Get-PlanFile -Arch"))
 }
 
 func TestWindowsServerModeBundleDirectoryMustBeAdminOnly(t *testing.T) {
