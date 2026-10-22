@@ -88,13 +88,27 @@ func newWinRig(t *testing.T, secure bool) *winRig {
 	h := http.HandlerFunc(r.serve)
 	r.caFile = filepath.Join(dir, "ca.pem")
 	if secure {
-		r.srv = httptest.NewTLSServer(h)
+		r.setServer(httptest.NewTLSServer(h))
 		r.trust(r.srv)
 	} else {
-		r.srv = httptest.NewServer(h)
+		r.setServer(httptest.NewServer(h))
 	}
 	t.Cleanup(func() { r.srv.Close() })
 	return r
+}
+
+// setServer sets the server under the lock: the handler goroutines read it (planText) while the test goroutine sets it.
+func (r *winRig) setServer(srv *httptest.Server) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.srv = srv
+}
+
+// origin is the URL of the server, for the handler goroutines.
+func (r *winRig) origin() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.srv.URL
 }
 
 // trust makes PowerShell trust the certificate of a test server.
@@ -214,7 +228,7 @@ func (r *winRig) serve(w http.ResponseWriter, req *http.Request) {
 
 // planText is a valid plan for this server; over replaces the value of a key (or, with an empty value, drops the line).
 func (r *winRig) planText(over map[string]string) string {
-	u := r.srv.URL
+	u := r.origin()
 	scheme := map[bool]string{true: "wss", false: "ws"}[r.secure]
 	vals := map[string]string{
 		KeyFormat: "1", KeyFleet: "windows-hosts", KeyVersionSource: "git",
@@ -765,7 +779,7 @@ func TestWindowsServerModeRedirects(t *testing.T) {
 			r.serve(w, req)
 		}))
 		defer redirecting.Close()
-		r.srv = redirecting
+		r.setServer(redirecting)
 		res := r.runWith()
 		assert.Equal(t, "plan_invalid", res.failure(), res.Out)
 		assert.Empty(t, other.seen(), "the grant does not follow a redirect to another origin")
