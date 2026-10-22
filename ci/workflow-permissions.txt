@@ -55,9 +55,11 @@ release.yml sign-blobs attestations
 release.yml push-images id-token
 release.yml push-images attestations
 release.yml push-images packages
-# The job chart packages the server chart with the digest of the server image and builds its OCI layout; it has contents: read only.
-# push-chart pushes that layout to ghcr.io/myriarch/charts/myriarch BY DIGEST (no tag; finalize sets the version tag after approval 2),
-# signs it (cosign sign) and attaches the provenance (actions/attest), strictly in sequence after push-images. The scopes are those of
+# The job chart packages the server chart with the digest of the server image and the collector chart with the digest of the updater
+# image and builds their OCI layouts; it has contents: read only.
+# push-chart pushes the layouts to ghcr.io/myriarch/charts/myriarch and ghcr.io/myriarch/charts/myriarch-collector BY DIGEST (no tag;
+# finalize sets the version tags after approval 2), signs each (cosign sign) and attaches the provenance (actions/attest), strictly in
+# sequence after push-images, the server chart first. The scopes are those of
 # push-images and for the same reasons: id-token mints the OIDC token of release.yml at the tag (the signing identity of ADR-0029),
 # attestations stores the attestation, packages (limited by GitHub to the packages of this repository) writes the chart package.
 # No contents or release access. helm runs only inside ci/release/chart-package.sh (job chart, verify-chart) and comes with the signing tool set.

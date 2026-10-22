@@ -12,6 +12,8 @@
 #     when CI=true.
 #  2. push-chart.sh and verify-chart.sh run with stand-ins for crane push, cosign and gh (the layout of part 1 is real, the pinned helm
 #     does the rendering).
+#  Both charts are covered: the server chart (deploy/helm/myriarch, image RELEASE_IMAGE_SERVER) and the collector chart
+#  (deploy/helm/myriarch-collector, RELEASE_IMAGE_UPDATER at the digest and the two upstream pins of ci/versions.env, four renderings).
 # shellcheck source=ci/tests/lib-test.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
 set -u
@@ -30,7 +32,9 @@ W="${TEST_TMP}"
 D1="sha256:$(printf 'a1%.0s' $(seq 32))"
 D2="sha256:$(printf 'b2%.0s' $(seq 32))"
 CHART="${ROOT}/deploy/helm/myriarch"
+CCHART="${ROOT}/deploy/helm/myriarch-collector"
 C40="$(printf 'c%.0s' $(seq 40))"
+UPD=ghcr.io/myriarch/myriarch-updater
 cp_run() { ( export TOOLS_BIN="${ROOT}/.cache/bin"; "${REL}/chart-package.sh" "$@" ); }
 eq() { if [ "$2" = "$3" ]; then ok "$1"; else fail "$1 (expected '$2', got '$3')"; fi; }
 
@@ -93,6 +97,81 @@ expect_fail "package: a second image that has a tag" "image_not_digest.*ghcr.io/
 expect_fail "usage: the digest is required" "usage:" cp_run verify --package "${W}/final/myriarch-0.2.0.tgz"
 PKG0="${W}/final/myriarch-0.2.0.tgz"
 
+# ---- the collector chart: the digest of the updater image lands in the slot and the annotation, the upstream pins stay -------------
+cbefore="$(cat "${CCHART}/values.yaml" "${CCHART}/Chart.yaml" | cksum)"
+cp_coll() { cp_run "$1" --chart-name myriarch-collector "${@:2}"; }
+expect_ok "collector package: a final version" cp_coll package --chart "${CCHART}" --version 0.2.0 --image-digest "${D1}" --out "${W}/cfinal"
+case "${OUT}" in *"CHART_PACKAGE=${W}/cfinal/myriarch-collector-0.2.0.tgz"*) ok "collector package: prints the package path" ;; *) fail "collector package: prints no CHART_PACKAGE line: ${OUT}" ;; esac
+expect_ok "collector package: a release candidate" cp_coll package --chart "${CCHART}" --version 0.2.0-rc.1 --image-digest "${D1}" --out "${W}/crc"
+eq "collector package: the chart of the repository is unchanged" "${cbefore}" "$(cat "${CCHART}/values.yaml" "${CCHART}/Chart.yaml" | cksum)"
+CPKG="${W}/cfinal/myriarch-collector-0.2.0.tgz"
+eq "collector package: the chart version and the app version are the version" "appVersion: 0.2.0
+version: 0.2.0" "$("${HELM_BIN}" show chart "${CPKG}" | grep -E '^(version|appVersion):' | sort)"
+want_imgs="$(printf '%s\n' "docker.io/$(sed -n 's/^OTELCOL_CONTRIB_IMAGE=\([^:]*\):[^@]*@/\1@/p' "${ROOT}/ci/versions.env")" "docker.io/$(sed -n 's/^OTELCOL_SUPERVISOR_IMAGE=\([^:]*\):[^@]*@/\1@/p' "${ROOT}/ci/versions.env")" "${UPD}@${D1}" | sort)"
+for prof in "" "--set mode=daemonset" "--set containerMode.enabled=true --set containerMode.trustedRoot.existingConfigMap=x" "--set openshift.enabled=true"; do
+  # shellcheck disable=SC2086
+  imgs="$("${HELM_BIN}" template r "${CPKG}" ${prof} | sed -n 's/^[[:space:]-]*image:[[:space:]]*//p' | tr -d '"' | sort -u)"
+  eq "collector package: the renderings reference the updater by digest and the two upstream pins (${prof:-default})" "${want_imgs}" "${imgs}"
+done
+imgs="$("${HELM_BIN}" template r "${CPKG}" --set images.updater.tag=9.9.9 | sed -n 's/^[[:space:]-]*image:[[:space:]]*//p' | tr -d '"' | grep -c "^${UPD}@${D1}\$")"
+eq "collector package: a tag value does not win over the updater digest" "1" "${imgs}"
+"${HELM_BIN}" show chart "${CPKG}" | grep -q "image: ${UPD}@${D1}\$" \
+  && ok "collector package: the Artifact Hub annotation names the updater digest" || fail "collector package: the Artifact Hub annotation lacks the updater digest"
+tar -xzOf "${CPKG}" myriarch-collector/values.yaml | grep -c 'digest: "\{0,1\}sha256:[0-9a-f]\{64\}' | grep -qx 3 \
+  && ok "collector package: all three images have a digest in values.yaml" || fail "collector package: values.yaml does not hold three digests"
+eq "collector package: the upstream pins in values.yaml are those of the chart in the repository" "$(grep -E '^    (digest|tag):' "${CCHART}/values.yaml" | sed -n '3,6p')" "$(tar -xzOf "${CPKG}" myriarch-collector/values.yaml | grep -E '^    (digest|tag):' | sed -n '3,6p')"
+expect_ok "collector verify: the package" cp_coll verify --package "${CPKG}" --image-digest "${D1}" --version 0.2.0
+expect_fail "collector verify: the digest of another image" "image_not_digest" cp_coll verify --package "${CPKG}" --image-digest "${D2}"
+expect_fail "collector verify: another version" "chart_version" cp_coll verify --package "${CPKG}" --image-digest "${D1}" --version 0.2.1
+expect_fail "collector verify: the collector package is not the server chart" "image_not_digest" cp_run verify --package "${CPKG}" --image-digest "${D1}"
+expect_fail "verify: the server package is not the collector chart" "image_not_digest" cp_coll verify --package "${W}/final/myriarch-0.2.0.tgz" --image-digest "${D1}"
+expect_fail "package: the collector chart is not the server chart" "chart_dir.*not the chart myriarch " cp_run package --chart "${CCHART}" --version 0.2.0 --image-digest "${D1}" --out "${W}/o7"
+expect_fail "package: the server chart is not the collector chart" "chart_dir.*not the chart myriarch-collector" cp_coll package --chart "${CHART}" --version 0.2.0 --image-digest "${D1}" --out "${W}/o7"
+expect_fail "package: an unknown chart name" "chart_name" cp_run package --chart-name other --chart "${CCHART}" --version 0.2.0 --image-digest "${D1}" --out "${W}/o7"
+expect_fail "collector package: an output directory with files" "chart_dir.*not empty" cp_coll package --chart "${CCHART}" --version 0.2.0 --image-digest "${D1}" --out "${W}/cfinal"
+expect_fail "collector package: a short digest" "digest_invalid" cp_coll package --chart "${CCHART}" --version 0.2.0 --image-digest sha256:abc --out "${W}/o7"
+mkdir -p "${W}/cplain"
+"${HELM_BIN}" package "${CCHART}" --version 0.2.0 --app-version 0.2.0 --destination "${W}/cplain" >/dev/null
+expect_fail "collector verify: a package without the updater digest fails" "image_not_digest.*${UPD}:0.2.0" cp_coll verify --package "${W}/cplain/myriarch-collector-0.2.0.tgz" --image-digest "${D1}"
+cmut() { # name python-replace-old python-replace-new file: a copy of the collector chart with one text replaced
+  cp -R "${CCHART}" "${W}/$1" && python3 -I -c '
+import sys
+p = sys.argv[1] + "/" + sys.argv[4]
+t = open(p).read()
+assert sys.argv[2] in t
+open(p, "w").write(t.replace(sys.argv[2], sys.argv[3], 1))' "${W}/$1" "$2" "$3" "$4"
+}
+cmut cc-noslot '    digest: ""' '    digest: "sha256:"' values.yaml
+expect_fail "collector package: values.yaml without the empty updater digest" "chart_digest_slot" cp_coll package --chart "${W}/cc-noslot" --version 0.2.0 --image-digest "${D1}" --out "${W}/o8"
+cmut cc-twoslots 'digest: sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6' 'digest: ""' values.yaml
+expect_fail "collector package: a second empty digest slot is not filled in silently" "image_not_digest" cp_coll package --chart "${W}/cc-twoslots" --version 0.2.0 --image-digest "${D1}" --out "${W}/o8"
+cmut cc-slot2 'images:' 'images:
+  updater2:
+    digest: ""' values.yaml
+cp_coll package --chart "${W}/cc-slot2" --version 0.2.0 --image-digest "${D1}" --out "${W}/o8b" >/dev/null 2>&1 \
+  && fail "collector package: a slot in another block must not be accepted" || ok "collector package: a slot in another block of images is not accepted"
+cmut cc-noann 'image: ghcr.io/myriarch/myriarch-updater' 'image: ghcr.io/example/other' Chart.yaml
+expect_fail "collector package: Chart.yaml without the updater placeholder entry" "chart_annotation_slot" cp_coll package --chart "${W}/cc-noann" --version 0.2.0 --image-digest "${D1}" --out "${W}/o9"
+cmut cc-repo 'repository: myriarch/myriarch-updater' 'repository: example/other' values.yaml
+expect_fail "collector package: the digest of another repository is refused" "image_not_digest.*ghcr.io/example/other@${D1}" cp_coll package --chart "${W}/cc-repo" --version 0.2.0 --image-digest "${D1}" --out "${W}/o10"
+cmut cc-pin 'digest: sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6' "digest: sha256:$(printf 'd4%.0s' $(seq 32))" values.yaml
+expect_fail "collector package: a changed upstream pin (collector) is refused" "image_not_digest.*neither.*upstream pin.*docker.io/otel/opentelemetry-collector-contrib@sha256:d4d4" cp_coll package --chart "${W}/cc-pin" --version 0.2.0 --image-digest "${D1}" --out "${W}/o11"
+cmut cc-pin2 'digest: sha256:13af4526381fe8279fb78f211628fea5cae693bf413737f234ee3587d9a44fb6' "digest: sha256:$(printf 'd5%.0s' $(seq 32))" values.yaml
+expect_fail "collector package: a changed upstream pin (supervisor) is refused" "image_not_digest.*opampsupervisor@sha256:d5d5" cp_coll package --chart "${W}/cc-pin2" --version 0.2.0 --image-digest "${D1}" --out "${W}/o12"
+cmut cc-tagonly 'digest: sha256:13af4526381fe8279fb78f211628fea5cae693bf413737f234ee3587d9a44fb6' 'digest: ""' values.yaml
+expect_fail "collector package: an upstream image by tag only is refused" "image_not_digest.*opampsupervisor:0.162.0" cp_coll package --chart "${W}/cc-tagonly" --version 0.2.0 --image-digest "${D1}" --out "${W}/o13"
+cp -R "${CCHART}" "${W}/cc-extra"
+printf 'apiVersion: v1\nkind: Pod\nmetadata:\n  name: extra\nspec:\n  containers:\n    - name: x\n      image: ghcr.io/example/tools:1.0\n' > "${W}/cc-extra/templates/extra.yaml"
+expect_fail "collector package: a fourth image is refused" "image_not_digest.*ghcr.io/example/tools:1.0" cp_coll package --chart "${W}/cc-extra" --version 0.2.0 --image-digest "${D1}" --out "${W}/o14"
+cp -R "${CCHART}" "${W}/cc-noupd"
+python3 -I -c '
+import sys
+p = sys.argv[1] + "/Chart.yaml"
+t = open(p).read()
+open(p, "w").write(t.replace("image: docker.io/otel/opentelemetry-collector-contrib@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6", "image: docker.io/otel/opentelemetry-collector-contrib:0.162.0", 1))' "${W}/cc-noupd"
+expect_ok "collector package: the upstream annotation entries are not rewritten (only the updater entry is)" cp_coll package --chart "${W}/cc-noupd" --version 0.2.0 --image-digest "${D1}" --out "${W}/o15"
+expect_fail "usage: the digest is required (collector)" "usage:" cp_coll verify --package "${CPKG}"
+
 # layout: the package as an OCI layout, pushed by digest to a throwaway registry of the pinned crane, like push-chart.sh does to ghcr.io
 expect_ok "layout: the package" cp_run layout --package "${PKG0}" --out "${W}/lay/chart"
 LAYDIG="$(printf '%s\n' "${OUT}" | sed -n 's/^chart-digest=//p')"
@@ -120,6 +199,14 @@ else
 fi
 kill "${REGPID}" 2>/dev/null || true
 wait "${REGPID}" 2>/dev/null || true
+
+# the collector layout: the repository of the throwaway registry follows the chart name
+expect_ok "collector layout: the package" cp_coll layout --package "${CPKG}" --out "${W}/lay/chart-collector"
+CLAYDIG="$(printf '%s\n' "${OUT}" | sed -n 's/^chart-digest=//p')"
+[[ "${CLAYDIG}" =~ ^sha256:[0-9a-f]{64}$ ]] && ok "collector layout: prints chart-digest" || fail "collector layout: no chart-digest line: ${OUT}"
+eq "collector layout: index.json holds exactly the manifest of the digest" "${CLAYDIG}" "$(python3 -I -c 'import json,sys; m=json.load(open(sys.argv[1]))["manifests"]; print(m[0]["digest"] if len(m)==1 else "n/a")' "${W}/lay/chart-collector/index.json")"
+[ "${CLAYDIG}" != "${LAYDIG}" ] && ok "collector layout: another digest than the server chart" || fail "collector layout: the digest equals the one of the server chart"
+expect_fail "collector layout: an unknown chart name" "chart_name" cp_run layout --chart-name other --package "${CPKG}" --out "${W}/lay/o3"
 
 # ==== 2. push-chart.sh and verify-chart.sh ===================================================================================
 S="${W}/stubs"; SB="${W}/stubbin"; HOME_DIR="${W}/home"
@@ -301,5 +388,60 @@ expect_fail "verify-chart: the signature does not verify" "signature_invalid" vc
 reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; touch "${S}/gh.fail"
 expect_fail "verify-chart: the provenance does not verify" "attestation_invalid" vc
 expect_fail "verify-chart: usage" "usage:" run_priv "${REL}/verify-chart.sh"
+
+# ---- the same scripts for the collector chart: RELEASE_CHART_COLLECTOR, the updater image -------------------------------------
+CREPO=ghcr.io/myriarch/charts/myriarch-collector
+CLAY="${W}/lay/chart-collector"
+CCD="${CLAYDIG}"
+reset_c() { rm -rf "${S}/calls"; mkdir -p "${S}/calls"; find "${S}" -maxdepth 1 -type f -exec rm -f {} +; printf '%s' "${CCD}" > "${S}/chart.digest"; cp "${CLAY}/blobs/sha256/${CCD#sha256:}" "${S}/manifest.json"; }
+pcc() { run_priv "${REL}/push-chart.sh" --chart-name myriarch-collector --layout "${CLAY}" --digest "${CCD}" --tag "${TAG}" --commit "${C40}"; }
+reset_c
+expect_ok "push-chart (collector): the chart" pcc
+case "${OUT}" in *"chart-digest=${CCD}"*) ok "push-chart (collector): prints chart-digest" ;; *) fail "push-chart (collector): no chart-digest line: ${OUT}" ;; esac
+eq "push-chart (collector): the layout is pushed by digest to the collector repository" "1" "$(count crane "^push ${CLAY} ${CREPO}@${CCD}\$")"
+eq "push-chart (collector): nothing is pushed to the server chart repository" "0" "$(count crane "ghcr.io/myriarch/charts/myriarch@")"
+eq "push-chart (collector): no tag is set and no tag list is read" "0" "$(count crane '^(tag|ls)')"
+eq "push-chart (collector): keyless signature of the chart digest" "1" "$(count cosign "^sign --yes ${CREPO}@${CCD}")"
+eq "push-chart (collector): verify with the exact identity" "1" "$(count cosign "^verify --certificate-identity https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG} --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-github-workflow-repository myriarch/myriarch --certificate-github-workflow-ref refs/tags/${TAG} --certificate-github-workflow-sha ${C40} --certificate-github-workflow-trigger push ${CREPO}@${CCD}")"
+reset_c; touch "${S}/crane.push.fail"
+expect_fail "push-chart (collector): crane push fails" "push_failed" pcc
+eq "push-chart (collector): nothing is signed after a failed push" "0" "$(count cosign '^sign')"
+reset_c
+expect_fail "push-chart (collector): outside the release workflow" "workflow_ref" run_priv env GITHUB_WORKFLOW_REF=myriarch/myriarch/.github/workflows/ci.yml@refs/heads/main "${REL}/push-chart.sh" --chart-name myriarch-collector --layout "${CLAY}" --digest "${CCD}" --tag "${TAG}" --commit "${C40}"
+expect_fail "push-chart (collector): the digest of the server chart is not the manifest of this layout" "layout_invalid.*exactly the image manifest" run_priv "${REL}/push-chart.sh" --chart-name myriarch-collector --layout "${CLAY}" --digest "${CD}" --tag "${TAG}" --commit "${C40}"
+expect_fail "push-chart: an unknown chart name" "chart_name" run_priv "${REL}/push-chart.sh" --chart-name other --layout "${CLAY}" --digest "${CCD}" --tag "${TAG}" --commit "${C40}"
+eq "push-chart: nothing was pushed by the refused runs" "0" "$(count crane '^push')"
+
+mk_registry_c() { # layer-media-type: the manifest of the collector package
+  local layer
+  cp "${CPKG}" "${S}/chart.tgz"
+  layer="sha256:$(sha "${CPKG}")"
+  printf '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.cncf.helm.config.v1+json","digest":"%s","size":2},"layers":[{"mediaType":"%s","digest":"%s","size":1}]}' \
+    "${D2}" "$1" "${layer}" > "${S}/manifest.json"
+  MDIGEST="sha256:$(sha "${S}/manifest.json")"
+  printf '%s' "${MDIGEST}" > "${S}/chart.digest"
+  printf '0.2.0\nsha256-%s\n' "${MDIGEST#sha256:}" > "${S}/tags"
+}
+vcc() { run_priv "${REL}/verify-chart.sh" --chart-name myriarch-collector --tag "${TAG}" --commit "${C40}" --digest "${MDIGEST}" --image-digest "${D1}"; }
+CT=application/vnd.cncf.helm.chart.content.v1.tar+gzip
+reset_c; mk_registry_c "${CT}"
+expect_ok "verify-chart (collector): the chart" vcc
+eq "verify-chart (collector): the signature is verified for the collector chart digest" "1" "$(count cosign "^verify .* ${CREPO}@${MDIGEST}\$")"
+eq "verify-chart (collector): the provenance is verified for the collector chart" "1" "$(count gh "^attestation verify oci://${CREPO}@${MDIGEST} --repo myriarch/myriarch --bundle-from-oci --cert-identity https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG} --source-ref refs/tags/${TAG} --source-digest ${C40} --deny-self-hosted-runners\$")"
+eq "verify-chart (collector): the layer is fetched from the collector repository by its digest" "1" "$(count crane "^blob ${CREPO}@sha256:")"
+eq "verify-chart (collector): nothing is read from the server chart repository" "0" "$(count crane "ghcr.io/myriarch/charts/myriarch@")"
+reset_c; mk_registry_c "${CT}"
+expect_fail "verify-chart (collector): a chart of another updater digest" "image_not_digest" run_priv "${REL}/verify-chart.sh" --chart-name myriarch-collector --tag "${TAG}" --commit "${C40}" --digest "${MDIGEST}" --image-digest "${D2}"
+reset_c; mk_registry_c "${CT}"
+expect_fail "verify-chart: the collector chart is not the server chart" "image_not_digest" vc
+reset_c; mk_registry_c "${CT}"; printf '0.2.0\nlatest\n' > "${S}/tags"
+expect_fail "verify-chart (collector): a tag latest" "chart_tag_unexpected.*latest" vcc
+reset_c; mk_registry_c "${CT}"; cp "${W}/cplain/myriarch-collector-0.2.0.tgz" "${S}/chart.tgz"
+expect_fail "verify-chart (collector): a layer that does not hash to its digest" "chart_layer.*does not hash" vcc
+reset_c; mk_registry_c "${CT}"; echo '^verify' > "${S}/cosign.fail"
+expect_fail "verify-chart (collector): the signature does not verify" "signature_invalid" vcc
+reset_c; mk_registry_c "${CT}"; touch "${S}/gh.fail"
+expect_fail "verify-chart (collector): the provenance does not verify" "attestation_invalid" vcc
+expect_fail "verify-chart: an unknown chart name" "chart_name" run_priv "${REL}/verify-chart.sh" --chart-name other --tag "${TAG}" --commit "${C40}" --digest "${MDIGEST}" --image-digest "${D1}"
 
 finish_tests chart-package-test

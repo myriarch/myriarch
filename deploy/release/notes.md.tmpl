@@ -39,7 +39,7 @@ Myriarch is alpha software: interfaces and configuration may change between mino
 | Linux hosts (systemd) | beta | Installer and updater from the release files. |
 | Container mode | beta | Needs a collector image that you build yourself until the collector chart of v0.2.0 ([container mode](https://github.com/{{REPOSITORY}}/blob/{{TAG}}/docs/design/container-mode.md)). |
 | Windows hosts | experimental | |
-| Helm chart | experimental | Installed from the tag, or from v0.2.0 on as a signed OCI chart. |
+| Helm chart | experimental | Installed from the tag, or from v0.2.0 on as a signed OCI chart. The collector chart `oci://ghcr.io/myriarch/charts/myriarch-collector` (version `{{VERSION}}`) runs the unchanged upstream OpAMP Supervisor and collector images; both charts are signed and attested by `release.yml` at `{{TAG}}`, verify them as in [verify releases](https://github.com/{{REPOSITORY}}/blob/{{TAG}}/docs/security/verify-releases.md#verify-the-helm-chart). |
 
 ## Known limitations
 
