@@ -346,7 +346,7 @@ describe('blueprints and fleets', () => {
 });
 
 describe('settings and tokens', () => {
-  it('admin creates an enrollment token and sees the secret once with install snippets', async () => {
+  it('admin creates an enrollment token and sees the secret once, with the way into Add host', async () => {
     renderApp({ route: '/settings/tokens' });
     const user = userEvent.setup();
     await user.click((await screen.findAllByRole('button', { name: 'Create token' }))[0]!);
@@ -354,7 +354,8 @@ describe('settings and tokens', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }));
     const secret = await screen.findByTestId('token-secret');
     expect(secret.textContent).toMatch(/^myre_[0-9a-f]{40}$/);
-    expect(screen.getByText('Installation')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add host with this token' })).toBeTruthy();
+    expect(screen.queryByText('Installation')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'I have saved the token' }));
     await waitFor(() => expect(screen.queryByTestId('token-secret')).toBeNull());
     expect(await screen.findByText('sites-test')).toBeTruthy();

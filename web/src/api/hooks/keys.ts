@@ -5,6 +5,7 @@ import type { ListAgentsQuery } from '../types';
 
 /** Central query key factory: live updates and mutations invalidate by these prefixes. */
 export const qk = {
+  installBundles: ['install', 'bundles'] as const,
   auth: { config: ['auth', 'config'] as const, me: ['auth', 'me'] as const },
   agents: {
     all: ['agents'] as const,

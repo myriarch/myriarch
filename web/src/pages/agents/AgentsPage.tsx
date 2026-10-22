@@ -3,13 +3,20 @@
 
 import { Badge, Button, Card, Drawer, Group, Indicator, Stack, TextInput } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconAdjustmentsHorizontal, IconRefresh, IconSearch, IconX } from '@tabler/icons-react';
+import {
+  IconAdjustmentsHorizontal,
+  IconRefresh,
+  IconSearch,
+  IconServerCog,
+  IconX,
+} from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { readStorage, writeStorage } from '@/lib/storage';
 import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router';
 import { useAgentFacets, useAgents } from '@/api/hooks/agents';
 import { useOverviewStats } from '@/api/hooks/overview';
+import { AddHostDialog } from '@/components/AddHostDialog';
 import { EmptyState, ErrorState, TableSkeleton } from '@/components/states';
 import { PageHeader } from '@/components/PageHeader';
 import { Pager } from '@/components/Pager';
@@ -42,6 +49,7 @@ export default function AgentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const state = useMemo(() => parseAgentSearch(searchParams), [searchParams]);
   const [drawerOpen, drawer] = useDisclosure(false);
+  const [addHostOpen, addHost] = useDisclosure(false);
   const [panelOpen, setPanelOpen] = useState(() => readStorage(FILTER_PANEL_KEY) !== 'closed');
   const togglePanel = () => {
     setPanelOpen((o) => {
@@ -204,10 +212,14 @@ export default function AgentsPage() {
             >
               {t('common.refresh')}
             </Button>
+            <Button size="xs" leftSection={<IconServerCog size={14} />} onClick={addHost.open}>
+              {t('addHost.title')}
+            </Button>
           </>
         }
       />
 
+      <AddHostDialog opened={addHostOpen} onClose={addHost.close} />
       <Group align="flex-start" gap="md" wrap="nowrap">
         {panelOpen && (
           <Card

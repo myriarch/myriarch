@@ -10,7 +10,9 @@ import {
 } from '@/brand';
 
 /**
- * Install commands and supervisor snippet shown after creating an enrollment token.
+ * Install commands and supervisor snippet of the manual path (v0.1.0). The token dialog no longer shows them: from v0.2.0 the dialog
+ * "Add host" renders the commands on the server. The file stays because internal/updater/deploy_snippets_test.go still checks it
+ * against the installers.
  *
  * The commands follow the manual path of docs/tasks/connect-a-host.md and name every input that the
  * installers require (deploy/scripts/install-linux.sh: --opamp-endpoint --token-file --site-type --site-id

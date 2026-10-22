@@ -119,10 +119,12 @@ export function useEnrollmentTokens(enabled = true) {
   });
 }
 
-export function useCreateEnrollmentToken() {
+/** `discard` drops the mutation (and the secret in its result) from the cache as soon as nothing observes it. */
+export function useCreateEnrollmentToken({ discard = false }: { discard?: boolean } = {}) {
   const qc = useQueryClient();
   return useMutation({
     meta: { inlineError: true },
+    gcTime: discard ? 0 : undefined,
     mutationFn: (body: CreateEnrollmentTokenRequest) =>
       call(client.POST('/enrollment-tokens', { body })),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.enrollmentTokens }),

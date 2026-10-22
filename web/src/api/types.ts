@@ -77,6 +77,11 @@ export type CreatedAPIToken = S['CreatedAPIToken'];
 export type EnrollmentToken = S['EnrollmentToken'];
 export type CreateEnrollmentTokenRequest = S['CreateEnrollmentTokenRequest'];
 export type CreatedEnrollmentToken = S['CreatedEnrollmentToken'];
+export type InstallBundle = S['InstallBundle'];
+export type InstallBundleList = S['InstallBundleList'];
+export type InstallCommandsRequest = S['InstallCommandsRequest'];
+export type InstallCommands = S['InstallCommands'];
+export type InstallCommand = S['InstallCommand'];
 
 export type AuditEvent = S['AuditEvent'];
 export type AuditEventPage = S['AuditEventPage'];
