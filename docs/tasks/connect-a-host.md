@@ -19,16 +19,17 @@ myriarch manages.
 
 There are two ways to install a host:
 
-- **One command** (*from v0.2.0*, Linux; Windows follows): the server renders a command, you paste it into a root shell on the
-  host, and the host comes up healthy in the right fleet. The server tells the installer which version its fleet targets, and
-  the installer verifies everything it runs. [This is the way to start](#one-command-install-a-linux-host-from-the-server).
+- **One command** (*from v0.2.0*, Linux and Windows): the server renders a command, you paste it into a root shell on the
+  host (an elevated Windows PowerShell on Windows), and the host comes up healthy in the right fleet. The server tells the
+  installer which version its fleet targets, and the installer verifies everything it runs. [This is the way to
+  start](#one-command-install-a-linux-host-from-the-server), and [this is the Windows version](#one-command-install-a-windows-host-from-the-server).
 - **The manual, verified path**: you collect the inputs, download and verify the installer yourself and run it with explicit
   options. It stays supported, for sites that cannot accept the trust of the first command (see below), for hosts without access
   to the server and for the installers of v0.1.0. The rest of this page describes it.
 
 The manual path describes the installers of the release v0.1.0; what the installers of v0.2.0 do differently is marked *from
 v0.2.0* (they check the host before they change anything, see [When the installer stops](#when-the-installer-stops), and on Linux
-the collector version has a default). Steps 1 to 3 are the same on both systems: [create an enrollment token](#1-create-an-enrollment-token), [download and verify the
+the collector version has a default; on Windows the collector version stays required without the server). Steps 1 to 3 are the same on both systems: [create an enrollment token](#1-create-an-enrollment-token), [download and verify the
 installer](#2-download-and-verify-the-installer) and
 [choose how the host verifies downloads](#3-choose-how-the-host-verifies-downloads). Step 4 [installs on
 Linux](#4-install-on-linux), step 5 [installs on Windows](#5-install-on-windows), and step 6 [checks the
@@ -114,10 +115,104 @@ signed `checksums.txt`, so you can compare it with the release before the first 
 
 **When it stops.** The last line is `ERROR [<code>] <message>`; the message names the next step. The codes of this way of installing
 (`plan_failed`, `plan_invalid`, `plan_rejected`, `plan_unavailable`, `https_required`, `conflicting_install`, `supervisor_missing`) are in
-[Installing a Linux host from the server](../operations/troubleshooting.md#installing-a-linux-host-from-the-server). Without
+[Installing a host from the server](../operations/troubleshooting.md#installing-a-host-from-the-server). Without
 `--server` (for example when you run `install-linux.sh` from a verified archive yourself) the script installs the version that this
 release was tested with when you leave `--collector-version` out, and `--collector-version latest` asks GitHub for the newest
 release; the manual path below uses explicit versions.
+
+## One command: install a Windows host from the server
+
+*Available from v0.2.0 (Windows on amd64; the upstream project publishes the supervisor for amd64 only).* A fresh Windows host gets
+the collector, the supervisor and, when the fleet uses the updater, the `myriarch-updater` with one command, and neither the
+execution policy of the machine nor a missing verifier stops it. The server knows what the fleet targets, so you name neither a
+version nor an endpoint. Everything that applies to the Linux command applies here: the server renders the command, the token never
+reaches the server, the plan is read as data, and the installer verifies what it runs.
+
+**What you need.** A server of the project's release with `install.enabled` on (the default); a Windows 10 (1803 or newer) or Windows
+Server 2019 or newer host with `tar.exe`, Windows PowerShell 5.1 or PowerShell 7 and https access to the server and to the Sigstore
+TUF repository (or a local `trusted_root.json`, see [What you need](#what-you-need)); an elevated session (*Run as administrator*) or
+SYSTEM; the certificate of the server in the certificate store of the machine (the command has no option for a CA file, so import the
+CA of a private server first); and a person who may create an enrollment token (`enrollment:manage`).
+
+1. **Create an enrollment token** as in [step 1](#1-create-an-enrollment-token).
+2. **Get the command from the server**, as on Linux with the platform `windows/amd64`
+   ([reference](../reference/api/install.md#render-the-install-commands-for-hosts-a-command-for-each-platform)); the *Add host* dialog
+   of the web UI shows the same text:
+
+   ```bash
+   curl -sS -X POST https://fleet.example.com/api/v1/install/commands \
+     -H "Authorization: Bearer $MYRIARCH_API_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"platforms":["windows/amd64"],"fleet":"windows-hosts","attributes":{"site.type":"edge","site.id":"042"}}' \
+     | jq -r '.commands[0].command'
+   ```
+
+   The command has the placeholder `@@MYRIARCH_ENROLLMENT_TOKEN@@` where the token goes; replace it with the token of step 1 (the
+   dialog does this in the browser), or use the variant "token from a file" below.
+3. **Paste the command into an elevated Windows PowerShell** on the host. It is a script block that uses cmdlets and native programs
+   only, so it also runs where App Control puts a typed command into Constrained Language Mode. It stops at the first failure:
+   - it checks that the session is elevated or SYSTEM (`privilege_required`) and that Group Policy does not set the execution policy
+     to `AllSigned` or `Restricted` (`execution_policy_blocked`; see below);
+   - it makes a working directory below `%ProgramFiles%`, whose folder admits no entry from a standard user, and restricts its DACL
+     to SYSTEM and the administrators **before** the token or the first byte of the bundle is written into it (`acl_failed`);
+   - it writes the token into a private file there, downloads the installer bundle (the zip of the updater release with the script,
+     its templates and `myriarch-updater.exe`) from the server with the token only as a request header, and refuses a redirect;
+   - it checks the SHA-256 that the command pins with `Get-FileHash` **before** it unpacks anything (`checksum_mismatch`), unpacks
+     the zip, runs `Unblock-File` on the verified script and starts it as
+     `powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File install-windows.ps1 -Server <server> -TokenFile <file> ...`;
+   - the installer checks the language mode first (`language_mode_unsupported`), then the host (an MSI of the upstream project stops
+     it with `conflicting_install`, and nothing is removed), asks the server for a plan, reads the plan as data, downloads collector
+     and supervisor from the server with short-lived install grants and verifies each against its SHA-256 and its Sigstore bundle
+     with an identity, issuer and trust root that it builds itself. The verifier is the `myriarch-updater.exe` of the bundle, so the
+     host needs no `cosign.exe`. Nothing runs before its check. The supervisor goes to
+     `C:\Program Files\Myriarch\supervisor\opampsupervisor.exe`, the path of the service, and the installer stops with
+     `supervisor_missing` if the file is not there afterwards;
+   - it creates the service `otelcol-supervisor` under its virtual account, starts it, and the command deletes the working
+     directory with the token file.
+4. **Check the result** as in [step 6](#6-check-the-result).
+
+**The execution policy.** The command sets the policy for the one new PowerShell process only (`-ExecutionPolicy RemoteSigned`),
+after the hash check and `Unblock-File`. It never uses `Bypass` and never changes the policy of the machine or of the user, and the
+session of the administrator keeps its own. A policy from Group Policy (the scopes `MachinePolicy` and `UserPolicy`) takes precedence
+over the parameter. The command does not work around it: it stops with `execution_policy_blocked` before it downloads anything and
+says why. Ask the owner of the policy for an exception, or use a host that the policy does not cover.
+
+**App Control and `AllSigned`.** The Windows files of the release are not Authenticode-signed
+([ADR-0034](../adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Under `AllSigned` they cannot run. Under App Control for
+Business with script enforcement an unsigned script runs in Constrained Language Mode, and the installer stops with
+`language_mode_unsupported` before it changes anything. Allow the files by a hash rule for each release: create the rule from the
+files of the bundle that the command pinned (`install-windows.ps1`, `myriarch-updater.exe` and the other binaries that you allow),
+with the App Control tools, because the hash that App Control uses for a script is not the SHA-256 of `checksums.txt`. The server
+serves the bytes of the release unchanged, so the rule stays valid. Once the files are signed, a publisher rule is enough. Details:
+[Windows: Language mode and App Control](../../deploy/windows/README.md#language-mode-and-app-control).
+
+**The token, PSReadLine, transcription and script block logging.** The default command contains the token, and text that you paste is
+recorded by what records typed text: the clipboard, the history file of PSReadLine (Windows PowerShell 5.1 keeps it in
+`%APPDATA%\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt`), PowerShell transcription, PowerShell script block
+logging (event 4104 in `Microsoft-Windows-PowerShell/Operational`, often forwarded to a log collector) and the recording of a terminal
+session. Nothing that the command and the installer do puts the token into an argument list, a URL, a log or an error message, but
+these records are outside their control, and a token that a record kept counts as leaked: revoke it. On a host that records its
+input, in production and in automation use the **variant "token from a file"**. Put the token into a file that only SYSTEM and the
+administrators can read, from a machine you trust:
+
+```powershell
+New-Item -ItemType Directory -Path 'C:\Program Files\myriarch-setup' -Force | Out-Null
+icacls.exe 'C:\Program Files\myriarch-setup' /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F'
+if ($LASTEXITCODE -ne 0) { throw 'icacls could not restrict the setup folder' }
+# then write the token into C:\Program Files\myriarch-setup\enrollment-token.txt
+```
+
+and ask the server for `"variant":"token_file"` with `"tokenFiles":{"windows":"C:\\Program Files\\myriarch-setup\\enrollment-token.txt"}`.
+That command contains no token and reads it from the file; delete the file after the run, which the command does not do for a file
+that it did not create. A token is a separate token per channel or region
+([ADR-0012](../adr/0012-agent-access-via-enrollment-tokens.md)).
+
+**When it stops.** The last line is `ERROR [<code>] <message>`, and the message names the next step. The codes of the command itself
+are `privilege_required`, `execution_policy_blocked`, `file_unreadable`, `option_missing`, `option_invalid`, `acl_failed`,
+`download_failed`, `checksum_mismatch` and `installer_failed`; the installer adds `language_mode_unsupported`, `conflicting_install`,
+`supervisor_missing` and the codes of the server mode (`plan_failed`, `plan_invalid`, `plan_rejected`, `plan_unavailable`,
+`https_required`). They are in [Installing a host from the server](../operations/troubleshooting.md#installing-a-host-from-the-server)
+and in [When the installer stops](#when-the-installer-stops). The manual path below, step 5, stays the way out for a host that cannot
+use the command; the installer there also takes `-Server` when you run it from a verified archive yourself.
 
 ## The manual path
 
@@ -391,6 +486,13 @@ putting the token into the command history (a prompt reads every line that follo
 Read-Host 'Enrollment token' | Set-Content -Path "$Setup\enrollment-token.txt" -NoNewline
 ```
 
+*From v0.2.0* the installer also has the server mode of [the command of the server](#one-command-install-a-windows-host-from-the-server):
+`-Server https://fleet.example.com` in place of `-OpampEndpoint`, `-CollectorVersion`, `-Verifier`, `-WithUpdater` and the `-Updater*`
+options. The installer then asks the server for the plan (`-Fleet` names the fleet that you expect, `-PlanWait` the seconds to wait
+while the server prepares the artifacts), takes collector and supervisor from the server and verifies them with the
+`myriarch-updater.exe` of the unpacked archive, which you verified in step 2. The certificate of the server has to be in the
+certificate store of the machine. The rest of this step describes the installer without `-Server`.
+
 Then choose the verifier of [step 3](#3-choose-how-the-host-verifies-downloads) and start the installer:
 
 ```powershell
@@ -470,7 +572,7 @@ to another credential".
 
 | Code or symptom | Cause | What to do |
 |---|---|---|
-| `option_missing` | A required option is absent, and the message names it: the site type, the site ID, the **collector version** on Windows (`-CollectorVersion`; `install-linux.sh` of v0.2.0 has a default), the OpAMP endpoint on Linux without `--server`, the token (`--token-file`, `-TokenFile`) or, with `--with-updater`, `--updater-url`. A missing or malformed endpoint ends with `option_invalid`. | Add the option. The collector version is the input that is forgotten most often, because the install example of the token dialog of v0.1.0 leaves it out; see [What you need](#what-you-need). |
+| `option_missing` | A required option is absent, and the message names it: the site type, the site ID, the **collector version** on Windows without `-Server` (`-CollectorVersion`; `install-linux.sh` of v0.2.0 has a default), the OpAMP endpoint on Linux without `--server`, the token (`--token-file`, `-TokenFile`) or, with `--with-updater`, `--updater-url`. A missing or malformed endpoint ends with `option_invalid`. | Add the option. The collector version is the input that is forgotten most often, because the install example of the token dialog of v0.1.0 leaves it out; see [What you need](#what-you-need). |
 | `usage_error` (Linux) | An option is unknown or has no value, for example `--verifier ""` when a command substitution such as `$(command -v cosign)` expands to nothing because the host has no `cosign`. | Check the names and the values of the options (`./deploy/scripts/install-linux.sh --help` lists them). On Windows PowerShell rejects an unknown or valueless parameter itself, without a `[code]`. |
 | `updater_hash_source_missing` | `--with-updater` without `--updater-checksums-url` or `--updater-sha256`. | Add one of them ([step 3](#3-choose-how-the-host-verifies-downloads)). |
 | `sigstore_verifier_missing` | The installer found no Sigstore verifier: no `cosign` it may use, no installed updater and no updater verified by `--updater-sha256`. On Linux the `PATH` of root may not contain `cosign`. On Windows a `cosign.exe` in a folder that unprivileged accounts can write is ignored, with a warning. | Choose a verifier as in [step 3](#3-choose-how-the-host-verifies-downloads): pass `--verifier` or `-Verifier` with the full path of a `cosign` that only root (the administrators) can replace, or of the `myriarch-updater` of the verified archive, or add the updater with its SHA-256. |
@@ -480,6 +582,9 @@ to another credential".
 | `template_missing` | The script runs outside the unpacked archive, so the directory `deploy` with the templates is not next to it. | Run the script from `deploy/scripts/` of the unpacked archive, or pass the `deploy` directory of the archive with `--templates-dir` (`-TemplatesDir`). |
 | PowerShell refuses the script (no `[code]`): "running scripts is disabled on this system" or "is not digitally signed" | The execution policy forbids the script (`Restricted`), or the file still carries the Mark of the Web (`RemoteSigned`). | Start the installer as in [step 5](#5-install-on-windows) and run `Unblock-File` after the checks. If Group Policy sets the policy, see the notes of step 5. |
 | `language_mode_unsupported` (Windows, from v0.2.0), or the PowerShell error "Cannot invoke method. Method invocation is supported only on core types in this language mode" with the installer of v0.1.0 | PowerShell runs the script in Constrained Language Mode (or another mode below `FullLanguage`). App Control for Business with script enforcement does this to a script that no rule allows, and the unsigned installer of a release is such a script. It is the first check of the installer, and nothing was changed. The message names the file. | Allow `install-windows.ps1` with a hash rule that you create from the copy you verified in [step 2](#2-download-and-verify-the-installer), one rule per release (the hash that App Control uses for a script is not the SHA-256 in `checksums.txt`), or ask the owner of the policy for an exception. `-ExecutionPolicy RemoteSigned` does not change the mode. See [Language mode and App Control](../../deploy/windows/README.md#language-mode-and-app-control). |
+| `execution_policy_blocked` (Windows command, from v0.2.0) | Group Policy sets the execution policy of the scope `MachinePolicy` or `UserPolicy` to `AllSigned` or `Restricted`. It takes precedence over `-ExecutionPolicy`, so the unsigned installer cannot run. The command stops before it downloads anything and does not work around the policy. | `Get-ExecutionPolicy -List` shows the policy. Ask its owner for an exception for this host, or install the host on another way that the policy allows. |
+| `installer_failed` (Windows command, from v0.2.0) | The installer that the command started ended with a non-zero exit code. Its own message, with its code, is the line above. | Act on that message. |
+| `plan_failed`, `plan_invalid`, `plan_rejected`, `plan_unavailable` (from v0.2.0) | The server mode of the installer (`--server`, `-Server`; [Linux](#one-command-install-a-linux-host-from-the-server), [Windows](#one-command-install-a-windows-host-from-the-server)) did not get a usable plan. | [Installing a host from the server](../operations/troubleshooting.md#installing-a-host-from-the-server) has the cause and the next step of each code. |
 | `privilege_required` | The installer does not run as root or Administrator. | Use a root shell (`sudo -i`), or an elevated Windows PowerShell. |
 | `unsupported_platform` | The installer supports amd64 and arm64 and nothing else. On Linux `uname -m` reports another CPU (`unsupported architecture: <value>`), or the system is not Linux (`only Linux is supported`). On Windows the processor architecture is neither AMD64 nor ARM64, or the installer would use arm64 (an ARM64 host without `-Arch amd64`, or `-Arch arm64`), and it stops because upstream publishes the supervisor for Windows amd64 only (`on ARM64 install with -Arch amd64`). | On Windows ARM64 add `-Arch amd64` ([What you need](#what-you-need)). The installer of v0.1.0 stopped only at the supervisor step: it had stopped the service and put the ARM64 collector into `C:\Program Files\Myriarch\collector\versions\<version>`, and the next run keeps a collector of the same version that it finds there, so delete that folder first if the host should run the amd64 collector. From v0.2.0 the installer stops as soon as it knows the architecture, before it stops a service, downloads or writes anything, and leaves nothing behind. On Linux there is no build for another CPU; `--arch amd64` or `--arch arm64` only replaces the detection and fits a machine that runs binaries of that architecture. |
 | `tool_missing` | A tool is absent. The message names it. | Install it ([What you need](#what-you-need)). |

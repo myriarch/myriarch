@@ -20,6 +20,19 @@
       restricted to SYSTEM/Administrators first, then the value is written
     - optionally the service "myriarch-updater" ("Myriarch Updater", LocalSystem: it replaces binaries)
 
+  Server mode (ADR-0046): with -Server the installer takes the versions, the OpAMP endpoint and the artifacts from the server instead
+  of from the operator. The copied command of the web UI downloads the installer bundle of the server (the zip with this script, its
+  templates and myriarch-updater.exe), checks its pinned SHA-256, unpacks it and starts this script from it:
+    install-windows.ps1 -Server https://fleet.example.com -TokenFile <file> -SiteType edge -SiteId 042
+  It asks POST <server>/api/v1/install/plan for a plan (the token only as a request header) and reads the answer strictly as data:
+  known keys only, each value against a pattern, at most 64 lines and 8 KiB, URLs of the origin of -Server only, https only, redirects
+  only to https on the same origin. Nothing in the plan is evaluated as code. Collector and supervisor are downloaded from the server
+  with the install grants of the plan and verified with SHA-256 and their Sigstore bundle against an identity that this script builds
+  itself (never one the server names); the verifier is the myriarch-updater.exe of the same bundle (verify-bundle). Nothing runs before
+  its check. A plan that the server is still preparing is awaited for -PlanWait seconds (default 900). The updater is installed from the
+  bundle when the plan says so. The server certificate is checked against the certificate store of the machine (-CaFile only goes into
+  the configuration of the supervisor and the updater).
+
   Trust model: downloads use https only; collector and supervisor are verified with SHA-256 and a Sigstore
   bundle (-VerifySignatures require, the default; verifier: -Verifier myriarch-updater.exe or cosign.exe, an
   already installed myriarch-updater, cosign.exe 3.0.4 or newer from a directory only administrators can write, or - with
@@ -73,9 +86,19 @@
       -SiteTimezone Europe/Amsterdam -CollectorVersion 0.162.0 -Verifier 'C:\Program Files\cosign\cosign.exe' -WithUpdater `
       -UpdaterUrl "$Base/myriarch-updater_${Version}_windows_${Arch}.exe" -UpdaterChecksumsUrl "$Base/checksums.txt"
   Remove-Item 'C:\Program Files\myriarch-setup\enrollment-token.txt'
+
+.EXAMPLE
+  # Server mode (what the command of the web UI starts from the unpacked installer bundle): the server gives the versions, the
+  # endpoint and the artifacts, and the verifier is the myriarch-updater.exe of the bundle:
+  powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\deploy\scripts\install-windows.ps1 `
+      -Server https://fleet.example.com -TokenFile 'C:\Program Files\myriarch-setup\enrollment-token.txt' `
+      -SiteType edge -SiteId 042
 #>
 [CmdletBinding()]
 param(
+  [string]$Server,
+  [string]$Fleet,
+  [string]$PlanWait,
   [string]$OpampEndpoint,
   [string]$Token,
   [string]$TokenFile,
@@ -156,6 +179,10 @@ $script:MinCosignVersion = [Version]'3.0.4'
 #   service_config_failed      sc.exe failed
 #   updater_install_failed     "myriarch-updater install" failed
 #   group_membership_failed    WARNING: the service account could not be added to a local group
+#   plan_failed, plan_invalid, plan_rejected, plan_unavailable
+#                              server mode (-Server): the same meaning as in install-linux.sh (no answer or a server error; a plan or a
+#                              redirect that breaks the rules; the server refused the plan, the message carries its code; the server
+#                              cannot give a plan now or was still preparing the artifacts after -PlanWait seconds)
 #   language_mode_unsupported  PowerShell runs the script in Constrained Language Mode (App Control for Business) or another
 #                              mode below FullLanguage; it is the first check of the run, before anything else happens
 #   unexpected_error           a failure that is not classified above (the original message follows the code)
@@ -308,6 +335,7 @@ function Test-TransientDownloadError {
 
 function Invoke-Download {
   param([string]$Url, [string]$Destination)
+  if ($script:ServerMode) { Invoke-ServerDownload -Url $Url -Destination $Destination; return }
   Assert-TransportAllowed -Url $Url -What 'download URL'
   Write-Log "downloading $Url"
   if ($Url -like 'file://*') {
@@ -360,6 +388,440 @@ function Invoke-Download {
       $pause = $pause * 2
     }
   }
+}
+
+# ---- Server mode (ADR-0046) ---------------------------------------------------------------------------------------------
+# The server provides data and the host verifies code. Every request goes to the origin of -Server (https only, a redirect only to
+# that origin), the enrollment token reaches the server as a request header only, and the plan is read as data: nothing in it is
+# run, evaluated or used before a strict pattern accepted it. The limits are those of internal/install/grammar.go and of
+# install-linux.sh.
+$script:PlanPath = '/api/v1/install/plan'
+$script:PlanMaxBytes = 8192
+$script:PlanMaxLines = 64
+$script:PlanKeys = @('format', 'fleet', 'version.source', 'opamp.endpoint', 'collector.version', 'collector.url', 'collector.grant',
+  'supervisor.version', 'supervisor.url', 'supervisor.grant', 'updater.install')
+$script:ServerMode = $false
+$script:PlanWaitSeconds = 900
+# the install grant of the artifact that is being downloaded (the bearer of its requests; empty outside a download)
+$script:DownloadBearer = ''
+# the myriarch-updater.exe of the installer bundle, copied into the working directory (verifier and updater of the server mode)
+$script:BundleUpdater = ''
+$script:Plan = @{}
+
+# One request, redirects not followed. HttpWebRequest instead of Invoke-WebRequest: Windows PowerShell 5.1 and PowerShell 7 report
+# a 3xx or a 4xx of Invoke-WebRequest in different ways, and this code has to see the status and the Location of every answer. The
+# body goes to $OutFile whatever the status (a refusal of the server is a problem document that the caller reads); a body above
+# $MaxBytes (0: no limit) or a transfer that takes longer than $TimeoutSeconds is a failure of the transport. Result: Status (0 when
+# there was no HTTP answer), Location, RetryAfter, Exception (the failure of the transport, else $null).
+function Send-ServerRequest {
+  param([string]$Method, [string]$Url, [string]$OutFile, [string]$Body, [string]$Bearer, [long]$MaxBytes, [int]$TimeoutSeconds)
+  $result = [pscustomobject]@{ Status = 0; Location = ''; RetryAfter = ''; Exception = $null }
+  $response = $null
+  $in = $null
+  $out = $null
+  try {
+    try {
+      [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    } catch { }
+    $request = [Net.HttpWebRequest][Net.WebRequest]::Create($Url)
+    $request.Method = $Method
+    $request.AllowAutoRedirect = $false
+    $request.Timeout = [Math]::Min($TimeoutSeconds, 60) * 1000
+    $request.ReadWriteTimeout = 60000
+    $request.UserAgent = 'myriarch-installer'
+    # no wait for "100 Continue" before the plan request is sent (a property that .NET Core only stubs: a failure here does not matter)
+    try { $request.ServicePoint.Expect100Continue = $false } catch { }
+    if ($Bearer) { $request.Headers.Add('Authorization', "Bearer $Bearer") }
+    if ($Method -eq 'POST') {
+      $bytes = [Text.Encoding]::UTF8.GetBytes($Body)
+      $request.Accept = 'text/plain'
+      $request.ContentType = 'application/json'
+      $request.ContentLength = $bytes.Length
+      $stream = $request.GetRequestStream()
+      try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+    }
+    try {
+      $response = $request.GetResponse()
+    } catch [Net.WebException] {
+      if (-not $_.Exception.Response) { throw }
+      $response = $_.Exception.Response
+    }
+    $result.Status = [int]$response.StatusCode
+    $result.Location = [string]$response.Headers['Location']
+    $result.RetryAfter = [string]$response.Headers['Retry-After']
+    $in = $response.GetResponseStream()
+    $out = [IO.File]::Open($OutFile, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    $buffer = New-Object byte[] 81920
+    $total = [long]0
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while (($n = $in.Read($buffer, 0, $buffer.Length)) -gt 0) {
+      $total += $n
+      if ($MaxBytes -gt 0 -and $total -gt $MaxBytes) {
+        $result.Status = 0
+        $result.Exception = New-Object IO.InvalidDataException("the answer is longer than $MaxBytes bytes")
+        break
+      }
+      if ($clock.Elapsed.TotalSeconds -gt $TimeoutSeconds) {
+        $result.Status = 0
+        $result.Exception = New-Object TimeoutException("the transfer took longer than $TimeoutSeconds s")
+        break
+      }
+      $out.Write($buffer, 0, $n)
+    }
+  } catch {
+    # a transport failure after an answer began counts as no answer: the caller must not read a partial body
+    $result.Status = 0
+    $result.Exception = $_.Exception
+  } finally {
+    if ($out) { $out.Dispose() }
+    if ($in) { $in.Dispose() }
+    if ($response) { $response.Dispose() }
+  }
+  return $result
+}
+
+# The URL of a redirect, after the checks: https (unless -Insecure) and the origin of -Server, nothing else.
+function Get-RedirectTarget {
+  param($Result)
+  $loc = $Result.Location
+  if (-not $loc) { Stop-Install 'plan_invalid' "the server answered HTTP $($Result.Status) without a Location: it is not a server this installer can talk to" }
+  if ($loc -cnotmatch '^[A-Za-z0-9._~:/@%+=?&-]+\z') { Stop-Install 'plan_invalid' 'the server redirected to a URL with characters that a URL of this installation does not have' }
+  if ($loc.StartsWith('//', [StringComparison]::Ordinal)) {
+    Stop-Install 'plan_invalid' 'the server redirected to another origin (a URL without a scheme): the installer follows redirects only on the origin of -Server'
+  } elseif ($loc.StartsWith('/', [StringComparison]::Ordinal)) {
+    $loc = "$($script:Server)$loc"
+  } elseif ($loc -cnotmatch '^https?://') {
+    Stop-Install 'plan_invalid' 'the server redirected to something that is not a URL on its origin: the installer follows redirects only on the origin of -Server'
+  }
+  Assert-TransportAllowed -Url $loc -What 'the redirect of the server'
+  if (-not ($loc -ceq $script:Server -or $loc.StartsWith("$($script:Server)/", [StringComparison]::Ordinal) -or $loc.StartsWith("$($script:Server)?", [StringComparison]::Ordinal))) {
+    Stop-Install 'plan_invalid' 'the server redirected to another origin: the installer follows redirects only on the origin of -Server, because the request carries the enrollment token or a grant'
+  }
+  return $loc
+}
+
+# One request with the redirects that the rules allow (at most three).
+function Invoke-ServerExchange {
+  param([string]$Method, [string]$Url, [string]$OutFile, [string]$Body, [string]$Bearer, [long]$MaxBytes, [int]$TimeoutSeconds)
+  $hops = 0
+  while ($true) {
+    $r = Send-ServerRequest -Method $Method -Url $Url -OutFile $OutFile -Body $Body -Bearer $Bearer -MaxBytes $MaxBytes -TimeoutSeconds $TimeoutSeconds
+    if (@(301, 302, 303, 307, 308) -notcontains $r.Status) { return $r }
+    $hops++
+    if ($hops -gt 3) { Stop-Install 'plan_invalid' 'the server redirected more than three times' }
+    $Url = Get-RedirectTarget -Result $r
+  }
+}
+
+# A request that is tried again while it fails in a way that can pass (the policy of Invoke-Download: a failed connection, a timeout and
+# the statuses in $Transient), for at most $Window seconds. The result is the last answer; the caller decides what it means.
+function Invoke-ServerCall {
+  param([int]$Window, [int[]]$Transient, [string]$Method, [string]$Url, [string]$OutFile, [string]$Body, [string]$Bearer, [long]$MaxBytes, [int]$TimeoutSeconds)
+  $pause = 1
+  $start = Get-MonotonicSeconds
+  $attempt = 0
+  while ($true) {
+    $attempt++
+    $r = Invoke-ServerExchange -Method $Method -Url $Url -OutFile $OutFile -Body $Body -Bearer $Bearer -MaxBytes $MaxBytes -TimeoutSeconds $TimeoutSeconds
+    if ($r.Status -ne 0) {
+      if ($Transient -notcontains $r.Status) { return $r }
+      $why = "HTTP $($r.Status)"
+    } else {
+      if (-not (Test-TransientDownloadError $r.Exception)) { return $r }
+      $why = Get-DownloadReason $r.Exception
+    }
+    $elapsed = [int][Math]::Floor((Get-MonotonicSeconds) - $start)
+    if ($elapsed -ge $Window) { return $r }
+    if ($elapsed + $pause -gt $Window) { $pause = $Window - $elapsed }
+    Write-Log "attempt $attempt failed ($why), next attempt in $pause s"
+    Start-Sleep -Seconds $pause
+    $pause = $pause * 2
+  }
+}
+
+# Seconds to wait from Retry-After (a number; a date is not used), between 1 and 60; the default when it is absent or odd.
+function Get-RetryAfterSeconds {
+  param($Result, [int]$Default)
+  if ($Result.RetryAfter -cmatch '^[0-9]{1,4}\z' -and [int]$Result.RetryAfter -ge 1) { return [Math]::Min([int]$Result.RetryAfter, 60) }
+  return $Default
+}
+
+# The first 64 KiB of an answer of the server as text (the answer is untrusted data), or an empty string.
+function Read-ProblemDocument {
+  param([string]$Path)
+  try {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+      $buffer = New-Object byte[] 65536
+      $n = $stream.Read($buffer, 0, $buffer.Length)
+      return [Text.Encoding]::UTF8.GetString($buffer, 0, $n)
+    } finally { $stream.Dispose() }
+  } catch { return '' }
+}
+
+# The code of the reason in a problem document of the server: the code of the first issue, else the class. It counts only when it has
+# the shape of a code.
+function Get-ProblemCode {
+  param([string]$Path)
+  try { $doc = Read-ProblemDocument -Path $Path | ConvertFrom-Json } catch { return '' }
+  if (-not $doc) { return '' }
+  $props = $doc.PSObject.Properties
+  if ($props['issues'] -and $doc.issues) {
+    $first = @($doc.issues)[0]
+    if ($first -and $first.PSObject.Properties['code'] -and ([string]$first.code) -cmatch '^[a-z][a-z0-9_]*\z') { return [string]$first.code }
+  }
+  if ($props['code'] -and ([string]$doc.code) -cmatch '^[a-z][a-z0-9_]*\z') { return [string]$doc.code }
+  return ''
+}
+
+# The detail sentence of a problem document, cut to harmless characters: it is shown to the person who reads the message.
+function Get-ProblemDetail {
+  param([string]$Path)
+  try { $doc = Read-ProblemDocument -Path $Path | ConvertFrom-Json } catch { return '' }
+  if (-not $doc -or -not $doc.PSObject.Properties['detail']) { return '' }
+  $text = [regex]::Replace([string]$doc.detail, '[^A-Za-z0-9 .,:;()/_=@+-]', '')
+  if ($text.Length -gt 300) { $text = $text.Substring(0, 300) }
+  return $text
+}
+
+# What to do about a reason that the server gave for refusing the plan.
+function Get-PlanHint {
+  param([string]$Code)
+  switch -CaseSensitive ($Code) {
+    'unauthorized' { return 'the enrollment token is unknown, revoked or expired, or it was not sent: create a new token in the web UI and run the command again' }
+    'not_found' { return 'this server does not offer the installation (install.enabled is off) or -Server does not name a myriarch server: check the address, or use the manual path of docs/tasks/connect-a-host.md' }
+    'forbidden' { return 'the server does not allow this token to install: ask the administrator of the server' }
+    'fleet_mismatch' { return 'the server assigns the host to another fleet than -Fleet: leave -Fleet out, or correct the site attributes and the labels of the enrollment token' }
+    'no_fleet' { return 'no fleet selects this host: check -SiteType, -SiteId and the other site options and the labels of the enrollment token against the selectors of the fleets in Git' }
+    'fleet_ambiguous' { return 'more than one fleet selects this host: give the fleets different priorities in Git or narrow their selectors' }
+    'rollout_blocking' { return 'a version rollout of the fleet is paused, failed or rolling back: resolve it in the web UI, then run the command again' }
+    'no_target_version' { return 'the fleet has no target version (it is on hold or none is set): set one in Git or choose one in the web UI, then run the command again' }
+    'unsupported_distribution' { return 'the fleet uses a collector distribution that cannot be installed from the server: use the manual path of docs/tasks/connect-a-host.md' }
+    { @('unknown_version', 'unknown_supervisor_version') -ccontains $_ } { return 'the release tracker of the server does not know that release: wait for the next poll, or name a version the server knows (-CollectorVersion)' }
+    'version_not_allowed' { return 'the version is outside the frame of the fleet in Git: leave -CollectorVersion out, or name a version inside the frame' }
+    { @('invalid_value', 'unknown_attribute') -ccontains $_ } { return 'the server did not accept a site option: check the values of -Site* and -Environment' }
+    'platform_not_supported' { return 'the server does not offer this platform: use the manual path of docs/tasks/connect-a-host.md' }
+    'server_settings' { return 'the server is not set up for host installations (server.publicUrl, opamp.path, client certificates): ask its administrator' }
+    default { return 'see docs/operations/troubleshooting.md, "When the installer stops", or use the manual path of docs/tasks/connect-a-host.md' }
+  }
+}
+
+# The body of the plan request. It holds no secret: the platform, the attributes the host would report, the fleet the person expects
+# and the version they ask for.
+function New-PlanRequestBody {
+  param([string]$Arch)
+  $attrs = [ordered]@{}
+  $hostName = [Environment]::MachineName
+  if ($hostName -cmatch '^[A-Za-z0-9._-]{1,253}\z') { $attrs['host.name'] = $hostName }
+  foreach ($pair in @(@('site.type', $SiteType), @('site.id', $SiteId), @('site.name', $SiteName), @('site.country', $SiteCountry),
+      @('site.region', $SiteRegion), @('site.timezone', $SiteTimezone), @('deployment.environment.name', $Environment))) {
+    if ($pair[1]) { $attrs[$pair[0]] = [string]$pair[1] }
+  }
+  $body = [ordered]@{ os = 'windows'; arch = $Arch; attributes = $attrs }
+  if ($Fleet) { $body['fleet'] = $Fleet }
+  if ($script:CollectorVersion) { $body['collectorVersion'] = $script:CollectorVersion }
+  return (ConvertTo-Json -InputObject $body -Compress -Depth 4)
+}
+
+# Asks the server for the plan; waits while it prepares the artifacts. Result: the path of the file with the plan.
+function Get-PlanFile {
+  param([string]$Arch, [string]$TmpDir)
+  $file = Join-Path $TmpDir 'plan.txt'
+  $body = New-PlanRequestBody -Arch $Arch
+  $wait = [int]$script:PlanWaitSeconds
+  $deadline = (Get-MonotonicSeconds) + $wait
+  Write-Log "asking $($script:Server) for the plan"
+  while ($true) {
+    $r = Invoke-ServerCall -Window 6 -Transient @(408, 500, 502, 504) -Method POST -Url "$($script:Server)$($script:PlanPath)" -OutFile $file -Body $body -Bearer $script:EffectiveToken -MaxBytes 1048576 -TimeoutSeconds 60
+    if ($r.Status -eq 0) {
+      $reason = Get-DownloadReason $r.Exception
+      Stop-Install 'plan_failed' "the request for the plan to $($script:Server) failed ($reason): check the address, the network and the certificate of the server (it has to be trusted by the certificate store of this machine; import the CA of a private server first), then run the command again"
+    }
+    if ($r.Status -eq 200) { return $file }
+    if ($r.Status -eq 503) {
+      $code = Get-ProblemCode -Path $file
+      if ($code -ceq 'preparing') {
+        $remaining = [int][Math]::Floor($deadline - (Get-MonotonicSeconds))
+        if ($remaining -le 0) { Stop-Install 'plan_unavailable' "the server was still preparing the artifacts after $wait s: run the command again later, or give -PlanWait more seconds; the log of the server tells whether a download fails" }
+        $pause = [Math]::Min((Get-RetryAfterSeconds -Result $r -Default 10), $remaining)
+        Write-Log "the server is preparing the artifacts (the first request for a platform downloads about 112 MB); asking again in $pause s"
+        Start-Sleep -Seconds $pause
+        continue
+      }
+      $suffix = ''
+      if ($code) { $suffix = ", $code" }
+      Stop-Install 'plan_unavailable' "the server cannot give a plan now (HTTP 503$suffix): run the command again in a minute; if it stays, look at the log of the server (database, release tracker)"
+    }
+    if ($r.Status -eq 429) { Stop-Install 'plan_unavailable' "the server limits the requests from this address (HTTP 429): run the command again after $(Get-RetryAfterSeconds -Result $r -Default 60) s" }
+    if (@(408, 500, 502, 504) -contains $r.Status) { Stop-Install 'plan_failed' "the server answered HTTP $($r.Status) for the plan: run the command again; if it stays, look at the log of the server" }
+    $code = Get-ProblemCode -Path $file
+    $detail = Get-ProblemDetail -Path $file
+    if (-not $code) { $code = "http_$($r.Status)" }
+    if ($detail) { $detail = " - $detail" }
+    Stop-Install 'plan_rejected' "the server refused the plan: $code (HTTP $($r.Status))${detail}: $(Get-PlanHint -Code $code)"
+  }
+}
+
+# The OpAMP endpoint of the plan names the host and port of -Server (the server derives it from the same address), with the scheme
+# that goes with it: wss or https for an https server, ws or http for a lab server.
+function Assert-PlanEndpoint {
+  param([string]$Url)
+  $scheme = $Url.Substring(0, $Url.IndexOf('://'))
+  $authority = $Url.Substring($Url.IndexOf('://') + 3)
+  $slash = $authority.IndexOf('/')
+  if ($slash -ge 0) { $authority = $authority.Substring(0, $slash) }
+  $serverScheme = $script:Server.Substring(0, $script:Server.IndexOf('://'))
+  if (@('https:wss', 'https:https', 'http:ws', 'http:http') -cnotcontains "${serverScheme}:${scheme}") {
+    Stop-Install 'plan_invalid' 'opamp.endpoint of the plan does not use the scheme that goes with -Server (wss:// or https:// for an https server)'
+  }
+  if ($authority -cne $script:Server.Substring($script:Server.IndexOf('://') + 3)) {
+    Stop-Install 'plan_invalid' 'opamp.endpoint of the plan names another host or port than -Server: the enrollment token would go to a server that was not asked for'
+  }
+}
+
+# The plan URL of an artifact: https (unless -Insecure), on the origin of -Server, no path tricks, and the file name that the
+# installer expects.
+function Assert-PlanUrl {
+  param([string]$Name, [string]$Url, [string]$File)
+  Assert-TransportAllowed -Url $Url -What "the $Name URL of the plan"
+  if (-not $Url.StartsWith("$($script:Server)/", [StringComparison]::Ordinal)) {
+    Stop-Install 'plan_invalid' "the $Name URL of the plan is not on the origin of -Server: the installer downloads from the server it was started for only"
+  }
+  $rest = $Url.Substring($script:Server.Length)
+  if ($rest.Contains('//') -or $rest.Contains('/../') -or $rest.Contains('/./') -or $rest.EndsWith('/..') -or $rest.EndsWith('/.')) {
+    Stop-Install 'plan_invalid' "the $Name URL of the plan has a path that is not plain"
+  }
+  if (($Url.Substring($Url.LastIndexOf('/') + 1)) -cne $File) { Stop-Install 'plan_invalid' "the $Name URL of the plan does not end in the file name $File" }
+}
+
+function Assert-PlanValue {
+  param([string]$Key, [string]$Value)
+  $reUrl = '^(https?|wss?)://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?(/[A-Za-z0-9._:/@+=-]*)?\z'
+  $reVersion = '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?\z'
+  $reGrant = '^myrd_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\z'
+  if (-not $Value) { Stop-Install 'plan_invalid' "the plan has no value for $Key" }
+  switch -CaseSensitive ($Key) {
+    'format' { if ($Value -cne '1') { Stop-Install 'plan_invalid' "the plan has the format $($Value.Substring(0, [Math]::Min(20, $Value.Length))), this installer reads format 1: use the installer bundle of the server" } }
+    'fleet' { if ($Value -cnotmatch '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\z') { Stop-Install 'plan_invalid' 'fleet in the plan is not the name of a fleet' } }
+    'version.source' { if (@('git', 'ui', 'rollout', 'request') -cnotcontains $Value) { Stop-Install 'plan_invalid' 'version.source in the plan is not a source this installer knows' } }
+    { @('opamp.endpoint', 'collector.url', 'supervisor.url') -ccontains $_ } {
+      if ($Value -cnotmatch $reUrl) { Stop-Install 'plan_invalid' "$Key in the plan is not an http(s) or ws(s) URL of the allowed shape" }
+    }
+    { @('collector.version', 'supervisor.version') -ccontains $_ } {
+      if ($Value -cnotmatch $reVersion -or $Value.Length -gt 64) { Stop-Install 'plan_invalid' "$Key in the plan is not a version" }
+    }
+    { @('collector.grant', 'supervisor.grant') -ccontains $_ } { if ($Value -cnotmatch $reGrant) { Stop-Install 'plan_invalid' "$Key in the plan is not an install grant" } }
+    'updater.install' { if (@('true', 'false') -cnotcontains $Value) { Stop-Install 'plan_invalid' 'updater.install in the plan must be true or false' } }
+  }
+}
+
+# Reads the plan as data (ADR-0046, "Interface sketch"; internal/install/grammar.go is the reference): at most 8 KiB and 64 lines of
+# "key=value", only the characters A-Z a-z 0-9 . _ : / @ + = - and the brackets of an IPv6 literal, the key "format" first and equal
+# to 1, only known keys, each exactly once, every value against the pattern of its key. Nothing in it is run. Result: a hashtable.
+function Read-Plan {
+  param([string]$Path)
+  $bytes = [IO.File]::ReadAllBytes($Path)
+  if ($bytes.Length -eq 0) { Stop-Install 'plan_invalid' 'the plan of the server is empty' }
+  if ($bytes.Length -gt $script:PlanMaxBytes) { Stop-Install 'plan_invalid' "the plan of the server is longer than $($script:PlanMaxBytes) bytes" }
+  $allowed = New-Object 'bool[]' 256
+  foreach ($c in [char[]]'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:/@+=[]-') { $allowed[[int]$c] = $true }
+  $allowed[10] = $true
+  foreach ($b in $bytes) {
+    if (-not $allowed[$b]) {
+      Stop-Install 'plan_invalid' 'the plan of the server holds a character that a plan may not have (only letters, digits and . _ : / @ + = - and the brackets of an IPv6 address)'
+    }
+  }
+  if ($bytes[$bytes.Length - 1] -ne 10) { Stop-Install 'plan_invalid' 'the plan of the server does not end in a line end' }
+  $text = [Text.Encoding]::ASCII.GetString($bytes)
+  $lines = $text.Substring(0, $text.Length - 1).Split("`n")
+  if ($lines.Count -gt $script:PlanMaxLines) { Stop-Install 'plan_invalid' "the plan of the server has more than $($script:PlanMaxLines) lines" }
+  $plan = @{}
+  $n = 0
+  foreach ($line in $lines) {
+    $n++
+    $eq = $line.IndexOf('=')
+    if ($eq -lt 0) { Stop-Install 'plan_invalid' "line $n of the plan has no =" }
+    $key = $line.Substring(0, $eq)
+    $value = $line.Substring($eq + 1)
+    if ($n -eq 1 -and $key -cne 'format') { Stop-Install 'plan_invalid' 'the plan does not start with the key format' }
+    if ($script:PlanKeys -cnotcontains $key) { Stop-Install 'plan_invalid' "line $n of the plan has a key this installer does not know: $($key.Substring(0, [Math]::Min(40, $key.Length)))" }
+    if ($plan.ContainsKey($key)) { Stop-Install 'plan_invalid' "the key $key is repeated in the plan" }
+    Assert-PlanValue -Key $key -Value $value
+    $plan[$key] = $value
+  }
+  foreach ($key in $script:PlanKeys) {
+    if (-not $plan.ContainsKey($key)) { Stop-Install 'plan_invalid' "the plan lacks the key $key" }
+  }
+  return $plan
+}
+
+# Checks what the plan says against what this host asked for and against the origin of -Server, and takes it over.
+function Use-Plan {
+  param($Plan, [string]$Arch)
+  if ($Fleet -and $Plan['fleet'] -cne $Fleet) { Stop-Install 'plan_invalid' "the plan names the fleet $($Plan['fleet']), not ${Fleet}: leave -Fleet out, or correct the site options" }
+  $verRe = '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?\z'
+  foreach ($key in @('collector.version', 'supervisor.version')) {
+    if ($Plan[$key] -cnotmatch $verRe) {
+      Stop-Install 'plan_invalid' "the plan names the version $($Plan[$key]), which this installer cannot install (a plain X.Y.Z or X.Y.Z-pre.release)"
+    }
+  }
+  if ($script:CollectorVersion -and $Plan['collector.version'] -cne $script:CollectorVersion) {
+    Stop-Install 'plan_invalid' "the plan names the collector version $($Plan['collector.version']), not the $($script:CollectorVersion) that -CollectorVersion asked for"
+  }
+  Assert-PlanEndpoint -Url $Plan['opamp.endpoint']
+  Assert-PlanUrl -Name 'collector' -Url $Plan['collector.url'] -File "otelcol-contrib_$($Plan['collector.version'])_windows_$Arch.tar.gz"
+  Assert-PlanUrl -Name 'supervisor' -Url $Plan['supervisor.url'] -File "opampsupervisor_$($Plan['supervisor.version'])_windows_amd64.exe"
+  $script:Plan = $Plan
+  $script:CollectorVersion = $Plan['collector.version']
+  $script:SupervisorVersion = $Plan['supervisor.version']
+  if (-not $script:OpampEndpoint) { $script:OpampEndpoint = $Plan['opamp.endpoint'] }
+  if ($Plan['updater.install'] -ceq 'true') { $script:WithUpdater = $true }
+  Write-Log "plan: fleet $($Plan['fleet']), collector v$($script:CollectorVersion) and supervisor v$($script:SupervisorVersion) (version from $($Plan['version.source'])), updater: $($Plan['updater.install'])"
+}
+
+# The verifier and the updater come from the installer bundle this script was started from: the myriarch-updater.exe next to deploy\,
+# a regular file of the archive whose SHA-256 the command pinned. It is copied into the private working directory first and that copy
+# is used for the checks and installed, so that nothing can replace it in between (Copy-VerifiedFile hashes it again).
+function Use-BundleUpdater {
+  param([string]$TmpDir)
+  $here = $PSScriptRoot
+  if (-not $here) { $here = Split-Path -Parent $MyInvocation.MyCommand.Path }
+  $src = [IO.Path]::Combine((Split-Path -Parent (Split-Path -Parent $here)), 'myriarch-updater.exe')
+  $item = Get-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
+  if ($item -and -not $item.PSIsContainer -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) {
+    $copy = Join-Path $TmpDir 'myriarch-updater.exe'
+    Copy-Item -LiteralPath $src -Destination $copy -Force
+    $script:BundleUpdater = $copy
+    $script:UpdaterDownload = $copy
+    $script:UpdaterDownloadHash = Get-Sha256 -Path $copy
+    return
+  }
+  if ($Verifier -and -not $WithUpdater) { return }
+  if ($Verifier) {
+    Stop-Install 'file_unreadable' "the plan asks for the updater, but the installer bundle has no regular file ${src}: run the installer from the unpacked installer bundle of the server"
+  }
+  Stop-Install 'sigstore_verifier_missing' "no Sigstore verifier: the installer bundle has no regular file ${src}; run the installer from the unpacked installer bundle of the server (the command of the web UI does), or pass -Verifier <cosign 3.0.4 or newer>"
+}
+
+# The download of the server mode: only from the origin of -Server, with the grant of the artifact as the bearer.
+function Invoke-ServerDownload {
+  param([string]$Url, [string]$Destination)
+  if (-not $Url.StartsWith("$($script:Server)/", [StringComparison]::Ordinal)) {
+    Stop-Install 'plan_invalid' "a download outside the origin of -Server was asked for: $Url"
+  }
+  Write-Log "downloading $Url"
+  $r = Invoke-ServerCall -Window 120 -Transient @(408, 429, 500, 502, 503, 504) -Method GET -Url $Url -OutFile $Destination -Bearer $script:DownloadBearer -MaxBytes 0 -TimeoutSeconds 900
+  if ($r.Status -eq 0) {
+    Stop-Install 'download_failed' "download failed: $Url ($(Get-DownloadReason $r.Exception); check the network and the certificate of the server)"
+  }
+  if ($r.Status -eq 200) { return }
+  switch ($r.Status) {
+    401 { $why = 'the install grant was refused, it expired or the enrollment token was revoked: run the command again to get a new plan' }
+    404 { $why = 'the server has no such artifact: run the command again to get a new plan' }
+    default { $why = 'run the command again; if it stays, look at the log of the server' }
+  }
+  Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+  Stop-Install 'download_failed' "download failed: $Url (HTTP $($r.Status); $why)"
 }
 
 # Certificate identity (SAN) of the Sigstore bundle of one release asset, bound to the requested version: the
@@ -455,6 +917,8 @@ function Resolve-Verifier {
     $script:VerifierPath = $Verifier
     return
   }
+  # server mode: the myriarch-updater.exe of the installer bundle, copied into the private working directory
+  if ($script:BundleUpdater) { $script:VerifierPath = $script:BundleUpdater; return }
   if ($script:UpdaterDownload -and -not $UpdaterChecksumsUrl -and $UpdaterSha256) { $script:VerifierPath = $script:UpdaterDownload; return }
   $installed = Join-Path $L.Updater 'myriarch-updater.exe'
   if (Test-Path -LiteralPath $installed) { $script:VerifierPath = $installed; return }
@@ -483,6 +947,9 @@ function Confirm-Signature {
   } else {
     $vargs = @('verify-bundle', '--bundle', $bundle, '--artifact', $File, '--version', "v$Version", '--identity-regexp', $IdentityRegexp, '--issuer', $script:CertIssuer)
     if ($TrustedRoot) { $vargs += @('--trusted-root', $TrustedRoot) }
+    # the verifier of the server mode is the updater of this release; its TUF cache lives in the private working directory, so that the
+    # check does not depend on the profile of the account that runs the installer
+    if ($script:ServerMode -and -not $TrustedRoot) { $vargs += @('--tuf-cache', (Join-Path $TmpDir 'tuf-cache')) }
   }
   $r = Invoke-Native -File $v -Arguments $vargs
   if ($r.ExitCode -ne 0) { Stop-Install 'sigstore_verification_failed' "Sigstore verification of $(Split-Path -Leaf $File) failed: $($r.Output)" }
@@ -707,12 +1174,16 @@ function Assert-NoConflictingInstall {
 }
 
 # Working directory for downloads and staging. It is created with a protected DACL (SYSTEM and Administrators only,
-# owner Administrators) before anything is written into it: the installer runs elevated, and a directory that
-# inherits the ACL of the invoking account's temporary directory could be changed by a non-elevated process of that
-# account between a check and the use of a file.
+# owner Administrators) before anything is written into it, the first download included: the installer runs elevated, and a
+# directory that inherits the ACL of a folder that unprivileged accounts can write to could be changed between a check and the
+# use of a file.
 function New-WorkDirectory {
   param([bool]$Staging)
-  $dir = Join-Path ([IO.Path]::GetTempPath()) ('myriarch-install-' + [Guid]::NewGuid().ToString('N'))
+  # Outside staging the directory is made below %ProgramFiles%, like the working directory of the command of the web UI: that folder
+  # admits no entries from standard users or from processes without elevation, so no handle with write rights to the new directory
+  # can exist before its DACL is restricted. A temporary folder (the profile of an account, or C:\Windows\Temp for SYSTEM) admits them.
+  $parent = $(if ($Staging) { [IO.Path]::GetTempPath() } else { $env:ProgramFiles })
+  $dir = Join-Path $parent ('myriarch-install-' + [Guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Path $dir -Force | Out-Null
   if (-not $Staging) {
     $sec = New-Object System.Security.AccessControl.DirectorySecurity
@@ -728,20 +1199,57 @@ function New-WorkDirectory {
   return $dir
 }
 
+# The options of the server mode: the address of the server, the fleet hint, the time to wait, and the options that cannot be combined
+# with it (the plan decides what they would set).
+function Test-ServerOptions {
+  if ($Server -cnotmatch '^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?\z') {
+    Stop-Install 'option_invalid' '-Server must be the address of the server, https://host[:port] without a path'
+  }
+  Assert-TransportAllowed -Url $Server -What '-Server'
+  if ($WithUpdater -or $UpdaterUrl -or $UpdaterSha256 -or $UpdaterVersion -or $UpdaterChecksumsUrl -or $UpdaterBundleUrl -or $UpdaterSignerThumbprint) {
+    Stop-Install 'option_conflict' '-Server decides whether the updater is installed and takes it from the installer bundle: -WithUpdater and the -Updater* options do not apply'
+  }
+  if ($script:BoundParameters.ContainsKey('ReleaseBaseUrl')) { Stop-Install 'option_conflict' '-Server downloads collector and supervisor from the server: -ReleaseBaseUrl does not apply' }
+  if ($SupervisorVersion) { Stop-Install 'option_conflict' '-Server takes the supervisor version from the plan: -SupervisorVersion does not apply' }
+  if ($VerifySignatures -ne 'require') { Stop-Install 'option_conflict' '-Server cannot be combined with -VerifySignatures skip: everything the server provides is verified' }
+  $wait = 900
+  if ($script:BoundParameters.ContainsKey('PlanWait')) {
+    if ($PlanWait -cnotmatch '^[0-9]{1,5}\z' -or [int]$PlanWait -lt 1) { Stop-Install 'option_invalid' '-PlanWait must be a number of seconds, 1 to 99999' }
+    $wait = [int]$PlanWait
+  }
+  $script:PlanWaitSeconds = $wait
+  if ($Fleet -and $Fleet -cnotmatch '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\z') { Stop-Install 'option_invalid' '-Fleet is not the name of a fleet (lower case letters, digits and -)' }
+  $script:Server = $Server
+  $script:ServerMode = $true
+}
+
 function Test-Inputs {
-  if ($script:OpampEndpoint -notmatch '^(wss?|https?)://\S+$') { Stop-Install 'option_invalid' '-OpampEndpoint must start with wss:// or https://' }
-  if ($script:OpampEndpoint -match '^(ws|http)://' -and -not $Insecure) {
-    Stop-Install 'insecure_required' '-OpampEndpoint without TLS (ws://, http://) is not allowed: the token would cross the network in clear text (-Insecure only for lab/tests)'
+  $verRe = '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
+  if ($Server) {
+    Test-ServerOptions
+  } else {
+    if ($Fleet) { Stop-Install 'option_conflict' '-Fleet only applies together with -Server' }
+    if ($script:BoundParameters.ContainsKey('PlanWait')) { Stop-Install 'option_conflict' '-PlanWait only applies together with -Server' }
+    if (-not $CollectorVersion) { Stop-Install 'option_missing' '-CollectorVersion is missing' }
+  }
+  # with -Server the endpoint comes from the plan; one that the operator gives is checked like any other
+  if (-not $Server -or $script:OpampEndpoint) {
+    if ($script:OpampEndpoint -notmatch '^(wss?|https?)://\S+$') { Stop-Install 'option_invalid' '-OpampEndpoint must start with wss:// or https://' }
+    if ($script:OpampEndpoint -match '^(ws|http)://' -and -not $Insecure) {
+      Stop-Install 'insecure_required' '-OpampEndpoint without TLS (ws://, http://) is not allowed: the token would cross the network in clear text (-Insecure only for lab/tests)'
+    }
   }
   if (-not $SiteType) { Stop-Install 'option_missing' '-SiteType is missing' }
   if (-not $SiteId) { Stop-Install 'option_missing' '-SiteId is missing' }
-  if (-not $CollectorVersion) { Stop-Install 'option_missing' '-CollectorVersion is missing' }
-  $verRe = '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
-  $script:CollectorVersion = $CollectorVersion.TrimStart('v')
-  if ($script:CollectorVersion -notmatch $verRe) { Stop-Install 'option_invalid' "invalid -CollectorVersion: $CollectorVersion" }
-  $script:SupervisorVersion = $(if ($SupervisorVersion) { $SupervisorVersion.TrimStart('v') } else { $script:CollectorVersion })
-  if ($script:SupervisorVersion -notmatch $verRe) { Stop-Install 'option_invalid' "invalid -SupervisorVersion: $SupervisorVersion" }
-  foreach ($v in @($SiteType, $SiteId, $SiteName, $SiteCountry, $SiteRegion, $SiteTimezone, $Environment, $OpampEndpoint, $CaFile)) {
+  if ($CollectorVersion) {
+    $script:CollectorVersion = $CollectorVersion.TrimStart('v')
+    if ($script:CollectorVersion -notmatch $verRe) { Stop-Install 'option_invalid' "invalid -CollectorVersion: $CollectorVersion" }
+  }
+  if (-not $Server) {
+    $script:SupervisorVersion = $(if ($SupervisorVersion) { $SupervisorVersion.TrimStart('v') } else { $script:CollectorVersion })
+    if ($script:SupervisorVersion -notmatch $verRe) { Stop-Install 'option_invalid' "invalid -SupervisorVersion: $SupervisorVersion" }
+  }
+  foreach ($v in @($SiteType, $SiteId, $SiteName, $SiteCountry, $SiteRegion, $SiteTimezone, $Environment, $OpampEndpoint, $CaFile, $Fleet)) {
     if ($v -and $v -match '[\x00-\x1f]') { Stop-Install 'option_invalid' 'control character in a parameter value' }
   }
   if ($Token -and $TokenFile) { Stop-Install 'option_conflict' '-Token and -TokenFile are mutually exclusive' }
@@ -752,7 +1260,7 @@ function Test-Inputs {
   }
   if (-not $tok) { Stop-Install 'option_missing' '-Token or -TokenFile is missing' }
   if ($Token) { Write-Warn 'token_on_command_line' '-Token is visible in the process command line (process logs, EDR); prefer -TokenFile' }
-  if ($tok -notmatch '^[A-Za-z0-9_.~+/=-]+$') { Stop-Install 'option_invalid' 'the token contains forbidden characters' }
+  if ($tok -cnotmatch '^[A-Za-z0-9_.~+/=-]+\z') { Stop-Install 'option_invalid' 'the token contains forbidden characters' }
   $script:EffectiveToken = $tok
   if ($CaFile -and -not [IO.Path]::IsPathRooted($CaFile)) { Stop-Install 'option_invalid' '-CaFile must be an absolute path' }
   if ($CaFile -and -not (Test-Path -LiteralPath $CaFile)) { Stop-Install 'file_unreadable' "CA file is not readable: $CaFile" }
@@ -798,6 +1306,7 @@ function Test-Inputs {
       Stop-Install 'option_invalid' '-UpdaterSignerThumbprint is not a certificate thumbprint (40 hex characters)'
     }
   }
+  if ($Server) { return }
   if ($ReleaseBaseUrl -notmatch '^(https?|file)://\S+$') { Stop-Install 'option_invalid' '-ReleaseBaseUrl must be an https:// URL' }
   Assert-TransportAllowed -Url $ReleaseBaseUrl -What '-ReleaseBaseUrl'
   $script:ReleaseBaseUrl = $ReleaseBaseUrl.TrimEnd('/')
@@ -832,7 +1341,7 @@ function Install-Collector {
   param($L, [string]$Arch, [string]$TmpDir)
   $version = $script:CollectorVersion
   $asset = "otelcol-contrib_${version}_windows_${Arch}.tar.gz"
-  $url = "$($script:ReleaseBaseUrl)/v$version/$asset"
+  $url = $(if ($script:ServerMode) { $script:Plan['collector.url'] } else { "$($script:ReleaseBaseUrl)/v$version/$asset" })
   $vdir = Join-Path $L.Versions $version
   $marker = Join-Path $vdir '.myriarch-install.json'
   if ((Test-Path -LiteralPath (Join-Path $vdir $script:CollectorBinary)) -and (Test-Path -LiteralPath $marker)) {
@@ -840,8 +1349,13 @@ function Install-Collector {
     return
   }
   $archive = Join-Path $TmpDir $asset
-  $null = Get-VerifiedAsset -Url $url -Destination $archive
-  Confirm-Signature -File $archive -BundleUrl "$url.sigstore.json" -IdentityRegexp (Get-CertIdentity -Workflow 'base-release' -Version $version) -Version $version -TmpDir $TmpDir
+  if ($script:ServerMode) { $script:DownloadBearer = $script:Plan['collector.grant'] }
+  try {
+    $null = Get-VerifiedAsset -Url $url -Destination $archive
+    Confirm-Signature -File $archive -BundleUrl "$url.sigstore.json" -IdentityRegexp (Get-CertIdentity -Workflow 'base-release' -Version $version) -Version $version -TmpDir $TmpDir
+  } finally {
+    $script:DownloadBearer = ''
+  }
   $stage = Join-Path $TmpDir 'collector-stage'
   if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
   New-Item -ItemType Directory -Path $stage -Force | Out-Null
@@ -982,7 +1496,7 @@ function Install-SupervisorBinary {
   Assert-SupervisorPlatform -Arch $Arch
   $version = $script:SupervisorVersion
   $asset = "opampsupervisor_${version}_windows_amd64.exe"
-  $url = "$($script:ReleaseBaseUrl)/cmd/opampsupervisor/v$version/$asset"
+  $url = $(if ($script:ServerMode) { $script:Plan['supervisor.url'] } else { "$($script:ReleaseBaseUrl)/cmd/opampsupervisor/v$version/$asset" })
   $target = Join-Path $L.Supervisor 'opampsupervisor.exe'
   $verFile = Join-Path $L.Supervisor 'VERSION'
   if ((Test-Path -LiteralPath $target) -and (Test-Path -LiteralPath $verFile) -and ((Get-Content -LiteralPath $verFile -Raw).Trim() -eq $version)) {
@@ -993,8 +1507,13 @@ function Install-SupervisorBinary {
   # A directory or a link at the path ends the run before anything is fetched (nothing is copied into it)
   Assert-SupervisorPathUsable -Path $target
   $tmp = Join-Path $TmpDir $asset
-  $hash = Get-VerifiedAsset -Url $url -Destination $tmp
-  Confirm-Signature -File $tmp -BundleUrl "$url.sigstore.json" -IdentityRegexp (Get-CertIdentity -Workflow 'base-binary-release' -Version $version) -Version $version -TmpDir $TmpDir
+  if ($script:ServerMode) { $script:DownloadBearer = $script:Plan['supervisor.grant'] }
+  try {
+    $hash = Get-VerifiedAsset -Url $url -Destination $tmp
+    Confirm-Signature -File $tmp -BundleUrl "$url.sigstore.json" -IdentityRegexp (Get-CertIdentity -Workflow 'base-binary-release' -Version $version) -Version $version -TmpDir $TmpDir
+  } finally {
+    $script:DownloadBearer = ''
+  }
   New-Item -ItemType Directory -Path $L.Supervisor -Force | Out-Null
   Stop-ServiceAndWait -Name $script:SupervisorService
   # VERSION says that this version is installed and was checked, and the next run then takes the file as it is, without a hash. It is
@@ -1222,7 +1741,6 @@ function Invoke-Main {
   if (-not $staging -and -not (Test-Administrator)) { Stop-Install 'privilege_required' 'run as Administrator' }
   if ($Uninstall) { Invoke-Uninstall -L $L -Staging $staging; return }
 
-  $script:OpampEndpoint = $OpampEndpoint
   Test-Inputs
   $arch = Resolve-Arch
   Assert-SupervisorPlatform -Arch $arch
@@ -1234,10 +1752,18 @@ function Invoke-Main {
   Assert-NoConflictingInstall
   $tmpDir = New-WorkDirectory -Staging $staging
   try {
+    if ($script:ServerMode) {
+      $script:Plan = @{}
+      Use-Plan -Plan (Read-Plan -Path (Get-PlanFile -Arch $arch -TmpDir $tmpDir)) -Arch $arch
+      Use-BundleUpdater -TmpDir $tmpDir
+    }
     Write-Log "installing: collector v$($script:CollectorVersion), supervisor v$($script:SupervisorVersion), windows/$arch, site $SiteType/$SiteId"
     # Authenticated updater + Sigstore verifier before any download/execution of collector/supervisor. With a
     # checksums.txt the verifier comes first (it checks the file that carries the hash of the updater).
-    if ($WithUpdater -and $UpdaterChecksumsUrl) {
+    if ($script:ServerMode) {
+      # the updater and the verifier are the myriarch-updater.exe of the installer bundle (Use-BundleUpdater)
+      Resolve-Verifier -L $L
+    } elseif ($WithUpdater -and $UpdaterChecksumsUrl) {
       Resolve-Verifier -L $L
       Get-UpdaterDownload -TmpDir $tmpDir
     } else {
