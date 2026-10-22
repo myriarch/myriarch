@@ -31,7 +31,7 @@ rendering from Git, rollouts in waves, collector version updates through executo
 | Needs an OpAMP server | Yes, an existing OpAMP server that you run or buy elsewhere | You write it | Included (`myriarchd`, needs PostgreSQL) |
 | Remote configuration | Accepts it from a server | You implement what the server sends | Renders it from blueprints in Git, one per collector |
 | Rollouts in waves and approvals | Not among its documented features | You build them | Included |
-| Rollback of a bad configuration | Optional automatic rollback to the last working remote configuration on the host (off by default) | You build it | Per policy, across the fleet: pause, abort or roll back |
+| Rollback of a bad configuration | Optional automatic rollback to the last working remote configuration on the host (off by default) | You build it | Per policy, for the whole rollout: automatic rollback or pause; after a pause, an operator resumes, retries, aborts or rolls back |
 | Collector binary updates | Not implemented upstream (see below) | You build them | Through executors: `myriarch-updater`, a webhook or AWX |
 | Source of truth | Not part of its scope | Yours to decide | A Git repository |
 | Audit of operator actions | Not among its documented features | You build it | Included |

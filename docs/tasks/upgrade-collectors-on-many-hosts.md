@@ -65,8 +65,7 @@ service and checks the health of the collector. If the new version does not beco
 
 The version policy sets the pace: the quickstart policy `canary-then-all` starts targets only inside a maintenance window and, on a
 failure, pauses so that a person decides to resume, retry the failed hosts, abort or roll back. The rollout page shows each target;
-the actions are buttons in the UI and API calls. Details, including the limits on the host side (`update.minimumVersion`,
-downgrades other than the step back to the previous version are refused by default) are in [Roll out a collector version](roll-out-a-collector-version.md).
+the actions are buttons in the UI and API calls. Details, including the limits on the host side (`update.minimumVersion`, and no downgrades except the step back to the previous version by default) are in [Roll out a collector version](roll-out-a-collector-version.md).
 
 ## 4. Hosts without internet access
 
