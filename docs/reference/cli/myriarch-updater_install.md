@@ -1,6 +1,6 @@
 ---
 title: "myriarch-updater install"
-weight: 190
+weight: 200
 description: "Install myriarch-updater as OS service (systemd unit / Windows service)."
 ---
 

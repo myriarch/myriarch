@@ -1,6 +1,6 @@
 ---
 title: "myriarch-updater run"
-weight: 210
+weight: 230
 description: "Run the updater (foreground or as OS service)."
 ---
 
