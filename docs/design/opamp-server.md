@@ -1189,3 +1189,31 @@ path (`http` only together with `--insecure`, the lab variant), and every reques
 The explicit `--opamp-endpoint` wins over the one of the plan. Without `--server`, the version is `--collector-version`, else the version the release was tested with
 (`DEFAULT_COLLECTOR_VERSION`, the `OTELCOL_VERSION` of `ci/versions.env`), and `latest` looks at the redirect of the releases page of the upstream project. The test
 `internal/install/installer_server_test.go` runs the script against a test server for every rule above.
+
+#### The installer on Windows (server mode)
+
+`deploy\scripts\install-windows.ps1 -Server <origin> -TokenFile <file>` is what the Windows command starts (the script is in the zip of the
+updater release, with `myriarch-updater.exe` in the root of the archive). It follows the steps of the Linux installer above with the same limits and patterns
+(`Read-Plan` is the PowerShell counterpart of `parse_plan`, `install.ParseText` the reference) and these differences:
+
+1. The language mode is the first action of the run, before an option is read (`language_mode_unsupported`); the check for packages of the upstream project
+   (`conflicting_install`) comes before the working directory and before the first request, so no token leaves a host that cannot be installed. `-Fleet`, `-PlanWait`
+   (seconds, 1 to 99999) and `-Server` are new parameters; `-WithUpdater` and the `-Updater*` options, `-ReleaseBaseUrl`, `-SupervisorVersion` and `-VerifySignatures skip` are
+   `option_conflict` with `-Server`, and `-Fleet` and `-PlanWait` are `option_conflict` without it.
+2. Requests use `System.Net.HttpWebRequest` with `AllowAutoRedirect` off, not `Invoke-WebRequest`, because Windows PowerShell 5.1 and PowerShell 7 report a 3xx or a 4xx of the
+   cmdlet in different ways and the installer has to see the status and the `Location` of every answer. The token and the grants are the `Authorization` header and nothing else.
+   The certificate is checked against the certificate store of the machine; there is no option for a CA file (a private CA is imported into the store first), and `-CaFile` only
+   goes into the configuration of the supervisor and the updater. The plan answer is limited to 1 MiB on the wire and to 8 KiB by the grammar. Retries, `Retry-After`,
+   the waiting for `preparing` and the codes are those of the Linux installer.
+3. The plan is read from bytes: at most 8 KiB, only the characters of the grammar (a byte table, so no culture or Unicode rule can widen it), `\n` line ends, case-sensitive
+   keys and values, patterns anchored with `\z` (the `$` of .NET also matches before a final line end). Nothing is evaluated: no `Invoke-Expression`, no expansion of a plan value into a
+   command, and `ConvertFrom-Json` reads the problem document of a refusal only (its `code` counts when it has the shape of a code, its `detail` is cut to harmless characters).
+   The file names that the installer expects are `otelcol-contrib_<v>_windows_amd64.tar.gz` and `opampsupervisor_<v>_windows_amd64.exe`.
+4. The verifier and the updater are the `myriarch-updater.exe` that lies two directories above the script: a regular file, no reparse point, copied into the working directory and
+   hashed again when it is installed. The identity, the issuer and the version of `verify-bundle` are the installer's own, and the TUF cache is in the working directory.
+5. Outside staging mode the working directory of the installer is made below `%ProgramFiles%`, like the one of the command, and its DACL is restricted to SYSTEM and the
+   administrators before the first download (a temporary folder admits standard users). The supervisor goes to the path of the service and is checked there
+   (`supervisor_missing`).
+
+The test `internal/install/installer_windows_server_test.go` runs the script in PowerShell 7 in staging mode (`-Root`) against a test server for every rule above and for every
+error code; what needs Windows (ACLs, services, the registry, Windows PowerShell 5.1) is checked by the end-to-end test on a Windows host.
