@@ -1772,10 +1772,10 @@ function Invoke-Main {
   }
   # Before the work directory, a download, a verifier or the stop of a service
   Assert-NoConflictingInstall
+  if ($script:ServerMode) { Assert-BundleDirectory }
   $tmpDir = New-WorkDirectory -Staging $staging
   try {
     if ($script:ServerMode) {
-      Assert-BundleDirectory
       $script:Plan = @{}
       Use-Plan -Plan (Read-Plan -Path (Get-PlanFile -Arch $arch -TmpDir $tmpDir)) -Arch $arch
       Use-BundleUpdater -TmpDir $tmpDir
