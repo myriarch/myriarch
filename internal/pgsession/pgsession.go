@@ -35,9 +35,9 @@ const (
 
 const (
 	userTimeoutParam = "tcp_user_timeout"
-	// keepaliveCount is tcp_keepalives_count; the interval is derived so that a
-	// server that ignores tcp_user_timeout still stays within the budget.
-	keepaliveCount = 5
+	// keepaliveSteps is the number of keepalive intervals into which the
+	// detection budget is divided; the interval is I = D/keepaliveSteps.
+	keepaliveSteps = 6
 	// maxRetryInterval is the retry interval of a follower that waits for the
 	// lock (before the 20 percent jitter).
 	maxRetryInterval = 5 * time.Second
@@ -72,7 +72,8 @@ func Detection(timeout time.Duration) time.Duration {
 
 // Params returns the server parameters for the startup packet. With the
 // detection budget D = Detection(T) the keepalive interval and idle time are
-// both I = D/(count+1), at least 1 second, and:
+// both I = D/6 (whole seconds, at least 1 second), the keepalive count is
+// D/I - 1, and:
 //
 //   - Linux (tcp_user_timeout set): the keepalive timer fires at I, 2I, ... after
 //     the last packet received and the connection is dropped at the first firing
@@ -80,20 +81,25 @@ func Detection(timeout time.Duration) time.Duration {
 //     consulted then. A silent peer is dropped after no less than D - I and less
 //     than D.
 //   - Servers without tcp_user_timeout: the connection is dropped after
-//     I + count*I = (count+1)*I <= D.
+//     I + count*I = (count+1)*I = floor(D/I)*I, which is above D - I and at most
+//     D, so it too lies after the leader gave up and within the budget.
 //
 // All values are whole seconds (milliseconds for the user timeout).
 func Params(timeout time.Duration) map[string]string {
 	d := int64(Detection(timeout) / time.Second)
-	i := d / (keepaliveCount + 1)
+	i := d / keepaliveSteps
 	if i < 1 {
 		i = 1
+	}
+	count := d/i - 1
+	if count < 1 {
+		count = 1
 	}
 	secs := strconv.FormatInt(i, 10)
 	return map[string]string{
 		"tcp_keepalives_idle":     secs,
 		"tcp_keepalives_interval": secs,
-		"tcp_keepalives_count":    strconv.Itoa(keepaliveCount),
+		"tcp_keepalives_count":    strconv.FormatInt(count, 10),
 		userTimeoutParam:          strconv.FormatInt((d-i)*1000, 10),
 	}
 }

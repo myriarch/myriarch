@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"os"
 	"strconv"
 	"testing"
@@ -21,7 +22,7 @@ func TestMain(m *testing.M) { os.Exit(pgtest.RunWithMigratedTemplate(m)) }
 
 func TestParams(t *testing.T) {
 	got := Params(30 * time.Second)
-	want := map[string]string{"tcp_keepalives_idle": "3", "tcp_keepalives_interval": "3", "tcp_keepalives_count": "5", "tcp_user_timeout": "19000"}
+	want := map[string]string{"tcp_keepalives_idle": "3", "tcp_keepalives_interval": "3", "tcp_keepalives_count": "6", "tcp_user_timeout": "19000"}
 	for k, v := range want {
 		if got[k] != v {
 			t.Errorf("%s = %q, want %q", k, got[k], v)
@@ -96,6 +97,9 @@ func TestBudget(t *testing.T) {
 		if cdrop > detect || takeover(cdrop) > T {
 			t.Errorf("T=%v: count-based drop after %v (detection %v)", T, cdrop, detect)
 		}
+		if cdrop <= resign {
+			t.Errorf("T=%v: count-based drop after %v, before the leader gave up at %v", T, cdrop, resign)
+		}
 	}
 }
 
@@ -121,7 +125,7 @@ func TestNewPoolSendsTheParameters(t *testing.T) {
 		t.Fatal(err)
 	}
 	// units differ by server version (the setting is shown with "s" or without)
-	if (idle != "3" && idle != "3s") || (interval != "3" && interval != "3s") || count != "5" {
+	if (idle != "3" && idle != "3s") || (interval != "3" && interval != "3s") || count != "6" {
 		t.Fatalf("session settings idle=%q interval=%q count=%q", idle, interval, count)
 	}
 	// the base pool is not changed
@@ -182,6 +186,14 @@ func TestDedicatedSessionUsesVerifiedTLS(t *testing.T) {
 		if err == nil {
 			p.Close()
 			t.Errorf("%s: the dedicated session was accepted", name)
+			continue
+		}
+		// the refusal must come from the certificate check, not from some other failure
+		var verr *tls.CertificateVerificationError
+		var uerr x509.UnknownAuthorityError
+		var herr x509.HostnameError
+		if !errors.As(err, &verr) && !errors.As(err, &uerr) && !errors.As(err, &herr) {
+			t.Errorf("%s: refused for another reason: %v", name, err)
 		}
 	}
 }

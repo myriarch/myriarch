@@ -36,14 +36,14 @@ The server parameters follow from D. With I = D/6 (rounded down, at least 1 seco
 |---|---|
 | `tcp_keepalives_idle` | I seconds |
 | `tcp_keepalives_interval` | I seconds |
-| `tcp_keepalives_count` | 5 |
+| `tcp_keepalives_count` | D/I − 1 (6 with the default) |
 | `tcp_user_timeout` | (D − I) seconds, in milliseconds |
 
 On Linux a non-zero `tcp_user_timeout` replaces the count as the criterion: PostgreSQL probes at I, 2I, 3I, ... after the
 last packet it received and drops the connection at the first probe time that is at least D − I after it, so a silent peer
 is dropped no earlier than D − I and before D (19 to 22 seconds with the default; D − I is above the 15 seconds after which
 the leader gives up, see below). The keepalive count only matters on a server that does not know
-`tcp_user_timeout`: it drops after 6I, which is again at most D. Because every timing is a whole number of
+`tcp_user_timeout`: it drops after (count + 1) × I = ⌊D/I⌋ × I, which is above D − I (so after the leader gave up) and at most D. Because every timing is a whole number of
 seconds, the steps are rounded in the safe direction for any T, including values that do not divide evenly. Only the two
 sessions get the settings; the pool of ordinary connections keeps the defaults of your server.
 
@@ -93,7 +93,8 @@ With the defaults that is 10 + 2 × 30 + 15 + 5 = **90 seconds**. The chart defa
 the drains finish well within their timeouts, which is the normal case (a quiet replica stops in a few seconds), but not
 one in which both drains run to their limit: set `terminationGracePeriodSeconds: 90` (or, with a different
 `config.server.shutdownTimeout`, the value of the formula) if you cannot accept that. A replica that is killed while it is
-still draining has not released the lock, and the others wait for the failover time of a hard failure.
+still draining loses its open requests and the final flush (last-seen times, events and the offline marking of its agents);
+the operating system closes its connections, so PostgreSQL releases the lock at once and the others take over as usual.
 
 `ha.leaderSessionTimeout` does not enter the formula: a stopping leader releases the lock itself.
 
