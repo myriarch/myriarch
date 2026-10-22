@@ -57,9 +57,11 @@ sections:
   - title: Facts and comparison
     links:
       - page: /project/what-is-myriarch/
-        note: "What Myriarch is and is not: scope, license, size, maturity and version, in one page."
+        title: Facts about myriarch
+        note: "What myriarch is and is not: scope, license, size, maturity and version, in one page."
       - page: /project/comparison/
-        note: "The OpAMP Supervisor alone, a server of your own on opamp-go and Myriarch, with sources and dates, and when Myriarch is not the right choice."
+        title: Supervisor, own server or myriarch compared
+        note: "The OpAMP Supervisor alone, a server of your own on opamp-go and myriarch, with sources and dates, and when myriarch is not the right choice."
       - page: /project/faq/
         note: "Short answers about managing many collectors, version updates, rollouts, the relation to OpenTelemetry and the license."
 

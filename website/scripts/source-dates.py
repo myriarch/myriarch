@@ -2,13 +2,13 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Writes website/data/source_dates.json: the date of the last commit that changed each source file of a content adapter.
+"""Writes website/data/source_dates.json: the author date of the last commit that changed each source file of a content adapter.
 
     python3 -I website/scripts/source-dates.py [--root DIR] [--output FILE]
 
 Hugo takes the date of an ordinary page (lastmod of the sitemap, modified time of the metadata) from Git (enableGitInfo in hugo.yaml).
 The pages of the content adapters (the decision records, the root files, the READMEs that data/repo_pages.yaml lists) are not files of
-the site for Hugo, so it knows no commit for them; the adapters read this file instead. The dates are those of the commit, in UTC, never
+the site for Hugo, so it knows no commit for them; the adapters read this file instead. The dates are the author dates of the commits (the date Hugo's Git info uses, and the one a rebase keeps), in UTC, never
 the time of the build, so two builds of one commit write the same file. The file is generated and ignored by Git.
 
 Sources: every docs/adr/NNNN-*.md and every "source:" of website/data/repo_pages.yaml. A source without a commit (a new, uncommitted file)
@@ -64,7 +64,7 @@ def sources(root):
 
 def commit_date(root, rel):
     """The date of the last commit that changed the file, as UTC with a Z, or None when no commit has."""
-    out = git(root, "log", "-1", "--format=%cI", "--", rel)
+    out = git(root, "log", "-1", "--format=%aI", "--", rel)
     if not out:
         return None
     when = datetime.datetime.fromisoformat(out.replace("Z", "+00:00"))
