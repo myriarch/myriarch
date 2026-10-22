@@ -1,12 +1,12 @@
 ---
 title: "myriarch-updater install-self"
 weight: 210
-description: "Copy this binary to <dir>/myriarch-updater (for init containers)."
+description: "Copy this binary into a directory as myriarch-updater (for init containers)."
 ---
 
 ## myriarch-updater install-self
 
-Copy this binary to &lt;dir>/myriarch-updater (for init containers)
+Copy this binary into a directory as myriarch-updater (for init containers)
 
 ### Synopsis
 

@@ -357,7 +357,7 @@ func NewRootCommand() *cobra.Command {
 
 	installSelfCmd := &cobra.Command{
 		Use:   "install-self <dir>",
-		Short: "Copy this binary to <dir>/myriarch-updater (for init containers)",
+		Short: "Copy this binary into a directory as myriarch-updater (for init containers)",
 		Long: "Copies the running binary to <dir>/myriarch-updater with mode 0755. The write is atomic (a temporary file in <dir>, " +
 			"then a rename), <dir> must be an existing absolute directory and an existing target must be a regular file. " +
 			"An init container uses it to put this static binary on a shared volume where the image of the collector has no shell. " +
