@@ -792,9 +792,10 @@ type HAConfig struct {
 	// LeaderSessionTimeout bounds the failover after a hard failure of the
 	// leader's node: the PostgreSQL sessions of the leader lock and the event
 	// bus get TCP keepalive and user timeout settings derived from it, so the
-	// database releases the lock of a silently dead leader within this time and
-	// another replica becomes leader. A leader that cannot confirm its lock
-	// session gives up leadership itself after half of it. Between 5s and 10m
+	// database releases the lock of a silently dead leader early enough that
+	// another replica, retrying every 5s or T/6 if shorter, becomes leader
+	// within this time in total. A leader that cannot confirm its lock session
+	// gives up leadership itself after half of it. Between 10s and 10m
 	// (default 30s).
 	LeaderSessionTimeout time.Duration `yaml:"leaderSessionTimeout"`
 }

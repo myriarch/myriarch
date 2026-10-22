@@ -9,13 +9,15 @@
 // bounded by the session timeout T (ha.leaderSessionTimeout): the lock session
 // is opened with TCP keepalive and user timeout settings derived from T
 // (internal/pgsession), so the server drops a session whose client node died
-// silently within T. The leader pings the session every T/6 with a timeout of
-// T/3 and gives up leadership at the latest T/2 after the last confirmation,
-// before the server can hand the lock to another replica (no split brain). It
-// then asks the server, over a regular pool connection, to end the lock session
-// at once. Non-leaders retry acquisition every 5s. Never run singleton work
-// without a live lock connection: a failed or timed-out health check ends
-// leadership even if the server has not yet noticed that the session is gone. IsLeader reports false from that moment on, i.e. it is
+// silently within pgsession.Detection(T), and a follower, asking every
+// min(5s, T/6) (+20% jitter), takes the lock within T in total. The leader
+// pings the session every T/6 with a timeout of T/3 and gives up leadership at
+// the latest T/2 after the last confirmation, before the server can hand the
+// lock to another replica (no split brain). It then asks the server, over a
+// regular pool connection, to end the lock session at once. Never run singleton
+// work without a live lock connection: a failed or timed-out health check ends
+// leadership even if the server has not yet noticed that the session is gone.
+// IsLeader reports false from that moment on, i.e. it is
 // already false when the leader context is observed to be cancelled (the
 // leader function may need some time to wind down).
 //
@@ -44,7 +46,9 @@ const DefaultSessionTimeout = 30 * time.Second
 
 // Timing parameters (variables so tests can shorten them).
 var (
-	// RetryInterval between acquisition attempts of a non-leader.
+	// RetryInterval between acquisition attempts of a non-leader, at most; a
+	// session timeout below 30s shortens it (pgsession.RetryInterval), so that
+	// the retry fits into the failover budget.
 	RetryInterval = 5 * time.Second
 )
 
@@ -98,6 +102,11 @@ type elector struct {
 
 var _ leader.Elector = (*elector)(nil)
 
+// retryInterval is the interval between acquisition attempts of a non-leader.
+func (e *elector) retryInterval() time.Duration {
+	return min(RetryInterval, pgsession.RetryInterval(e.sessionTimeout))
+}
+
 // IsLeader implements leader.Elector.
 func (e *elector) IsLeader() bool { return e.leading.Load() }
 
@@ -120,7 +129,7 @@ func (e *elector) Run(ctx context.Context, onElected func(ctx context.Context)) 
 				select {
 				case <-ctx.Done():
 					return nil
-				case <-time.After(jitter(RetryInterval)):
+				case <-time.After(jitter(e.retryInterval())):
 				}
 				continue
 			}
@@ -138,7 +147,7 @@ func (e *elector) Run(ctx context.Context, onElected func(ctx context.Context)) 
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(jitter(RetryInterval)):
+		case <-time.After(jitter(e.retryInterval())):
 		}
 	}
 	return nil
