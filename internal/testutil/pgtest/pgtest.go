@@ -107,6 +107,7 @@ type Server struct {
 	external string
 	adminCfg *pgx.ConnConfig
 	suffix   string
+	tlsCert  string // certificate of the embedded server with PGTEST_TLS (trust anchor of the tests)
 	mu       sync.Mutex
 	created  []string
 }
@@ -140,6 +141,24 @@ func Start(ctx context.Context) (*Server, error) {
 		}
 		attempts, fixed = 1, uint32(p)
 	}
+	startParams := map[string]string{
+		"unix_socket_directories": "", // TCP only
+		"fsync":                   "off",
+		"synchronous_commit":      "off",
+		"full_page_writes":        "off",
+		"max_connections":         "100",
+		"timezone":                "UTC", // initdb otherwise bakes in the host TZ (e.g. Europe/Berlin)
+		"log_timezone":            "UTC",
+	}
+	if os.Getenv(TLSEnv) != "" {
+		tf, err := writeTLSFiles(base)
+		if err != nil {
+			_ = os.RemoveAll(base)
+			return nil, fmt.Errorf("tls certificate: %w", err)
+		}
+		startParams["ssl"], startParams["ssl_cert_file"], startParams["ssl_key_file"] = "on", tf.cert, tf.key
+		s.tlsCert = tf.cert
+	}
 	var lastErr error
 	for attempt := 0; attempt < attempts; attempt++ {
 		port, err := freePort()
@@ -163,15 +182,7 @@ func Start(ctx context.Context) (*Server, error) {
 			BinariesPath(binDir).
 			StartTimeout(60 * time.Second).
 			Logger(s.log).
-			StartParameters(map[string]string{
-				"unix_socket_directories": "", // TCP only
-				"fsync":                   "off",
-				"synchronous_commit":      "off",
-				"full_page_writes":        "off",
-				"max_connections":         "100",
-				"timezone":                "UTC", // initdb otherwise bakes in the host TZ (e.g. Europe/Berlin)
-				"log_timezone":            "UTC",
-			})
+			StartParameters(startParams)
 		if os.Getenv("PGTEST_INHERIT_LOCALE") == "" {
 			// Without this initdb inherits LANG/LC_* of the developer shell (e.g. de_DE.UTF-8).
 			cfg = cfg.Locale("C").Encoding("UTF8")
@@ -236,7 +247,7 @@ var dbnameKV = regexp.MustCompile(`(^|\s)(dbname|database)\s*=\s*('([^'\\]|\\.)*
 // server it is PGTEST_DSN with the database replaced.
 func (s *Server) DSN(db string) string {
 	if s.external == "" {
-		return fmt.Sprintf("postgres://%s:%s@127.0.0.1:%d/%s?sslmode=disable", user, password, s.Port, db)
+		return fmt.Sprintf("postgres://%s:%s@127.0.0.1:%d/%s?%s", user, password, s.Port, db, s.sslQuery())
 	}
 	if u, err := url.Parse(s.external); err == nil && (u.Scheme == "postgres" || u.Scheme == "postgresql") {
 		u.Path, u.RawPath = "/"+db, ""
@@ -273,7 +284,14 @@ func (s *Server) PrepareTemplate(ctx context.Context, name string, migrate func(
 	if s.external != "" {
 		name = fmt.Sprintf("%s_%s", name, s.suffix) // unique per test binary
 	}
-	if err := s.createDatabase(ctx, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize(), name); err != nil {
+	coll, err := collationClause()
+	if err != nil {
+		return err
+	}
+	if err := s.createDatabase(ctx, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize()+" "+coll, name); err != nil {
+		if coll != "" {
+			return fmt.Errorf("%w (%s=%q)", err, CollationEnv, os.Getenv(CollationEnv))
+		}
 		return err
 	}
 	pool, err := pgxpool.New(ctx, s.DSN(name))
@@ -306,6 +324,29 @@ func (s *Server) NewDatabase(ctx context.Context) (*pgxpool.Pool, func(), error)
 	}
 	pool, err := pgxpool.New(ctx, s.DSN(name))
 	if err != nil {
+		return nil, nil, err
+	}
+	return pool, func() {
+		pool.Close()
+		s.dropDatabase(context.Background(), name)
+	}, nil
+}
+
+// NewEmptyDatabase creates a database without any schema (with the collation of
+// PGTEST_COLLATION) and returns a pool for it. The cleanup func closes the pool
+// and drops the database.
+func (s *Server) NewEmptyDatabase(ctx context.Context) (*pgxpool.Pool, func(), error) {
+	coll, err := collationClause()
+	if err != nil {
+		return nil, nil, err
+	}
+	name := s.databaseName("e")
+	if err := s.createDatabase(ctx, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize()+" "+coll, name); err != nil {
+		return nil, nil, err
+	}
+	pool, err := pgxpool.New(ctx, s.DSN(name))
+	if err != nil {
+		s.dropDatabase(context.Background(), name)
 		return nil, nil, err
 	}
 	return pool, func() {

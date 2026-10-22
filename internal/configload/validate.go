@@ -23,6 +23,7 @@ import (
 	"github.com/myriarch/myriarch/internal/gitops"
 	"github.com/myriarch/myriarch/internal/netguard"
 	"github.com/myriarch/myriarch/internal/notify/channels"
+	"github.com/myriarch/myriarch/internal/pgsession"
 	"github.com/myriarch/myriarch/internal/release"
 )
 
@@ -457,6 +458,9 @@ func ValidateOptions(c *config.Config, opts Options) error {
 	v.positive("ha.heartbeatInterval", c.HA.HeartbeatInterval)
 	if c.HA.HeartbeatInterval > 10*time.Second {
 		v.add("ha.heartbeatInterval", "must not exceed 10s (replicas are considered dead after 30s without heartbeat)")
+	}
+	if t := c.HA.LeaderSessionTimeout; t < pgsession.MinTimeout || t > pgsession.MaxTimeout {
+		v.add("ha.leaderSessionTimeout", fmt.Sprintf("must be between %v and %v, got %v", pgsession.MinTimeout, pgsession.MaxTimeout, t))
 	}
 
 	if len(v.issues) == 0 {

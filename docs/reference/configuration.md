@@ -283,6 +283,7 @@ How to read the tables: **Type** `duration` is a string in Go syntax. **Default*
 | `ha.replicaId` | string | empty | `replicaId` identifies the replica (default: hostname + "-" + random suffix). |
 | `ha.leaderLockKey` | integer | `7012024` | `leaderLockKey` is the Postgres advisory lock key of the leader election (default 7012024). |
 | `ha.heartbeatInterval` | duration | `10s` | `heartbeatInterval` is the interval of the replica registry heartbeat (default 10s). |
+| `ha.leaderSessionTimeout` | duration | `30s` | `leaderSessionTimeout` bounds the failover after a hard failure of the leader's node: the PostgreSQL sessions of the leader lock and the event bus get TCP keepalive and user timeout settings derived from it, so the database releases the lock of a silently dead leader within this time and another replica becomes leader. A leader that cannot confirm its lock session gives up leadership itself after half of it. Between 5s and 10m (default 30s). |
 
 ## ui
 

@@ -5,12 +5,17 @@
 // advisory lock (pg_try_advisory_lock(key)) held on a dedicated connection.
 //
 // Semantics: the replica that acquires the lock is leader until its
-// connection breaks (lock released by the server) or ctx ends. The elector
-// checks the connection every 5s (SELECT 1); on failure it cancels the
-// leader context immediately, then retries acquisition every 5s. Never
-// run singleton work without a live lock connection: a failed or timed-out
-// health check ends leadership even if the server has not yet noticed that
-// the session is gone. IsLeader reports false from that moment on, i.e. it is
+// connection breaks (lock released by the server) or ctx ends. The failover is
+// bounded by the session timeout T (ha.leaderSessionTimeout): the lock session
+// is opened with TCP keepalive and user timeout settings derived from T
+// (internal/pgsession), so the server drops a session whose client node died
+// silently within T. The leader pings the session every T/6 with a timeout of
+// T/3 and gives up leadership at the latest T/2 after the last confirmation,
+// before the server can hand the lock to another replica (no split brain). It
+// then asks the server, over a regular pool connection, to end the lock session
+// at once. Non-leaders retry acquisition every 5s. Never run singleton work
+// without a live lock connection: a failed or timed-out health check ends
+// leadership even if the server has not yet noticed that the session is gone. IsLeader reports false from that moment on, i.e. it is
 // already false when the leader context is observed to be cancelled (the
 // leader function may need some time to wind down).
 //
@@ -30,38 +35,65 @@ import (
 
 	"github.com/myriarch/myriarch/internal/leader"
 	"github.com/myriarch/myriarch/internal/metrics"
+	"github.com/myriarch/myriarch/internal/pgsession"
 )
+
+// DefaultSessionTimeout is the session timeout of an elector without
+// WithSessionTimeout (the default of ha.leaderSessionTimeout).
+const DefaultSessionTimeout = 30 * time.Second
 
 // Timing parameters (variables so tests can shorten them).
 var (
 	// RetryInterval between acquisition attempts of a non-leader.
 	RetryInterval = 5 * time.Second
-	// CheckInterval between connection health checks of the leader.
-	CheckInterval = 5 * time.Second
-	// CheckTimeout for one health check.
-	CheckTimeout = 3 * time.Second
 )
 
-// New returns an Elector using advisory lock key.
-func New(pool *pgxpool.Pool, key int64, replicaID string, logger *slog.Logger, reg prometheus.Registerer) leader.Elector {
+// Option configures an Elector.
+type Option func(*elector)
+
+// WithSessionTimeout bounds the failover: see the package documentation. It
+// must be positive (the default is DefaultSessionTimeout).
+func WithSessionTimeout(d time.Duration) Option {
+	return func(e *elector) {
+		if d > 0 {
+			e.sessionTimeout = d
+		}
+	}
+}
+
+// New returns an Elector using advisory lock key. pool is the regular pool of
+// the process: the elector opens its lock session on a pool of its own with the
+// settings of pool and the dead-peer parameters of the session timeout, and
+// uses pool to end a lock session that it can not reach any more.
+func New(pool *pgxpool.Pool, key int64, replicaID string, logger *slog.Logger, reg prometheus.Registerer, opts ...Option) leader.Elector {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &elector{
+	e := &elector{
 		pool: pool, key: key, replicaID: replicaID, log: logger.With("component", "leader"),
+		sessionTimeout: DefaultSessionTimeout,
 		gauge: metrics.Register(reg, prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "myriarch_leader", Help: "1 while this replica holds the leader lock, else 0.",
 		})),
 	}
+	for _, o := range opts {
+		o(e)
+	}
+	return e
 }
 
 type elector struct {
-	pool      *pgxpool.Pool
-	key       int64
-	replicaID string
-	log       *slog.Logger
-	gauge     prometheus.Gauge
-	leading   atomic.Bool
+	pool           *pgxpool.Pool // regular pool
+	lockPool       *pgxpool.Pool // pool of the lock session (created by Run)
+	sessionTimeout time.Duration
+	connTweak      func(*pgxpool.Config) // tests: route the lock session through a proxy
+	// tests: fixed timing of the health check
+	checkInterval, checkTimeout time.Duration
+	key                         int64
+	replicaID                   string
+	log                         *slog.Logger
+	gauge                       prometheus.Gauge
+	leading                     atomic.Bool
 }
 
 var _ leader.Elector = (*elector)(nil)
@@ -72,7 +104,28 @@ func (e *elector) IsLeader() bool { return e.leading.Load() }
 // Run implements leader.Elector.
 func (e *elector) Run(ctx context.Context, onElected func(ctx context.Context)) error {
 	e.gauge.Set(0)
+	defer func() {
+		if e.lockPool != nil {
+			e.lockPool.Close()
+			e.lockPool = nil
+		}
+	}()
 	for ctx.Err() == nil {
+		if e.lockPool == nil {
+			p, err := pgsession.NewPool(ctx, e.pool, e.sessionTimeout, e.connTweak, e.log)
+			if err != nil {
+				if ctx.Err() == nil {
+					e.log.Warn("leader election: open lock session pool failed", "error", err)
+				}
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.After(jitter(RetryInterval)):
+				}
+				continue
+			}
+			e.lockPool = p
+		}
 		held := e.tryLead(ctx, onElected)
 		if ctx.Err() != nil {
 			return nil
@@ -95,7 +148,7 @@ func (e *elector) Run(ctx context.Context, onElected func(ctx context.Context)) 
 // became leader (and the leadership has ended by now).
 func (e *elector) tryLead(ctx context.Context, onElected func(ctx context.Context)) bool {
 	actx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	conn, err := e.pool.Acquire(actx)
+	conn, err := e.lockPool.Acquire(actx)
 	cancel()
 	if err != nil {
 		if ctx.Err() == nil {
@@ -105,7 +158,8 @@ func (e *elector) tryLead(ctx context.Context, onElected func(ctx context.Contex
 	}
 	qctx, qcancel := context.WithTimeout(ctx, 10*time.Second)
 	var got bool
-	err = conn.QueryRow(qctx, "SELECT pg_try_advisory_lock($1)", e.key).Scan(&got)
+	var pid int32
+	err = conn.QueryRow(qctx, "SELECT pg_try_advisory_lock($1), pg_backend_pid()", e.key).Scan(&got, &pid)
 	qcancel()
 	if err != nil || !got {
 		if err != nil && ctx.Err() == nil {
@@ -126,7 +180,7 @@ func (e *elector) tryLead(ctx context.Context, onElected func(ctx context.Contex
 	monitorDone := make(chan struct{})
 	go func() {
 		defer close(monitorDone)
-		e.monitor(lctx, lcancel, conn)
+		e.monitor(lctx, lcancel, conn, pid)
 	}()
 
 	onElected(lctx)
@@ -146,8 +200,14 @@ func (e *elector) tryLead(ctx context.Context, onElected func(ctx context.Contex
 
 // monitor pings the lock connection; on failure it clears the leader state and
 // cancels the leader context.
-func (e *elector) monitor(ctx context.Context, cancel context.CancelFunc, conn *pgxpool.Conn) {
-	t := time.NewTicker(CheckInterval)
+func (e *elector) monitor(ctx context.Context, cancel context.CancelFunc, conn *pgxpool.Conn, pid int32) {
+	// health check every T/6 with a timeout of T/3: leadership ends at the
+	// latest T/2 after the last confirmed check
+	interval, timeout := e.sessionTimeout/6, e.sessionTimeout/3
+	if e.checkInterval > 0 {
+		interval, timeout = e.checkInterval, e.checkTimeout
+	}
+	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {
@@ -155,7 +215,7 @@ func (e *elector) monitor(ctx context.Context, cancel context.CancelFunc, conn *
 			return
 		case <-t.C:
 		}
-		pctx, pcancel := context.WithTimeout(ctx, CheckTimeout)
+		pctx, pcancel := context.WithTimeout(ctx, timeout)
 		var one int
 		err := conn.QueryRow(pctx, "SELECT 1").Scan(&one)
 		pcancel()
@@ -169,8 +229,27 @@ func (e *elector) monitor(ctx context.Context, cancel context.CancelFunc, conn *
 			e.leading.Store(false)
 			e.gauge.Set(0)
 			cancel()
+			e.terminateSession(pid)
 			return
 		}
+	}
+}
+
+// terminateSession asks the server over the regular pool to end the lock
+// session of backend pid, so that another replica need not wait until the
+// server notices the dead connection. Only a backend that holds the lock is
+// ended. It is best effort: if the database is unreachable, the keepalive
+// settings of the session end it.
+func (e *elector) terminateSession(pid int32) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := e.pool.Exec(ctx, `SELECT pg_terminate_backend(l.pid) FROM pg_locks l
+WHERE l.pid = $1 AND l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+  AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
+  AND l.classid = (($2::bigint >> 32) & 4294967295)::bigint::oid
+  AND l.objid = ($2::bigint & 4294967295)::bigint::oid`, pid, e.key)
+	if err != nil {
+		e.log.Warn("could not end the lock session on the server, it ends by itself", "error", err)
 	}
 }
 

@@ -200,6 +200,44 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  # ---- database matrix: the database tests on an embedded PostgreSQL with TLS and with a collation other than C -------------------
+  # go-test-linux runs the whole suite against the plain PostgreSQL service (C collation, no TLS). This job repeats the
+  # database-facing packages in the two environments the service container can not offer (internal/testutil/pgtest, PGTEST_TLS and
+  # PGTEST_COLLATION). The upgrade tests from an empty database and from the schema of v0.1.0 run in every job above.
+  db-matrix:
+    name: db-matrix (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: tls
+            tls: '1'
+            collation: ''
+          - name: collation
+            tls: ''
+            collation: en_US.UTF-8
+    env:
+      PGTEST_TLS: ${{ matrix.tls }}
+      PGTEST_COLLATION: ${{ matrix.collation }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+      - name: Cache the embedded PostgreSQL binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/myriarch/embedded-postgres
+          key: pgtest-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
+      - name: Run the database tests (-race, embedded PostgreSQL)
+        run: |
+          ulimit -n 10240
+          go test -race -count=1 ./internal/store/... ./internal/leader/... ./internal/eventbus/... ./internal/pgsession/... ./internal/testutil/...
+
   # ---- web UI: schema drift, typecheck, lint, formatting, tests, build ------------------------------------------------------
   web:
     name: web
@@ -468,7 +506,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [go, go-test-linux, go-test-native, web, build, shell-helm, docs, website, compliance, dependency-review, workflows, scripts, e2e]
+    needs: [go, go-test-linux, go-test-native, db-matrix, web, build, shell-helm, docs, website, compliance, dependency-review, workflows, scripts, e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

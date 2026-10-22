@@ -193,13 +193,13 @@ func run(ctx context.Context, cfg config.Config, opts runOptions) error {
 	// must be closed before the pool (defers run last-in first-out).
 	defer st.Close()
 
-	bus, err := pgbus.New(ctx, pool, replicaID, logger, reg)
+	bus, err := pgbus.New(ctx, pool, replicaID, logger, reg, pgbus.WithSessionTimeout(cfg.HA.LeaderSessionTimeout))
 	if err != nil {
 		return fmt.Errorf("event bus: %w", err)
 	}
 	defer bus.Close()
 	ready := readiness(db, bus)
-	elector := pglock.New(pool, cfg.HA.LeaderLockKey, replicaID, logger, reg)
+	elector := pglock.New(pool, cfg.HA.LeaderLockKey, replicaID, logger, reg, pglock.WithSessionTimeout(cfg.HA.LeaderSessionTimeout))
 	auditRec := audit.NewRecorder(st.Audit(), logger)
 	agentCtl := control.NewBusControl(bus)
 

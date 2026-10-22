@@ -789,6 +789,14 @@ type HAConfig struct {
 	// HeartbeatInterval is the interval of the replica registry heartbeat
 	// (default 10s).
 	HeartbeatInterval time.Duration `yaml:"heartbeatInterval"`
+	// LeaderSessionTimeout bounds the failover after a hard failure of the
+	// leader's node: the PostgreSQL sessions of the leader lock and the event
+	// bus get TCP keepalive and user timeout settings derived from it, so the
+	// database releases the lock of a silently dead leader within this time and
+	// another replica becomes leader. A leader that cannot confirm its lock
+	// session gives up leadership itself after half of it. Between 5s and 10m
+	// (default 30s).
+	LeaderSessionTimeout time.Duration `yaml:"leaderSessionTimeout"`
 }
 
 // DevConfig holds the settings of the development mode.
@@ -889,8 +897,9 @@ func Default() Config {
 		UI:        UIConfig{DefaultLanguage: "en"},
 		Telemetry: TelemetryConfig{LogLevel: "info", LogFormat: "json", Metrics: true},
 		HA: HAConfig{
-			LeaderLockKey:     7012024,
-			HeartbeatInterval: 10 * time.Second,
+			LeaderLockKey:        7012024,
+			HeartbeatInterval:    10 * time.Second,
+			LeaderSessionTimeout: 30 * time.Second,
 		},
 		Dev: DevConfig{
 			DataDir:             ".dev",
