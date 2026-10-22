@@ -78,10 +78,21 @@ func BridgeModeOfAgent(a *Agent) BridgeMode {
 	if a == nil {
 		return BridgeModeUnknown
 	}
-	if _, ok := a.IdentifyingAttributes[AttrBridgeMode]; ok {
-		return BridgeModeOf(a.IdentifyingAttributes)
+	// Standalone only when every reported value says so: the Bridge writes the
+	// attribute itself, and a contradiction resolves to the stricter reading.
+	var mode BridgeMode
+	found := false
+	for _, attrs := range []map[string]string{a.IdentifyingAttributes, a.NonIdentifyingAttributes} {
+		if _, ok := attrs[AttrBridgeMode]; !ok {
+			continue
+		}
+		m := BridgeModeOf(attrs)
+		if found && m != mode {
+			return BridgeModeUnknown
+		}
+		mode, found = m, true
 	}
-	return BridgeModeOf(a.NonIdentifyingAttributes)
+	return mode
 }
 
 // BridgeConfigLock explains why a fleet may not send remote configuration to

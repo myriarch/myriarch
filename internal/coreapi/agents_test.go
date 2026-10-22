@@ -451,6 +451,10 @@ func TestBridgeAgentRefusesRestartAndHasNoEffectiveConfig(t *testing.T) {
 	if n := len(e.ctl.list()); n != 0 {
 		t.Fatalf("the restart of a Bridge must not reach the control: %v", e.ctl.list())
 	}
+	evs, _, _ := e.db.Audit().List(context.Background(), store.AuditFilter{Action: "agent.restart", Limit: 10})
+	if len(evs) != 1 || evs[0].Result != "failure" || evs[0].TargetID != bridge.String() {
+		t.Fatalf("the refused restart is audited as a failure: %+v", evs)
+	}
 	if r := e.get("/agents/" + bridge.String() + "/effective-config"); r.Code != 404 {
 		t.Fatalf("effective config of a Bridge: %d %s", r.Code, r.Body)
 	}

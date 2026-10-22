@@ -52,6 +52,9 @@ func TestBridgeIsNotRenderedAConfigWithoutTheOptIn(t *testing.T) {
 	assert.Equal(t, "edge-nl", ag.Assignment.FleetName)
 	assert.True(t, ag.Assignment.DesiredConfigHash.IsZero())
 	assert.Empty(t, ag.Assignment.TargetVersion, "a Bridge has no target version")
+	for _, ev := range e.st.Events(id) {
+		assert.NotContains(t, ev.Message, "render failed", "the lock is no render error")
+	}
 }
 
 func TestBridgeInStandaloneModeIsAssignedWithTheOptIn(t *testing.T) {
@@ -64,6 +67,7 @@ func TestBridgeInStandaloneModeIsAssignedWithTheOptIn(t *testing.T) {
 	assert.False(t, as.AssignedConfigHash.IsZero())
 	assert.True(t, as.DesiredChanged)
 	assert.False(t, e.st.Agent(id).Assignment.DesiredConfigHash.IsZero())
+	assert.Empty(t, e.st.Agent(id).Assignment.TargetVersion, "a Bridge is no member for versions, with the opt-in as well")
 }
 
 func TestBridgeInOperatorModeStaysLockedWithTheOptIn(t *testing.T) {

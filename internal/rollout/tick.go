@@ -183,6 +183,21 @@ func (rc *runCtx) loadAgents(ids []domain.AgentID) {
 
 func (rc *runCtx) agent(id domain.AgentID) *domain.Agent { return rc.agents[id] }
 
+// bridgeHeldBack returns why a target is skipped because its agent is an OpAMP
+// Bridge now, or "". A target can predate that (a rollout from before the
+// upgrade, or an agent that reports the Bridge attributes later); no executor
+// is called for a Bridge (ADR-0037). A config target of a Bridge stays valid
+// while its fleet configures it.
+func (rc *runCtx) bridgeHeldBack(ag *domain.Agent) string {
+	if ag.Kind != domain.AgentKindBridge {
+		return ""
+	}
+	if rc.r.Kind == domain.RolloutKindVersion {
+		return domain.BridgeVersionRefused
+	}
+	return ag.Assignment.Error
+}
+
 func (rc *runCtx) updaterOf(a *domain.Agent) *domain.Agent {
 	if a == nil || a.Updater == nil {
 		return nil
@@ -910,6 +925,10 @@ func (rc *runCtx) evalInFlight() error {
 			rc.setTarget(i, domain.TargetSkipped, "agent left the fleet")
 			continue
 		}
+		if why := rc.bridgeHeldBack(ag); why != "" {
+			rc.setTarget(i, domain.TargetSkipped, why)
+			continue
+		}
 		if rc.r.Kind == domain.RolloutKindConfig {
 			if rc.evalConfig(i, t, ag) {
 				reconcile = append(reconcile, i)
@@ -1050,6 +1069,10 @@ func (rc *runCtx) startTargets(cur int) (bool, error) {
 			continue
 		case ag.Assignment.FleetName != r.FleetName:
 			rc.setTarget(i, domain.TargetSkipped, "agent left the fleet")
+			continue
+		}
+		if why := rc.bridgeHeldBack(ag); why != "" {
+			rc.setTarget(i, domain.TargetSkipped, why)
 			continue
 		}
 		if !ag.IsOnline() {

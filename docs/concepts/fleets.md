@@ -101,7 +101,8 @@ the cluster; myriarch shows it in the inventory and leaves its configuration alo
     offer: the first message, a heartbeat, a push, a resync or a reconnect.
   - *Restarts:* the restart command is refused for a Bridge, with and without the opt-in. The REST action answers `412`
     and the audit log records the attempt. Restart the workloads through Kubernetes.
-  - *Version rollouts:* a Bridge is never a target. Change a version with `spec.image` of the collector resources in your
+  - *Version rollouts:* a Bridge is never a target, not even of a rollout that began before the agent was recognised.
+    A Bridge that the fleet configures takes part in config rollouts like a collector. Change a version with `spec.image` of the collector resources in your
     deployment repository, or with a `gitops-pr` executor in a fleet of collectors.
   - *Effective configuration:* the server keeps none for a Bridge, because it holds the complete collector resources.
   - Every action that is held back is an agent event of the type `bridge_locked` and an audit entry

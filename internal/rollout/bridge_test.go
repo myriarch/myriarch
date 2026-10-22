@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/myriarch/myriarch/internal/domain"
 )
@@ -44,7 +45,75 @@ func TestVersionRolloutSkipsOpAMPBridgeAgents(t *testing.T) {
 	e.plan()
 	e.plan()
 	assert.Equal(t, 1, count(), "planning again does not repeat the event")
+	n := 0
+	for _, a := range e.auditActions() {
+		if a == "agent.bridge_held_back" {
+			n++
+		}
+	}
+	assert.Equal(t, 1, n, "an audit entry as well, once")
 	for _, id := range good {
 		assert.Empty(t, e.st.Events(id), "nothing is noted for a collector")
 	}
+}
+
+func bridgeOpt(mode string) agentOpt {
+	return func(_ int, a *domain.Agent) {
+		a.Kind = domain.AgentKindBridge
+		a.NonIdentifyingAttributes[domain.AttrBridgeMode] = mode
+	}
+}
+
+// A target that was created while the agent still counted as a collector is
+// skipped once the agent reports as a Bridge: no executor is called for it.
+func TestVersionRolloutSkipsTargetThatBecameABridge(t *testing.T) {
+	e := newEnv(t)
+	e.setPolicy("p", spec(allWave()))
+	versionFleet(e)
+	ids := e.addAgents(2, "f", inSync())
+	e.publishSnapshot()
+	e.plan()
+	r := e.only()
+	require.Len(t, e.targets(r.ID), 2)
+
+	a := e.st.Agent(ids[0])
+	a.Kind = domain.AgentKindBridge
+	a.NonIdentifyingAttributes[domain.AttrBridgeMode] = "standalone"
+	e.st.PutAgent(*a)
+	e.steps(3)
+
+	for _, c := range e.exec.startCalls {
+		for _, tg := range c.Targets {
+			assert.NotEqual(t, ids[0], tg.AgentID, "no executor call for the Bridge")
+		}
+	}
+	tg := e.targetOf(r.ID, ids[0])
+	assert.Equal(t, domain.TargetSkipped, tg.Status)
+	assert.Equal(t, domain.BridgeVersionRefused, tg.LastError)
+}
+
+// A Bridge that its fleet configures is a member of config rollouts, so a
+// change in Git moves its desired config like that of a collector; a locked
+// Bridge is not.
+func TestConfigRolloutIncludesOnlyBridgesThatTheirFleetConfigures(t *testing.T) {
+	e := newEnv(t)
+	e.setPolicy("p", spec(allWave()))
+	e.addFleet("f", func(f *domain.Fleet) { f.Bridge.Manage = true })
+	e.addFleet("g")
+	managed := e.addAgents(1, "f", bridgeOpt("standalone"))
+	operator := e.addAgents(1, "f", bridgeOpt("operator"))
+	locked := e.addAgents(1, "g", bridgeOpt("standalone"))
+	coll := e.addAgents(1, "f")
+	e.publishSnapshot()
+	e.plan()
+
+	var got []domain.AgentID
+	for _, r := range e.rollouts() {
+		for _, tg := range e.targets(r.ID) {
+			got = append(got, tg.AgentID)
+		}
+	}
+	assert.ElementsMatch(t, append(managed, coll...), got)
+	assert.NotContains(t, got, operator[0])
+	assert.NotContains(t, got, locked[0])
 }

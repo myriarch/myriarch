@@ -53,7 +53,14 @@ func (s *Server) reconcile(sess *session, flags uint64) *protobufs.ServerToAgent
 	}
 
 	// ---- remote config
-	if domain.HasCapability(a.Capabilities, domain.CapAcceptsRemoteConfig) && !a.Assignment.DesiredConfigHash.IsZero() && !s.bridgeConfigLocked(sess, a) {
+	held := false
+	if a.Kind == domain.AgentKindBridge && domain.HasCapability(a.Capabilities, domain.CapAcceptsRemoteConfig) &&
+		(a.Assignment.FleetName != "" || !a.Assignment.DesiredConfigHash.IsZero()) {
+		// Also without a desired hash: a fleet that does not configure the Bridge
+		// renders none, and the lock itself is what gets recorded.
+		held = s.bridgeConfigLocked(sess, a)
+	}
+	if domain.HasCapability(a.Capabilities, domain.CapAcceptsRemoteConfig) && !a.Assignment.DesiredConfigHash.IsZero() && !held {
 		desired := a.Assignment.DesiredConfigHash
 		needs := sess.resync || configNeedsOffer(a, desired)
 		stale := confirmed && !needs && s.staleApplying(sess, a, desired, now)

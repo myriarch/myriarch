@@ -184,3 +184,32 @@ func TestCollectorIsUnchanged(t *testing.T) {
 		t.Fatal("nothing is held back from a collector")
 	}
 }
+
+// The real assigner sets no desired config for a Bridge that its fleet does not
+// configure. The lock is still recorded, once, as an event and an audit entry.
+func TestBridgeLockIsRecordedWithoutADesiredConfig(t *testing.T) {
+	r := newRig(t, rigOpts{holdBridge: true})
+	optIn(t, r, false)
+	id := newAgentID()
+	a := r.connect("", id, capsCollector)
+	a.send(firstMessage(id, bridgeDesc("standalone")))
+	if m := a.mustRecv(); m.RemoteConfig != nil {
+		t.Fatal("a Bridge without a desired config is offered one")
+	}
+	if !r.agent(id).Assignment.DesiredConfigHash.IsZero() {
+		t.Fatal("the assignment sets no desired config of the Bridge")
+	}
+	r.waitEvent(id, domain.AgentEventBridgeLocked)
+	for i := 0; i < 3; i++ {
+		a.send(&protobufs.AgentToServer{})
+		a.mustRecv()
+	}
+	if n := r.countEvents(id, domain.AgentEventBridgeLocked); n != 1 {
+		t.Fatalf("%d bridge_locked events, want 1", n)
+	}
+	eventually(t, "the audit entry", 5*time.Second, func() bool { return r.auditActions()["agent.bridge_held_back"] == 1 })
+	time.Sleep(100 * time.Millisecond)
+	if n := r.auditActions()["agent.bridge_held_back"]; n != 1 {
+		t.Fatalf("%d audit entries, want 1", n)
+	}
+}

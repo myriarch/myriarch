@@ -252,6 +252,9 @@ func (rc *runCtx) rollbackConfig(touched []int) error {
 			// Moved to another fleet: its desired config belongs to that fleet now.
 			rc.setTarget(i, domain.TargetSkipped, "agent left the fleet")
 			continue
+		case rc.bridgeHeldBack(ag) != "":
+			rc.setTarget(i, domain.TargetSkipped, rc.bridgeHeldBack(ag))
+			continue
 		case t.FromRef == "":
 			rc.setTarget(i, domain.TargetRolledBack, "no previous configuration known")
 			continue
@@ -321,6 +324,9 @@ func (rc *runCtx) rollbackVersion(touched []int) error {
 			continue
 		case ag.Assignment.FleetName != rc.r.FleetName:
 			rc.setTarget(i, domain.TargetSkipped, "agent left the fleet")
+			continue
+		case rc.bridgeHeldBack(ag) != "":
+			rc.setTarget(i, domain.TargetSkipped, rc.bridgeHeldBack(ag))
 			continue
 		case t.FromRef == "":
 			rc.setTarget(i, domain.TargetRolledBack, "no previous version known")

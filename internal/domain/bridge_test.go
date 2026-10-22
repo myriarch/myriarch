@@ -90,3 +90,33 @@ func TestFleetSpecSerializesBridgeOnlyWhenSet(t *testing.T) {
 		t.Errorf("a stored spec without the block reads as not managed: %+v %v", old.Bridge, err)
 	}
 }
+
+// A contradiction between the identifying and the non-identifying attributes
+// resolves to the stricter reading: only agreeing values give standalone.
+func TestBridgeModeOfAgentFailsClosedOnContradiction(t *testing.T) {
+	cases := []struct {
+		name  string
+		ident map[string]string
+		nonid map[string]string
+		want  BridgeMode
+	}{
+		{"non-identifying only", nil, map[string]string{AttrBridgeMode: "standalone"}, BridgeModeStandalone},
+		{"identifying only", map[string]string{AttrBridgeMode: "standalone"}, nil, BridgeModeStandalone},
+		{"both agree", map[string]string{AttrBridgeMode: "standalone"}, map[string]string{AttrBridgeMode: "standalone"}, BridgeModeStandalone},
+		{"operator wins non-identifying", map[string]string{AttrBridgeMode: "standalone"}, map[string]string{AttrBridgeMode: "operator"}, BridgeModeUnknown},
+		{"operator wins identifying", map[string]string{AttrBridgeMode: "operator"}, map[string]string{AttrBridgeMode: "standalone"}, BridgeModeUnknown},
+		{"none", nil, nil, BridgeModeUnknown},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := &Agent{IdentifyingAttributes: c.ident, NonIdentifyingAttributes: c.nonid}
+			if got := BridgeModeOfAgent(a); got != c.want {
+				t.Errorf("mode %q, want %q", got, c.want)
+			}
+			f := &Fleet{ObjectMeta: ObjectMeta{Name: "f"}, FleetSpec: FleetSpec{Bridge: BridgeSpec{Manage: true}}}
+			if locked := BridgeConfigLock(a, f) != ""; locked != (c.want != BridgeModeStandalone) {
+				t.Errorf("locked %v with the opt-in", locked)
+			}
+		})
+	}
+}

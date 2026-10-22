@@ -230,6 +230,7 @@ func (s *Service) VersionSelections(ctx context.Context) (map[string]*domain.Fle
 type outcome struct {
 	assignment      domain.Assignment
 	assignmentWrote bool // SetAssignment was written (fleet, hash, version or error changed)
+	bridgeLocked    bool // the agent is a Bridge that its fleet does not configure
 }
 
 func (s *Service) lockFor(id domain.AgentID) *sync.Mutex { return &s.locks[int(id[15])%lockStripes] }
@@ -252,6 +253,8 @@ func (s *Service) AssignAgent(ctx context.Context, id domain.AgentID) (domain.As
 	result := "ok"
 	if err != nil {
 		result = "error"
+	} else if out.bridgeLocked {
+		result = "bridge_locked"
 	} else if out.assignment.Error != "" {
 		result = "render_error"
 	}
@@ -367,16 +370,20 @@ func (s *Service) assignOne(ctx context.Context, st *state, ag *domain.Agent, li
 		// server holds the offer back as well.
 		if reason := domain.BridgeConfigLock(ag, fleet); reason != "" {
 			res.assignment.Error = reason
+			res.bridgeLocked = true
 			if err := write(store.AgentAssignmentUpdate{FleetName: fleet.Name, Error: reason}); err != nil {
 				return res, err
 			}
 			if prev.FleetName != fleet.Name {
-				s.fleetEvent(ctx, ag.ID, fleet.Name, prev.FleetName, snap.Commit, reason)
+				s.fleetEvent(ctx, ag.ID, fleet.Name, prev.FleetName, snap.Commit, "")
 			}
 			return res, nil
 		}
 	}
-	res.assignment.TargetVersion = st.targetVersion(fleet)
+	if ag.Kind != domain.AgentKindBridge {
+		// A Bridge is no member for versions (ADR-0037): it gets no target.
+		res.assignment.TargetVersion = st.targetVersion(fleet)
+	}
 
 	render, rerr := s.deps.Renderer.Render(blueprint.RenderInput{
 		Snapshot: snap, Fleet: fleet, Agent: blueprint.AgentInput{ID: &ag.ID, Attributes: view},

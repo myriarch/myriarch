@@ -400,16 +400,24 @@ Bridge and holds back every action that changes something. All of it fails close
 - **Assignment.** The assignment service matches a Bridge like a collector, so that it is a member of the fleet that selects
   it. It renders a configuration for it, and sets the desired hash, only when `domain.BridgeConfigLock` finds no reason:
   the fleet sets `spec.bridge.manage` and the Bridge reports the mode `standalone`. Otherwise the assignment keeps the fleet
-  name, stores the reason as the assignment error and sets no hash.
+  name, stores the reason as the assignment error and sets no hash; the lock is not a render error (no event text, the
+  metric label is `bridge_locked`). A Bridge gets no target version, with the opt-in as well. The mode is `standalone` only
+  when every reported value of the mode attribute (identifying and non-identifying) says so; a contradiction is the unknown
+  mode and stays locked.
 - **Guard in the reconcile step** (`bridgeConfigLocked`, `internal/opamp/bridge.go`). Whatever the assignment did, reconcile
   offers a Bridge no remote config unless `BridgeConfigLock` allows it. It reads the fleet of the agent from the stored
-  snapshot, so the opt-in applies at once, and a fleet that cannot be read locks the Bridge. Every offer goes through
+  snapshot, so the opt-in applies at once, and a fleet that cannot be read locks the Bridge. It runs for a Bridge that has a
+  fleet even when the assignment set no desired hash, which is the normal case of a locked Bridge, so the lock itself is
+  recorded. Every offer goes through
   reconcile (first message, heartbeat, push, resync, reconnect), so this is the one place that has to hold.
 - **No restart.** The REST action answers `412` (`internal/coreapi/agents.go`); `sendRestart` and the polling path of HTTP
   agents refuse the command as well, in case a command was queued by another replica or an older release.
 - **No effective configuration.** `processEffectiveConfig` stores nothing for a Bridge, and the REST endpoint answers `404`.
-- **Version rollouts.** The planner reads only collectors, so a Bridge is never a target. It reads the Bridges of a fleet
-  that has an effective target version to say so once per agent and version (until the leader restarts) as an agent event.
+- **Rollouts.** A Bridge is never a member of a version rollout. It is a member of config rollouts only while its fleet
+  configures it (`BridgeConfigLock` finds no reason), so waves, approvals and audit apply to its configuration; a locked
+  Bridge is not. The tick skips a target whose agent became a Bridge after the rollout began (`bridgeHeldBack`), so no
+  executor is called for it. For a fleet that has an effective target version the planner says once per agent and version
+  (until the leader restarts) that the Bridge is left out, as an agent event and an audit entry.
 - **Events and audit.** Each held-back action is an agent event of the type `bridge_locked` (severity `warning`; details
   `action`, `reason`) and an audit entry `agent.bridge_held_back`. A configuration offer is noted once per reason and
   desired hash on a connection, not per message.
