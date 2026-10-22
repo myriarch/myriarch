@@ -1123,12 +1123,11 @@ the constant script followed by the values in a hashtable. It uses cmdlets and n
    agents, which run the variant `token_file`; an administrator who is not elevated has Medium and is refused, although the group Administrators is in the token "for deny
    only") and unless Group Policy leaves room for a script: a policy of the scopes `MachinePolicy` or `UserPolicy` that is `AllSigned` or `Restricted` wins over `-ExecutionPolicy`
    and would stop the unsigned installer later, so the command says so first (`execution_policy_blocked`); then it checks the token as above;
-2. makes a directory below `%ProgramData%` with a name that cannot be guessed. `%ProgramData%` lets standard users create entries, so that directory only holds the working
-   directory and is never trusted before it is safe: it replaces its DACL with `icacls.exe /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F`
-   (SYSTEM and the administrators) **before the first download** (`acl_failed`), makes the administrators its owner (`icacls.exe /setowner *S-1-5-32-544`, also `acl_failed`),
-   stops if it is a reparse point or if anything is in it (`directory_unsafe`), and only then makes the working directory in it, which inherits nothing but the restricted
-   DACL. A handle that was opened or an entry that was planted while the directory still had the inherited rights cannot reach the working directory. The outer directory is removed in a
-   `finally`. This sequence can be checked on real Windows only (the `host-e2e` workflow); the tests of the command cover its structure and its order;
+2. makes the working directory directly below `%ProgramFiles%` with a name that cannot be guessed. Standard users and processes without elevation cannot write there, so no handle
+   with write rights to the new directory (which could set a reparse point) can exist. Users may read there, so the command replaces its DACL with
+   `icacls.exe /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F` (SYSTEM and the administrators) **before the first download** (`acl_failed`) and makes the
+   administrators its owner (`icacls.exe /setowner *S-1-5-32-544`, also `acl_failed`). The directory is removed in a `finally`. This sequence can be checked on real Windows only
+   (the `host-e2e` workflow); the tests of the command cover its structure and its order;
 3. writes the token to a file of the working directory with `Set-Content` (variant `token_inline`) and downloads the bundle with `Invoke-WebRequest -Headers`, without following a redirect
    (`download_failed`); .NET has to negotiate TLS 1.2, which Windows 10 and Windows Server 2019 and newer do by default;
 4. checks the SHA-256 with `Get-FileHash` before it unpacks (`checksum_mismatch`), unpacks with `Expand-Archive`, runs `Unblock-File` on the verified script and starts it

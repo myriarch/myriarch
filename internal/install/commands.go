@@ -31,7 +31,7 @@ import (
 //     argument vector, an environment variable or a URL; on Linux it comes through the standard input of the shell
 //     that runs as root (a quoted here document), on Windows through a parameter of a script block;
 //   - it is written to a file in a private directory (mode 0600 below the home directory of root on Linux; a directory
-//     below %ProgramData% whose DACL admits SYSTEM and the administrators only, set before the first download), is
+//     below %ProgramFiles% whose DACL admits SYSTEM and the administrators only, set before the first download), is
 //     passed to the installer with --token-file (-TokenFile) and is deleted with the directory after the run;
 //   - it leaves the host as a request header only (curl -K - reads the header from standard input; Invoke-WebRequest
 //     -Headers).
@@ -646,20 +646,15 @@ if ($TokenFile) {
 if (-not $Token) { throw '[{{LOG}}] ERROR [option_missing] the enrollment token is empty' }
 if ($Token -match '@@') { throw '[{{LOG}}] ERROR [option_missing] the placeholder of the enrollment token was not replaced' }
 if ($Token -notmatch '^[A-Za-z0-9_.~+/=-]+\z') { throw '[{{LOG}}] ERROR [option_invalid] the enrollment token contains characters that a token cannot have' }
-$base = Join-Path $env:ProgramData ('{{SETUP_DIR}}-' + (New-Guid).Guid)
-New-Item -ItemType Directory -Path $base | Out-Null
+$d = Join-Path $env:ProgramFiles ('{{SETUP_DIR}}-' + (New-Guid).Guid)
+New-Item -ItemType Directory -Path $d | Out-Null
 try {
-  # %ProgramData% lets standard users create entries, so the new directory starts with rights that they may hold. It is
-  # restricted and made safe first and only holds the working directory: that one is made after the restriction and
-  # inherits nothing but SYSTEM and the administrators, so nothing that was opened or planted before can reach it.
-  icacls.exe $base /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+  # %ProgramFiles% admits no entries from standard users or from processes without elevation, so no handle with write
+  # rights to this new directory can exist. Users may read there, so the DACL is restricted before the token is written.
+  icacls.exe $d /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
   if ($LASTEXITCODE -ne 0) { throw '[{{LOG}}] ERROR [acl_failed] icacls could not restrict the working directory to SYSTEM and the administrators' }
-  icacls.exe $base /setowner '*S-1-5-32-544' | Out-Null
+  icacls.exe $d /setowner '*S-1-5-32-544' | Out-Null
   if ($LASTEXITCODE -ne 0) { throw '[{{LOG}}] ERROR [acl_failed] icacls could not make the administrators the owner of the working directory' }
-  if ((Get-Item -LiteralPath $base -Force).Attributes -match 'ReparsePoint') { throw '[{{LOG}}] ERROR [directory_unsafe] the new working directory is a reparse point' }
-  if (@(Get-ChildItem -LiteralPath $base -Force).Count -ne 0) { throw '[{{LOG}}] ERROR [directory_unsafe] the new working directory is not empty' }
-  $d = Join-Path $base 'work'
-  New-Item -ItemType Directory -Path $d | Out-Null
   if (-not $TokenFile) {
     $TokenFile = Join-Path $d 'enrollment-token.txt'
     Set-Content -LiteralPath $TokenFile -Value $Token -NoNewline
@@ -682,8 +677,8 @@ try {
   & powershell.exe @run
   if ($LASTEXITCODE -ne 0) { throw "[{{LOG}}] ERROR [installer_failed] the installer ended with exit code $LASTEXITCODE; its message is above" }
 } finally {
-  Remove-Item -LiteralPath $base -Recurse -Force -ErrorAction SilentlyContinue
-  if (Test-Path -LiteralPath $base) { Write-Warning "[{{LOG}}] the working directory $base could not be removed: delete it by hand, it holds the installer bundle and may hold the enrollment token" }
+  Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath $d) { Write-Warning "[{{LOG}}] the working directory $d could not be removed: delete it by hand, it holds the installer bundle and may hold the enrollment token" }
 }
 `
 

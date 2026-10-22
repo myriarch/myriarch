@@ -20,20 +20,15 @@
   if (-not $Token) { throw '[myriarch-install] ERROR [option_missing] the enrollment token is empty' }
   if ($Token -match '@@') { throw '[myriarch-install] ERROR [option_missing] the placeholder of the enrollment token was not replaced' }
   if ($Token -notmatch '^[A-Za-z0-9_.~+/=-]+\z') { throw '[myriarch-install] ERROR [option_invalid] the enrollment token contains characters that a token cannot have' }
-  $base = Join-Path $env:ProgramData ('myriarch-setup-' + (New-Guid).Guid)
-  New-Item -ItemType Directory -Path $base | Out-Null
+  $d = Join-Path $env:ProgramFiles ('myriarch-setup-' + (New-Guid).Guid)
+  New-Item -ItemType Directory -Path $d | Out-Null
   try {
-    # %ProgramData% lets standard users create entries, so the new directory starts with rights that they may hold. It is
-    # restricted and made safe first and only holds the working directory: that one is made after the restriction and
-    # inherits nothing but SYSTEM and the administrators, so nothing that was opened or planted before can reach it.
-    icacls.exe $base /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+    # %ProgramFiles% admits no entries from standard users or from processes without elevation, so no handle with write
+    # rights to this new directory can exist. Users may read there, so the DACL is restricted before the token is written.
+    icacls.exe $d /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw '[myriarch-install] ERROR [acl_failed] icacls could not restrict the working directory to SYSTEM and the administrators' }
-    icacls.exe $base /setowner '*S-1-5-32-544' | Out-Null
+    icacls.exe $d /setowner '*S-1-5-32-544' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw '[myriarch-install] ERROR [acl_failed] icacls could not make the administrators the owner of the working directory' }
-    if ((Get-Item -LiteralPath $base -Force).Attributes -match 'ReparsePoint') { throw '[myriarch-install] ERROR [directory_unsafe] the new working directory is a reparse point' }
-    if (@(Get-ChildItem -LiteralPath $base -Force).Count -ne 0) { throw '[myriarch-install] ERROR [directory_unsafe] the new working directory is not empty' }
-    $d = Join-Path $base 'work'
-    New-Item -ItemType Directory -Path $d | Out-Null
     if (-not $TokenFile) {
       $TokenFile = Join-Path $d 'enrollment-token.txt'
       Set-Content -LiteralPath $TokenFile -Value $Token -NoNewline
@@ -56,8 +51,8 @@
     & powershell.exe @run
     if ($LASTEXITCODE -ne 0) { throw "[myriarch-install] ERROR [installer_failed] the installer ended with exit code $LASTEXITCODE; its message is above" }
   } finally {
-    Remove-Item -LiteralPath $base -Recurse -Force -ErrorAction SilentlyContinue
-    if (Test-Path -LiteralPath $base) { Write-Warning "[myriarch-install] the working directory $base could not be removed: delete it by hand, it holds the installer bundle and may hold the enrollment token" }
+    Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $d) { Write-Warning "[myriarch-install] the working directory $d could not be removed: delete it by hand, it holds the installer bundle and may hold the enrollment token" }
   }
 } @{
   Server = 'http://localhost:8080'
