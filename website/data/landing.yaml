@@ -114,6 +114,15 @@ community:
     - label: Releases
       link: https://github.com/myriarch/myriarch/releases
       icon: fa-solid fa-tag
+    - label: What is Myriarch?
+      link: /project/what-is-myriarch/
+      icon: fa-solid fa-circle-info
+    - label: Comparison
+      link: /project/comparison/
+      icon: fa-solid fa-table-columns
+    - label: FAQ
+      link: /project/faq/
+      icon: fa-solid fa-circle-question
     - label: Roadmap
       link: /project/roadmap/
       icon: fa-solid fa-route

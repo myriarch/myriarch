@@ -8,8 +8,8 @@ description: "Short answers about what myriarch is, how it relates to OpenTeleme
 
 Myriarch is a fleet manager for OpenTelemetry Collectors, built on OpAMP. Git is the source of truth for blueprints, fleets,
 rollout policies and the allowed collector versions. The web UI and the REST API operate within that frame, and every
-operator action is audited. Start with the [concepts](/docs/concepts/) or the
-[architecture](/docs/architecture/).
+operator action is audited. The page [What is Myriarch?](/project/what-is-myriarch/) has the facts in one place; the
+[concepts](/docs/concepts/) and the [architecture](/docs/architecture/) explain how it works.
 
 ## How does it relate to OpenTelemetry and OpAMP?
 
@@ -25,6 +25,43 @@ The upstream OpAMP Supervisor can manage configuration, health and restarts, but
 Version updates therefore go through exchangeable executors: the host agent `myriarch-updater`, a webhook or an AWX job. On
 Kubernetes the version is part of the image, so a pipeline changes it. See
 [Executors](/docs/concepts/executors/) and [ADR-0006](/docs/adr/0006-version-updates-via-exchangeable-executors/).
+
+## How do I manage many OpenTelemetry Collectors with OpAMP?
+
+Run each collector under the upstream OpAMP Supervisor, run Myriarch as the OpAMP server, and declare blueprints, fleets and
+rollout policies in a Git repository. Changes merged in Git are rendered per collector and rolled out in waves. The steps are in
+[Manage many OpenTelemetry Collectors with OpAMP and Git](/docs/tasks/manage-many-collectors/).
+
+## Does Myriarch replace the OpAMP Supervisor?
+
+No. The collectors keep running under the upstream supervisor, and Myriarch is the server side. It does not plan its own
+supervisor or collector distribution; see the [roadmap](/project/roadmap/#not-planned). The
+[comparison](/project/comparison/) shows when the supervisor alone, a server of your own on opamp-go or Myriarch fits, and when
+Myriarch is not the right choice.
+
+## How do I upgrade the OpenTelemetry Collector on many hosts?
+
+Set the target version of the fleet in Git and give the fleet an executor: the host agent `myriarch-updater`, a webhook or an
+AWX job installs it, because the supervisor cannot replace the collector binary. A version rollout moves the hosts in waves and a
+host is done when its collector reports the new version. See
+[Upgrade the OpenTelemetry Collector on many hosts](/docs/tasks/upgrade-collectors-on-many-hosts/).
+
+## How do I roll out a collector configuration change safely?
+
+Change the blueprint in Git and merge. The rollout policy of each affected fleet sets the waves, the approval of the next wave,
+the failure threshold and whether a failure rolls back or pauses. See
+[Roll out a configuration change](/docs/tasks/roll-out-a-config-change/).
+
+## How do I check a collector configuration in CI?
+
+`myrctl validate` runs the same validation as the server, and `myrctl render` shows the configuration that a host would
+receive. See [Validate a GitOps repository](/docs/tasks/validate-a-gitops-repository/).
+
+## Who changed a configuration?
+
+Declared state changes only through Git, so the history of the repository answers it. Every operator action in the UI and the API,
+such as an approval or a version chosen in the UI, is audited with the user and the reason; see the
+[security model](/docs/security/model/) and the audit endpoints of the [REST API](/docs/reference/api/).
 
 ## What are the support levels?
 
