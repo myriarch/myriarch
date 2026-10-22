@@ -155,7 +155,7 @@ readonly MIN_COSIGN_VERSION="3.0.4"
 readonly SERVICE_USER="otelcol"
 readonly UPDATER_BINARY_NAME="myriarch-updater"
 # The collector version that this release was tested with: the OTELCOL_VERSION of ci/versions.env. The default of an installation
-# without --server and without --collector-version; ci/tests/versions-test.sh keeps both in step.
+# without --server and without --collector-version; TestWithoutServerTheTestedVersionIsTheDefault in internal/install keeps both in step.
 readonly DEFAULT_COLLECTOR_VERSION="0.162.0"
 # Where --collector-version latest asks: the redirect of this page names the newest release (no API, no rate limit).
 readonly LATEST_RELEASE_URL="https://github.com/open-telemetry/opentelemetry-collector-releases/releases/latest"

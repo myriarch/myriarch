@@ -41,9 +41,14 @@ supervisor and, when the fleet uses the updater, the `myriarch-updater` with one
 targets, so you name neither a version nor an endpoint.
 
 **What you need.** A server of the project's release with `install.enabled` on (the default), a host with systemd, root, `curl`,
-`tar` with `gzip`, `sha256sum` and https access to the server and to the Sigstore TUF repository (or a local `trusted_root.json`,
-see [What you need](#what-you-need)), and a person who may create an enrollment token (`enrollment:manage`). The host reaches
+`tar` with `gzip`, `sha256sum` and https access to the server and to the Sigstore TUF repository (`tuf-repo-cdn.sigstore.dev`), and a person who may create an enrollment token (`enrollment:manage`). The host reaches
 the server only; it downloads nothing from GitHub.
+
+A host that cannot reach the TUF repository passes a `trusted_root.json` instead. Create it on a machine that can reach the
+repository with `myriarch-updater fetch-trusted-root --out trusted_root.json`, copy it to the host, and append
+`'--trusted-root' '<path of the file>'` to the options of the command, after the last option and before the line
+`<<'MYRIARCH_TOKEN_END'`. Without it, the host verifies through TUF and stops with `sigstore_verification_failed` when it cannot
+reach the repository.
 
 1. **Create an enrollment token** as in [step 1](#1-create-an-enrollment-token). Give it the labels that your fleets select on, if any.
 2. **Get the command from the server.** It is rendered by `POST /api/v1/install/commands`
