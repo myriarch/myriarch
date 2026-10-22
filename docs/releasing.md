@@ -265,7 +265,7 @@ release.
    package is connected to the repository `myriarch/myriarch` and that the repository has Write access in "Manage Actions access".
    `finalize` fails with `ghcr_not_public` until all are public.
 7. **Approve gate 2** (`finalize`) **within 24 hours of the start of the run**, because the artifacts expire after one day (see
-   [Re-runs](#rc-numbering-and-re-runs)). `finalize` tags the images, publishes the release, and checks that GitHub made it
+   [Re-runs](#rc-numbering-and-re-runs)). `finalize` tags the images and the chart, publishes the release, and checks that GitHub made it
    immutable.
 8. **Check the smoke jobs** (`smoke-assets`, `smoke-linux`, `smoke-windows`, `smoke-kind`). They run after publication. A failure
    here is fixed forward (see [When something fails](#when-something-fails)).
