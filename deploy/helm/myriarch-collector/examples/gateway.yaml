@@ -1,0 +1,18 @@
+# A regional OTLP gateway: two replicas, each its own OpAMP agent with its own PVC.
+#   kubectl create secret generic myriarch-enrollment --from-literal=token=myre_...
+#   helm install otel-gateway deploy/helm/myriarch-collector -f deploy/helm/myriarch-collector/examples/gateway.yaml
+mode: statefulset
+replicaCount: 2
+server:
+  endpoint: wss://fleet.example.com/v1/opamp
+site:
+  id: k8s-de-prod
+  name: Regional gateway DE
+  country: DE
+  environment: production
+  clusterName: k8s-de-prod
+persistence:
+  size: 2Gi
+resources:
+  requests: {cpu: 250m, memory: 512Mi}
+  limits: {memory: 1Gi}

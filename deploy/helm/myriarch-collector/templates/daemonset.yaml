@@ -1,0 +1,24 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- if include "myriarch-collector.daemonset" . }}
+{{- $_ := include "myriarch-collector.checks" . }}
+{{- /* One collector per node. Every pod is its own OpAMP agent; persistence.hostPath keeps its instance UID across restarts. */ -}}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "myriarch-collector.fullname" . }}
+  labels:
+    {{- include "myriarch-collector.labels" . | nindent 4 }}
+spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.updateStrategy.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "myriarch-collector.selectorLabels" . | nindent 6 }}
+  template:
+    {{- include "myriarch-collector.podTemplate" . | nindent 4 }}
+{{- end }}

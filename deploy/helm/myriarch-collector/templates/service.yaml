@@ -1,0 +1,45 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- if not (include "myriarch-collector.daemonset" .) }}
+{{- /* The headless Service that the StatefulSet needs (stable pod names) */ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "myriarch-collector.fullname" . }}-headless
+  labels:
+    {{- include "myriarch-collector.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "myriarch-collector.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: health
+      port: 13133
+      targetPort: health
+{{- if .Values.service.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "myriarch-collector.fullname" . }}
+  labels:
+    {{- include "myriarch-collector.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "myriarch-collector.selectorLabels" . | nindent 4 }}
+  ports:
+    {{- range .Values.ports }}
+    - name: {{ .name }}
+      port: {{ .port }}
+      targetPort: {{ .name }}
+      protocol: {{ .protocol | default "TCP" }}
+    {{- end }}
+{{- end }}
+{{- end }}

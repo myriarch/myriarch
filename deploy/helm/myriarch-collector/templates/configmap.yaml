@@ -1,0 +1,123 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- $_ := include "myriarch-collector.checks" . }}
+{{- $container := include "myriarch-collector.containerMode" . }}
+{{- $tls := .Values.server.tls }}
+{{- $caDir := "/etc/myriarch/ca" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "myriarch-collector.fullname" . }}
+  labels:
+    {{- include "myriarch-collector.labels" . | nindent 4 }}
+data:
+  # Everything dynamic comes from the environment of the pod (${env:...} is resolved by the supervisor when it loads the file).
+  supervisor.yaml: |
+    server:
+      endpoint: "${env:MYRIARCH_OPAMP_ENDPOINT}"
+      headers:
+        Authorization: "Bearer ${env:MYRIARCH_ENROLLMENT_TOKEN}"
+      {{- if or $tls.existingSecret $tls.existingConfigMap }}
+      tls:
+        ca_file: {{ printf "%s/%s" $caDir $tls.key }}
+      {{- end }}
+    capabilities:
+      accepts_remote_config: true
+      accepts_restart_command: true
+      reports_effective_config: true
+      reports_health: true
+      reports_available_components: true
+      reports_heartbeat: true
+      reports_own_metrics: false
+      accepts_opamp_connection_settings: false
+    agent:
+      executable: {{ include "myriarch-collector.collectorExecutable" . }}
+      config_apply_timeout: 30s
+      bootstrap_timeout: 15s
+      validate_config: true
+      automatic_config_rollback: true
+      # The collector logs to stdout instead of <storage>/agent.log (container logging).
+      passthrough_logs: true
+      startup_fallback_configs: [/etc/myriarch/fallback.yaml]
+      description:
+        non_identifying_attributes:
+          site.type: "${env:SITE_TYPE}"
+          site.id: "${env:SITE_ID}"
+          site.name: "${env:SITE_NAME}"
+          site.country: "${env:SITE_COUNTRY}"
+          site.region: "${env:SITE_REGION}"
+          site.timezone: "${env:SITE_TIMEZONE}"
+          deployment.environment.name: "${env:ENVIRONMENT}"
+          k8s.cluster.name: "${env:K8S_CLUSTER_NAME}"
+          k8s.namespace.name: "${env:K8S_NAMESPACE_NAME}"
+          k8s.pod.name: "${env:K8S_POD_NAME}"
+          k8s.node.name: "${env:K8S_NODE_NAME}"
+    # The instance UID of the collector is in <storage>/persistent_state.yaml: the volume keeps the identity.
+    storage:
+      directory: /var/lib/otelcol/supervisor
+    healthcheck:
+      endpoint: 0.0.0.0:13134
+    telemetry:
+      logs: {level: info}
+  # Active only if, at startup, neither a stored remote configuration nor the server is available.
+  fallback.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    receivers:
+      nop:
+    exporters:
+      nop:
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [nop]
+          exporters: [nop]
+        metrics:
+          receivers: [nop]
+          exporters: [nop]
+        logs:
+          receivers: [nop]
+          exporters: [nop]
+  {{- if $container }}
+  updater.yaml: |
+    server:
+      endpoint: "${env:MYRIARCH_OPAMP_ENDPOINT}"
+      # the same token as the supervisor: the server links updater and collector only when token and host name are the same
+      token: "${env:MYRIARCH_ENROLLMENT_TOKEN}"
+      allowInsecureTransport: {{ .Values.server.allowInsecureTransport }}
+      {{- if or $tls.existingSecret $tls.existingConfigMap }}
+      caFile: {{ printf "%s/%s" $caDir $tls.key }}
+      {{- end }}
+    supervisor:
+      storageDir: /var/lib/otelcol/supervisor
+      serviceName: opampsupervisor
+      healthUrl: http://127.0.0.1:13134/health
+    collector:
+      installDir: /var/lib/myriarch/collector
+      binaryName: otelcol-contrib
+      healthUrl: http://127.0.0.1:13133/
+      keepVersions: {{ .Values.containerMode.keepVersions }}
+      activation: symlink
+    update:
+      requireSignature: {{ .Values.containerMode.update.requireSignature }}
+      {{- if .Values.containerMode.trustedRoot.existingConfigMap }}
+      trustedRootFile: /etc/myriarch/trust/{{ .Values.containerMode.trustedRoot.key }}
+      {{- end }}
+      healthTimeout: {{ .Values.containerMode.update.healthTimeout }}
+      preflightValidate: true
+    container:
+      supervisorCommand: ["/usr/local/bin/opampsupervisor", "--config=/etc/opampsupervisor/supervisor.yaml"]
+      seedBinary: /shared/otelcol-contrib
+      seedPolicy: {{ .Values.containerMode.seedPolicy }}
+      stopTimeout: {{ .Values.containerMode.stopTimeout }}
+      restartDelay: 2s
+      maxRestarts: 5
+      restartWindow: 10m
+      healthListen: "0.0.0.0:13135"
+    stateDir: /var/lib/myriarch/updater
+    log: {level: info, format: json}
+  {{- end }}

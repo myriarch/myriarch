@@ -17,30 +17,42 @@ environments where that is not possible, such as air-gapped or edge clusters.
 
 ## Images and support level
 
-Container mode is **beta** in v0.1.0 ([ADR-0021](../adr/0021-publication-gates-and-v0-1-0-scope.md)). The project publishes no
-collector image ([ADR-0024](../adr/0024-container-registry-and-image-set.md)), so container mode needs a collector image that
-you build yourself until the collector chart of v0.2.0: `deploy/k8s/collector/Dockerfile` or
-`scripts/build-collector-image-crane.sh` put the supervisor, `otelcol-contrib` and `myriarch-updater` into one image that keeps
-the entry point of the supervisor image (user 10001, the user of the upstream supervisor image, and group 0 for the volume).
+Container mode is **beta** ([ADR-0021](../adr/0021-publication-gates-and-v0-1-0-scope.md)). From v0.2.0 it runs in the pod of
+the collector chart `deploy/helm/myriarch-collector` (`containerMode.enabled`, see
+[Install the collector with Helm](../operations/install-collector-helm.md)) with the **unchanged upstream images**; the project
+no longer needs a combined collector image, and the Kustomize base and the build scripts of v0.1.0 are deprecated
+(`contrib/legacy-kubernetes-collector`). The pod has three images:
 
-The updater in that image can be the released one. `ghcr.io/myriarch/myriarch-updater` is the published updater image (`FROM
-scratch`, user and group 65532, `/usr/local/bin/myriarch-updater`, built from the binary of the signed release archive). It is
-a source of the binary and not an image that runs container mode: it holds no supervisor and no collector, and it has no state
-directory of its own. The directories of container mode (`collector.installDir`, `stateDir`) are on the volume of the image that
-runs the updater, which is the collector image (`/var/lib/myriarch`, writable for its user 10001 and group 0, see
-`deploy/k8s/collector/Dockerfile`). The server image `ghcr.io/myriarch/myriarch` is a different case: it has the data directory
-`/var/lib/myriarchd` for the non-root user 65532, because the server writes the GitOps clone and the artifact cache there.
+- `ghcr.io/myriarch/myriarch-updater` (`FROM scratch`, user and group 65532, `/usr/local/bin/myriarch-updater`, built from the
+  binary of the signed release archive) is the source of the updater binary. It runs the init command `install-self` and is
+  PID 1 of the main container, because the main container starts `/shared/myriarch-updater container` from the shared volume. It
+  has no supervisor, no collector and no state directory of its own.
+- `otel/opentelemetry-collector-opampsupervisor` is the main container. Its supervisor is the child of the updater
+  (`container.supervisorCommand: /usr/local/bin/opampsupervisor`), so the supervisor version stays that of the image.
+- `otel/opentelemetry-collector-contrib` seeds the first collector binary: its init container runs
+  `/shared/myriarch-updater copy /otelcol-contrib /shared/`, and `container.seedBinary` is `/shared/otelcol-contrib`.
 
-Build the collector image with `--build-arg UPDATER_SOURCE=image --build-arg
-UPDATER_IMAGE=ghcr.io/myriarch/myriarch-updater@sha256:<digest>` to copy that binary instead of compiling the updater from your
-checkout; without the build arguments the Dockerfile compiles it. The digest is named in the release notes.
+The directories of container mode live on volumes that the chart mounts, not in an image: the `shared` volume (an `emptyDir`
+with the updater and the seed binary, read-only for the main container) and the claim `binaries` at `/var/lib/myriarch`
+(`collector.installDir` and `stateDir`). The supervisor storage (`/var/lib/otelcol/supervisor`, the instance UID of the
+collector) is a separate claim, so a binary update never touches the identity. The server image `ghcr.io/myriarch/myriarch` is a
+different case: it has the data directory `/var/lib/myriarchd` for the non-root user 65532, because the server writes the GitOps
+clone and the artifact cache there.
+
+What the chart sets for container mode: the second `volumeClaimTemplate` `binaries`; probes on `container.healthListen`
+(`:13135`: `/healthz` for startup and liveness, `/readyz` for readiness); `terminationGracePeriodSeconds` of at least 360 seconds,
+more than `container.stopTimeout` plus the critical section of an installation; and the Sigstore trusted root as a ConfigMap for
+the offline verification (rendering fails without it unless the verification is switched off on purpose). The pod runs without a
+fixed user ID under the Pod Security level `restricted`: `myriarch-updater` needs write access to the directories of the volumes
+only, and the volumes are writable through the `fsGroup` (standard profile) or the SCC (OpenShift profile). Container mode is a
+StatefulSet feature, because every replica needs a claim of its own.
 
 ## Invocation
 
 `myriarch-updater container --config <file>`. The command runs on Linux and on macOS (useful for local end-to-end tests). On
 Windows it fails with an explanatory error, and the updater runs there as a service next to the supervisor service
-(`myriarch-updater run`). The image entry point stays that of the supervisor image, so the image remains backward
-compatible, and the container command overrides it.
+(`myriarch-updater run`). In the chart the `command` of the main container is `/shared/myriarch-updater container`, which
+overrides the entry point of the supervisor image.
 
 ## Init container commands
 
@@ -114,7 +126,7 @@ The volume is a single-writer volume, so the deployment runs a single replica.
 
 ## Seeding and precedence
 
-The image carries a collector binary (`container.seedBinary`). At every start, before the child is started, the updater
+The pod carries a collector binary (`container.seedBinary`, copied from the collector image by an init container). At every start, before the child is started, the updater
 decides which binary is active:
 
 1. Run `seedBinary --version` to learn the image version X. If that fails and a version is already active, keep the
@@ -176,7 +188,7 @@ The `container` section of `updater.yaml` is required only for the `container` c
 ```yaml
 container:
   supervisorCommand: ["/usr/local/bin/opampsupervisor", "--config=/etc/opampsupervisor/supervisor.yaml"]
-  seedBinary: /usr/local/bin/otelcol-contrib   # collector binary in the image
+  seedBinary: /shared/otelcol-contrib          # collector binary that the init container copied from the collector image
   seedPolicy: newest                           # newest | image
   stopTimeout: 30s
   restartDelay: 2s
@@ -193,11 +205,12 @@ Validation: `supervisorCommand` and `seedBinary` are required, `seedPolicy` is o
 
 - Termination grace period: set the pod's `terminationGracePeriodSeconds` to at least two stop timeouts plus two
   health timeouts plus a margin, so that a shutdown during a swap can finish its critical section. With the defaults
-  that is about six minutes.
+  that is about six minutes. The collector chart renders at least 360 seconds in container mode.
 - Memory: the preflight `validate` run starts a second collector process next to the running one. Give the container
   headroom for two collector processes, and measure it.
 - Supervisor and collector version skew: after an update the supervisor of the image may control a newer collector.
   Keep selectable versions inside one minor version of the image, or update the image as well.
 - Probes: use `/healthz` for startup and liveness (it stays green during seeding and recovery) and the collector's own
   health endpoint or `/readyz` for readiness.
-- Exactly one replica per volume. Scaling out needs one volume per pod, for example through a volume claim template.
+- Exactly one replica per volume. Scaling out needs one volume per pod: the chart uses a volume claim template of the
+  StatefulSet and refuses container mode for a DaemonSet.

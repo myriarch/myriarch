@@ -1,0 +1,6 @@
+# The OpenShift profile: no runAsUser, runAsGroup or fsGroup, the SCC restricted-v2 assigns them.
+mode: statefulset
+openshift:
+  enabled: true
+server:
+  endpoint: wss://fleet.example.com/v1/opamp

@@ -1,0 +1,18 @@
+# A node agent: one collector per node. The node logs are read-only hostPath mounts and the identity stays on the node; both need a
+# namespace without the Pod Security level baseline or restricted (label it privileged). Prepare /var/lib/myriarch/otel-agent on the
+# nodes, writable for the user of the supervisor image (UID 10001), because the chart has no root init container.
+#   helm install otel-agent deploy/helm/myriarch-collector -f deploy/helm/myriarch-collector/examples/node-agent.yaml
+mode: daemonset
+server:
+  endpoint: wss://fleet.example.com/v1/opamp
+site:
+  id: k8s-de-prod
+  name: Node agent
+tolerations:
+  - operator: Exists
+persistence:
+  hostPath:
+    enabled: true
+    path: /var/lib/myriarch/otel-agent
+nodeLogs:
+  enabled: true

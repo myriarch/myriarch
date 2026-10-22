@@ -17,7 +17,6 @@
 #   make release-rehearsal  rehearsal of the release build: snapshot in stage collect, one signing pass with a throwaway test CA, snapshot in stage apply, dist and reproducibility checks (ci/release/rehearsal.sh; needs the built UI and a C compiler with the OpenSSL 3 headers for osslsigncode)
 #   make ci-test      script tests of ci/ and contrib/enterprise-mirror/ (ci/tests/run-all.sh)
 #   make image-crane  container image WITHOUT a container runtime (crane) and FROM scratch: build and push to IMAGE_REPO (required), print the digest (scripts/build-image-crane.sh; IMAGE_PLATFORM=linux/arm64 builds for arm64)
-#   make collector-image-crane  collector image (upstream opampsupervisor + otelcol-contrib of the same version + myriarch-updater) WITHOUT a container runtime: build and push to IMAGE_REPO (required); OTELCOL_VERSION=0.162.0 (default: ci/versions.env)
 #   make mirror-image-crane  in-cluster mirror of the collector release files (busybox httpd) WITHOUT a container runtime: build and push to IMAGE_REPO (required; scripts/build-mirror-image-crane.sh)
 #   make docs-gen     regenerate the generated references: docs/reference/cli from the cobra command trees (cmd/myriarchd/clidoc_test.go; CLIDOC_UPDATE=1), docs/reference/api from api/openapi.yaml (internal/apidoc; APIDOC_UPDATE=1), docs/reference/{configuration,environment-variables,metrics}.md from the configuration struct, the loader and the metric definitions, and deploy/helm/myriarch/values.schema.json from values.schema.source.yaml and the configuration struct (internal/refdoc; REFDOC_UPDATE=1)
 #   make docs-check   documentation checks: internal links, front matter (scripts/check-docs.py) and drift of the generated reference (ci/check-docs-gen.sh)
@@ -58,9 +57,6 @@ RELEASE_TAGS := $(UI_TAGS)
 BINARIES  := myriarchd myriarch-updater myrctl myriarch-sim
 PLATFORMS := linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/arm64
 
-# Collector image (make collector-image-crane): version of supervisor AND collector, default = the pinned one of ci/versions.env
-OTELCOL_VERSION ?= $(shell sed -n 's/^OTELCOL_VERSION=//p' ci/versions.env)
-
 # Pinned CI tools (make tools): built from ci/tools/ or downloaded with a SHA-256 check, see ci/install-tools.sh
 TOOLS ?= goreleaser cosign helm yq kustomize kubeconform gotestsum crane govulncheck go-licenses gitleaks reuse shellcheck pwsh kind kubectl hugo sass lychee actionlint syft gh go-winres zizmor
 
@@ -69,7 +65,7 @@ SIM_UPDATERS ?= true
 SIM_SERVER   ?= ws://localhost:8080/v1/opamp
 SIM_TOKEN    ?= myre_devtoken_insecure_do_not_use_in_prod
 
-.PHONY: all build test test-race lint fmt web-install web-build web-dev web-gen dev sim e2e docs-gen docs-check license-headers notices licenses-check validate-examples release release-snapshot release-rehearsal ci-test image-crane collector-image-crane mirror-image-crane e2e-ui-updates website website-serve website-preview website-check tools kind-up kind-down kind-probe check-local vulncheck secrets-scan clean
+.PHONY: all build test test-race lint fmt web-install web-build web-dev web-gen dev sim e2e docs-gen docs-check license-headers notices licenses-check validate-examples release release-snapshot release-rehearsal ci-test image-crane mirror-image-crane e2e-ui-updates website website-serve website-preview website-check tools kind-up kind-down kind-probe check-local vulncheck secrets-scan clean
 
 all: lint test build
 
@@ -126,11 +122,11 @@ e2e: build
 # environment and metrics references (docs/reference/{configuration,environment-variables,metrics}.md) come from the configuration struct,
 # the loader, the environment reads and the metric definitions by a test of internal/refdoc, and so do the values schema of the Helm
 # chart (deploy/helm/myriarch/values.schema.json) and the values table in its README, which is assembled from the hand-written values.schema.source.yaml next to it and the
-# configuration struct. The tests also run in the go-test gate as a drift check. PGTEST_SKIP=1: the tests need no database.
+# configuration struct. The collector chart (deploy/helm/myriarch-collector) gets its schema and values table the same way, without a configuration struct. The tests also run in the go-test gate as a drift check. PGTEST_SKIP=1: the tests need no database.
 docs-gen:
 	PGTEST_SKIP=1 CLIDOC_UPDATE=1 $(GO) test -count=1 -run '^TestCLIReference$$' ./cmd/myriarchd
 	PGTEST_SKIP=1 APIDOC_UPDATE=1 $(GO) test -count=1 -run '^TestAPIReference$$' ./internal/apidoc
-	PGTEST_SKIP=1 REFDOC_UPDATE=1 $(GO) test -count=1 -run '^(TestReferencePages|TestChartValuesSchema|TestChartValuesTable)$$' ./internal/refdoc
+	PGTEST_SKIP=1 REFDOC_UPDATE=1 $(GO) test -count=1 -run '^(TestReferencePages|TestChartValuesSchema|TestChartValuesTable|TestCollectorChartValuesSchema|TestCollectorChartValuesTable)$$' ./internal/refdoc
 
 # Documentation checks: relative links and anchors, front matter, and the generated references are up to date (regenerates them and fails on a diff).
 docs-check:
@@ -189,19 +185,6 @@ ci-test:
 # scripts/build-image-crane.sh login '<registry-user>' < token-file`.
 image-crane:
 	VERSION='$(VERSION)' COMMIT='$(COMMIT)' scripts/build-image-crane.sh
-
-# Collector image (supervisor + otelcol-contrib + myriarch-updater in one image; documented in the header of
-# scripts/build-collector-image-crane.sh): pulls the two upstream images of OTELCOL_VERSION (pinned by digest), builds myriarch-updater
-# from this repository (VERSION/COMMIT of the Makefile are linked into it), pushes IMAGE_REPO:TAG (IMAGE_REPO is required; default tag
-# <collector version>-<git short sha>) and prints the digest. Environment: IMAGE_REPO, TAG, WITH_UPDATER=0 (image without
-# myriarch-updater, tag <version>), IMAGE_PLATFORM=linux/arm64 (default linux/amd64; tag suffix -arm64), DRY_RUN=1, VERIFY=1,
-# VERIFY_UPSTREAM=1 (signature check, needs cosign).
-# Examples: `make collector-image-crane IMAGE_REPO=registry.example.com/<org>/myriarch-collector OTELCOL_VERSION=0.161.0`,
-# `make collector-image-crane IMAGE_REPO=... DRY_RUN=1`.
-# (OTELCOL_VERSION, not VERSION: VERSION is the version of myriarchd.)
-collector-image-crane:
-	@test -n '$(OTELCOL_VERSION)' || { echo "OTELCOL_VERSION is empty (ci/versions.env?)"; exit 1; }
-	UPDATER_VERSION='$(VERSION)' UPDATER_COMMIT='$(COMMIT)' scripts/build-collector-image-crane.sh '$(OTELCOL_VERSION)'
 
 # In-cluster mirror image (busybox httpd + the verified release files of the collector in the GitHub layout; see the header of
 # scripts/build-mirror-image-crane.sh): VERSIONS="0.161.0 0.162.0" PLATFORMS="linux/amd64"; DRY_RUN=1 builds the layer without pushing;
