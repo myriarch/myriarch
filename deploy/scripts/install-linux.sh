@@ -811,7 +811,7 @@ SERVER_HEADERS=""                  # the response headers of the last request
 CURL_RC=0                          # exit code of curl for the last request
 HTTP_STATUS=000                    # HTTP status of the last request
 DL_BEARER=""                       # the install grant for the artifact that is being downloaded
-PLAN_FORMAT="" PLAN_FLEET="" PLAN_SOURCE="" PLAN_OPAMP="" PLAN_COLLECTOR_VERSION="" PLAN_COLLECTOR_URL="" PLAN_COLLECTOR_GRANT=""
+PLAN_FLEET="" PLAN_SOURCE="" PLAN_OPAMP="" PLAN_COLLECTOR_VERSION="" PLAN_COLLECTOR_URL="" PLAN_COLLECTOR_GRANT=""
 PLAN_SUPERVISOR_VERSION="" PLAN_SUPERVISOR_URL="" PLAN_SUPERVISOR_GRANT="" PLAN_UPDATER=""
 BUNDLE_UPDATER_SHA=""              # SHA-256 of the myriarch-updater that was copied from the installer bundle
 
@@ -867,9 +867,9 @@ retry_after_seconds() { # default
 # is in no argument list and no environment. Sets CURL_RC and HTTP_STATUS; the body is in out, the headers in SERVER_HEADERS.
 server_once() { # method url out body bearer maxsize maxtime
   local method="$1" url="$2" out="$3" body="$4" bearer="$5" maxsize="$6" maxtime="$7"
-  local proto='=https' rc=0 code=""
-  [ "${INSECURE}" = 1 ] && proto='=http,https'
-  local args=(--silent --show-error --globoff --proto "${proto}" --tlsv1.2 --connect-timeout 20 --max-time "${maxtime}"
+  local curl_proto='=https' rc=0 code=""
+  [ "${INSECURE}" = 1 ] && curl_proto='=http,https'
+  local args=(--silent --show-error --globoff --proto "${curl_proto}" --tlsv1.2 --connect-timeout 20 --max-time "${maxtime}"
     -D "${SERVER_HEADERS}" -o "${out}" -w '%{http_code}')
   [ -z "${maxsize}" ] || args+=(--max-filesize "${maxsize}")
   [ -z "${CA_FILE}" ] || args+=(--cacert "${CA_FILE}")
@@ -1103,7 +1103,7 @@ parse_plan() { # file
     seen="${seen}${key} "
     plan_value_check "${key}" "${value}"
     case "${key}" in
-      format) PLAN_FORMAT="${value}" ;;
+      format) ;; # checked by plan_value_check
       fleet) PLAN_FLEET="${value}" ;;
       version.source) PLAN_SOURCE="${value}" ;;
       opamp.endpoint) PLAN_OPAMP="${value}" ;;
