@@ -6,7 +6,8 @@ SPDX-License-Identifier: Apache-2.0
   Content adapter: one page per decision record docs/adr/NNNN-*.md (ADR-0031). The records keep their MADR layout and are not edited.
   The title is the H1 line (without it in the body), the weight is the record number, and the "- Status:" line becomes the parameter
   status (as written) and, with its Markdown links reduced to their labels, the description (it is shown as plain text in section lists, meta tags
-  and the search index, where a relative link would resolve against the wrong page). The template 0000 is not a decision. The files reach this adapter as assets/repo/docs/adr/ (config/_default/module.yaml).
+  and the search index, where a relative link would resolve against the wrong page). The date of the page (lastmod) is the date of the last commit
+  that changed the record (data/source_dates.json, written by scripts/source-dates.py before the build). The template 0000 is not a decision. The files reach this adapter as assets/repo/docs/adr/ (config/_default/module.yaml).
 */ -}}
 {{ $adapter := . -}}
 {{ range resources.Match "repo/docs/adr/[0-9][0-9][0-9][0-9]-*.md" -}}
@@ -29,6 +30,7 @@ SPDX-License-Identifier: Apache-2.0
       "title" $title
       "weight" $num
       "description" (printf "Decision record %04d (%s)." $num $plainStatus)
+      "dates" (partial "repo/source-dates.html" (printf "docs/adr/%s" $file))
       "params" (dict "sourcePath" (printf "docs/adr/%s" $file) "status" $status "adr" $num)
       "content" (dict "mediaType" "text/markdown" "value" $body)
   ) -}}

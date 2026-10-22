@@ -1,7 +1,7 @@
 ---
 title: "Server behaviour"
 weight: 20
-description: "Normative server behaviour of myriarchd, grouped by component."
+description: "Normative behaviour of myriarchd, grouped by component: startup, OpAMP endpoint, persistence, rendering, rollouts and executors."
 ---
 
 Normative decisions for myriarchd, grouped by component: persistence, event bus and leader lock, authentication, the OpAMP

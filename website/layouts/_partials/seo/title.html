@@ -1,0 +1,34 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  The text of <title> for a page (called by head.html).
+  The title of a page is its H1 and the label in the navigation, so a page whose short name says nothing in a list of results ("Agents",
+  "Audit") gets a title of its own here, without a change of the page:
+    1. The home page: params.seo.homeTitle.
+    2. A path listed in data/seo_titles.yaml: that title. The key is the URL path of the page. The documentation pages (their front matter
+       holds title, weight and description only) and the generated pages get a better title this way.
+    3. A page of the REST API reference (below /docs/reference/api/, except the index): "<title> API". Its title is the tag of the
+       OpenAPI contract ("Agents", "Authentication") and would equal the title of a concept or an operations page otherwise.
+    4. Any other page: its own title.
+  The site title follows, as before: "<title> | myriarch". check-seo.py fails when two pages have one title. Keep a listed title to
+  49 characters, so that the whole title stays within 60.
+*/ -}}
+{{- $result := .Site.Title -}}
+{{- if .IsHome -}}
+  {{- $result = .Site.Params.seo.homeTitle | default .Site.Title -}}
+{{- else -}}
+  {{- $title := .Title -}}
+  {{- with index (default dict hugo.Data.seo_titles) .RelPermalink -}}
+    {{- $title = . -}}
+  {{- else -}}
+    {{- if and (hasPrefix .RelPermalink "/docs/reference/api/") (ne .RelPermalink "/docs/reference/api/") $title -}}
+      {{- $title = printf "%s API" $title -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if $title -}}
+    {{- $result = printf "%s | %s" $title .Site.Title -}}
+  {{- end -}}
+{{- end -}}
+{{- return $result -}}

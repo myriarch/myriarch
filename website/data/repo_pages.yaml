@@ -12,17 +12,17 @@ project:
     slug: changelog
     title: Release notes
     weight: 20
-    description: Notable changes of every release, in the Keep a Changelog format.
+    description: Notable changes of every myriarch release, including unreleased work, in the Keep a Changelog format.
   - source: CONTRIBUTING.md
     slug: contributing
     title: Contributing
     weight: 30
-    description: How to report problems, propose changes and send contributions.
+    description: How to report problems, propose changes and send contributions to myriarch, the checks before a pull request and the sign-off.
   - source: GOVERNANCE.md
     slug: governance
     title: Governance
     weight: 40
-    description: How decisions are made in the myriarch project and who makes them.
+    description: How decisions are made in the myriarch project, who makes them, and how a contributor can become a maintainer.
   - source: SECURITY.md
     slug: security
     title: Security policy
@@ -32,22 +32,22 @@ project:
     slug: code-of-conduct
     title: Code of conduct
     weight: 60
-    description: The standards of behavior in the myriarch community.
+    description: The standards of behavior in the myriarch community, and how violations are reported and handled.
   - source: MAINTAINERS.md
     slug: maintainers
     title: Maintainers
     weight: 70
-    description: The people who maintain the project.
+    description: The people who maintain the myriarch project, and how to reach them about the project itself.
   - source: ADOPTERS.md
     slug: adopters
     title: Adopters
     weight: 80
-    description: Organizations that use myriarch, and how to add yours.
+    description: Organizations that use myriarch in their environments, and how to add yours to the list.
   - source: CONTRIBUTOR_LADDER.md
     slug: contributor-ladder
     title: Contributor ladder
     weight: 90
-    description: The roles in the project and how a contributor moves between them.
+    description: The roles in the myriarch project, from contributor to maintainer, and how a contributor moves between them.
   - source: assets/brand/README.md
     slug: brand
     title: Brand and trademark use
