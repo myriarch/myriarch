@@ -7,7 +7,7 @@
 # go, node, pnpm, make or goreleaser.
 #
 #   GH_TOKEN=... TOOLS_BIN=... RELEASE_COMMIT=... RELEASE_PRERELEASE=... RELEASE_LATEST=... IMAGE_TAGS=... SERVER_INDEX_DIGEST=... \
-#   UPDATER_INDEX_DIGEST=... GITHUB_RUN_ATTEMPT=... ci/release/finalize.sh --tag TAG --release-id ID --verified DIR
+#   UPDATER_INDEX_DIGEST=... CHART_DIGEST=... GITHUB_RUN_ATTEMPT=... ci/release/finalize.sh --tag TAG --release-id ID --verified DIR
 #
 #   --verified DIR  the artifact of the verify job: verified-manifest.txt, verified-images.txt, checksums.txt
 #
@@ -15,8 +15,9 @@
 #   1. inputs       ID is a number; RELEASE_COMMIT is the commit of the tag; verified-manifest.txt has the 42 names of assets.json with well-formed lines; verified-images.txt has
 #                   six lines whose index digests equal the two environment digests [verified_mismatch]; IMAGE_TAGS are the tags of TAG
 #                   (X.Y.Z-rc.N, or X.Y.Z and X.Y) and none is latest [image_tag_latest]; RELEASE_PRERELEASE and RELEASE_LATEST fit TAG
-#   2. visibility   all six digests are read WITHOUT credentials (a fresh empty DOCKER_CONFIG for that one crane call): ghcr.io makes a
-#                   new package private, and an organization owner switches it to public by hand [ghcr_not_public]
+#   2. visibility   all six image digests and the digest of the chart (CHART_DIGEST, a well-formed digest [verified_mismatch]) are read
+#                   WITHOUT credentials (a fresh empty DOCKER_CONFIG for that one crane call): ghcr.io makes a new package private,
+#                   and an organization owner switches it to public by hand [ghcr_not_public]
 #   3. the release  release ID has the tag, was created by github-actions[bot], is named TAG and has the expected prerelease flag
 #                   [draft_foreign]; it is the only release of the tag [draft_ambiguous]; it is a draft, or - only in a re-run
 #                   (GITHUB_RUN_ATTEMPT > 1) after it was published by this job - published with the same assets [release_not_draft]
@@ -95,6 +96,8 @@ server_index="${SERVER_INDEX_DIGEST:-}"
 updater_index="${UPDATER_INDEX_DIGEST:-}"
 check_match verified_mismatch "SERVER_INDEX_DIGEST" "${server_index}" "${DIGEST_RE}"
 check_match verified_mismatch "UPDATER_INDEX_DIGEST" "${updater_index}" "${DIGEST_RE}"
+chart_digest="${CHART_DIGEST:-}"
+check_match verified_mismatch "CHART_DIGEST" "${chart_digest}" "${DIGEST_RE}"
 
 manifest="${verified}/verified-manifest.txt"
 images="${verified}/verified-images.txt"
@@ -144,7 +147,10 @@ while read -r r p d; do
 done <<EOT
 ${image_lines}
 EOT
-info "all six image digests are readable without credentials"
+if ! DOCKER_CONFIG="${anon}" "${TOOLS_BIN}/crane" manifest "${RELEASE_CHART}@${chart_digest}" > /dev/null 2> "${work}/anon.err"; then
+  err ghcr_not_public "${RELEASE_CHART} cannot be read without credentials: ghcr.io makes a package private on its first publish. An organization owner sets ${RELEASE_CHART} to public (package settings, \"Change visibility\"; this cannot be undone), then re-runs this job with \"Re-run failed jobs\"."
+fi
+info "all six image digests and the chart digest are readable without credentials"
 
 # --- 3. the release ----------------------------------------------------------------------------------------------------------
 rel=""

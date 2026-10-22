@@ -8,14 +8,14 @@
 # jobs with id-token, attestations, packages or contents write execute the signing set, and nothing that runs on the same runner may be
 # able to change it between the build and the SHA-256 of its tar file:
 #
-#   signing   cosign, crane, gh      linux-amd64, plus cosign and crane for linux-arm64 and cosign.exe for windows-amd64. Built first
+#   signing   cosign, crane, gh, helm  linux-amd64, plus cosign and crane for linux-arm64 and cosign.exe for windows-amd64. Built first
 #                                    on a runner of its own: no apt package, no C compiler, no other tool is installed or run there.
 #   build     goreleaser, syft, yq, go-winres, osslsigncode (linux-amd64): executed only by the jobs with contents: read.
 #
 #   ci/release/tools.sh build --set signing|build --out DIR
 #   ci/release/tools.sh check --set signing|build --dir DIR --platform linux-amd64|linux-arm64|windows-amd64
 #
-# build   signing: 1. DIR/linux-amd64: cosign crane gh (ci/install-tools.sh with TOOLS_NO_CACHE=1, stamps included)
+# build   signing: 1. DIR/linux-amd64: cosign crane gh helm (ci/install-tools.sh with TOOLS_NO_CACHE=1, stamps included)
 #                  2. cross builds with the module files and flags of go_install in ci/install-tools.sh (CGO_ENABLED=0, -mod=readonly,
 #                     -trimpath): DIR/linux-arm64/cosign, DIR/linux-arm64/crane, DIR/windows-amd64/cosign.exe
 #         build:   1. installs the build prerequisites of osslsigncode (ci/install-tools.sh apt:libssl-dev apt:zlib1g-dev)
@@ -59,7 +59,7 @@ check_version() { # tool expected-text actual-text
 # set_tools <set>: the tools of a set, sorted (the names VERSIONS must list)
 set_tools() {
   case "$1" in
-    signing) printf '%s\n' cosign crane gh ;;
+    signing) printf '%s\n' cosign crane gh helm ;;
     build) printf '%s\n' go-winres goreleaser osslsigncode syft yq ;;
     *) usage_err "${USAGE}" ;;
   esac
@@ -84,7 +84,7 @@ build() {
 
   local bin="${out}/linux-amd64" v
   if [ "${set}" = signing ]; then
-    TOOLS_NO_CACHE=1 TOOLS_BIN="${bin}" "${ROOT}/ci/install-tools.sh" cosign crane gh >&2 || err build_failed "building the signing tools failed"
+    TOOLS_NO_CACHE=1 TOOLS_BIN="${bin}" "${ROOT}/ci/install-tools.sh" cosign crane gh helm >&2 || err build_failed "building the signing tools failed"
     cross_build cosign github.com/sigstore/cosign/v3/cmd/cosign linux arm64 "${out}/linux-arm64/cosign"
     cross_build crane github.com/google/go-containerregistry/cmd/crane linux arm64 "${out}/linux-arm64/crane"
     cross_build cosign github.com/sigstore/cosign/v3/cmd/cosign windows amd64 "${out}/windows-amd64/cosign.exe"
@@ -94,6 +94,11 @@ build() {
     check_version crane "${v}" "$(version_line "${bin}/crane" version | head -n 1)"
     v="$(pin GH_VERSION)"
     check_version gh "gh version ${v#v}" "$(version_line "${bin}/gh" --version | head -n 1)"
+    # a helm that go builds without the release flags does not print its pinned version; the stamp of the build names it
+    v="$(pin HELM_VERSION)"
+    [ -x "${bin}/helm" ] || err tool_version "helm was not built"
+    # shellcheck disable=SC2144,SC2012  # exactly one stamp is expected, and the glob must match it
+    [ -f "$(ls "${bin}"/.stamp-helm-"${v}"-* 2>/dev/null | head -n 1)" ] || err tool_version "helm has no stamp for ${v}"
   else
     "${ROOT}/ci/install-tools.sh" apt:libssl-dev apt:zlib1g-dev >&2 || err build_failed "installing the osslsigncode prerequisites failed"
     TOOLS_NO_CACHE=1 TOOLS_BIN="${bin}" "${ROOT}/ci/install-tools.sh" goreleaser syft go-winres yq osslsigncode >&2 || err build_failed "building the build tools failed"
@@ -117,6 +122,7 @@ build() {
       cosign) printf 'cosign %s\n' "$(pin COSIGN_VERSION)" ;;
       crane) printf 'crane %s\n' "$(pin CRANE_VERSION)" ;;
       gh) printf 'gh %s\n' "$(pin GH_VERSION)" ;;
+      helm) printf 'helm %s\n' "$(pin HELM_VERSION)" ;;
       go-winres) printf 'go-winres %s\n' "$(pin GOWINRES_VERSION)" ;;
       goreleaser) printf 'goreleaser %s\n' "$(pin GORELEASER_VERSION)" ;;
       osslsigncode) printf 'osslsigncode %s\n' "$(pin OSSLSIGNCODE_VERSION)" ;;

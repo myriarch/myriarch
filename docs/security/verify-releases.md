@@ -296,8 +296,8 @@ attestations in these tags. They are part of the release: do not delete them, an
 image, or the checks above fail. There is no `latest` tag while the major version is 0; the version tags are `X.Y.Z`, `X.Y`
 (the newest patch release of that minor version) and `X.Y.Z-rc.N` for release candidates.
 
-**Pin the digest in your deployment.** With the Helm chart from the tag, set the digest of the server image (the digest wins
-over the tag):
+**Pin the digest in your deployment.** With the Helm chart from a checkout of the tag (the OCI chart of v0.2.0 has the digest
+written into it, see the next section), set the digest of the server image (the digest wins over the tag):
 
 ```bash
 helm install myriarch ./deploy/helm/myriarch --set image.digest="${DIGEST}"     # from a checkout of the tag
@@ -305,6 +305,38 @@ helm install myriarch ./deploy/helm/myriarch --set image.digest="${DIGEST}"     
 
 For Compose, use `QUICKSTART_IMAGE=ghcr.io/myriarch/myriarch@${DIGEST}` (see the
 [Docker Compose quickstart](../getting-started/docker-compose.md)).
+
+## Verify the Helm chart
+
+> **Available from v0.2.0.** The release of v0.1.0 has no OCI chart.
+
+The server chart is published at `ghcr.io/myriarch/charts/myriarch` with the version of the release as its tag (`0.2.0`; `0.2.0-rc.1`
+for a candidate). It is signed by the same workflow identity as the files and the images and carries a provenance attestation. The
+workflow writes the digest of the signed server image into `image.digest` of the packaged chart, so the chart references that image
+by digest only; before publication it checks with `helm template` (default values and the OpenShift profile) that every image of
+the rendering is `ghcr.io/myriarch/myriarch@<digest>` of this release.
+
+```bash
+VERSION=0.2.0; TAG="v${VERSION}"
+CHART_DIGEST="$(crane digest "ghcr.io/myriarch/charts/myriarch:${VERSION}")"      # the digest is what you verify and install
+cosign verify "ghcr.io/myriarch/charts/myriarch@${CHART_DIGEST}" \
+  --certificate-identity "https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG}" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+gh attestation verify "oci://ghcr.io/myriarch/charts/myriarch@${CHART_DIGEST}" --repo myriarch/myriarch --bundle-from-oci \
+  --signer-workflow "myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG}"
+```
+
+As with the images, `cosign verify` also accepts an attestation of the same identity; the JSON it prints shows the type of each
+verified entry, and `https://sigstore.dev/cosign/sign/v1` is the signature made by `cosign sign`. To see that the chart pins the
+image, render it and compare the digest with the one in the release notes:
+
+```bash
+helm template myriarch "oci://ghcr.io/myriarch/charts/myriarch" --version "${VERSION}" | grep 'image:'      # every line: ghcr.io/myriarch/myriarch@sha256:...
+```
+
+`helm install oci://...` takes a version, which is a tag; to install exactly what you verified, run `helm pull
+"oci://ghcr.io/myriarch/charts/myriarch" --version "${VERSION}"` and compare the digest that it prints with `${CHART_DIGEST}`.
+The `sha256-<hex>` tags of the chart package are part of the release like those of the images; do not delete them.
 
 ## macOS
 

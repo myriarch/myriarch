@@ -13,7 +13,8 @@
 #     the digest check, and every download is followed by an unpack against the SHA-256 that the producing job reported;
 #   - no ${{ }} expression in a run text, no write to GITHUB_ENV or GITHUB_PATH, no DOCKER_CONFIG, no secret, no cache;
 #   - the registry writes: push, cosign sign and the six attestations of both images run as strictly sequential steps of the job
-#     push-images, each attestation after the signature of its image, and no other job pushes, signs or attests images;
+#     push-images, each attestation after the signature of its image; the chart is packaged with the index digest of the server image,
+#     pushed and signed by one script and attested in the job push-chart; no other job pushes, signs or attests images;
 #   - the pins: the six GitHub-owned actions at the SHAs the other workflows use (actions/attest is new);
 #   - tool resolution: the pinned tools are reached only through TOOLS_BIN (the workflow never writes GITHUB_PATH). Every step that
 #     calls a script or a program that needs a pinned tool sets TOOLS_BIN to the directory of a tool set that the same job unpacked
@@ -59,6 +60,7 @@ def check(cond, message):
 # ---- the frozen identity and the pins (constants of the design) --------------------------------------------------------------
 REPOSITORY = "myriarch/myriarch"
 IMAGES = {"server": "ghcr.io/myriarch/myriarch", "updater": "ghcr.io/myriarch/myriarch-updater"}
+CHART = "ghcr.io/myriarch/charts/myriarch"
 PINS = {
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1": "v7.0.1",
     "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e": "v7.0.0",
@@ -86,11 +88,13 @@ JOBS = {
     "images": (["guard", "build-tools", "signing-tools", "package"], CR, None, 30, U),
     "sign-blobs": (["guard", "signing-tools", "package", "sign-windows"], {"contents": "read", "id-token": "write", "attestations": "write"}, None, 15, U),
     "push-images": (["guard", "signing-tools", "images", "sign-windows"], {"contents": "read", "id-token": "write", "attestations": "write", "packages": "write"}, None, 30, U),
+    "push-chart": (["guard", "signing-tools", "images", "push-images", "sign-windows"], {"contents": "read", "id-token": "write", "attestations": "write", "packages": "write"}, None, 15, U),
     "draft": (["guard", "signing-tools", "package", "images", "sign-windows", "sign-blobs", "push-images"], {"contents": "write"}, None, 20, U),
     "verify": (["guard", "signing-tools", "package", "images", "sign-blobs", "push-images"], {"contents": "read", "packages": "read", "attestations": "read"}, None, 30, U),
     "verify-images": (["guard", "signing-tools", "images", "push-images"], {"contents": "read", "packages": "read"}, None, 15, UA),
+    "verify-chart": (["guard", "signing-tools", "images", "push-chart"], {"contents": "read", "packages": "read", "attestations": "read"}, None, 15, U),
     "verify-windows": (["guard", "package", "sign-windows"], CR, None, 20, W),
-    "finalize": (["guard", "signing-tools", "images", "push-images", "draft", "verify", "verify-images", "verify-windows"], {"contents": "write", "packages": "write", "attestations": "read"}, "release", 20, U),
+    "finalize": (["guard", "signing-tools", "images", "push-images", "push-chart", "draft", "verify", "verify-images", "verify-chart", "verify-windows"], {"contents": "write", "packages": "write", "attestations": "read"}, "release", 20, U),
     "smoke-assets": (["guard", "signing-tools", "images", "finalize"], {"contents": "read", "attestations": "read"}, None, 20, U),
     "smoke-linux": (["guard", "signing-tools", "images", "finalize"], CR, None, 30, UA),
     "smoke-windows": (["guard", "signing-tools", "finalize"], CR, None, 30, W),
@@ -317,7 +321,7 @@ for jid, steps in steps_of.items():
 # The jobs with id-token, attestations, packages or contents write (and the Windows jobs) execute only the signing set, which is built on a
 # runner of its own before anything else is installed or run there; the build set (goreleaser, syft, yq, go-winres, osslsigncode, which
 # needs apt packages and a C compiler) reaches only jobs with contents: read.
-SIGNING_USERS = {"images", "sign-blobs", "push-images", "draft", "verify", "verify-images", "finalize", "smoke-assets", "smoke-linux", "smoke-windows"}
+SIGNING_USERS = {"images", "sign-blobs", "push-images", "push-chart", "draft", "verify", "verify-images", "verify-chart", "finalize", "smoke-assets", "smoke-linux", "smoke-windows"}
 BUILD_USERS = {"build-windows", "package", "images"}
 for jid, (needs, perms, env, _, _) in JOBS.items():
     uses_signing, uses_build = "signing-tools" in needs, "build-tools" in needs
@@ -336,7 +340,7 @@ for jid, flag in (("signing-tools", "signing"), ("build-tools", "build")):
 # ---- tool resolution ----------------------------------------------------------------------------------------------------------
 # The workflow never writes GITHUB_PATH, so a pinned tool is found only through TOOLS_BIN (or CRANE for the image scripts). The first
 # release candidate failed because a goreleaser command got no TOOLS_BIN; this part ties every step to the tool set it can use.
-TOOLSET = {("signing", "linux-amd64"): {"cosign", "crane", "gh"}, ("signing", "linux-arm64"): {"cosign", "crane"},
+TOOLSET = {("signing", "linux-amd64"): {"cosign", "crane", "gh", "helm"}, ("signing", "linux-arm64"): {"cosign", "crane"},
            ("signing", "windows-amd64"): {"cosign"},
            ("build", "linux-amd64"): {"goreleaser", "syft", "yq", "go-winres", "osslsigncode"}}
 BUILD_ALL = {"goreleaser", "syft", "yq", "go-winres", "osslsigncode"}
@@ -348,6 +352,9 @@ ENTRIES = [
     (r"registry-login\.sh login", {"crane"}),
     (r"sign-checksums\.sh sign", {"cosign"}),
     (r"sign-image\.sh", {"cosign"}),
+    (r"chart-package\.sh", {"helm"}),
+    (r"push-chart\.sh", {"helm", "cosign", "crane"}),
+    (r"verify-chart\.sh", {"helm", "cosign", "crane", "gh"}),
     (r"ci/release/draft\.sh", {"gh"}),
     (r"ci/release/verify\.sh", {"gh", "cosign", "crane"}),
     (r"ci/release/finalize\.sh", {"gh", "crane"}),
@@ -455,21 +462,22 @@ OWNERS = {
     
     "windows-sign-hook.sh": {"sign-windows"}, "ci/release/stage-assets.sh": {"package"}, "ci/release/images.sh": {"images"},
     "sign-checksums.sh": {"sign-blobs"}, "push-images.sh": {"push-images"}, "sign-image.sh": {"push-images"},
+    "chart-package.sh": {"push-chart"}, "push-chart.sh": {"push-chart"}, "verify-chart.sh": {"verify-chart"},
     "ci/release/notes.sh": {"draft"}, "ci/release/draft.sh": {"draft"}, "ci/release/verify.sh": {"verify"},
     "ci/release/finalize.sh": {"finalize"},
 }
 for script, owners in OWNERS.items():
     callers = {jid for jid, steps in steps_of.items() for s in steps if script in (tx(s.get("run")) or "")}
     check(callers == owners, "%s is called by %s, expected %s" % (script, sorted(callers), sorted(owners)))
-for script, owner in (("registry-login.sh login", {"push-images", "verify", "verify-images", "finalize"}), ("registry-login.sh logout", {"push-images", "verify", "verify-images", "finalize"})):
+for script, owner in (("registry-login.sh login", {"push-images", "push-chart", "verify", "verify-images", "verify-chart", "finalize"}), ("registry-login.sh logout", {"push-images", "push-chart", "verify", "verify-images", "verify-chart", "finalize"})):
     callers = {jid for jid, steps in steps_of.items() for s in steps if script in (tx(s.get("run")) or "")}
     check(callers == owner, "%s is called by %s, expected %s" % (script, sorted(callers), sorted(owner)))
 for jid, steps in steps_of.items():
     for s in steps:
         run = tx(s.get("run")) or ""
-        if jid not in ("push-images", "sign-blobs", "finalize"):
+        if jid not in ("push-images", "sign-blobs", "finalize"):  # push-chart signs inside push-chart.sh
             check(not re.search(r"\b(crane (push|copy|tag)|cosign (sign|attest))\b", run), "job %s: only push-images, sign-blobs and finalize write to a registry or sign" % jid)
-check(code.count("uses: " + ATTEST) == 7, "actions/attest must appear exactly 7 times")
+check(code.count("uses: " + ATTEST) == 8, "actions/attest must appear exactly 8 times")
 
 # sign-blobs: sign, attest the checksums, name the provenance, in this order
 sb = steps_of.get("sign-blobs", [])
@@ -535,9 +543,39 @@ for k in ("server", "updater"):
     want += ["push:%s" % k, "sign:%s" % k, "provenance:%s" % k, "sbom:%s:amd64" % k, "sbom:%s:arm64" % k]
 want.append("logout")
 check(sequence == want, "push-images: the steps must run in the order %s (found %s)" % (want, sequence))
-# no image repository outside the two literals
+# push-chart: the chart is packaged with the server index digest, pushed and signed by one script, then attested, strictly in sequence
+pc = steps_of.get("push-chart", [])
+check("strategy" not in mp(jobs.get("push-chart")), "push-chart must not use a matrix")
+sequence = []
+for s in pc:
+    run, uses, w = tx(s.get("run")) or "", tx(s.get("uses")) or "", mp(s.get("with"))
+    env = mp(s.get("env"))
+    if "registry-login.sh login" in run:
+        sequence.append("login")
+    elif "registry-login.sh logout" in run:
+        sequence.append("logout")
+    elif "chart-package.sh package" in run:
+        sequence.append("package")
+        check(tx(env.get("IMAGE_DIGEST")) == "${{ needs.images.outputs.server-index }}", "push-chart: the chart is packaged with the index digest of the server image")
+    elif "push-chart.sh" in run:
+        sequence.append("push")
+        check(tx(env.get("IMAGE_DIGEST")) == "${{ needs.images.outputs.server-index }}", "push-chart: the push checks the package against the index digest of the server image")
+        check(tx(s.get("id")) == "push", "push-chart: the push step has the id push")
+    elif uses == ATTEST:
+        check(tx(w.get("subject-name")) == CHART and tx(w.get("subject-digest")) == "${{ steps.push.outputs.chart-digest }}"
+              and tx(w.get("push-to-registry")) == "true" and tx(w.get("create-storage-record")) == "false" and set(w) == {"subject-name", "subject-digest", "push-to-registry", "create-storage-record"},
+              "push-chart: the attestation takes the chart digest of the push step, pushes to the registry and creates no storage record")
+        sequence.append("provenance")
+    elif uses in (CHECKOUT, DOWNLOAD) or "artifact.sh unpack" in run:
+        pass
+    else:
+        sequence.append("other")
+check(sequence == ["package", "login", "push", "provenance", "logout"] or sequence == ["login", "package", "push", "provenance", "logout"],
+      "push-chart: the steps must run in the order package, login, push, provenance, logout (found %s)" % sequence)
+check(tx(mp(jobs.get("push-chart")).get("outputs") and mp(mp(jobs.get("push-chart")).get("outputs")).get("chart-digest")) == "${{ steps.push.outputs.chart-digest }}", "push-chart: the output chart-digest is the one of the push step")
+# no image repository outside the literals
 repos = set(re.findall(r"ghcr\.io/[A-Za-z0-9._/-]+", code))
-check(repos == set(IMAGES.values()), "image repositories in the file: %s" % sorted(repos))
+check(repos == set(IMAGES.values()) | {CHART}, "image repositories in the file: %s" % sorted(repos))
 check(code.count(REPOSITORY) >= 1 and set(re.findall(r"myriarch/[a-z-]+", code)) >= {"myriarch/myriarch"}, "the repository literal is missing")
 
 # ---- permissions are commented (zizmor pedantic: undocumented-permissions) ----------------------------------------------------
@@ -646,7 +684,7 @@ expect_fail "an unpack against another producer is refused" 'same producer' \
   mutated 'TAR_SHA256: ${{ needs.build-tools.outputs.sha256 }}' 'TAR_SHA256: ${{ needs.images.outputs.sha256 }}'
 expect_fail "an attestation with a storage record is refused" 'create no storage record' \
   mutated 'create-storage-record: false' 'create-storage-record: true'
-expect_fail "an eighth attestation is refused" 'exactly 7 times' \
+expect_fail "a ninth attestation is refused" 'exactly 8 times' \
   mutated $'      - name: Log out of ghcr.io\n        run: ci/release/registry-login.sh logout\n\n  # Creates the draft' $'      - name: Attest once more\n        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2\n        with:\n          subject-checksums: x\n      - name: Log out of ghcr.io\n        run: ci/release/registry-login.sh logout\n\n  # Creates the draft'
 expect_fail "a changed pin is refused" 'an action outside the allowed pins' \
   mutated 'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2' 'actions/attest@0000000000000000000000000000000000000000 # v4.2.2'
@@ -662,6 +700,10 @@ expect_fail "the wrong image order is refused" 'push-images: the steps must run 
   mutated 'subject-digest: ${{ needs.images.outputs.server-amd64 }}' 'subject-digest: ${{ needs.images.outputs.server-arm64 }}'
 expect_fail "another image repository is refused" 'image repositories in the file' \
   mutated 'subject-name: ghcr.io/myriarch/myriarch-updater' 'subject-name: ghcr.io/example/other'
+expect_fail "an attestation of the chart with another digest is refused" 'push-chart: the attestation takes the chart digest' \
+  mutated 'subject-digest: ${{ steps.push.outputs.chart-digest }}' 'subject-digest: ${{ needs.images.outputs.server-index }}'
+expect_fail "a chart packaged with another digest is refused" 'push-chart: the chart is packaged with the index digest' \
+  mutated $'          IMAGE_DIGEST: ${{ needs.images.outputs.server-index }}\n        run: ci/release/chart-package.sh' $'          IMAGE_DIGEST: ${{ needs.images.outputs.updater-index }}\n        run: ci/release/chart-package.sh'
 expect_fail "a changed timeout is refused" 'job finalize: timeout-minutes' \
   mutated $'    timeout-minutes: 20\n    environment: release\n' $'    timeout-minutes: 25\n    environment: release\n'
 expect_fail "a changed runner is refused" 'job verify-windows: runs-on' \

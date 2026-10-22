@@ -226,6 +226,8 @@ and SHA-256 (`ci/release/artifact.sh`).
 | `build-windows` | `goreleaser build --clean --id myriarch-updater --id myrctl` with `MYRIARCH_WINDOWS_STAGE=collect`, then `windows-signed.sh seal`. |
 | `sign-windows` | `ci/release/windows-sign-hook.sh` with `WINDOWS_SIGNING` from `windows-signing.env` (job with the first approval). |
 | `package` | `goreleaser release --clean --skip=publish` with `MYRIARCH_WINDOWS_STAGE=apply` and `MYRIARCH_WINDOWS_SIGNING`, then `windows-signed.sh check-dist`, then `ci/release/stage-assets.sh`, which copies the 40 files under their upload names and ends with `ci/release/verify-dist.sh --stage unsigned`. |
+| `push-chart` | `ci/release/chart-package.sh` copies `deploy/helm/myriarch`, writes the index digest of the signed server image into `image.digest` (and into the `artifacthub.io/images` entry of `Chart.yaml`), runs `helm package --version V --app-version V` with V the tag without `v`, and checks with `helm template` that every image is referenced by that digest; `ci/release/push-chart.sh` pushes it to `oci://ghcr.io/myriarch/charts` and signs it. The job needs no build output of `goreleaser`. |
+| `verify-chart` | `ci/release/verify-chart.sh` fetches the chart layer by digest and runs the same check again, then verifies signature and provenance. |
 | `sign-blobs`, `draft`, `verify` | `checksums.txt.sigstore.json` and the provenance file are added to the 40 files; `verify-dist.sh --stage final` checks all 42. |
 
 Points that the build and the workflow depend on:
