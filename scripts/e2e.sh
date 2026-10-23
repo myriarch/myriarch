@@ -545,10 +545,14 @@ EOF
   check_ge "effective config contains the rendered exporter" 1 "$(a /agents/$MAC/effective-config | jq -r .body | grep -c 'otlp_grpc/gateway')"
   check_ge "effective config contains the injected opamp extension" 1 "$(a /agents/$MAC/effective-config | jq -r .body | grep -c '^    opamp:')"
   check_eq "capabilities reported" true "$(a /agents/$MAC | jq -r '.capabilityNames|index("AcceptsRemoteConfig")!=null and index("ReportsHealth")!=null')"
+  # Event ids grow monotonically: only events newer than the request count, so the "unhealthy" of an earlier start-up or
+  # a "command" of an earlier action cannot satisfy the waits below.
+  RESTART_MARK=$(a /agents/$MAC/events | jq -r '[.items[].id]|max // 0')
   ap "/agents/$MAC/actions/restart" >/dev/null
-  wait_until 60 "a /agents/$MAC/events | jq -e '[.items[:10][]|select(.type==\"health_changed\" and (.message|test(\"unhealthy\")))]|length>0' >/dev/null"
+  wait_until 60 "a /agents/$MAC/events | jq -e --argjson m $RESTART_MARK '[.items[]|select(.id>\$m and .type==\"command\")]|length>0' >/dev/null"
+  wait_until 60 "a /agents/$MAC/events | jq -e --argjson m $RESTART_MARK '[.items[]|select(.id>\$m and .type==\"health_changed\" and (.message|test(\"unhealthy\")))]|length>0' >/dev/null"
   wait_until 90 "[ \"\$(a /agents/$MAC | jq -r .agent.health.healthy)\" = true ]"
-  check_eq "restart command: recorded, collector restarted and healthy again" "true true" "$(a /agents/$MAC/events | jq -r '[.items[]|select(.type=="command")]|length>0') $(a /agents/$MAC | jq -r .agent.health.healthy)"
+  check_eq "restart command: recorded, collector restarted and healthy again" "true true" "$(a /agents/$MAC/events | jq -r --argjson m $RESTART_MARK '[.items[]|select(.id>$m and .type=="command")]|length>0') $(a /agents/$MAC | jq -r .agent.health.healthy)"
   # failed config: batch processor with an invalid size rule -> collector validation fails -> FAILED, no re-offer loop
   cat > "$GITOPS/blueprints/dev-bad.yaml" <<'EOF'
 apiVersion: myriarch.dev/v1alpha1

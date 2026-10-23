@@ -42,10 +42,14 @@ type seedResult struct {
 // ("otelcol-contrib version 0.161.0").
 var seedVersionRE = regexp.MustCompile(`(?m)\bversion\s+v?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?)\b`)
 
+// defaultImageVersionTimeout bounds the version probe when the caller passes no
+// timeout.
+const defaultImageVersionTimeout = 30 * time.Second
+
 // imageVersion runs the image binary with --version.
 func imageVersion(ctx context.Context, exe Executor, binary string, timeout time.Duration) (string, error) {
 	if timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = defaultImageVersionTimeout
 	}
 	vctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

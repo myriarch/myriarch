@@ -312,9 +312,7 @@ describe('update dialog', () => {
     await user.click(within(dlg).getByTestId('start-update'));
     expect(await screen.findByTestId('update-waiting')).toBeTruthy();
     expect(screen.getByText('Creating the rollout …')).toBeTruthy();
-    await waitFor(() => expect(location()).toMatch(/^\/rollouts\/[0-9a-f-]{36}$/), {
-      timeout: 6000,
-    });
+    await waitFor(() => expect(location()).toMatch(/^\/rollouts\/[0-9a-f-]{36}$/));
     expect(location()).toBe(`/rollouts/${db.selections.get('k8s-gateway')!.rolloutId}`);
   });
 
