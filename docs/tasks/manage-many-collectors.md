@@ -86,8 +86,8 @@ shows `state: ok` when it has read your repository, and the fleets appear in the
 Create an enrollment token in the UI (*Settings*, *Tokens*) and run the installation script on each host. The script sets up the
 upstream supervisor, the collector and optionally `myriarch-updater`. The `site.*` options become attributes that your fleet
 selectors match on. [Connect a host](connect-a-host.md) has the inputs and the exact commands; Linux hosts with systemd are beta and
-Windows hosts are experimental in v0.1.0. Collectors in Kubernetes run as containers; see the
-[collector deployment notes](../../deploy/k8s/collector/README.md).
+Windows hosts are experimental in v0.1.0. Collectors in Kubernetes run as pods of the Helm chart `myriarch-collector` with
+unchanged upstream images; see [Install the collector with Helm](../operations/install-collector-helm.md).
 
 ## 7. Change the fleet
 
