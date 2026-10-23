@@ -7,7 +7,7 @@
 # go, node, pnpm, make or goreleaser.
 #
 #   GH_TOKEN=... TOOLS_BIN=... RELEASE_COMMIT=... RELEASE_PRERELEASE=... RELEASE_LATEST=... IMAGE_TAGS=... SERVER_INDEX_DIGEST=... \
-#   UPDATER_INDEX_DIGEST=... GITHUB_RUN_ATTEMPT=... ci/release/finalize.sh --tag TAG --release-id ID --verified DIR
+#   UPDATER_INDEX_DIGEST=... CHART_DIGEST=... GITHUB_RUN_ATTEMPT=... ci/release/finalize.sh --tag TAG --release-id ID --verified DIR
 #
 #   --verified DIR  the artifact of the verify job: verified-manifest.txt, verified-images.txt, checksums.txt
 #
@@ -15,8 +15,9 @@
 #   1. inputs       ID is a number; RELEASE_COMMIT is the commit of the tag; verified-manifest.txt has the 42 names of assets.json with well-formed lines; verified-images.txt has
 #                   six lines whose index digests equal the two environment digests [verified_mismatch]; IMAGE_TAGS are the tags of TAG
 #                   (X.Y.Z-rc.N, or X.Y.Z and X.Y) and none is latest [image_tag_latest]; RELEASE_PRERELEASE and RELEASE_LATEST fit TAG
-#   2. visibility   all six digests are read WITHOUT credentials (a fresh empty DOCKER_CONFIG for that one crane call): ghcr.io makes a
-#                   new package private, and an organization owner switches it to public by hand [ghcr_not_public]
+#   2. visibility   all six image digests and the digest of the chart (CHART_DIGEST, a well-formed digest [verified_mismatch]) are read
+#                   WITHOUT credentials (a fresh empty DOCKER_CONFIG for that one crane call): ghcr.io makes a new package private,
+#                   and an organization owner switches it to public by hand [ghcr_not_public]
 #   3. the release  release ID has the tag, was created by github-actions[bot], is named TAG and has the expected prerelease flag
 #                   [draft_foreign]; it is the only release of the tag [draft_ambiguous]; it is a draft, or - only in a re-run
 #                   (GITHUB_RUN_ATTEMPT > 1) after it was published by this job - published with the same assets [release_not_draft]
@@ -24,7 +25,8 @@
 #                   size [asset_size_mismatch] and the SHA-256 digest of the manifest [asset_digest_missing] [asset_digest_mismatch];
 #                   refs/tags/TAG exists and resolves (an annotated tag is dereferenced) to RELEASE_COMMIT [tag_moved]
 #   5. image tags   per repository from `crane ls`: an immutable tag (X.Y.Z-rc.N, X.Y.Z) is set when absent, kept when it already
-#                   points at the index, and a conflict otherwise [image_tag_conflict]; the moving tag X.Y (final tags only) is set when
+#                   points at the index, and a conflict otherwise [image_tag_conflict]; the chart (pushed by digest only) gets the tag
+#                   X.Y.Z[-rc.N] under the same rule and never X.Y [chart_tag_conflict]; the moving tag X.Y (final tags only) is set when
 #                   absent, re-set when its image has a lower version, left alone (and logged) when its version is higher, and a
 #                   conflict when unreadable; a repository with a tag latest is refused. After tagging, `crane digest` of every tag
 #                   that was set or kept equals the index [image_tag_mismatch]
@@ -95,6 +97,8 @@ server_index="${SERVER_INDEX_DIGEST:-}"
 updater_index="${UPDATER_INDEX_DIGEST:-}"
 check_match verified_mismatch "SERVER_INDEX_DIGEST" "${server_index}" "${DIGEST_RE}"
 check_match verified_mismatch "UPDATER_INDEX_DIGEST" "${updater_index}" "${DIGEST_RE}"
+chart_digest="${CHART_DIGEST:-}"
+check_match verified_mismatch "CHART_DIGEST" "${chart_digest}" "${DIGEST_RE}"
 
 manifest="${verified}/verified-manifest.txt"
 images="${verified}/verified-images.txt"
@@ -144,7 +148,10 @@ while read -r r p d; do
 done <<EOT
 ${image_lines}
 EOT
-info "all six image digests are readable without credentials"
+if ! DOCKER_CONFIG="${anon}" "${TOOLS_BIN}/crane" manifest "${RELEASE_CHART}@${chart_digest}" > /dev/null 2> "${work}/anon.err"; then
+  err ghcr_not_public "${RELEASE_CHART} cannot be read without credentials: ghcr.io makes a package private on its first publish. An organization owner sets ${RELEASE_CHART} to public (package settings, \"Change visibility\"; this cannot be undone), then re-runs this job with \"Re-run failed jobs\"."
+fi
+info "all six image digests and the chart digest are readable without credentials"
 
 # --- 3. the release ----------------------------------------------------------------------------------------------------------
 rel=""
@@ -341,6 +348,18 @@ except Exception:
 }
 plan_repo "${RELEASE_IMAGE_SERVER}" "${server_index}"
 plan_repo "${RELEASE_IMAGE_UPDATER}" "${updater_index}"
+# the chart: only the version tag, set when absent, kept when it points at the chart digest, a conflict otherwise
+existing="$("${TOOLS_BIN}/crane" ls "${RELEASE_CHART}" 2> "${work}/crane.err")" || err chart_tag_conflict "crane could not list the tags of ${RELEASE_CHART}"
+if printf '%s\n' "${existing}" | grep -Fxq latest; then
+  err image_tag_latest "${RELEASE_CHART} has the tag latest, which must not exist during v0.x"
+fi
+if printf '%s\n' "${existing}" | grep -Fxq -- "${version}"; then
+  cur="$("${TOOLS_BIN}/crane" digest "${RELEASE_CHART}:${version}" 2> "${work}/crane.err")" || err chart_tag_conflict "crane could not read ${RELEASE_CHART}:${version}"
+  [ "${cur}" = "${chart_digest}" ] || err chart_tag_conflict "${RELEASE_CHART}:${version} points to ${cur}, not to ${chart_digest}: a chart tag is never moved"
+  plan_line "${RELEASE_CHART}" "${chart_digest}" "${version}" keep
+else
+  plan_line "${RELEASE_CHART}" "${chart_digest}" "${version}" set
+fi
 while IFS='|' read -r r idx t action; do
   [ -n "${r}" ] || continue
   if [ "${action}" = set ]; then

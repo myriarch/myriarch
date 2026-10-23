@@ -26,7 +26,7 @@ Every other place that states the product version is a copy of `VERSION`:
 
 | Copy | What it is |
 |---|---|
-| `deploy/helm/myriarch/Chart.yaml`, `version` | Version of the Helm chart. |
+| `deploy/helm/myriarch/Chart.yaml`, `version` | Version of the Helm chart in the repository. The release workflow packages the chart with `--version` and `--app-version` set to the tag without `v`, so the published OCI chart always has the version of the release. |
 | `deploy/helm/myriarch/Chart.yaml`, `appVersion` | Default image tag of the chart (`image.tag` is empty by default). |
 | `api/openapi.yaml`, `info.version` | Contract version of the REST API. It equals the release version. |
 | `web/package.json`, `version` | Version of the web UI package. |
@@ -145,7 +145,7 @@ the release the way a user does.
 | Job | What it does | Approval |
 |---|---|---|
 | `guard` | Tag guard and `meta.sh` (above); the outputs of all later jobs. | |
-| `signing-tools` | Builds cosign, crane and gh (and cosign, crane for other platforms) once from `ci/tools` on a runner of its own, before anything else is installed or run there; no cache. The only tools the privileged jobs execute. | |
+| `signing-tools` | Builds cosign, crane, gh and helm (and cosign, crane for other platforms) once from `ci/tools` on a runner of its own, before anything else is installed or run there; no cache. The only tools the privileged jobs execute. | |
 | `build-tools` | Builds goreleaser, syft, yq, go-winres and osslsigncode once from `ci/tools`; no cache. Only jobs with `contents: read` execute them. | |
 | `ui` | Builds the web UI (the only job with Node.js) and runs the release dependency and license gates. | |
 | `build-windows` | `goreleaser build` of the Windows targets in stage `collect`. | |
@@ -154,11 +154,14 @@ the release the way a user does.
 | `images` | Builds the OCI layouts of both images from the release archives and their SBOMs. | |
 | `sign-blobs` | Signs `checksums.txt` keyless and attests the build provenance of its 39 files. | |
 | `push-images` | Pushes both images by digest (no release tags), signs them and attaches provenance and SBOM attestations. | |
+| `chart` | Packages the server chart with the digest of the server image written into `image.digest` (`ci/release/chart-package.sh`; chart version = app version = the tag without `v`), checks the rendering, and turns the package into an OCI layout (exactly what `helm push` writes). It holds `contents: read` only and hands the layout on as an artifact. | |
+| `push-chart` | Pushes the layout to `ghcr.io/myriarch/charts/myriarch` by digest, without a tag, signs it keyless and attaches the provenance attestation. It runs after `push-images`. The version tag of the chart is set by `finalize`, like the tags of the images. | |
 | `draft` | Renders the release notes and creates the draft release with 42 assets. It holds `contents: write` and runs before gate 2. | |
 | `verify` | Verifies signatures, provenance and images, and the files from which the draft was created (not the draft itself); writes the verified manifest and a summary. | |
 | `verify-images` | Runs both images on amd64 and arm64. | |
+| `verify-chart` | Verifies the pushed chart by digest: that the version tag does not exist yet (or, in a re-run after `finalize`, points at this digest), the chart layer (every image of the `helm template` rendering is the server image of this run), the signature and the provenance. | |
 | `verify-windows` | Checks version resources and Authenticode state of the Windows files on a Windows runner. | |
-| `finalize` | Binds the draft to the verified files (GitHub's asset digests), checks that the tag still points at the tagged commit and that both packages are public, tags the images, reads the draft again directly before it publishes, publishes the release, compares the published release with the verified files once more and checks that it is immutable. | **Gate 2** |
+| `finalize` | Binds the draft to the verified files (GitHub's asset digests), checks that the tag still points at the tagged commit and that all three packages (both images and the chart) are public, tags the images and the chart (`X.Y.Z[-rc.N]`), reads the draft again directly before it publishes, publishes the release, compares the published release with the verified files once more and checks that it is immutable. | **Gate 2** |
 | `smoke-assets`, `smoke-linux`, `smoke-windows`, `smoke-kind` | Anonymous downloads and verification, installers on amd64 and arm64, Windows staging, `docker run`, the Helm chart on kind. | |
 
 Rules that hold for all of it:
@@ -255,13 +258,14 @@ release.
    - the digests of both images in the notes equal the digests in the summary of `verify`;
    - the summary names the identity `https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/vX.Y.Z-rc.N`
      and the commit you tagged.
-6. **First release only: make both packages public.** After `push-images` of the first candidate and before gate 2, an
-   organization owner opens each package (organization `myriarch`, Packages, `myriarch` and then `myriarch-updater`), then
+6. **First release only: make all three packages public.** After `push-images` and `push-chart` of the first candidate and before
+   gate 2, an organization owner opens each package (organization `myriarch`, Packages, `myriarch`, `myriarch-updater` and then
+   `charts/myriarch`, the chart, which exists from v0.2.0-rc.1 on), then
    Package settings, "Danger Zone", "Change visibility", Public. This **cannot be undone**. While you are there, check that the
    package is connected to the repository `myriarch/myriarch` and that the repository has Write access in "Manage Actions access".
-   `finalize` fails with `ghcr_not_public` until both are public.
+   `finalize` fails with `ghcr_not_public` until all are public.
 7. **Approve gate 2** (`finalize`) **within 24 hours of the start of the run**, because the artifacts expire after one day (see
-   [Re-runs](#rc-numbering-and-re-runs)). `finalize` tags the images, publishes the release, and checks that GitHub made it
+   [Re-runs](#rc-numbering-and-re-runs)). `finalize` tags the images and the chart, publishes the release, and checks that GitHub made it
    immutable.
 8. **Check the smoke jobs** (`smoke-assets`, `smoke-linux`, `smoke-windows`, `smoke-kind`). They run after publication. A failure
    here is fixed forward (see [When something fails](#when-something-fails)).
@@ -373,9 +377,10 @@ Other files of the repository, such as `deploy/README.md`, are not in an archive
 | `signing-tools`, `build-tools`, `ui`, `build-windows`, `package`, `images` | A build, a gate (dependencies, licenses, notices) or an artifact check failed | Fix it in a pull request and tag the next candidate. |
 | `sign-windows` | The signing provider failed (v0.1.0: only the copy of the files) | Re-run. A provider issue is handled in the provider's change. |
 | `sign-blobs`, `push-images` | Sigstore or ghcr.io unavailable, a token problem | Re-run failed jobs. |
+| `push-chart` | Sigstore or ghcr.io unavailable, a token problem | Re-run failed jobs. The chart is pushed by digest and has no tag yet, so pushing the same digest again changes nothing and no manual deletion is needed. |
 | `draft` | `release_exists` or `draft_foreign` | A published release of the tag exists, or someone else made a draft of it: tag the next candidate (the next patch version for a final tag), or delete the foreign draft by hand and re-run. |
-| `verify`, `verify-images`, `verify-windows` | A verification failed | **Do not approve gate 2.** Fix forward with the next candidate. |
-| `finalize`, `ghcr_not_public` | A package is still private | Make both packages public (step 6 above), then "Re-run failed jobs". |
+| `verify`, `verify-images`, `verify-chart`, `verify-windows` | A verification failed | **Do not approve gate 2.** Fix forward with the next candidate. |
+| `finalize`, `ghcr_not_public` | A package is still private | Make all packages public (step 6 above), then "Re-run failed jobs". |
 | `finalize`, `image_tag_conflict` | An immutable image tag points to another digest | Investigate. Never move an immutable tag. |
 | `finalize`, `release_not_immutable` | The release is published but not immutable | The release stays mutable. Enable release immutability before the next tag, and announce nothing until it is fixed. |
 | `finalize`, `tag_moved` | `refs/tags/<tag>` does not exist (any more) or does not resolve to the tagged commit | Nothing was published. The tag was moved, re-created or deleted, against the ruleset: investigate, do not approve again, tag the next candidate. |

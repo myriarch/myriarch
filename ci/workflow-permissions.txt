@@ -55,6 +55,15 @@ release.yml sign-blobs attestations
 release.yml push-images id-token
 release.yml push-images attestations
 release.yml push-images packages
+# The job chart packages the server chart with the digest of the server image and builds its OCI layout; it has contents: read only.
+# push-chart pushes that layout to ghcr.io/myriarch/charts/myriarch BY DIGEST (no tag; finalize sets the version tag after approval 2),
+# signs it (cosign sign) and attaches the provenance (actions/attest), strictly in sequence after push-images. The scopes are those of
+# push-images and for the same reasons: id-token mints the OIDC token of release.yml at the tag (the signing identity of ADR-0029),
+# attestations stores the attestation, packages (limited by GitHub to the packages of this repository) writes the chart package.
+# No contents or release access. helm runs only inside ci/release/chart-package.sh (job chart, verify-chart) and comes with the signing tool set.
+release.yml push-chart id-token
+release.yml push-chart attestations
+release.yml push-chart packages
 # draft creates the draft release of the tag with the verified-to-be file set; contents: write is the only scope that the
 # Releases API accepts for that. A draft is invisible to the public and stays editable until finalize. The job runs before
 # approval 2 and has no environment: approval 2 stops finalize only, so draft runs nothing but the signing tool set and

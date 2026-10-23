@@ -185,7 +185,7 @@ parallel. Details: [docs/architecture.md](docs/architecture.md).
 | `myrctl` | CLI for the CI pipelines of the GitOps repository (`validate`, `render`); a short alias `myr` is documented in [docs/reference/cli/myrctl.md](docs/reference/cli/myrctl.md) |
 | `myriarch-updater` | Host agent for collector binary updates (systemd, Windows service, container mode) |
 | `myriarch-sim` | Load simulator (1,000 and more simulated supervisors and updaters) |
-| Helm chart | [`deploy/helm/myriarch`](deploy/helm/myriarch/README.md); install it from the repository, a signed OCI chart is planned for v0.2.0 |
+| Helm chart | [`deploy/helm/myriarch`](deploy/helm/myriarch/README.md); install it from the repository or, from v0.2.0, as a signed OCI chart |
 | Container images | `ghcr.io/myriarch/myriarch` (the server, with `myrctl`, `myriarch-sim` and the example repositories) and `ghcr.io/myriarch/myriarch-updater`, for `linux/amd64` and `linux/arm64`; published with every release, release candidates included (tags `X.Y.Z` and `X.Y`, `X.Y.Z-rc.N` for a candidate, no `latest`). `myrctl` and the simulator are also in the release archives |
 
 ## Documentation

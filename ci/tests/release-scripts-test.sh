@@ -144,6 +144,7 @@ case "$1" in
     echo "logged in with ${tok}" >&2 ;;
   manifest|config|digest|ls)
     if [ -f "${d}/crane.anon.fail" ] && [ -n "${DOCKER_CONFIG:-}" ]; then echo "UNAUTHORIZED: stub" >&2; exit 1; fi
+    if [ -f "${d}/crane.anon.fail.chart" ] && [ -n "${DOCKER_CONFIG:-}" ] && [[ "$2" == */charts/* ]]; then echo "UNAUTHORIZED: stub" >&2; exit 1; fi
     f="${d}/crane/$1.$(key "$2")"
     [ -f "${f}" ] || { echo "stub crane: no state for $1 $2" >&2; exit 1; }
     cat "${f}" ;;
@@ -448,7 +449,8 @@ eq "issuer" "https://token.actions.githubusercontent.com" "$(idv RELEASE_OIDC_IS
 eq "trigger" "push" "$(idv RELEASE_TRIGGER)"
 eq "server image" "ghcr.io/myriarch/myriarch" "$(idv RELEASE_IMAGE_SERVER)"
 eq "updater image" "ghcr.io/myriarch/myriarch-updater" "$(idv RELEASE_IMAGE_UPDATER)"
-eq "six keys only" "6" "$(grep -cv '^#\|^$' "${ID}")"
+eq "chart" "ghcr.io/myriarch/charts/myriarch" "$(idv RELEASE_CHART)"
+eq "seven keys only" "7" "$(grep -cv '^#\|^$' "${ID}")"
 repo_brand="$(sed -n 's|^[[:space:]]*Repository[[:space:]]*=[[:space:]]*"https://github.com/\([^"]*\)".*|\1|p' "${ROOT}/internal/brand/brand.go" | head -n 1)"
 eq "internal/brand Repository" "$(idv RELEASE_REPOSITORY)" "${repo_brand}"
 eq "install-linux.sh RELEASE_REPOSITORY" "$(idv RELEASE_REPOSITORY)" "$(sed -n 's/^readonly RELEASE_REPOSITORY="\(.*\)"$/\1/p' "${ROOT}/deploy/scripts/install-linux.sh")"
@@ -1242,11 +1244,14 @@ fsetup() { # tag [image options...]
   FVER="${TEST_TMP}/fver_${FV}"; rm -rf "${FVER}"
   gen verified "${FVER}" "${FA_}" "${FS_}" "${FV}" "${SERVER_INDEX_DIGEST}" "${SERVER_AMD64_DIGEST}" "${SERVER_ARM64_DIGEST}" "${UPDATER_INDEX_DIGEST}" "${UPDATER_AMD64_DIGEST}" "${UPDATER_ARM64_DIGEST}"
   gen release "${S}" 4711 "${FTAG}" "${FV}" "${FVER}/verified-manifest.txt"
+  echo '{}' > "${S}/crane/manifest.ghcr.io_myriarch_charts_myriarch_sha256_${FR_CHART#sha256:}"
+  : > "${S}/crane/ls.ghcr.io_myriarch_charts_myriarch"
   printf '{"tagName":"%s","isDraft":false,"isPrerelease":%s,"isImmutable":true,"databaseId":4711}\n' "${FTAG}" "${FPRE}" > "${S}/view.json"
   printf '{"ref":"refs/tags/%s","object":{"type":"commit","sha":"%s"}}\n' "${FTAG}" "${C40}" > "${S}/ref.json"
 }
+FR_CHART="sha256:$(printf '3%.0s' $(seq 64))"
 fr() {
-  GH_TOKEN=stub-token-not-secret RELEASE_COMMIT="${FR_COMMIT:-${C40}}" RELEASE_PRERELEASE="${FPRE}" RELEASE_LATEST="${FR_LATEST:-${FLATEST}}" IMAGE_TAGS="${FR_TAGS:-${FTAGS}}" \
+  GH_TOKEN=stub-token-not-secret CHART_DIGEST="${FR_CHART_DIGEST-${FR_CHART}}" RELEASE_COMMIT="${FR_COMMIT:-${C40}}" RELEASE_PRERELEASE="${FPRE}" RELEASE_LATEST="${FR_LATEST:-${FLATEST}}" IMAGE_TAGS="${FR_TAGS:-${FTAGS}}" \
     GITHUB_RUN_ATTEMPT="${FR_ATTEMPT:-1}" RELEASE_RETRY_DELAY=0 run_priv "${REL}/finalize.sh" --tag "${FTAG}" --release-id "${FR_ID:-4711}" --verified "${FVER}"
 }
 seq_line() { grep -n "$1" "${S}/calls/all.log" | head -n 1 | cut -d: -f1; }
@@ -1254,9 +1259,10 @@ seq_last() { grep -n "$1" "${S}/calls/all.log" | tail -n 1 | cut -d: -f1; }
 fsetup v9.9.9-rc.1
 expect_ok "finalize: an rc" fr
 contains "finalize rc: stdout is the release URL" "release-url=https://github.com/myriarch/myriarch/releases/tag/v9.9.9-rc.1" "${OUT}"
-eq "finalize rc: six anonymous manifest reads with an empty DOCKER_CONFIG" "6" "$(call_count crane '^manifest [^ ]+ DOCKER_CONFIG=/')"
+eq "finalize rc: seven anonymous manifest reads (six images, the chart) with an empty DOCKER_CONFIG" "7" "$(call_count crane '^manifest [^ ]+ DOCKER_CONFIG=/')"
 eq "finalize rc: no other crane call uses an anonymous config" "0" "$(call_count crane '^(ls|tag|digest|config) .*DOCKER_CONFIG=/')"
-eq "finalize rc: crane tag for both repositories" "2" "$(call_count crane '^tag ')"
+eq "finalize rc: crane tag for both image repositories and the chart" "3" "$(call_count crane '^tag ')"
+has_call crane "^tag ghcr.io/myriarch/charts/myriarch@${FR_CHART} 9.9.9-rc.1 " && ok "finalize rc: the chart gets its version tag by digest" || fail "finalize rc: the chart was not tagged"
 has_call crane "^tag ${REPO_S}@${SERVER_INDEX_DIGEST} 9.9.9-rc.1 " && has_call crane "^tag ${REPO_U}@${UPDATER_INDEX_DIGEST} 9.9.9-rc.1 " && ok "finalize rc: tag 9.9.9-rc.1 on the index digests" || fail "finalize rc: wrong crane tag calls"
 no_call crane '(^| )latest( |$)' && ok "finalize rc: no call with latest" || fail "finalize rc: a call with latest"
 eq "finalize rc: the publish call (draft=false, make_latest=false)" "api -X PATCH repos/myriarch/myriarch/releases/4711 -F draft=false -f make_latest=false" "$(call_line gh 7)"
@@ -1269,7 +1275,9 @@ has_call gh '^release verify v9.9.9-rc.1 --repo myriarch/myriarch$' && has_call 
 [ "$(seq_last 'crane manifest')" -lt "$(seq_line 'crane tag')" ] && [ "$(seq_last 'crane tag')" -lt "$(seq_line 'PATCH')" ] && ok "finalize rc: anonymous reads, then tags, then the publication" || fail "finalize rc: wrong order"
 fsetup v9.9.9
 expect_ok "finalize: a final tag" fr
-eq "finalize final: four crane tag calls" "4" "$(call_count crane '^tag ')"
+eq "finalize final: five crane tag calls (X.Y.Z and X.Y per image, X.Y.Z for the chart)" "5" "$(call_count crane '^tag ')"
+has_call crane "^tag ghcr.io/myriarch/charts/myriarch@${FR_CHART} 9.9.9 " && ok "finalize final: the chart gets 9.9.9" || fail "finalize final: the chart was not tagged 9.9.9"
+no_call crane "^tag ghcr.io/myriarch/charts/myriarch@[^ ]+ 9\\.9 " && ok "finalize final: the chart gets no moving tag" || fail "finalize final: the chart got X.Y"
 for r in "${REPO_S}@${SERVER_INDEX_DIGEST}" "${REPO_U}@${UPDATER_INDEX_DIGEST}"; do
   has_call crane "^tag ${r} 9.9.9 " && has_call crane "^tag ${r} 9.9 " && ok "finalize final: 9.9.9 and 9.9 on ${r:0:40}" || fail "finalize final: tags missing on ${r}"
 done
@@ -1307,6 +1315,10 @@ refuse_case() { # name regex  (state prepared by the caller)
 fsetup v9.9.9-rc.1; touch "${S}/crane.anon.fail"
 refuse_case "anonymous read fails" "ghcr_not_public.*cannot be read without credentials.*Change visibility"
 no_call crane '^tag ' && ok "finalize: no crane tag before the visibility check passes" || fail "finalize: tagged although not public"
+fsetup v9.9.9-rc.1; touch "${S}/crane.anon.fail.chart"
+refuse_case "the chart is private" "ghcr_not_public.*charts/myriarch cannot be read without credentials.*Change visibility"
+no_call crane '^tag ' && ok "finalize: no crane tag while the chart is private" || fail "finalize: tagged although the chart is private"
+fsetup v9.9.9-rc.1; FR_CHART_DIGEST="" refuse_case "no chart digest" "verified_mismatch.*CHART_DIGEST"
 fsetup v9.9.9-rc.1; gen release "${S}" 4711 v9.9.9-rc.1 9.9.9-rc.1 "${FVER}/verified-manifest.txt" draft=0
 refuse_case "published and attempt 1" "release_not_draft.*never publish the draft by hand"
 fsetup v9.9.9-rc.1; gen release "${S}" 4711 v9.9.9-rc.1 9.9.9-rc.1 "${FVER}/verified-manifest.txt" tag=v9.9.8-rc.1
@@ -1333,6 +1345,14 @@ fsetup v9.9.9-rc.1; gen release "${S}" 4711 v9.9.9-rc.1 9.9.9-rc.1 "${FVER}/veri
 refuse_case "an asset of another uploader" "asset_foreign"
 fsetup v9.9.9-rc.1; gen release "${S}" 4711 v9.9.9-rc.1 9.9.9-rc.1 "${FVER}/verified-manifest.txt" "state=starter"
 refuse_case "an asset that is not uploaded" "asset_state"
+fsetup v9.9.9-rc.1; echo 9.9.9-rc.1 >> "${S}/crane/ls.ghcr.io_myriarch_charts_myriarch"; echo "sha256:$(printf '4%.0s' $(seq 64))" > "${S}/crane/digest.ghcr.io_myriarch_charts_myriarch_9.9.9-rc.1"
+refuse_case "a chart tag that points at another digest" "chart_tag_conflict.*never moved"
+no_call crane '^tag ' && ok "finalize: no tag at all after a chart tag conflict" || fail "finalize: tagged although the chart tag conflicts"
+fsetup v9.9.9-rc.1; echo latest >> "${S}/crane/ls.ghcr.io_myriarch_charts_myriarch"
+refuse_case "latest in the chart repository" "image_tag_latest"
+fsetup v9.9.9-rc.1; echo 9.9.9-rc.1 >> "${S}/crane/ls.ghcr.io_myriarch_charts_myriarch"; echo "${FR_CHART}" > "${S}/crane/digest.ghcr.io_myriarch_charts_myriarch_9.9.9-rc.1"
+expect_ok "finalize: a chart tag that already points at the chart digest" fr
+no_call crane "^tag ghcr.io/myriarch/charts/myriarch" && ok "finalize: the chart tag is kept" || fail "finalize: the kept chart tag was set again"
 fsetup v9.9.9-rc.1; FR_TAGS="9.9.9-rc.1,latest"
 refuse_case "latest in IMAGE_TAGS" "image_tag_latest"
 unset FR_TAGS
@@ -1353,6 +1373,7 @@ fsetup v9.9.9
 for t in 9.9.9 9.9; do for r in "${REPO_S}:${SERVER_INDEX_DIGEST}" "${REPO_U}:${UPDATER_INDEX_DIGEST}"; do
   echo "${r#*:}" > "${S}/crane/digest.$(ckey "${r%%:*}:${t}")"; echo "${t}" >> "${S}/crane/ls.$(ckey "${r%%:*}")"
 done; done
+echo "${FR_CHART}" > "${S}/crane/digest.ghcr.io_myriarch_charts_myriarch_9.9.9"; echo 9.9.9 >> "${S}/crane/ls.ghcr.io_myriarch_charts_myriarch"
 gen release "${S}" 4711 v9.9.9 9.9.9 "${FVER}/verified-manifest.txt" draft=0
 FR_ATTEMPT=2 expect_ok "finalize: a re-run after the publication" fr
 no_call gh '-X PATCH' && ok "finalize resume: no PATCH" || fail "finalize resume: PATCH was called"
@@ -1468,13 +1489,13 @@ section "15. tools.sh check, images.sh"
 TL="${TEST_TMP}/tools"
 mkdir -p "${TL}/linux-amd64" "${TL}/linux-arm64" "${TL}/windows-amd64"
 printf 'a\n' > "${TL}/linux-amd64/cosign"; printf 'b\n' > "${TL}/linux-amd64/.stamp-cosign-v1-abc"; printf 'c\n' > "${TL}/linux-arm64/cosign"; printf 'd\n' > "${TL}/windows-amd64/cosign.exe"
-printf 'g\n' > "${TL}/linux-amd64/crane"; printf 'h\n' > "${TL}/linux-amd64/gh"
-printf 'cosign v1\ncrane v2\ngh v3\n' > "${TL}/VERSIONS"
+printf 'g\n' > "${TL}/linux-amd64/crane"; printf 'h\n' > "${TL}/linux-amd64/gh"; printf 'i\n' > "${TL}/linux-amd64/helm"
+printf 'cosign v1\ncrane v2\ngh v3\nhelm v4\n' > "${TL}/VERSIONS"
 mksums() { ( cd "$1" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do printf '%s  %s\n' "$(sha256_of "${f}")" "${f}"; done > SHA256SUMS ); }
 mksums "${TL}"
 tc() { run_priv "${REL}/tools.sh" check --set "$1" --dir "${2:-${TL}}" --platform "$3"; }
 for pl in linux-amd64 linux-arm64 windows-amd64; do expect_ok "tools check: the signing set, ${pl}" tc signing "${TL}" "${pl}"; done
-expect_fail "tools check: a tree of the signing set is not the build set" "tools_sums.*VERSIONS names 'cosign crane gh', the build set is" tc build "${TL}" linux-amd64
+expect_fail "tools check: a tree of the signing set is not the build set" "tools_sums.*VERSIONS names 'cosign crane gh helm', the build set is" tc build "${TL}" linux-amd64
 expect_fail "tools check: the set is required" "usage:" run_priv "${REL}/tools.sh" check --dir "${TL}" --platform linux-amd64
 expect_fail "tools check: an unknown set" "usage:" tc other "${TL}" linux-amd64
 printf 'x' >> "${TL}/linux-arm64/cosign"
@@ -1495,8 +1516,8 @@ expect_fail "tools check: VERSIONS is missing" "tools_sums.*VERSIONS is missing"
 expect_fail "tools build: a non-empty output directory" "out_not_empty" run_priv "${REL}/tools.sh" build --set signing --out "${TL}"
 expect_fail "tools build: the set is required" "usage:" run_priv "${REL}/tools.sh" build --out "${TEST_TMP}/tools-x"
 expect_fail "tools build: an unknown set" "usage:" run_priv "${REL}/tools.sh" build --set all --out "${TEST_TMP}/tools-x"
-grep -q 'TOOLS_NO_CACHE=1 TOOLS_BIN="${bin}" "${ROOT}/ci/install-tools.sh" cosign crane gh ' "${REL}/tools.sh" \
-  && ok "tools build: the signing set is cosign, crane and gh without the cache" || fail "tools build: unexpected install-tools.sh call for the signing set"
+grep -q 'TOOLS_NO_CACHE=1 TOOLS_BIN="${bin}" "${ROOT}/ci/install-tools.sh" cosign crane gh helm ' "${REL}/tools.sh" \
+  && ok "tools build: the signing set is cosign, crane, gh and helm without the cache" || fail "tools build: unexpected install-tools.sh call for the signing set"
 grep -q 'TOOLS_NO_CACHE=1 TOOLS_BIN="${bin}" "${ROOT}/ci/install-tools.sh" goreleaser syft go-winres yq osslsigncode ' "${REL}/tools.sh" \
   && ok "tools build: the build set is goreleaser, syft, go-winres, yq and osslsigncode without the cache" || fail "tools build: unexpected install-tools.sh call for the build set"
 # the signing set is built before anything else is installed, and never needs apt or a C compiler

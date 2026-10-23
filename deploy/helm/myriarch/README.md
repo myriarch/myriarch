@@ -22,12 +22,24 @@ Two things are needed: a Secret with the database DSN and the external URL.
 kubectl create namespace myriarch
 kubectl -n myriarch create secret generic myriarch-secrets \
   --from-literal=database-dsn='postgres://myriarch:<password>@db.example.com:5432/myriarch?sslmode=verify-full'
-# from a checkout of the repository (a signed OCI chart is planned for v0.2.0):
+# from a checkout of the repository, or, from v0.2.0, from the signed OCI chart (verify it first, see "Signed OCI chart" below):
 helm install myriarch deploy/helm/myriarch -n myriarch --set config.server.publicUrl=https://fleet.example.com
+helm install myriarch oci://ghcr.io/myriarch/charts/myriarch --version 0.2.0 -n myriarch --set config.server.publicUrl=https://fleet.example.com
 ```
 
 The documented release name and namespace are both `myriarch`, so the Service, Deployment, ConfigMap and ServiceAccount
-are all called `myriarch`. A signed OCI chart is planned for v0.2.0; until then install from a checkout of the repository.
+are all called `myriarch`.
+
+### Signed OCI chart
+
+> **Available from v0.2.0.** The chart of v0.1.0 is installed from a checkout of the repository.
+
+Every release publishes the chart as `oci://ghcr.io/myriarch/charts/myriarch`; its version and its `appVersion` are the version of
+the release. The release workflow writes the digest of the signed server image into `image.digest` before it packages the chart, so
+the published chart references the image by digest, signs the chart keyless with the identity of the release workflow, and checks
+before publication that `helm template` renders every image by that digest. In the repository `image.digest` stays empty (the image
+is then `appVersion`'s tag). Verification commands: [Verify a release](../../../docs/security/verify-releases.md#verify-the-helm-chart);
+installation: [Install with Helm](../../../docs/operations/install-helm.md#install-the-signed-oci-chart).
 
 ### Access
 
@@ -343,6 +355,148 @@ configuration ([Verification](#verification)).
 the hand-written part, and from `internal/config`; do not edit the JSON file. A new value of the chart goes into `values.yaml`,
 the templates and `values.schema.source.yaml`; the tests fail when `values.yaml` or a template uses a value that the schema does
 not list.
+
+## Values
+
+Every value of the chart with its type, its default and its description. The table is generated from
+[`values.schema.json`](values.schema.json) and [`values.yaml`](values.yaml) (`make docs-gen`), so it cannot drift from them.
+"unset" means that `values.yaml` has no entry and the chart applies its own default.
+
+<!-- BEGIN GENERATED VALUES TABLE (make docs-gen; do not edit) -->
+
+| Value | Type | Default | Description |
+|---|---|---|---|
+| `replicaCount` | integer | `2` | Number of myriarchd replicas. All replicas serve agents and the API; the singleton jobs run on the leader. |
+| `image.registry` | string | `"ghcr.io"` | Registry host, with an optional port, of the image, for example ghcr.io. It applies when image.repository has no registry host of its own, and global.imageRegistry takes precedence over it. Empty means the default registry of the container runtime. |
+| `image.repository` | string | `"myriarch/myriarch"` | Repository of the image without a registry host, for example myriarch/myriarch. A repository that starts with a registry host (registry.example.com/myriarch/myriarch, the form of the values of v0.1.0) is used unchanged and neither image.registry nor global.imageRegistry applies. The first segment is a registry host when it contains a . or a : or is localhost, as for the container runtimes; otherwise it belongs to the repository, which is in lower case. |
+| `image.tag` | string | `""` | Image tag. Empty means the appVersion of the chart. |
+| `image.digest` | string | `""` | Image digest, sha256: followed by 64 hexadecimal characters. When set, the image is referenced as repository@digest and the tag is ignored. |
+| `image.pullPolicy` | enum | `"IfNotPresent"` | Image pull policy. |
+| `imagePullSecrets` | array | `[]` | Secrets for pulling the image from a private registry. |
+| `nameOverride` | string | `""` | Overrides the chart name in resource names. |
+| `fullnameOverride` | string | `""` | Overrides the complete resource name. |
+| `global.imageRegistry` | string or null | unset | Registry host, with an optional port, that replaces image.registry, for example the host of a mirror. A repository that has a registry host of its own is not affected. A parent chart may pass null for no mirror. |
+| `enabled` | boolean | unset | Read by the dependency condition of a parent chart (condition: myriarch.enabled), not by this chart, which ignores it. It has no default and no effect on a standalone installation. |
+| `serviceAccount.create` | boolean | `true` | Create the ServiceAccount. |
+| `serviceAccount.name` | string | `""` | Name of the ServiceAccount. Empty means a name generated from the release name. |
+| `serviceAccount.annotations` | object | `{}` | Annotations of the ServiceAccount. |
+| `config` | object | | The configuration file of the server (`myriarchd.yaml`); keys, types and descriptions are those of the [configuration reference](../../../docs/reference/configuration.md). The chart defaults are in `values.yaml`. |
+| `oidcFromEnvironment` | boolean | `false` | Declares that single sign-on is switched on by environment variables (MYRIARCH_AUTH_OIDC_ENABLED in extraEnv, a ConfigMap or a Secret), which the chart cannot read. The chart then treats OIDC as enabled; the server reads the environment. |
+| `bootstrapAdmin.enabled` | boolean | `true` | Configure the bootstrap admin. |
+| `bootstrapAdmin.username` | string | `"admin"` | User name of the account, 1 to 64 characters from letters, digits, ".", "_", "@" and "-". |
+| `bootstrapAdmin.existingSecret` | string | `""` | Secret that holds the credentials. Empty means that the chart generates the Secret \<fullname>-bootstrap with a random one-time token. |
+| `bootstrapAdmin.tokenKey` | string | `"token"` | Key of the one-time token in the Secret. Empty means no token, only a password hash, and needs existingSecret. |
+| `bootstrapAdmin.passwordHashKey` | string | `""` | Key of a bcrypt password hash in existingSecret. Needs existingSecret. |
+| `bootstrapAdmin.keepWithOidc` | boolean | `false` | Keep the bootstrap admin active next to single sign-on (break-glass). |
+| `enrollmentTokens` | array | `[]` | Enrollment tokens for agents that exist from the first start. A token is never a value: each entry names a Secret that holds it, or the chart generates the Secret with a random token. |
+| `existingSecret` | string | `"myriarch-secrets"` | Name of the Secret with the files of the server (database-dsn and the optional keys). It is mounted at /etc/myriarchd/secrets. |
+| `secretChecksum.enabled` | boolean | `true` | Add the annotation checksum/secret to the pods. |
+| `secretEnv` | array | `[]` | Environment variables for the executors, each taken from one key of the Secret existingSecret. |
+| `extraEnv` | array | `[]` | Additional environment variables of the myriarchd container, in the format of a Kubernetes container. |
+| `extraVolumes` | array | `[]` | Additional volumes of the pod, in the format of a Kubernetes pod. |
+| `extraVolumeMounts` | array | `[]` | Additional volume mounts of the myriarchd container, in the format of a Kubernetes container. |
+| `openshift.enabled` | boolean or enum | `false` | true selects the OpenShift profile, false the standard profile, and auto the OpenShift profile when the cluster offers the API security.openshift.io/v1. helm template renders the standard profile for auto unless it gets --api-versions security.openshift.io/v1. |
+| `openshift.route.enabled` | boolean | `true` | Create the Route in the OpenShift profile. |
+| `openshift.route.host` | string | `""` | Host of the Route. Empty means the host of config.server.publicUrl, without the port. |
+| `openshift.route.annotations` | object | `{}` | Further annotations of the Route. The router timeout annotations are always set unless this map sets them. |
+| `openshift.route.timeout` | string | `"3600s"` | Router timeout for the long-lived OpAMP WebSockets, a number with a unit (us, ms, s, m, h or d), for example 3600s. |
+| `openshift.route.tls.insecureEdgeTerminationPolicy` | enum | `"Redirect"` | What the router does with plain HTTP requests. |
+| `openshift.route.tls.externalCertificateSecret` | string | `""` | Secret (kubernetes.io/tls, same namespace) with a certificate for the host of the Route. Empty means the default certificate of the router. |
+| `openshift.routerNamespaceSelector.matchLabels` | object | `{"policy-group.network.openshift.io/ingress":""}` | A map from strings to strings. An entry may be null: the values files of the examples switch off an entry of an earlier values file that way, and Helm keeps such a null for a key that values.yaml does not define. |
+| `openshift.routerNamespaceSelector.matchExpressions` | array | unset |  |
+| `openshift.dns.to` | array | see `values.yaml` | Destinations in NetworkPolicy peer format. |
+| `openshift.dns.ports` | array | `[5353,53]` | Ports of the DNS service, used for UDP and TCP. |
+| `service.type` | enum | `"ClusterIP"` | Service type. |
+| `service.port` | integer | `8080` | Port of the HTTP service (UI, REST and OpAMP). |
+| `service.metricsPort` | integer | `9090` | Port of the metrics endpoint. |
+| `service.annotations` | object | `{}` | Annotations of the Service. |
+| `networkPolicy.enabled` | boolean | `true` | Render the NetworkPolicy. |
+| `networkPolicy.ingress.from` | array | `[]` | Sources in NetworkPolicy peer format, for example the namespace of the ingress controller or Gateway. Required while ingress or httpRoute is enabled. |
+| `networkPolicy.ingress.allowSameNamespace` | boolean | `true` | Allow every pod of the release namespace to reach port 8080. It must be false while config.server.trustedProxies or config.opamp.clientCertHeader is set. |
+| `networkPolicy.metrics.from` | array | `[]` | Sources in NetworkPolicy peer format. Empty means nobody. |
+| `networkPolicy.egress.enabled` | boolean | `true` | Restrict egress to DNS and the ports below. |
+| `networkPolicy.egress.ports` | array | `[5432,443]` | Allowed destination ports (TCP) for all destinations, by default 5432 for PostgreSQL and 443 for HTTPS. The Git SSH port is added automatically while config.gitops is enabled with an SSH URL. |
+| `networkPolicy.egress.extraPorts` | array | `[]` | Further ports (TCP), merged into the rule above. |
+| `networkPolicy.egress.exceptCidrs` | array | `["169.254.0.0/16"]` | Destinations that the rule excludes, by default the cloud metadata service. |
+| `networkPolicy.egress.dns.to` | array | see `values.yaml` | Destinations in NetworkPolicy peer format. |
+| `networkPolicy.egress.dns.ports` | array | `[53]` | Ports of the DNS service, used for UDP and TCP. |
+| `networkPolicy.egress.extraRules` | array | `[]` | Further egress rules in NetworkPolicy format. |
+| `ingress.enabled` | boolean | `false` | Create an Ingress. |
+| `ingress.className` | string | `""` | Ingress class. Empty means the default class of the cluster. |
+| `ingress.annotations` | object | `{}` | Annotations for the controller. OpAMP connections are long-lived WebSockets, so the controller needs long timeouts. |
+| `ingress.hosts` | array | see `values.yaml` | Host names and paths of the Ingress. |
+| `ingress.tls` | array | `[]` | TLS of the Ingress. Required while config.server.publicUrl is https, unless allowWithoutTls is set. |
+| `ingress.allowWithoutTls` | boolean | `false` | Allow an https publicUrl without ingress.tls, because TLS terminates outside the Ingress. |
+| `ingress.allowWithoutTrustedProxies` | boolean | `false` | Allow an empty config.server.trustedProxies, so that all clients appear with the address of the ingress controller. |
+| `httpRoute.enabled` | boolean | `false` | Create an HTTPRoute. |
+| `httpRoute.parentRefs` | array | `[]` | Gateways that the route is bound to, in the format of the Gateway API. Required while enabled. |
+| `httpRoute.hostnames` | array | `[]` | Host names of the route. They must match config.server.publicUrl. Required while enabled. |
+| `httpRoute.annotations` | object | `{}` | Annotations of the HTTPRoute. |
+| `httpRoute.tlsTerminatedAtGateway` | boolean | `false` | Confirms that the Gateway listener terminates TLS. Required with an https publicUrl, because the chart cannot check the Gateway. |
+| `httpRoute.allowWithoutTrustedProxies` | boolean | `false` | Allow an empty config.server.trustedProxies. |
+| `httpRoute.timeouts.request` | string | unset | A duration in the format of the Gateway API, for example 30s or 1h30m. |
+| `httpRoute.timeouts.backendRequest` | string | unset | A duration in the format of the Gateway API, for example 30s or 1h30m. |
+| `resources.requests` | object | `{"cpu":"250m","ephemeral-storage":"512Mi","memory":"512Mi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
+| `resources.limits` | object | `{"ephemeral-storage":"5Gi","memory":"1Gi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
+| `resources.claims` | array | unset |  |
+| `preStopSleepSeconds` | integer | `10` | Pause before the shutdown, so that the endpoint disappears from the load balancers before the connections are closed. |
+| `terminationGracePeriodSeconds` | integer | `60` | Grace period of the pod on termination. |
+| `probes.startup.path` | string | `"/healthz"` | HTTP path of the probe. |
+| `probes.startup.failureThreshold` | integer | `30` | A number of seconds or attempts, at least 1. |
+| `probes.startup.periodSeconds` | integer | `2` | A number of seconds or attempts, at least 1. |
+| `probes.liveness.path` | string | `"/healthz"` | HTTP path of the probe. |
+| `probes.liveness.periodSeconds` | integer | `10` | A number of seconds or attempts, at least 1. |
+| `probes.liveness.timeoutSeconds` | integer | `3` | A number of seconds or attempts, at least 1. |
+| `probes.liveness.failureThreshold` | integer | `3` | A number of seconds or attempts, at least 1. |
+| `probes.readiness.path` | string | `"/readyz"` | HTTP path of the probe. |
+| `probes.readiness.periodSeconds` | integer | `5` | A number of seconds or attempts, at least 1. |
+| `probes.readiness.timeoutSeconds` | integer | `3` | A number of seconds or attempts, at least 1. |
+| `probes.readiness.failureThreshold` | integer | `3` | A number of seconds or attempts, at least 1. |
+| `tests.enabled` | boolean | `true` | Render the test Pod. The Pod exists only while "helm test" runs. "helm template \| kubectl apply" creates it as an ordinary Pod; "helm template --skip-tests" leaves it out. |
+| `tests.token.existingSecret` | string | `""` | Name of the Secret with the token of the test. Empty means that the Pod mounts no Secret. |
+| `tests.token.key` | string | `"token"` | Key of the token in the Secret. |
+| `tests.podAnnotations` | object | `{}` | Annotations of the test Pod, for example the opt-out from the sidecar injection of a service mesh. A sidecar that keeps running stops the Pod from completing. The chart sets the annotations of the hook itself, and a key that starts with helm.sh/hook is refused: it would change or, as a null, remove the hook, and the Pod would become an ordinary resource of the release. |
+| `tests.resources.requests` | object | `{"cpu":"10m","ephemeral-storage":"16Mi","memory":"32Mi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
+| `tests.resources.limits` | object | `{"ephemeral-storage":"64Mi","memory":"64Mi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
+| `podDisruptionBudget.enabled` | boolean | `true` | Create the PodDisruptionBudget. |
+| `podDisruptionBudget.minAvailable` | integer or string | `1` | Minimum number or percentage of available pods. Ignored while maxUnavailable is set. |
+| `podDisruptionBudget.maxUnavailable` | integer or string | unset | Maximum number or percentage of unavailable pods. It replaces minAvailable when set. |
+| `podAnnotations` | object | `{}` | Annotations of the pods. |
+| `podLabels` | object | `{}` | Additional labels of the pods. |
+| `priorityClassName` | string | `""` | Priority class of the pods. |
+| `podSecurityContext.runAsNonRoot` | boolean | `true` |  |
+| `podSecurityContext.runAsUser` | integer | `65532` |  |
+| `podSecurityContext.runAsGroup` | integer | `65532` |  |
+| `podSecurityContext.fsGroup` | integer | `65532` |  |
+| `podSecurityContext.seccompProfile.type` | enum | `"RuntimeDefault"` |  |
+| `securityContext.allowPrivilegeEscalation` | boolean | `false` |  |
+| `securityContext.readOnlyRootFilesystem` | boolean | `true` |  |
+| `securityContext.privileged` | boolean | unset |  |
+| `securityContext.runAsNonRoot` | boolean | unset |  |
+| `securityContext.runAsUser` | integer | unset |  |
+| `securityContext.runAsGroup` | integer | unset |  |
+| `securityContext.capabilities.add` | array | unset |  |
+| `securityContext.capabilities.drop` | array | `["ALL"]` |  |
+| `securityContext.seccompProfile.type` | enum | unset |  |
+| `persistence.enabled` | boolean | `false` | Mount a PersistentVolumeClaim instead of an emptyDir. |
+| `persistence.existingClaim` | string | `""` | Name of an existing claim. Empty means that the chart creates one. |
+| `persistence.storageClass` | string | `""` | Storage class of the created claim. Empty means the default class. |
+| `persistence.accessModes` | array | `["ReadWriteMany"]` | Access modes of the created claim. |
+| `persistence.size` | number or string | `"10Gi"` | Size of the created claim. |
+| `emptyDir.sizeLimit` | number or string | `"4Gi"` | Size limit of the emptyDir volume. It must stay above config.artifacts.maxCacheBytes. |
+| `topologySpreadConstraints` | array | see `values.yaml` | Spreads the replicas, in the format of a Kubernetes pod. The chart adds the label selector of the release to every entry. |
+| `nodeSelector` | object | `{}` | Node selector of the pods. |
+| `tolerations` | array | `[]` | Tolerations of the pods. |
+| `affinity.nodeAffinity` | object | unset |  |
+| `affinity.podAffinity` | object | unset |  |
+| `affinity.podAntiAffinity` | object | unset |  |
+| `serviceMonitor.enabled` | boolean | `false` | Create the ServiceMonitor. |
+| `serviceMonitor.interval` | string | `"30s"` | Scrape interval, for example 30s. |
+| `serviceMonitor.labels` | object | `{}` | Labels of the ServiceMonitor, for example the label that selects it in the Prometheus resource. |
+| `prometheusRule.enabled` | boolean | `false` | Create the PrometheusRule. |
+| `prometheusRule.labels` | object | `{}` | Labels of the PrometheusRule, for example the label that selects it in the Prometheus resource (ruleSelector). |
+
+<!-- END GENERATED VALUES TABLE -->
 
 ## Misconfiguration messages
 

@@ -4,7 +4,9 @@
 # The release workflow (ADR-0035): it runs for a pushed tag v* and nothing else. It builds the release files and the container
 # images, signs checksums.txt and the images keyless with the OIDC token of this workflow, attests the build provenance, creates
 # a draft release, verifies everything before the release exists for the public, and publishes it only after a second approval.
-# Smoke tests of the published release run at the end of the same workflow.
+# Smoke tests of the published release run at the end of the same workflow. The server chart is packaged with the digest of the signed
+# server image, pushed by digest to ghcr.io/myriarch/charts/myriarch, signed and attested like the images, verified before publication
+# and tagged by finalize after approval 2.
 #
 # Rules that this file keeps (ci/check-workflows.py rule R13 and ci/tests/release-workflow-test.sh enforce them):
 #   - The signing identity is frozen from v0.1.0 on: https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/v*
@@ -12,7 +14,7 @@
 #     workflow or another workflow, never add another trigger.
 #   - Build code (go, node, pnpm, goreleaser, make) runs only in jobs with contents: read. The jobs with write scopes, id-token,
 #     attestations: write or an environment call only the scripts below ci/release, cosign, crane, gh and actions/attest.
-#   - Two tool sets: cosign, crane and gh (signing-tools, built first on a runner of its own) are the only tools that jobs with a
+#   - Two tool sets: cosign, crane, gh and helm (signing-tools, built first on a runner of its own) are the only tools that jobs with a
 #     write scope, id-token, attestations or an environment execute; goreleaser, syft, yq, go-winres and osslsigncode (build-tools)
 #     reach only jobs with contents: read. Every consumer runs ci/release/tools.sh check after the unpack.
 #   - Jobs exchange files only as artifacts of this run: one tar file each, uploaded without compression, downloaded by artifact
@@ -25,7 +27,10 @@
 #     before gate 2: only finalize is stopped by it. v0.1.0 reads no secret.
 #   - The registry credentials live in $HOME/.docker/config.json (written by ci/release/registry-login.sh): actions/attest reads
 #     only that file. DOCKER_CONFIG is never set.
-#   - Pushes, signatures and attestations for one image digest run as strictly sequential steps of the job push-images.
+#   - Pushes, signatures and attestations for one image digest run as strictly sequential steps of the job push-images, and those of
+#     the chart digest (the Helm chart as an OCI artifact, which references the server image by digest) as strictly sequential steps
+#     of the job push-chart, which runs after push-images. The chart is packaged in the job chart (no write scope) and, like the images, gets
+#     its version tag only in finalize.
 name: release
 
 on:
@@ -93,7 +98,7 @@ jobs:
           RELEASE_COMMIT: ${{ github.sha }}
         run: ci/release/meta.sh >> "${GITHUB_OUTPUT}"
 
-  # Builds the tools that the jobs with id-token, attestations, packages or contents write execute (cosign, crane, gh) on a runner of
+  # Builds the tools that the jobs with id-token, attestations, packages or contents write execute (cosign, crane, gh, helm) on a runner of
   # their own, before anything else is installed or run there: no apt package, no C compiler, no other tool. The tar file carries
   # VERSIONS and SHA256SUMS; the job summary records both. See ci/release/tools.sh and docs/security/model.md.
   signing-tools:
@@ -725,6 +730,143 @@ jobs:
       - name: Log out of ghcr.io
         run: ci/release/registry-login.sh logout
 
+  # Packages the server chart with the digest of the server image (chart version = app version = the tag without v) and turns the package
+  # into an OCI layout, exactly what helm push would write to a registry. No registry access, no write scope: only the layout and its
+  # SHA-256 leave this job, like the layouts of the images. helm and crane come with the signing tool set and run inside the scripts
+  # below ci/release.
+  chart:
+    name: chart
+    needs: [guard, signing-tools, images, sign-windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+      chart-digest: ${{ steps.layout.outputs.chart-digest }}
+    steps:
+      - name: Check out the release scripts and the chart
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+            deploy/helm/myriarch
+          sparse-checkout-cone-mode: false
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      - name: Package the chart with the image digest
+        env:
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+          IMAGE_DIGEST: ${{ needs.images.outputs.server-index }}
+        run: ci/release/chart-package.sh package --chart deploy/helm/myriarch --version "${RELEASE_VERSION}" --image-digest "${IMAGE_DIGEST}" --out "${RUNNER_TEMP}/chart"
+      - name: Build the OCI layout of the chart
+        id: layout
+        env:
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          RELEASE_VERSION: ${{ needs.guard.outputs.version }}
+        run: ci/release/chart-package.sh layout --package "${RUNNER_TEMP}/chart/myriarch-${RELEASE_VERSION}.tgz" --out "${RUNNER_TEMP}/chart-layout/chart" >> "${GITHUB_OUTPUT}"
+      - name: Pack chart-layout
+        id: pack
+        run: ci/release/artifact.sh pack --dir "${RUNNER_TEMP}/chart-layout" --out "${RUNNER_TEMP}/out/chart-layout.tar" >> "${GITHUB_OUTPUT}"
+      - name: Upload chart-layout
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/out/chart-layout.tar
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: false
+
+  # Pushes the chart by digest (no tag: finalize sets the version tag after approval 2, like the image tags), signs it keyless and
+  # attests its provenance, strictly in sequence. The chart references the server image by digest only, so the signature of the chart
+  # covers the image that a user pulls. Like the images, the package is private until an organization owner makes it public. helm is
+  # not needed here: the chart was packaged and rendered in the job chart.
+  push-chart:
+    name: push-chart
+    needs: [guard, signing-tools, chart, push-images, sign-windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+      id-token: write # mint the OIDC token of release.yml at the tag for keyless signing (the frozen identity of ADR-0035)
+      attestations: write # store the attestation in GitHub's attestation API
+      packages: write # write the packages of this repository in ghcr.io
+    outputs:
+      chart-digest: ${{ steps.push.outputs.chart-digest }}
+    steps:
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+          sparse-checkout-cone-mode: false
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      - name: Download chart-layout
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.chart.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/chart-layout
+          digest-mismatch: error
+      - name: Unpack chart-layout
+        env:
+          TAR_SHA256: ${{ needs.chart.outputs.sha256 }}
+        run: ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/chart-layout/chart-layout.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/chart-layout"
+      # Default HOME, no DOCKER_CONFIG: actions/attest reads only $HOME/.docker/config.json.
+      - name: Log in to ghcr.io
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+        run: ci/release/registry-login.sh login
+      - name: Push and sign the chart
+        id: push
+        env:
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          CHART_DIGEST: ${{ needs.chart.outputs.chart-digest }}
+          RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
+        run: ci/release/push-chart.sh --layout "${RUNNER_TEMP}/chart-layout/chart" --digest "${CHART_DIGEST}" --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}" >> "${GITHUB_OUTPUT}"
+      - name: Attest the provenance of the chart
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/myriarch/charts/myriarch
+          subject-digest: ${{ steps.push.outputs.chart-digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: Log out of ghcr.io
+        run: ci/release/registry-login.sh logout
+
   # Creates the draft release with the 42 files and the rendered notes. A draft is invisible to the public and stays
   # editable until finalize publishes it.
   draft:
@@ -969,6 +1111,57 @@ jobs:
           TOOLS_BIN: ${{ runner.temp }}/tools/${{ matrix.tools }}
         run: ci/release/registry-login.sh logout
 
+  # Verifies the pushed chart before publication: the tag, the content (every image by the digest of this run), the signature and the
+  # provenance.
+  verify-chart:
+    name: verify-chart
+    needs: [guard, signing-tools, images, push-chart]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read # check out the repository and read the files of the tagged commit
+      packages: read # read the (still private) packages of this repository in ghcr.io
+      attestations: read # read the attestations to verify them
+    steps:
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+            deploy/release
+          sparse-checkout-cone-mode: false
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.signing-tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.signing-tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      - name: Log in to ghcr.io (read)
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+        run: ci/release/registry-login.sh login
+      - name: Verify the chart
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          RELEASE_TAG: ${{ needs.guard.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.guard.outputs.commit }}
+          CHART_DIGEST: ${{ needs.push-chart.outputs.chart-digest }}
+          IMAGE_DIGEST: ${{ needs.images.outputs.server-index }}
+        run: ci/release/verify-chart.sh --tag "${RELEASE_TAG}" --commit "${RELEASE_COMMIT}" --digest "${CHART_DIGEST}" --image-digest "${IMAGE_DIGEST}"
+      - name: Log out of ghcr.io
+        run: ci/release/registry-login.sh logout
+
   # Checks the Windows files (version resources, Authenticode state, installer scripts) before publication.
   verify-windows:
     name: verify-windows
@@ -1029,7 +1222,7 @@ jobs:
   # sets the image tags and publishes the release, which becomes immutable. Nothing here builds or runs project code.
   finalize:
     name: finalize
-    needs: [guard, signing-tools, images, push-images, draft, verify, verify-images, verify-windows]
+    needs: [guard, signing-tools, images, push-images, push-chart, draft, verify, verify-images, verify-chart, verify-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: release
@@ -1093,6 +1286,7 @@ jobs:
           IMAGE_TAGS: ${{ needs.guard.outputs.image-tags }}
           SERVER_INDEX_DIGEST: ${{ needs.images.outputs.server-index }}
           UPDATER_INDEX_DIGEST: ${{ needs.images.outputs.updater-index }}
+          CHART_DIGEST: ${{ needs.push-chart.outputs.chart-digest }}
         run: ci/release/finalize.sh --tag "${RELEASE_TAG}" --release-id "${RELEASE_ID}" --verified "${RUNNER_TEMP}/verified" >> "${GITHUB_OUTPUT}"
       - name: Log out of ghcr.io
         run: ci/release/registry-login.sh logout

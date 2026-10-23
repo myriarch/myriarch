@@ -124,13 +124,13 @@ e2e: build
 # Generated references. The command line reference (docs/reference/cli) comes from the cobra trees of the four binaries by a test of
 # cmd/myriarchd; the REST API reference (docs/reference/api) comes from api/openapi.yaml by a test of internal/apidoc; the configuration,
 # environment and metrics references (docs/reference/{configuration,environment-variables,metrics}.md) come from the configuration struct,
-# the loader, the environment reads and the metric definitions by a test of internal/refdoc, and so does the values schema of the Helm
-# chart (deploy/helm/myriarch/values.schema.json), which is assembled from the hand-written values.schema.source.yaml next to it and the
+# the loader, the environment reads and the metric definitions by a test of internal/refdoc, and so do the values schema of the Helm
+# chart (deploy/helm/myriarch/values.schema.json) and the values table in its README, which is assembled from the hand-written values.schema.source.yaml next to it and the
 # configuration struct. The tests also run in the go-test gate as a drift check. PGTEST_SKIP=1: the tests need no database.
 docs-gen:
 	PGTEST_SKIP=1 CLIDOC_UPDATE=1 $(GO) test -count=1 -run '^TestCLIReference$$' ./cmd/myriarchd
 	PGTEST_SKIP=1 APIDOC_UPDATE=1 $(GO) test -count=1 -run '^TestAPIReference$$' ./internal/apidoc
-	PGTEST_SKIP=1 REFDOC_UPDATE=1 $(GO) test -count=1 -run '^(TestReferencePages|TestChartValuesSchema)$$' ./internal/refdoc
+	PGTEST_SKIP=1 REFDOC_UPDATE=1 $(GO) test -count=1 -run '^(TestReferencePages|TestChartValuesSchema|TestChartValuesTable)$$' ./internal/refdoc
 
 # Documentation checks: relative links and anchors, front matter, and the generated references are up to date (regenerates them and fails on a diff).
 docs-check:

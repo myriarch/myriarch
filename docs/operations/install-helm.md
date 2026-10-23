@@ -11,8 +11,9 @@ the values file step by step; the complete file is
 renders it with every change of the chart.
 
 > **Support level.** The Helm chart is experimental in the first release ([ADR-0021](../adr/0021-publication-gates-and-v0-1-0-scope.md)).
-> It is installed from a checkout of the repository at a release tag. A signed OCI chart is planned for v0.2.0. Read the
-> [production checklist](production-checklist.md) before you rely on an installation.
+> v0.1.0 installs the chart from a checkout of the repository at a release tag; from v0.2.0 the chart is also a signed OCI
+> artifact ([below](#install-the-signed-oci-chart)). Read the [production checklist](production-checklist.md) before you rely
+> on an installation.
 
 ## Prerequisites
 
@@ -39,6 +40,33 @@ git clone --depth 1 --branch "${TAG}" https://github.com/myriarch/myriarch.git
 The images `ghcr.io/myriarch/myriarch` (the server) and `ghcr.io/myriarch/myriarch-updater` are published with the tags
 `X.Y.Z` and `X.Y` (`X.Y.Z-rc.N` for release candidates). There is no tag `latest`. **They exist from v0.1.0-rc.3 on.** Pin
 the image by digest in production (`image.digest`, see below).
+
+### Install the signed OCI chart
+
+> **Available from v0.2.0.** The chart of v0.1.0 is not published as an OCI artifact; install it from the checkout above.
+
+From v0.2.0 on, every release publishes the chart as an OCI artifact at `oci://ghcr.io/myriarch/charts/myriarch`. Its version
+is the version of the release without the `v` (`0.2.0`, `0.2.0-rc.1`), and so is its `appVersion`. The release workflow writes
+the digest of the signed server image into the chart before it packages it, so the chart references the server image **by digest**
+and the signature of the chart covers the image that your cluster pulls. `image.tag` has no effect on this chart; to run another
+image, set `image.digest` (or `image.registry`, `image.repository` and `image.digest` for a mirror).
+
+Verify the chart before you install it (the identity is the one of the release files, see
+[Verify a release](../security/verify-releases.md#verify-the-helm-chart)):
+
+```bash
+VERSION=0.2.0                     # the release you install
+CHART_DIGEST="$(crane digest "ghcr.io/myriarch/charts/myriarch:${VERSION}")"
+cosign verify "ghcr.io/myriarch/charts/myriarch@${CHART_DIGEST}" \
+  --certificate-identity "https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/v${VERSION}" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+helm install myriarch oci://ghcr.io/myriarch/charts/myriarch --version "${VERSION}" -n myriarch --create-namespace \
+  -f myriarch-values.yaml
+```
+
+The commands for the values file and the Secrets are in the sections below; replace the path of the checkout with the OCI
+reference and add `--version`. `helm show values oci://ghcr.io/myriarch/charts/myriarch --version "${VERSION}"` prints the
+defaults, and the [chart README](../../deploy/helm/myriarch/README.md#values) lists every value with its type and default.
 
 ### Registry and repository of the image
 
