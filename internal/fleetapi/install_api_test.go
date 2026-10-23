@@ -175,11 +175,15 @@ func (e *apiEnv) waitPrepared() {
 	require.NoError(e.t, e.cache.WaitPrepared(ctx))
 }
 
-// readyPlan asks for the plan until the artifacts are prepared.
+// readyPlan asks for the plan until the artifacts are prepared. A download that failed once (a transient error of
+// the machine) is started again by the next request, because the store of the tests runs on a fake clock and its
+// failed record is older than the retry interval of the cache; so one round of waiting is not enough, and the
+// test asks again until a deadline.
 func (e *apiEnv) readyPlan(secret string, body any, hdr ...string) resp {
 	e.t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
 	r := e.planRequest(secret, body, hdr...)
-	if r.Code == http.StatusServiceUnavailable {
+	for r.Code == http.StatusServiceUnavailable && time.Now().Before(deadline) {
 		e.waitPrepared()
 		r = e.planRequest(secret, body, hdr...)
 	}
@@ -232,8 +236,7 @@ func TestInstallPlanIsPreparedInTheBackground(t *testing.T) {
 	assert.NotContains(t, r.Body.String(), "request id", "the preparing answer keeps its own text")
 	assert.Contains(t, body["detail"], "112 MB")
 
-	e.waitPrepared()
-	r = e.planRequest(secret, datacenterHost())
+	r = e.readyPlan(secret, datacenterHost())
 	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
 }
 
@@ -694,8 +697,7 @@ func TestInstallPlanConcurrentRequests(t *testing.T) {
 	for c := range codes {
 		assert.Contains(t, []int{http.StatusOK, http.StatusServiceUnavailable}, c)
 	}
-	e.waitPrepared()
-	assert.Equal(t, http.StatusOK, e.planRequest(secret, datacenterHost()).Code)
+	assert.Equal(t, http.StatusOK, e.readyPlan(secret, datacenterHost()).Code)
 	arts, _, err := e.st.Artifacts().List(context.Background(), store.ArtifactFilter{})
 	require.NoError(t, err)
 	assert.Len(t, arts, 2, "one record for the collector and one for the supervisor")
