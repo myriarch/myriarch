@@ -944,7 +944,7 @@ the workflow has no secret to log in with, and a rerun of the job is the answer.
 the probe: the server chart in a `restricted` namespace with `helm test` (the Pod checks `/readyz` and an OpAMP WebSocket handshake), the
 collector chart as a StatefulSet in a `restricted` namespace and as a DaemonSet in a `privileged` namespace (the documented exception for
 the `hostPath` volume), every agent registered, online and healthy at the server (REST API), a clean uninstall, and a `helm upgrade` from
-the chart of the tag `v0.1.0` (from Git, with the image of that release) to the chart and the image of the commit. It reuses `hack/kind`
+the chart of the tag `v0.1.0` (from Git, with the image of that release pinned by digest as `UPGRADE_FROM_SERVER_IMAGE`) to the chart and the image of the commit. It reuses `hack/kind`
 (cluster, registry, `images.sh` with the server image and the updater of the commit, `diag.sh`), so it shares the cluster with
 `make kind-probe`: run one of the two at a time. It needs Docker and is not part of `make check-local`; the gate only holds its shell
 syntax (`ci/lint-shell.sh`) and the shape of its workflow job (`ci/tests/workflow-artifacts-test.sh`). Stages and environment:

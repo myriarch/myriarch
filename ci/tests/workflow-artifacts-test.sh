@@ -168,6 +168,21 @@ bites "e2e-kind: an upload of the whole work directory is found" 'matches \.cach
 case "${OUT}" in *"helm/config/registry/config.json"*) ok "... together with the registry credentials of Helm" ;; *) fail "the Helm registry credentials are not named: ${OUT}" ;; esac
 fresh_tree; removed_line "${KIND}" '!.cache/kind/**/secrets/**' 2
 bites "e2e-kind: without the exclusion of secrets/ a secrets directory in the diagnostics is found" 'matches \.cache/kind/diag/20261015T010101/secrets/x'
+# the two uploads are checked one by one: a change to the upload of the job "charts" alone is found as well
+fresh_tree; edit "${KIND}" '          name: e2e-kind-charts-${{ matrix.label }}
+          path: |
+' '          name: e2e-kind-charts-${{ matrix.label }}
+          path: |
+            .cache/kind/values-chart-test.yaml
+'
+bites "e2e-kind: the generated values in the upload of the charts job alone are found" 'matches \.cache/kind/values-chart-test\.yaml'
+fresh_tree; edit "${KIND}" '          name: e2e-kind-charts-${{ matrix.label }}
+          path: |
+' '          name: e2e-kind-charts-${{ matrix.label }}
+          path: |
+            .cache/kind/chart-v0.1.0/**
+'
+bites "e2e-kind: the checkout of the old chart in the upload of the charts job alone is found" 'matches \.cache/kind/chart-v0\.1\.0/deploy/helm/myriarch/values\.yaml'
 fresh_tree; removed_line "${KIND}" '!.cache/kind/**/cookies*' 2
 bites "e2e-kind: without the exclusion of cookie jars a jar in the diagnostics is found" 'matches \.cache/kind/diag/20261015T010101/cookies-main'
 fresh_tree; removed_line "${KIND}" '!.cache/kind/**/kubeconfig*' 2

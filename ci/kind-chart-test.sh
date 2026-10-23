@@ -40,6 +40,22 @@ NS_DS=ct-ds
 NS_UPGRADE=ct-upgrade
 CT_NAMESPACES="${NS_APP} ${NS_STS} ${NS_DS} ${NS_UPGRADE} ${NS_INFRA}"
 UPGRADE_FROM="${CHART_TEST_UPGRADE_FROM:-v0.1.0}"
+# the release image of the old chart, pinned by digest (UPGRADE_FROM_SERVER_IMAGE of hack/kind/versions.env for v0.1.0); another tag
+# needs its image with a digest in CHART_TEST_UPGRADE_FROM_IMAGE, there is no fallback to a mutable tag
+if [ -n "${CHART_TEST_UPGRADE_FROM_IMAGE:-}" ]; then
+  OLD_IMAGE="${CHART_TEST_UPGRADE_FROM_IMAGE}"
+elif [ "${UPGRADE_FROM}" = v0.1.0 ]; then
+  OLD_IMAGE="${UPGRADE_FROM_SERVER_IMAGE:-}"
+else
+  die "CHART_TEST_UPGRADE_FROM=${UPGRADE_FROM} needs CHART_TEST_UPGRADE_FROM_IMAGE (repository:tag@sha256:digest of its release image)"
+fi
+printf '%s' "${OLD_IMAGE}" | grep -Eq '^[^@[:space:]]+@sha256:[0-9a-f]{64}$' || die "the image of the old chart is not pinned by digest: ${OLD_IMAGE:-unset}"
+OLD_IMAGE_REPO="${OLD_IMAGE%%@*}"
+OLD_IMAGE_REPO="${OLD_IMAGE_REPO%:*}"
+OLD_IMAGE_DIGEST="${OLD_IMAGE##*@}"
+# the names a user gets from the collector chart: <release>-myriarch-collector (the release names do not contain the chart name)
+STS_NAME=ct-sts-myriarch-collector
+DS_NAME=ct-ds-myriarch-collector
 SERVER_ENDPOINT="ws://myriarch.${NS_APP}.svc:8080/v1/opamp"
 export DIAG_EXTRA_NS="${NS_STS} ${NS_DS} ${NS_UPGRADE}"
 
@@ -86,17 +102,26 @@ OLD_CHART_DIR="${PROBE_WORK}/chart-${UPGRADE_FROM}"
 COLLECTOR_CHART_DIR="${ROOT}/deploy/helm/myriarch-collector"
 STEP_LOG="${PROBE_WORK}/logs/chart-test-steps.log"
 K8S_VERSION=""
-DIAG_DONE=""
+DIAG_FAILED_AT=0
 
 test_cleanup() {
   local rc=$?
   trap - EXIT
   stage_end
-  if [ "${FAILED}" -gt 0 ] && [ -z "${DIAG_DONE}" ]; then "${KIND_DIR}/diag.sh" >&2 || true; fi
+  diag_if_failed
   pf_stop_all
   exit "${rc}"
 }
 trap test_cleanup EXIT
+
+# diag_if_failed: the diagnostics of hack/kind/diag.sh when a check failed since the last call. Called before every uninstall, because
+# afterwards the pods, their logs and the describe output are gone (the directories carry a timestamp, so several calls are fine).
+diag_if_failed() {
+  if [ "${FAILED}" -gt "${DIAG_FAILED_AT}" ]; then
+    "${KIND_DIR}/diag.sh" >&2 || true
+    DIAG_FAILED_AT="${FAILED}"
+  fi
+}
 trap 'log "interrupted"; exit 130' INT TERM
 
 summary() {
@@ -123,7 +148,7 @@ summary() {
 fatal() {
   stage_end
   "${KIND_DIR}/diag.sh" >&2 || true
-  DIAG_DONE=1
+  DIAG_FAILED_AT="${FAILED}"
   summary
   exit 1
 }
@@ -185,7 +210,7 @@ put_token() {
 
 # agents_healthy SITE_ID -> number of collector agents of the site that are online and healthy (REST API of the server)
 agents_healthy() {
-  a "/agents?attr=site.id%3D$1&kind=collector&limit=200" | jq '[.items[]? | select(.connection.status == "online" and .health.healthy == true)] | length'
+  a "/agents?attr=site.id%3D$1&kind=collector&limit=200" | jq '[.items[]? | select(.status == "online" and .healthy == true)] | length'
 }
 agents_total() {
   a "/agents?attr=site.id%3D$1&kind=collector&limit=200" | jq '[.items[]?] | length'
@@ -193,6 +218,14 @@ agents_total() {
 
 # leftovers NAMESPACE RELEASE -> the resources of the release that still exist (without PVCs: Kubernetes keeps those of a
 # StatefulSet on purpose)
+# uninstall_clean NAMESPACE RELEASE: helm uninstall in the foreground (the default background cascade returns before the garbage
+# collector removed the ReplicaSets and pods) and then waits until nothing of the release is left
+uninstall_clean() {
+  h uninstall "$2" -n "$1" --wait --cascade foreground --timeout 5m
+}
+wait_leftovers_gone() {
+  wait_until 180 "[ -z \"\$(leftovers '$1' '$2')\" ]" 3
+}
 leftovers() {
   kn "$1" get all,configmap,serviceaccount,networkpolicy,poddisruptionbudget,ingress -l "app.kubernetes.io/instance=$2" -o name 2>/dev/null \
     | grep -v '^configmap/kube-root-ca.crt$'
@@ -269,9 +302,9 @@ put_token "${NS_STS}" myriarch-enrollment "$(secret_path enroll-sts)"
 step "helm install, StatefulSet with two replicas under Pod Security restricted" \
   h install ct-sts "${COLLECTOR_CHART_DIR}" -n "${NS_STS}" "${collector_args[@]}" --set mode=statefulset --set replicaCount=2 \
   --set site.id=ct-sts --set site.name=chart-test-sts --wait --timeout 8m
-check_eq "StatefulSet: both pods Ready" 2 "$(kn "${NS_STS}" get sts ct-sts -o jsonpath='{.status.readyReplicas}' 2>/dev/null)"
+check_eq "StatefulSet: both pods Ready" 2 "$(kn "${NS_STS}" get sts ${STS_NAME} -o jsonpath='{.status.readyReplicas}' 2>/dev/null)"
 check_eq "StatefulSet: the namespace enforces restricted" restricted "$(k get ns "${NS_STS}" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')"
-check_eq "StatefulSet: the pods run as the numeric user 10001" 10001 "$(kn "${NS_STS}" get pod ct-sts-0 -o jsonpath='{.spec.securityContext.runAsUser}')"
+check_eq "StatefulSet: the pods run as the numeric user 10001" 10001 "$(kn "${NS_STS}" get pod ${STS_NAME}-0 -o jsonpath='{.spec.securityContext.runAsUser}')"
 
 # The documented exception: the hostPath volume of nodeLogs is refused by baseline and restricted, so this namespace is privileged.
 ct_namespace "${NS_DS}" privileged 1
@@ -279,29 +312,34 @@ put_token "${NS_DS}" myriarch-enrollment "$(secret_path enroll-ds)"
 step "helm install, DaemonSet with nodeLogs in a privileged namespace" \
   h install ct-ds "${COLLECTOR_CHART_DIR}" -n "${NS_DS}" "${collector_args[@]}" --set mode=daemonset --set nodeLogs.enabled=true \
   --set site.id=ct-ds --set site.name=chart-test-ds --wait --timeout 8m
-want_ds="$(kn "${NS_DS}" get ds ct-ds -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null)"
+want_ds="$(kn "${NS_DS}" get ds ${DS_NAME} -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null)"
 check_ge "DaemonSet: at least one node is scheduled" 1 "${want_ds}"
-check_eq "DaemonSet: every scheduled pod is Ready" "${want_ds}" "$(kn "${NS_DS}" get ds ct-ds -o jsonpath='{.status.numberReady}' 2>/dev/null)"
+check_eq "DaemonSet: every scheduled pod is Ready" "${want_ds}" "$(kn "${NS_DS}" get ds ${DS_NAME} -o jsonpath='{.status.numberReady}' 2>/dev/null)"
 
 if wait_until 300 "[ \"\$(agents_healthy ct-sts)\" = 2 ]" 3; then pass "StatefulSet: two agents are registered, online and healthy at the server"; else fail "StatefulSet: two agents are registered, online and healthy at the server" "healthy $(agents_healthy ct-sts) of $(agents_total ct-sts)"; fi
 if wait_until 300 "[ \"\$(agents_healthy ct-ds)\" = '${want_ds}' ]" 3; then pass "DaemonSet: one healthy agent per node at the server" "${want_ds}"; else fail "DaemonSet: one healthy agent per node at the server" "healthy $(agents_healthy ct-ds) of $(agents_total ct-ds), want ${want_ds}"; fi
 
 # a restarted pod keeps its identity: the storage volume holds the instance UID
 before="$(agents_total ct-sts)"
-step "StatefulSet: a deleted pod comes back" kn "${NS_STS}" delete pod ct-sts-0 --wait=true --timeout=120s
-step "StatefulSet: the StatefulSet is Ready again" kn "${NS_STS}" rollout status sts/ct-sts --timeout=300s
-if wait_until 300 "[ \"\$(agents_healthy ct-sts)\" = 2 ]" 3; then pass "StatefulSet: the restarted pod is the same agent (no third agent)" "$(agents_total ct-sts) agents, before ${before}"; else fail "StatefulSet: the restarted pod is the same agent (no third agent)" "healthy $(agents_healthy ct-sts) of $(agents_total ct-sts)"; fi
+step "StatefulSet: a deleted pod comes back" kn "${NS_STS}" delete pod ${STS_NAME}-0 --wait=true --timeout=120s
+step "StatefulSet: the StatefulSet is Ready again" kn "${NS_STS}" rollout status sts/${STS_NAME} --timeout=300s
+check_eq "StatefulSet: two agents before the restart" 2 "${before}"
+if wait_until 300 "[ \"\$(agents_healthy ct-sts)\" = 2 ] && [ \"\$(agents_total ct-sts)\" = '${before}' ]" 3; then pass "StatefulSet: the restarted pod is the same agent (no third agent)" "$(agents_total ct-sts) agents, before ${before}"; else fail "StatefulSet: the restarted pod is the same agent (no third agent)" "healthy $(agents_healthy ct-sts) of $(agents_total ct-sts), before ${before}"; fi
 
 # ---- stage 6: uninstall -----------------------------------------------------------------------------------------------
 stage_begin 6 "clean uninstall"
-step "helm uninstall of the DaemonSet" h uninstall ct-ds -n "${NS_DS}" --wait --timeout 3m
+diag_if_failed
+step "helm uninstall of the DaemonSet" uninstall_clean "${NS_DS}" ct-ds
+wait_leftovers_gone "${NS_DS}" ct-ds
 check_eq "DaemonSet: nothing of the release is left" "" "$(leftovers "${NS_DS}" ct-ds)"
-step "helm uninstall of the StatefulSet" h uninstall ct-sts -n "${NS_STS}" --wait --timeout 3m
+step "helm uninstall of the StatefulSet" uninstall_clean "${NS_STS}" ct-sts
+wait_leftovers_gone "${NS_STS}" ct-sts
 check_eq "StatefulSet: nothing of the release is left (the PVCs stay by design)" "" "$(leftovers "${NS_STS}" ct-sts)"
 check_eq "StatefulSet: the two PVCs stay and are removed by hand" 2 "$(kn "${NS_STS}" get pvc --no-headers 2>/dev/null | wc -l | tr -d ' ')"
 step "the PVCs of the StatefulSet are deleted" kn "${NS_STS}" delete pvc --all --wait=true --timeout=120s
 pf_stop_all
-step "helm uninstall of the server chart" h uninstall myriarch -n "${NS_APP}" --wait --timeout 3m
+step "helm uninstall of the server chart" uninstall_clean "${NS_APP}" myriarch
+wait_leftovers_gone "${NS_APP}" myriarch
 check_eq "server: nothing of the release is left" "" "$(leftovers "${NS_APP}" myriarch)"
 check_eq "no Helm release is left in the namespaces of the test" "" "$(for ns in ${NS_APP} ${NS_STS} ${NS_DS}; do h list -n "${ns}" -q; done)"
 
@@ -328,8 +366,12 @@ apply_secret "${NS_UPGRADE}" myriarch-secrets "database-dsn=$(secret_path databa
 put_token "${NS_UPGRADE}" ct-enroll-sts "$(secret_path enroll-sts)"
 put_token "${NS_UPGRADE}" ct-enroll-ds "$(secret_path enroll-ds)"
 put_token "${NS_UPGRADE}" ct-enroll-helm-test "$(secret_path enroll-helm-test)"
-step "helm install of the chart of ${UPGRADE_FROM} (its own image)" \
-  h install myriarch "${OLD_CHART}" -n "${NS_UPGRADE}" --set "config.server.publicUrl=${PUBLIC_URL}" --wait --timeout 8m || fatal
+step "helm install of the chart of ${UPGRADE_FROM} (its own image, by digest)" \
+  h install myriarch "${OLD_CHART}" -n "${NS_UPGRADE}" --set "config.server.publicUrl=${PUBLIC_URL}" \
+  --set "image.repository=${OLD_IMAGE_REPO}" --set "image.digest=${OLD_IMAGE_DIGEST}" --wait --timeout 8m || fatal
+old_pods="$(kn "${NS_UPGRADE}" get pods -l app.kubernetes.io/instance=myriarch -o json | jq '.items | length')"
+check_eq "every pod of the old chart runs the pinned digest ${OLD_IMAGE_DIGEST:0:19}" "${old_pods}" \
+  "$(kn "${NS_UPGRADE}" get pods -l app.kubernetes.io/instance=myriarch -o json | jq --arg d "${OLD_IMAGE_DIGEST}" '[.items[] | select(.status.containerStatuses[0].imageID | endswith($d))] | length')"
 check_eq "release revision before the upgrade" 1 "$(h list -n "${NS_UPGRADE}" -o json | jq -r '.[0].revision')"
 step "helm upgrade to the chart of the commit (image of the commit, test token)" \
   h upgrade myriarch "${CHART_DIR}" -n "${NS_UPGRADE}" "${CHART_SET[@]}" -f "${VALUES_FILE}" --wait --timeout 8m || fatal
@@ -338,7 +380,9 @@ check_eq "release status after the upgrade" deployed "$(h list -n "${NS_UPGRADE}
 check_eq "the server runs the image of the commit" "${SERVER_REPO}@${SERVER_DIGEST}" "$(kn "${NS_UPGRADE}" get deploy myriarch -o jsonpath='{.spec.template.spec.containers[0].image}')"
 check_eq "the server pods are Ready after the upgrade" "$(kn "${NS_UPGRADE}" get deploy myriarch -o jsonpath='{.spec.replicas}')" "$(kn "${NS_UPGRADE}" get deploy myriarch -o jsonpath='{.status.readyReplicas}')"
 step "helm test after the upgrade" h test myriarch -n "${NS_UPGRADE}" --timeout 3m --logs
-step "helm uninstall after the upgrade" h uninstall myriarch -n "${NS_UPGRADE}" --wait --timeout 3m
+diag_if_failed
+step "helm uninstall after the upgrade" uninstall_clean "${NS_UPGRADE}" myriarch
+wait_leftovers_gone "${NS_UPGRADE}" myriarch
 check_eq "upgrade release: nothing is left" "" "$(leftovers "${NS_UPGRADE}" myriarch)"
 
 stage_end

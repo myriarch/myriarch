@@ -63,7 +63,7 @@ if [ -f "${API_JAR}" ] && pf_ensure >/dev/null 2>&1 && [ "$(a /auth/me | jq -r '
   a /gitops/status | jq . > "${out}/api-gitops-status.json" 2>&1
   a '/rollouts?limit=50' | jq . > "${out}/api-rollouts.json" 2>&1
   for id in $(a '/rollouts?limit=10' | jq -r '.items[]?.id'); do a "/rollouts/${id}/targets" | jq . > "${out}/api-rollout-${id}-targets.json" 2>&1; done
-  a '/agents?limit=200' | jq '[.items[] | {id, kind, hostname, version, status: .connection.status, healthy: .health.healthy}]' > "${out}/api-agents.json" 2>&1
+  a '/agents?limit=200' | jq '[.items[] | {id, kind, hostname, version, status, healthy}]' > "${out}/api-agents.json" 2>&1
   a /stats/overview | jq . > "${out}/api-stats-overview.json" 2>&1
 else
   echo "no working API session" > "${out}/api-skipped.txt"

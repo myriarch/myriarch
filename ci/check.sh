@@ -120,7 +120,7 @@ c3="$(digest_in deploy/compose/quickstart.yaml 'image: postgres:')"
 # images are filled in by the scripts, never hard-coded).
 while IFS= read -r line; do
   case "${line}" in
-    *_IMAGE=*) printf '%s' "${line#*=}" | grep -Eq '@sha256:[0-9a-f]{64}$' || bad "hack/kind/versions.env: ${line%%=*} is not pinned by digest" ;;
+    *_IMAGE=* | *_IMAGE_*=*) printf '%s' "${line#*=}" | grep -Eq '@sha256:[0-9a-f]{64}$' || bad "hack/kind/versions.env: ${line%%=*} is not pinned by digest" ;;
   esac
 done < hack/kind/versions.env
 grep -Eq '^DEX_CHART_SHA256=[0-9a-f]{64}$' hack/kind/versions.env || bad "hack/kind/versions.env: DEX_CHART_SHA256 is missing or not a SHA-256"
