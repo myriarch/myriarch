@@ -225,7 +225,10 @@ func (c *Cache) StartPrefetchResolved(ctx context.Context, dist, version string,
 			if err != nil {
 				return nil, plan, fmt.Errorf("record artifact: %w", err)
 			}
+			// WaitPrepared waits for this download as well.
+			c.prepWG.Add(1)
 			go func() {
+				defer c.prepWG.Done()
 				bctx, cancel := context.WithTimeout(context.Background(), ensureTimeout)
 				defer cancel()
 				if _, err := c.Ensure(bctx, s.dist, s.version, s.os, s.arch); err != nil {

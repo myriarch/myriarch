@@ -573,7 +573,7 @@ func (c *Cache) ensureLocal(ctx context.Context, rec *domain.Artifact, path stri
 		if err := os.Chmod(tmp, 0o640); err != nil {
 			return nil, err
 		}
-		return nil, os.Rename(tmp, path)
+		return nil, c.moveIntoPlace(tmp, path, rec.SHA256)
 	})
 	select {
 	case r := <-ch:
@@ -596,4 +596,39 @@ func (c *Cache) touch(path string) {
 	c.lastTouch[path] = now
 	c.touchMu.Unlock()
 	_ = os.Chtimes(path, now, now)
+}
+
+// moveIntoPlace moves the downloaded file tmp to final, the content-addressed path of the artifact with the SHA-256
+// sum. Two downloads of the same content end up at the same path, and where Windows cannot replace a file that is
+// being replaced or read at the same moment, the rename fails. That is no failure when final already holds a regular
+// file with exactly this SHA-256: the result is reached, and tmp is removed. Every other situation keeps the error of
+// the rename.
+func (c *Cache) moveIntoPlace(tmp, final string, sum []byte) error {
+	err := c.rename(tmp, final)
+	if err == nil {
+		return nil
+	}
+	if !holdsContent(final, sum) {
+		return err
+	}
+	_ = os.Remove(tmp)
+	return nil
+}
+
+// holdsContent reports whether path is a regular file (not a link) whose content has the SHA-256 sum. The content is
+// hashed again, its existence is not enough.
+func holdsContent(path string, sum []byte) bool {
+	f, err := openNoFollow(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
+		return false
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return false
+	}
+	return equalBytes(h.Sum(nil), sum)
 }

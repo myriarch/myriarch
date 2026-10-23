@@ -150,6 +150,12 @@ func newFixture(t *testing.T, mut ...func(cfg *config.ArtifactsConfig)) *fixture
 	c, err := NewCache(cfg, f.deps)
 	require.NoError(t, err)
 	f.cache = c
+	// Background downloads (Prepare, StartPrefetch) write into f.dir; wait for them before t.TempDir removes it.
+	t.Cleanup(func() {
+		wctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		assert.NoError(t, c.WaitPrepared(wctx))
+	})
 	// Real archives are too big to ship, real bundles only match real
 	// archives: the flow tests stub the verification (verify_test.go covers
 	// the real verification with real bundles).

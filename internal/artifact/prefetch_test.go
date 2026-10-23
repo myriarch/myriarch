@@ -95,7 +95,7 @@ func TestStartPrefetchDerivesPlatformsFromConnectedCollectors(t *testing.T) {
 	explicit, err := f.cache.StartPrefetch(ctx, domain.DistributionContrib, "0.162.0", []string{"linux/amd64"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"linux/amd64"}, prefetchedPlatforms(explicit))
-	// wait for the background download so it does not outlive the test's temp directory
+	// the third artifact becomes ready
 	require.Eventually(t, func() bool {
 		l, _, _ := f.st.Artifacts().List(ctx, store.ArtifactFilter{Status: []domain.ArtifactStatus{domain.ArtifactReady}})
 		return len(l) == 3
@@ -116,4 +116,28 @@ func TestStartPrefetchWithoutAnyPlatformFails(t *testing.T) {
 	_, err = f.cache.StartPrefetch(ctx, domain.DistributionContrib, "0.162.0", nil)
 	require.ErrorIs(t, err, domain.ErrInvalidArgument)
 	assert.Contains(t, err.Error(), "no platforms given, none configured (artifacts.prefetchPlatforms) and no connected collectors use this distribution")
+}
+
+// WaitPrepared must also wait for the background downloads of StartPrefetch, otherwise they outlive the temp directory.
+func TestWaitPreparedWaitsForPrefetchDownloads(t *testing.T) {
+	f := newFixture(t, func(cfg *config.ArtifactsConfig) { cfg.PrefetchPlatforms = []string{"linux/amd64"} })
+	ctx := context.Background()
+	f.up.release("0.162.0", "linux", "amd64", fakeArchive(200), []byte("b"))
+	release := f.up.block()
+	t.Cleanup(release)
+
+	_, err := f.cache.StartPrefetch(ctx, domain.DistributionContrib, "0.162.0", nil)
+	require.NoError(t, err)
+
+	short, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, f.cache.WaitPrepared(short), context.DeadlineExceeded, "the download is still blocked")
+
+	release()
+	long, cancelLong := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelLong()
+	require.NoError(t, f.cache.WaitPrepared(long))
+	l, _, err := f.st.Artifacts().List(ctx, store.ArtifactFilter{Status: []domain.ArtifactStatus{domain.ArtifactReady}})
+	require.NoError(t, err)
+	assert.Len(t, l, 1)
 }

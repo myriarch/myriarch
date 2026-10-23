@@ -21,18 +21,6 @@ import (
 
 const prepAsset = "/v0.162.0/otelcol-contrib_0.162.0_linux_amd64.tar.gz"
 
-// prepFixture is a cache whose background downloads are waited for before the directory is removed.
-func prepFixture(t *testing.T) *fixture {
-	t.Helper()
-	f := newFixture(t)
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_ = f.cache.WaitPrepared(ctx)
-	})
-	return f
-}
-
 func (f *fixture) prepare() (*domain.Artifact, Readiness, error) {
 	return f.cache.Prepare(context.Background(), "otelcol-contrib", "0.162.0", "linux", "amd64")
 }
@@ -45,7 +33,7 @@ func (f *fixture) waitPrepared() {
 }
 
 func TestPrepareStartsOneDownloadAndReportsPending(t *testing.T) {
-	f := prepFixture(t)
+	f := newFixture(t)
 	f.up.release("0.162.0", "linux", "amd64", fakeArchive(5000), []byte("bundle"))
 	release := f.up.block()
 	t.Cleanup(release)
@@ -76,7 +64,7 @@ func TestPrepareStartsOneDownloadAndReportsPending(t *testing.T) {
 }
 
 func TestPrepareManyCallersStartOneDownload(t *testing.T) {
-	f := prepFixture(t)
+	f := newFixture(t)
 	f.up.release("0.162.0", "linux", "amd64", fakeArchive(5000), []byte("bundle"))
 	release := f.up.block()
 	t.Cleanup(release)
@@ -102,7 +90,7 @@ func TestPrepareManyCallersStartOneDownload(t *testing.T) {
 }
 
 func TestPrepareDoesNotWaitForTheDownload(t *testing.T) {
-	f := prepFixture(t)
+	f := newFixture(t)
 	f.up.release("0.162.0", "linux", "amd64", fakeArchive(5000), []byte("bundle"))
 	release := f.up.block() // the upstream answers nothing until the test lets it
 	t.Cleanup(release)
@@ -126,7 +114,7 @@ func TestPrepareDoesNotWaitForTheDownload(t *testing.T) {
 
 // A failed attempt is recorded, not repeated before a minute has passed, and tried again afterwards.
 func TestPrepareDoesNotRetryAFailureBeforeTheBackoff(t *testing.T) {
-	f := prepFixture(t) // the upstream has no release: the checksum is a 404
+	f := newFixture(t) // the upstream has no release: the checksum is a 404
 	_, state, err := f.prepare()
 	require.NoError(t, err)
 	assert.Equal(t, PreparePending, state)
@@ -168,7 +156,7 @@ func TestPrepareDoesNotRetryAFailureBeforeTheBackoff(t *testing.T) {
 // A download that another replica runs (a recent record in the status downloading) is not started a second
 // time; the record of a replica that is gone is.
 func TestPrepareLeavesTheDownloadOfAnotherReplicaAlone(t *testing.T) {
-	f := prepFixture(t)
+	f := newFixture(t)
 	ctx := context.Background()
 	_, err := f.st.Artifacts().Upsert(ctx, domain.Artifact{
 		ID: uuid.Must(uuid.NewV7()), Distribution: "otelcol-contrib", Version: "0.162.0", OS: "linux", Arch: "amd64", Format: "tar.gz",
@@ -195,7 +183,7 @@ func TestPrepareLeavesTheDownloadOfAnotherReplicaAlone(t *testing.T) {
 
 // A record that claims to be ready but lacks what makes it servable is not ready.
 func TestPrepareDoesNotTrustAnUnverifiedReadyRecord(t *testing.T) {
-	f := prepFixture(t)
+	f := newFixture(t)
 	f.up.release("0.162.0", "linux", "amd64", fakeArchive(5000), []byte("bundle"))
 	ctx := context.Background()
 	a, err := f.cache.Ensure(ctx, "otelcol-contrib", "0.162.0", "linux", "amd64")
@@ -225,7 +213,7 @@ func TestPrepareDoesNotTrustAnUnverifiedReadyRecord(t *testing.T) {
 }
 
 func TestPrepareRejectsWhatItCannotDownload(t *testing.T) {
-	f := prepFixture(t)
+	f := newFixture(t)
 	ctx := context.Background()
 	for name, c := range map[string][4]string{
 		"unknown system":  {"otelcol-contrib", "0.162.0", "plan9", "amd64"},
