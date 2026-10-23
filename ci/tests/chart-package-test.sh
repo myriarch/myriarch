@@ -442,6 +442,12 @@ reset_c; mk_registry_c "${CT}"; echo '^verify' > "${S}/cosign.fail"
 expect_fail "verify-chart (collector): the signature does not verify" "signature_invalid" vcc
 reset_c; mk_registry_c "${CT}"; touch "${S}/gh.fail"
 expect_fail "verify-chart (collector): the provenance does not verify" "attestation_invalid" vcc
+reset_c; mk_registry_c "${CT}"; mk_ah "${AHC}" "${AHL}"
+expect_ok "verify-chart (collector): the tag artifacthub.io with the Artifact Hub media types" vcc
+eq "verify-chart (collector): the manifest of artifacthub.io is read from the collector repository" "1" "$(count crane "^manifest ${CREPO}:artifacthub.io\$")"
+eq "verify-chart (collector): the manifest of artifacthub.io is not read from the server chart repository" "0" "$(count crane "ghcr.io/myriarch/charts/myriarch:")"
+reset_c; mk_registry_c "${CT}"; mk_ah "${AHC}" "${CT}"
+expect_fail "verify-chart (collector): artifacthub.io with the chart layer" "chart_tag_unexpected.*artifacthub.io" vcc
 expect_fail "verify-chart: an unknown chart name" "chart_name" run_priv "${REL}/verify-chart.sh" --chart-name other --tag "${TAG}" --commit "${C40}" --digest "${MDIGEST}" --image-digest "${D1}"
 
 finish_tests chart-package-test
