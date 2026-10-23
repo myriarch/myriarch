@@ -101,7 +101,8 @@ type Engine struct {
 	// it at the start of every term of leadership: another leader may have written the record in between.
 	lastPlanned map[string]string
 	// bridgeNoted is the target version for which each OpAMP Bridge was noted as
-	// left out of version rollouts (guarded by fleetsMu).
+	// left out of version rollouts (guarded by fleetsMu). The note goes to the event and audit log that all replicas
+	// share, so Run forgets it at the start of every term of leadership, like lastPlanned.
 	bridgeNoted map[domain.AgentID]string
 
 	// tzWarned holds the policy names the engine already warned about because

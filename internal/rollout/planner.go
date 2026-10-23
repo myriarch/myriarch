@@ -118,8 +118,8 @@ func (e *Engine) plan(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// noteBridgesSkipped records, once per agent and target version while this
-// engine runs, that a Bridge of the fleet is left out of the version rollout
+// noteBridgesSkipped records, once per agent and target version in a term of
+// leadership, that a Bridge of the fleet is left out of the version rollout
 // and why.
 func (e *Engine) noteBridgesSkipped(ctx context.Context, bridges []*domain.Agent, version string) {
 	var evs []domain.AgentEvent

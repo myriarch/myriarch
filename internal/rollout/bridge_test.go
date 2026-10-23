@@ -4,7 +4,10 @@
 package rollout
 
 import (
+	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -116,4 +119,40 @@ func TestConfigRolloutIncludesOnlyBridgesThatTheirFleetConfigures(t *testing.T) 
 	assert.ElementsMatch(t, append(managed, coll...), got)
 	assert.NotContains(t, got, operator[0])
 	assert.NotContains(t, got, locked[0])
+}
+
+// The note that a Bridge is left out goes to the event and audit log of all
+// replicas, so a new term of leadership writes it again: another leader may
+// have noted other versions in between, and a note must not go missing.
+func TestRunNotesTheBridgeAgainWhenTheEngineLeadsAgain(t *testing.T) {
+	e := newEnv(t)
+	e.setPolicy("p", spec(allWave()))
+	versionFleet(e)
+	e.addAgents(2, "f", inSync())
+	bridge := e.addAgents(1, "f", inSync(), func(i int, a *domain.Agent) { a.Kind = domain.AgentKindBridge })
+	e.publishSnapshot()
+	count := func() int {
+		n := 0
+		for _, ev := range e.st.Events(bridge[0]) {
+			if ev.Type == domain.AgentEventBridgeLocked {
+				n++
+			}
+		}
+		return n
+	}
+	e.plan()
+	e.plan()
+	require.Equal(t, 1, count(), "within a term the note is written once")
+
+	ctx, cancel := context.WithCancel(e.ctx)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_ = e.eng.Run(ctx)
+	}()
+	require.Eventually(t, func() bool { return count() == 2 }, 20*time.Second, 10*time.Millisecond,
+		"the first run of a term notes the Bridge again")
+	cancel()
+	wg.Wait()
 }

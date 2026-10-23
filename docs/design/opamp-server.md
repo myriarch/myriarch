@@ -417,7 +417,7 @@ Bridge and holds back every action that changes something. All of it fails close
   configures it (`BridgeConfigLock` finds no reason), so waves, approvals and audit apply to its configuration; a locked
   Bridge is not. The tick skips a target whose agent became a Bridge after the rollout began (`bridgeHeldBack`), so no
   executor is called for it. For a fleet that has an effective target version the planner says once per agent and version
-  (until the leader restarts) that the Bridge is left out, as an agent event and an audit entry.
+  (per term of leadership) that the Bridge is left out, as an agent event and an audit entry.
 - **Events and audit.** Each held-back action is an agent event of the type `bridge_locked` (severity `warning`; details
   `action`, `reason`) and an audit entry `agent.bridge_held_back`. A configuration offer is noted once per reason and
   desired hash on a connection, not per message.

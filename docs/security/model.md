@@ -74,6 +74,8 @@ Residual risk:
 | Connections per replica; above the limit new connections get `503` with `Retry-After`. Pooled HTTP sessions are bounded as well (least recently used are evicted). | `opamp.maxConnectionsPerReplica`, default 10000. |
 | A WebSocket connection must send its first message within 30 seconds and is closed after twice `opamp.offlineAfter` without a message. | Fixed first-message timeout; `opamp.offlineAfter`, default 90 seconds. |
 
+Residual risk: a large number of authenticated agents can still load a replica up to the configured limits. Size the limits to the fleet (see [Scaling](../architecture.md#scaling)).
+
 ### OpAMP Bridge agents
 
 The OpAMP Bridge of the OpenTelemetry Operator replaces the whole set of collector resources that it manages with the
@@ -91,8 +93,6 @@ Residual risk: the recognition uses the `service.name` and the mode attribute th
 against mistakes and no authentication. A Bridge of a release before 0.157.0 in standalone mode reports neither and is treated
 as a collector. Give Bridges an enrollment token of their own and select on `labels.*`; the labels of a token are the attributes that an agent cannot choose
 ([ADR-0037](../adr/0037-opamp-bridge-agents-until-the-operator-integration.md)).
-
-Residual risk: a large number of authenticated agents can still load a replica up to the configured limits. Size the limits to the fleet (see [Scaling](../architecture.md#scaling)).
 
 ## Artifact verification
 
