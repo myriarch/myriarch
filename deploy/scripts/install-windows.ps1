@@ -1382,12 +1382,21 @@ function Install-Collector {
   if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
   New-Item -ItemType Directory -Path $stage -Force | Out-Null
   # extract only the binary from the archive root (tar.exe: Windows 10 1803+ / Server 2019+)
-  $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
-  if (-not $tar) { $tar = Get-Command tar -ErrorAction SilentlyContinue }
-  if (-not $tar) { Stop-Install 'tool_missing' 'tar.exe not found (requires Windows 10 1803 / Server 2019 or newer)' }
-  $r = Invoke-Native -File $tar.Source -Arguments @('-xzf', $archive, '-C', $stage, $script:CollectorBinary)
+  # The bsdtar of Windows comes first: a GNU tar earlier in the PATH (Git for Windows) reads C:\... as host:path and fails.
+  $tarPath = ''
+  if ($env:SystemRoot) {
+    $sysTar = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if (Test-Path -LiteralPath $sysTar -PathType Leaf) { $tarPath = $sysTar }
+  }
+  if (-not $tarPath) {
+    $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
+    if (-not $tar) { $tar = Get-Command tar -ErrorAction SilentlyContinue }
+    if ($tar) { $tarPath = $tar.Source }
+  }
+  if (-not $tarPath) { Stop-Install 'tool_missing' 'tar.exe not found (requires Windows 10 1803 / Server 2019 or newer)' }
+  $r = Invoke-Native -File $tarPath -Arguments @('-xzf', $archive, '-C', $stage, $script:CollectorBinary)
   if ($r.ExitCode -ne 0) {
-    $r = Invoke-Native -File $tar.Source -Arguments @('-xzf', $archive, '-C', $stage, "./$($script:CollectorBinary)")
+    $r = Invoke-Native -File $tarPath -Arguments @('-xzf', $archive, '-C', $stage, "./$($script:CollectorBinary)")
     if ($r.ExitCode -ne 0) { Stop-Install 'archive_invalid' "$($script:CollectorBinary) not found in the archive root: $($r.Output)" }
   }
   $exe = Join-Path $stage $script:CollectorBinary

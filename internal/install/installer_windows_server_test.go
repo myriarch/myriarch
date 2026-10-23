@@ -69,6 +69,8 @@ type winRig struct {
 	wrongSHA bool
 	// tampered makes every .sigstore.json say TAMPERED, which the stand-in verifier refuses.
 	tampered bool
+	// pathFront is a directory that env puts in front of the PATH of the rig's processes (Windows only).
+	pathFront string
 }
 
 func newWinRig(t *testing.T, secure bool) *winRig {
@@ -267,6 +269,9 @@ func (r *winRig) env() []string {
 				env = append(env, kv)
 			}
 		}
+		if r.pathFront != "" {
+			env = append(env, "PATH="+r.pathFront+string(os.PathListSeparator)+os.Getenv("PATH"))
+		}
 		env = append(env, "TEMP="+r.tmp, "TMP="+r.tmp, "USERPROFILE="+r.home, "HOME="+r.home, "APPDATA="+r.home, "LOCALAPPDATA="+r.home, "LOGDIR="+r.logs)
 	} else {
 		env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + r.home, "TMPDIR=" + r.tmp, "LOGDIR=" + r.logs, "LANG=C", "NO_PROXY=127.0.0.1,localhost"}
@@ -431,6 +436,28 @@ func testWindowsServerModeInstallsFromThePlan(t *testing.T) {
 	res = r.runWith("-Fleet", "windows-hosts", "-SiteName", `Edge "north"`, "-Environment", "prod")
 	require.Equal(t, 0, res.Code, res.Out)
 	assert.Contains(t, res.Out, "Collector v0.162.0 is already installed")
+}
+
+// testWindowsServerModeIgnoresATarOfThePath puts a tar.exe and a tar.cmd in front of the PATH that both fail, as the GNU tar of Git
+// for Windows does with a path like C:\..., which it reads as host:path. The installer takes the bsdtar of System32 and installs.
+func testWindowsServerModeIgnoresATarOfThePath(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("the tar of System32 exists on Windows only")
+	}
+	r := newWinRig(t, false)
+	front := filepath.Join(t.TempDir(), "fake-tar")
+	require.NoError(t, os.MkdirAll(front, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(front, "tar.exe"), []byte("this is not a program"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(front, "tar.cmd"), []byte("@echo tar (child): Cannot connect to C: resolve failed 1>&2\r\n@exit /b 2\r\n"), 0o755))
+	r.pathFront = front
+	res := r.runWith()
+	require.Equal(t, 0, res.Code, res.Out)
+	assert.NotContains(t, res.Out, "Cannot connect to C:")
+	assert.True(t, r.installed())
+}
+
+func TestWindowsServerModeIgnoresATarOfThePath(t *testing.T) {
+	eachWinShell(t, testWindowsServerModeIgnoresATarOfThePath)
 }
 
 func TestWindowsServerModeInstallsFromThePlan(t *testing.T) {
