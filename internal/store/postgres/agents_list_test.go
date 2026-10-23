@@ -6,6 +6,7 @@ package postgres_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -508,27 +509,50 @@ func TestHeartbeatWritesAreHotUpdates(t *testing.T) {
 		}
 		h0, t0 = h, tt
 	}
-	for i := 1; i <= 5; i++ {
-		mustNoErr(t, db.Agents().TouchLastSeen(ctx, ids, time.Now().Add(time.Duration(i)*time.Minute)))
+	// Structural properties of migration 00002: free space in the heap pages and no index
+	// that contains last_seen_at. They hold regardless of what else runs on the server.
+	var reloptions []string
+	mustNoErr(t, db.Pool().QueryRow(ctx, `SELECT coalesce(reloptions, '{}') FROM pg_class WHERE oid = 'agents'::regclass`).Scan(&reloptions))
+	if !slices.Contains(reloptions, "fillfactor=75") {
+		t.Fatalf("agents reloptions = %v, want fillfactor=75", reloptions)
 	}
+	var indexed int
+	mustNoErr(t, db.Pool().QueryRow(ctx, `SELECT count(*) FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)
+WHERE i.indrelid = 'agents'::regclass AND a.attname = 'last_seen_at'`).Scan(&indexed))
+	if indexed != 0 {
+		t.Fatalf("%d index(es) on agents contain last_seen_at", indexed)
+	}
+	// The first round only has the fillfactor space left by the seeding (a third of the rows),
+	// every later one depends on removing the old row versions. Left to the opportunistic
+	// pruning that depends on what else runs on a shared server, so the test vacuums between
+	// the rounds and measures the rounds after the warm-up round.
+	const rounds = 4
+	vacuum := func() { _, err := db.Pool().Exec(ctx, `VACUUM agents`); mustNoErr(t, err) }
+	mustNoErr(t, db.Agents().TouchLastSeen(ctx, ids, time.Now().Add(time.Minute)))
+	vacuum()
+	h0, t0 = read()
+	for i := 2; i < 2+rounds; i++ {
+		mustNoErr(t, db.Agents().TouchLastSeen(ctx, ids, time.Now().Add(time.Duration(i)*time.Minute)))
+		vacuum()
+	}
+	want := int64(rounds * len(ids))
 	// the statistics collector flushes asynchronously: poll until all updates are counted
 	var h1, t1 int64
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		h1, t1 = read()
-		if t1-t0 >= 5*2000 || time.Now().After(deadline) {
+		if t1-t0 >= want || time.Now().After(deadline) {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	upd, hot := t1-t0, h1-h0
-	if upd < 5*2000 {
-		t.Fatalf("statistics not visible within 30s: %d of %d updates counted", upd, 5*2000)
+	if upd < want {
+		t.Fatalf("statistics not visible within 30s: %d of %d updates counted", upd, want)
 	}
 	ratio := float64(hot) / float64(upd)
 	t.Logf("%d updates, %d HOT (%.0f%%)", upd, hot, ratio*100)
-	// without the migration every one of these updates is non-HOT (indexed column); five
-	// back-to-back full rounds are a stress case, steady state (one round per 15s) is higher
+	// without the migration every one of these updates is non-HOT (indexed column)
 	if ratio < 0.5 {
 		t.Fatalf("only %.0f%% of the heartbeat updates were HOT", ratio*100)
 	}

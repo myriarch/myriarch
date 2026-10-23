@@ -126,7 +126,7 @@ describe('dashboard', () => {
       ),
     );
     renderApp({ route: '/' });
-    expect(await screen.findByText('Data could not be loaded', {}, { timeout: 5000 })).toBeTruthy();
+    expect(await screen.findByText('Data could not be loaded')).toBeTruthy();
     expect(screen.getByText(/The server is temporarily unavailable/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
@@ -151,7 +151,7 @@ describe('agents list', () => {
     const first = renderApp({ route: '/agents' });
     const user = userEvent.setup();
     await user.type(await screen.findByTestId('agent-search'), 'edge-1001');
-    await waitFor(() => expect(location()).toBe('/agents?q=edge-1001'), { timeout: 3000 });
+    await waitFor(() => expect(location()).toBe('/agents?q=edge-1001'));
     await waitFor(() =>
       expect(screen.getAllByTestId('agent-row').length).toBe(
         getDb().queryAgents({ q: 'edge-1001' }).total,

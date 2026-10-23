@@ -193,9 +193,9 @@ func TestReaperExecutorDoesNotHangOnPipeHoldingDescendant(t *testing.T) {
 // The preflight of container mode runs the image binary through the same
 // executor: sanity check with a script that looks like otelcol-contrib.
 func TestImageVersionParsing(t *testing.T) {
-	// A zero timeout selects the production default, so the deadline under load
-	// is the one the probe really uses instead of a fixed second.
-	const probeTimeout = 0
+	// The deadline under load is the one the preflight passes to the probe
+	// (update.preflightTimeout), not a fixed second.
+	probeTimeout := DefaultConfig().Update.PreflightTimeout.D()
 	rp := testReaper(t)
 	dir := t.TempDir()
 	good := writeScript(t, dir, "otelcol-contrib", "echo \"otelcol-contrib version 0.161.0\"\n")
