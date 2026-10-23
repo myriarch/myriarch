@@ -13,8 +13,7 @@ User-agent: *
 Disallow: /
 {{ else -}}
 # Crawler policy: every crawler may read the whole site, the crawlers of search engines and of AI assistants alike. The documentation is
-# public on GitHub as well. The firewall of the host only records bot traffic (log mode); it neither blocks nor challenges a crawler.
-# /llms.txt summarizes the project for language models.
+# public on GitHub as well. /llms.txt summarizes the project for language models.
 User-agent: *
 Disallow:
 
