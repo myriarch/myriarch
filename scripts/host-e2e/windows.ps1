@@ -242,11 +242,12 @@ function Assert-CiHost {
   if ($env:HOST_E2E -ne '1') {
     Stop-He 'refusing to run: HOST_E2E=1 is not set. It confirms that this machine is a throwaway runner (docs/development.md, Host end-to-end test)'
   }
-  if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
-    Stop-He "refusing to run: this is not Windows ($([Environment]::OSVersion.Platform))"
-  }
+  # checked before the platform: it does not depend on Windows, so the test of the helpers reaches it on any system
   if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
     Stop-He "refusing to run: the runner is '$($env:RUNNER_ENVIRONMENT)', not github-hosted. A runner that outlives the job keeps what this script installs"
+  }
+  if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+    Stop-He "refusing to run: this is not Windows ($([Environment]::OSVersion.Platform))"
   }
   if (-not (Test-Administrator)) {
     Stop-He 'refusing to run: the installer needs an elevated session (the runner user of GitHub-hosted Windows runners is an administrator)'
@@ -1198,7 +1199,8 @@ function Complete-Scenario {
   try {
     if (@(Get-HostLeftovers).Count -gt 0) { Reset-Host -Quiet }
   } catch { Write-HeWarn "reset failed: $($_.Exception.Message)" }
-  if (-not (Remove-CaTrust)) { Write-HeWarn 'the throwaway CA is still in the machine store' }
+  if (Remove-CaTrust) { Add-Pass 'the throwaway CA is out of the machine store' $script:TrustThumbprint }
+  else { Add-Fail 'the throwaway CA is out of the machine store' "still trusted: $($script:TrustThumbprint)" }
   try { Export-Artifacts } catch { Write-HeWarn "artifacts failed: $($_.Exception.Message)" }
   Write-Summary
 }
@@ -1211,13 +1213,21 @@ function Invoke-Scenario {
   Assert-FreshHost
   $script:Active = $true
   $script:Aborted = $false
+  $completed = $false
   try {
     Initialize-Shared
     $null = & $Body
+    $completed = $true
   } catch {
     $script:Aborted = $true
     Add-Fail "scenario $Name" ("stopped: " + $_.Exception.Message)
   } finally {
+    # exit (Stop-He) skips the catch, and a cancelled step runs the finally only: either way the run counts as failed and the
+    # artifacts are collected before the slow clean-up (a runner does not wait for that)
+    if (-not $completed -and -not $script:Aborted) {
+      $script:Aborted = $true
+      Add-Fail "scenario $Name" 'ended early (exit or cancel)'
+    }
     Complete-Scenario
   }
 }

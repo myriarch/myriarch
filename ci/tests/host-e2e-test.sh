@@ -625,7 +625,7 @@ grep -q "versionRange: \">=${OLD}, <=${NEW}\"" "${WFLEET}" && grep -q "^    vers
   && ok "the frame and the Git target of the Windows fleet are the two versions of the test" || fail "the Windows fleet does not match ${OLD} and ${NEW}"
 [ "$(sed -n "s/^\$script:VersionOld = '\(.*\)'\$/\1/p" "${WIN}")" = "${OLD}" ] && [ "$(sed -n "s/^\$script:VersionNew = '\(.*\)'\$/\1/p" "${WIN}")" = "${NEW}" ] \
   && ok "windows.ps1 uses the same two versions as lib.sh" || fail "windows.ps1 and lib.sh name other versions"
-grep -q '^  name: windows-hosts$' "${WFLEET}" || grep -q '^  name: windows-hosts$' <(sed 's/^metadata:/&/' "${WFLEET}") && ok "the Windows fleet is called windows-hosts" || fail "the Windows fleet is not called windows-hosts"
+grep -q '^  name: windows-hosts$' "${WFLEET}" && ok "the Windows fleet is called windows-hosts" || fail "the Windows fleet is not called windows-hosts"
 if [ -x "${BIN}/myrctl" ]; then
   mkdir -p "${W}/wfixture"
   cp -R "${HE}/gitops/blueprints" "${HE}/gitops/policies" "${W}/wfixture/"
@@ -646,13 +646,13 @@ EOF_PS
   t_parse() { PARSE_FILES="${WIN}|${HE}/killer.ps1|${CI_DIR}/tests/host-e2e-windows.ps1" pwsh -NoProfile -NonInteractive -File "${W}/parse.ps1"; }
   expect_ok "windows.ps1, killer.ps1 and the test of the helpers parse" t_parse
   t_helpers() { pwsh -NoProfile -NonInteractive -File "${CI_DIR}/tests/host-e2e-windows.ps1" -Script "${WIN}" -Work "${W}/winwork" 2>&1; }
-  HOUT="$(t_helpers)"
+  HRC=0; HOUT="$(t_helpers)" || HRC=$?
   printf '%s\n' "${HOUT}" | sed -n 's/^ok /ok    windows: /p'
-  if printf '%s\n' "${HOUT}" | grep -q '^FAIL '; then
-    printf '%s\n' "${HOUT}" | grep '^FAIL ' | while IFS= read -r line; do fail "windows: ${line#FAIL }"; done
-  fi
-  PASS=$((PASS + $(printf '%s\n' "${HOUT}" | grep -c '^ok ')))
-  if ! printf '%s\n' "${HOUT}" | grep -q '^ok '; then fail "the test of the helpers of windows.ps1 printed no result: ${HOUT}"; fi
+  # the loop reads from a process substitution, not a pipe: fail must count in this shell
+  while IFS= read -r line; do fail "windows: ${line#FAIL }"; done < <(printf '%s\n' "${HOUT}" | grep '^FAIL ' || true)
+  PASS=$((PASS + $(printf '%s\n' "${HOUT}" | grep -c '^ok ' || true)))
+  if [ "${HRC}" -ne 0 ]; then fail "the test of the helpers of windows.ps1 exited ${HRC}: $(printf '%s\n' "${HOUT}" | tail -n 5)"; fi
+  if ! printf '%s\n' "${HOUT}" | grep -q '^END helpers$'; then fail "the test of the helpers of windows.ps1 did not run to its last line"; fi
 else
   echo "  note  pwsh not found: the parse check, the helpers and the guard of windows.ps1 are skipped (ci/install-tools.sh pwsh)"
   if [ "${CI:-}" = true ]; then fail "pwsh is required in CI for the tests of windows.ps1"; fi
