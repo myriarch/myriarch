@@ -938,6 +938,25 @@ runs besides `hack/kind` (the image scripts and what they source, the pins, the 
 the job and the Node.js version it installs), and the same test holds the list. The runner pulls the images anonymously, so Docker Hub can limit the pulls of a busy day;
 the workflow has no secret to log in with, and a rerun of the job is the answer.
 
+### Chart installation test on kind (`ci/kind-chart-test.sh`)
+
+`ci/kind-chart-test.sh --fresh` installs the two Helm charts on a fresh kind cluster, as a user does, and prints PASS / FAIL per step like
+the probe: the server chart in a `restricted` namespace with `helm test` (the Pod checks `/readyz` and an OpAMP WebSocket handshake), the
+collector chart as a StatefulSet in a `restricted` namespace and as a DaemonSet in a `privileged` namespace (the documented exception for
+the `hostPath` volume), every agent registered, online and healthy at the server (REST API), a clean uninstall, and a `helm upgrade` from
+the chart of the tag `v0.1.0` (from Git, with the image of that release) to the chart and the image of the commit. It reuses `hack/kind`
+(cluster, registry, `images.sh` with the server image and the updater of the commit, `diag.sh`), so it shares the cluster with
+`make kind-probe`: run one of the two at a time. It needs Docker and is not part of `make check-local`; the gate only holds its shell
+syntax (`ci/lint-shell.sh`) and the shape of its workflow job (`ci/tests/workflow-artifacts-test.sh`). Stages and environment:
+[`hack/kind/README.md`](../hack/kind/README.md#chart-installation-test).
+
+**In CI.** The job `charts` of `.github/workflows/e2e-kind.yml` runs it on two Kubernetes versions, one entry of the matrix each: the pins
+`KIND_NODE_IMAGE` and `KIND_NODE_IMAGE_PREVIOUS` of `hack/kind/versions.env` (node images by digest; the previous minor version stays within
+the skew of the kubectl pin, and the charts need Kubernetes 1.30 or later). It starts under the conditions of the probe (the path filter
+now names the chart test as well), has no secret and a read-only token, and uploads the same allow-list of logs, events, descriptions and
+diagnostics from `.cache/kind` after a failure (artifact `e2e-kind-charts-<label>`), never the kubeconfig, the generated tokens or cookie
+jars. Its test step has a timeout of its own below that of the job.
+
 ## Web UI
 
 The UI is React 19, TypeScript, Vite 8 and Mantine 9. It is built into static files in `internal/webui/dist` and embedded

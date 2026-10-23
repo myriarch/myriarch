@@ -108,8 +108,35 @@ deletes the probe namespaces (and the CoreDNS rewrite); without a flag it requir
 * `probe.sh` is the driver, `lib/stages-*.sh` hold the numbered stages, `lib/common.sh`, `lib/api.sh` and `lib/install.sh` the
   helpers (REST calls with a cookie jar and CSRF token, port-forward lifecycle, rollout observation, installation steps).
 * `up.sh`, `down.sh`, `images.sh`, `install.sh` (installation without checks), `diag.sh` (diagnostics, called on failure).
+  `ci/kind-chart-test.sh` (outside this directory) is the chart installation test that reuses them.
 * `cluster.yaml`, `versions.env` (all image pins carry a digest; `ci/check.sh` verifies it), `manifests/`, `values/`, `gitops/`,
   `git/` (scripts of the Git server), `fault/killer.sh` (fault injection for the rollback check).
+
+## Chart installation test
+
+`ci/kind-chart-test.sh` is the second test on this cluster. The probe checks the whole system; this one checks only the two Helm
+charts, installed the way a user installs them, and prints PASS / FAIL per step in the same format (`results.txt`, `probe.log`).
+It reuses `up.sh`, `images.sh` (with `IMAGES_SET=server,updater`: the server image and the static `myriarch-updater` of the commit, no
+legacy collector image), `diag.sh` (with `DIAG_EXTRA_NS` for its namespaces) and the libraries of the probe, so the cluster, the
+registry, the work directory and the node image are the same ones.
+
+```bash
+ci/kind-chart-test.sh --fresh    # cluster, registry and work directory from zero; --reset keeps cluster and registry
+```
+
+| Stage | What it checks |
+|---|---|
+| 0, 1, 2 | Docker and the schemas of both charts, the cluster (three nodes Ready, the Kubernetes version is printed), the images of the commit in the local registry |
+| 3 | PostgreSQL, the enrollment tokens (generated into `secrets/`, never printed) |
+| 4 | Server chart in a namespace under the Pod Security level `restricted` with test values (declared enrollment tokens, `tests.token`): `helm install --wait`, Pods Ready, `helm test` (the Pod checks `/readyz` and the OpAMP WebSocket handshake with a token that exists for the test only), the test Pod is removed |
+| 5 | Collector chart as a StatefulSet with two replicas in a `restricted` namespace and as a DaemonSet with `nodeLogs` in a `privileged` namespace (the documented exception: the PSA levels `baseline` and `restricted` refuse the `hostPath` volume); every agent is registered, online and healthy at the server (REST API, filtered by `site.id`); a deleted StatefulSet Pod comes back as the same agent |
+| 6 | `helm uninstall` of all three releases leaves none of their resources (the PVCs of the StatefulSet stay by design and are deleted by the test) |
+| 7 | `helm upgrade` from the chart of the tag `v0.1.0` (taken from Git with `git archive`, running the image of that release, on an empty second database) to the chart and the image of the commit, then `helm test` and a clean uninstall |
+
+`CHART_TEST_UPGRADE_FROM` names another tag for stage 7. The upgrade stage pulls the released server image from `ghcr.io` and the
+checkout needs the tag (the script fetches it when it is missing). Not covered, on purpose: a failover with `docker pause`,
+an arbitrary user ID, the Compose smoke test, updates of the container mode and a Quickstart on kind. The test shares the cluster
+and the work directory with `make kind-probe`: run one of the two at a time.
 
 ## Inspecting and cleaning up
 
@@ -136,9 +163,12 @@ not a gate of the release; before a tag the last green run of the commit does wh
 ([Releasing](../../docs/releasing.md)).
 
 The matrix has one entry per Kubernetes version. `image-var` names the pin of `versions.env` with the node image (`KIND_NODE_IMAGE`
-today) and the workflow passes it as `KIND_NODE_IMAGE`, so the digest is in this file only and `ci/check.sh` keeps holding it. A second
-Kubernetes version is a second pin in `versions.env` and a second entry with its `image-var`; the kubectl pin must stay within the skew
-of both node images.
+and `KIND_NODE_IMAGE_PREVIOUS`) and the workflow passes it as `KIND_NODE_IMAGE`, so the digest is in this file only and `ci/check.sh`
+keeps holding it. The probe job (`kind`) runs on the newest version. The second job, `charts`, runs the [chart installation
+test](#chart-installation-test) (`ci/kind-chart-test.sh --fresh`) on both versions, starts under the same conditions as the probe,
+shows the summary block in the job summary and uploads the same allow-list after a failure (artifact `e2e-kind-charts-<label>`). A
+further Kubernetes version is a further pin in `versions.env` and a further entry with its `image-var`; the kubectl pin must stay
+within the skew of every node image.
 
 A failed run uploads an allow-list for seven days: `probe.log`, `results.txt`, `durations.txt`, `logs/` and `diag/` below
 `.cache/kind`. It never uploads the kubeconfig, `secrets/`, the cookie jars, the Helm credentials in `helm/`, `values-tokens.yaml` or

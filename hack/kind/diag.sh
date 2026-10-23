@@ -7,6 +7,7 @@
 #
 #   hack/kind/diag.sh            writes $PROBE_WORK/diag/<timestamp>/ and prints the directory
 #   DIAG_KIND_LOGS=1 ...         also runs `kind export logs` (large)
+#   DIAG_EXTRA_NS="a b" ...      also these namespaces (ci/kind-chart-test.sh)
 #
 # Secrets are never dumped (no `get secret -o`); the Helm values of the myriarch releases carry no secrets (they are passed
 # through Secrets), the values of the Dex demo release do and are left out.
@@ -29,7 +30,9 @@ if [ ! -f "${KUBECONFIG}" ] || ! kubectl --context "${KIND_CONTEXT}" get nodes >
 fi
 
 k get nodes,pods,svc,pvc,networkpolicies,deploy,sts,ds,pdb,events -A -o wide > "${out}/cluster.txt" 2>&1
-for ns in "${NS_APP}" "${NS_INFRA}" "${NS_DEX}" "${NS_DEXIDP}" "${NS_OUTSIDE}" kube-system; do
+# DIAG_EXTRA_NS: more namespaces (ci/kind-chart-test.sh), space separated
+# shellcheck disable=SC2086
+for ns in "${NS_APP}" "${NS_INFRA}" "${NS_DEX}" "${NS_DEXIDP}" "${NS_OUTSIDE}" ${DIAG_EXTRA_NS:-} kube-system; do
   k get ns "${ns}" >/dev/null 2>&1 || continue
   kn "${ns}" describe pods > "${out}/describe-${ns}.txt" 2>&1
   for pod in $(kn "${ns}" get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
@@ -37,7 +40,8 @@ for ns in "${NS_APP}" "${NS_INFRA}" "${NS_DEX}" "${NS_DEXIDP}" "${NS_OUTSIDE}" k
     kn "${ns}" logs "${pod}" --all-containers --prefix --previous --tail=500 > "${out}/logs/${ns}-${pod}.previous.log" 2>&1 || rm -f "${out}/logs/${ns}-${pod}.previous.log"
   done
 done
-for ns in "${NS_APP}" "${NS_DEX}" "${NS_DEXIDP}"; do
+# shellcheck disable=SC2086
+for ns in "${NS_APP}" "${NS_DEX}" "${NS_DEXIDP}" ${DIAG_EXTRA_NS:-}; do
   h list -n "${ns}" > "${out}/helm-list-${ns}.txt" 2>&1
   for rel in $(h list -n "${ns}" -q 2>/dev/null); do
     # the values of the upstream Dex release carry the demo client secret inline: status only

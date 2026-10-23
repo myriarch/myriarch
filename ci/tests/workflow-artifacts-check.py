@@ -144,6 +144,7 @@ KIND_PATHS = [
     "scripts/lib/image-common.sh",
     "scripts/lib/oci_image.py",
     "ci/image-labels.env",
+    "ci/kind-chart-test.sh",
     "ci/install-tools.sh",
     "ci/lib.sh",
     "ci/versions.env",
@@ -396,8 +397,18 @@ def check_kind(text, root, findings):
             findings.append("%s: image-var %s is no pin of hack/kind/versions.env, or it has no digest" % (name, v))
     if "make kind-probe" not in text:
         findings.append("%s: the probe runs through make kind-probe" % name)
-    probe_steps = [(number, lines) for number, lines in read_steps(text) if any("make kind-probe" in line for line in step_block(lines, "run"))]
-    check_timeouts(name, text, probe_steps, findings)
+    # each job that runs a test has one timeout of its own and its test steps keep the margin below it
+    jobs = split_jobs(text)
+    for job, command in (("kind", "make kind-probe"), ("charts", "ci/kind-chart-test.sh")):
+        if job not in jobs:
+            findings.append("%s: the job `%s` does not exist" % (name, job))
+            continue
+        job_steps = [(number, lines) for number, lines in read_steps(jobs[job]) if any(command in line for line in step_block(lines, "run"))]
+        if job == "charts" and not job_steps:
+            findings.append("%s: the charts job runs ci/kind-chart-test.sh" % name)
+        check_timeouts(name, jobs[job], job_steps, findings)
+    if len(re.findall(r"^[ \t]+image-var: KIND_NODE_IMAGE_PREVIOUS$", text, re.M)) != 1 or len(variables) < 3:
+        findings.append("%s: the charts job runs on two Kubernetes versions: its matrix needs the entries KIND_NODE_IMAGE and KIND_NODE_IMAGE_PREVIOUS" % name)
     filter_entries = set(re.findall(r"^[ \t]+- '([^']+)'$", text, re.M))
     for entry in KIND_PATHS:
         if entry not in filter_entries:
@@ -406,6 +417,13 @@ def check_kind(text, root, findings):
         findings.append("%s: HOST_E2E belongs to the host test" % name)
     if "docker login" in text or "docker/login-action" in text:
         findings.append("%s: no registry login (the workflow has no secret)" % name)
+
+
+def split_jobs(text):
+    """The text of every job of the workflow by its name (a key at two spaces of indentation below `jobs:`)."""
+    body = text.split("\njobs:\n", 1)[-1]
+    parts = re.split(r"^  ([A-Za-z0-9_-]+):[ \t]*$", body, flags=re.M)
+    return {parts[i]: parts[i + 1] for i in range(1, len(parts) - 1, 2)}
 
 
 def code_lines(text):
