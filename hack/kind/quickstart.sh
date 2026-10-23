@@ -43,7 +43,6 @@ set -euo pipefail
 cd "${ROOT}"
 
 : "${QUICKSTART_SOURCE:=release}"
-: "${QUICKSTART_SIM:=0}"
 : "${QUICKSTART_OCI_BASE:=oci://ghcr.io/myriarch/charts}"
 QS_GW_RELEASE='kind-gw'
 QS_NODES_RELEASE='kind-nodes'
@@ -253,6 +252,15 @@ install_sim() {
   kn "${NS_APP}" rollout status deploy/myriarch-sim --timeout=300s >&2
 }
 
+# resolve_sim: QUICKSTART_SIM as the cluster has it when the caller does not say: 1 if the simulator is installed, else 0. Every command
+# rebuilds the Git state from this choice, so a later command without QUICKSTART_SIM=1 must not drop the simulated fleets.
+resolve_sim() {
+  if [ -z "${QUICKSTART_SIM:-}" ]; then
+    if kn "${NS_APP}" get deploy myriarch-sim >/dev/null 2>&1; then QUICKSTART_SIM=1; else QUICKSTART_SIM=0; fi
+  fi
+  export QUICKSTART_SIM
+}
+
 # ---- up ---------------------------------------------------------------------------------------------------------------
 cmd_up() {
   local start=${SECONDS}
@@ -270,10 +278,18 @@ cmd_up() {
   log "installing PostgreSQL and the Git server"
   install_infra
   wait_infra
+  resolve_sim
   qs_gitops_prepare
-  # A second run keeps the repository as it is: the tutorial may have changed it since (config-change).
+  # A second run keeps the repository as it is: the tutorial may have changed it since (config-change). Only the simulated fleets are
+  # added when QUICKSTART_SIM=1 and they are missing; that publish resets a batch timeout set by config-change.
   if GITOPS_SHA="$(kn "${NS_INFRA}" exec deploy/git -- git --git-dir=/srv/git/fleet.git rev-parse --verify -q refs/heads/main 2>/dev/null)"; then
-    log "the GitOps repository has commits already (${GITOPS_SHA}); it stays as it is"
+    if [ "${QUICKSTART_SIM}" = 1 ] && ! kn "${NS_INFRA}" exec deploy/git -- git --git-dir=/srv/git/fleet.git cat-file -e main:fleets/sim-edge.yaml 2>/dev/null; then
+      warn "the GitOps repository lacks the simulated fleets; publishing the initial state again (a batch timeout from config-change is reset)"
+      gitops_publish "quickstart: initial state with the simulator"
+      log "GitOps repository pushed (${GITOPS_SHA})"
+    else
+      log "the GitOps repository has commits already (${GITOPS_SHA}); it stays as it is"
+    fi
   else
     gitops_publish "quickstart: initial state"
     log "GitOps repository pushed (${GITOPS_SHA})"
@@ -307,6 +323,7 @@ ready_all() { # kind name  -> every wanted replica is ready
 }
 cmd_smoke() {
   assert_context
+  resolve_sim
   SMOKE_FAILED=0
   smoke_check "all nodes are Ready" k wait --for=condition=Ready node --all --timeout=60s
   smoke_check "the server pods are Ready" ready_all deploy myriarch spec.replicas status.readyReplicas
@@ -374,6 +391,7 @@ cmd_config_change() {
   case "${timeout}" in [0-9]*s) ;; *) die "the batch timeout must be a number of seconds like 7s, not '${timeout}'" ;; esac
   assert_context
   prepare_work_dirs
+  resolve_sim
   qs_gitops_prepare
   sed -e "s/default: 5s/default: ${timeout}/" "${GITOPS_WORK}/blueprints/kind-collector.yaml" > "${GITOPS_WORK}/blueprints/kind-collector.yaml.new"
   mv "${GITOPS_WORK}/blueprints/kind-collector.yaml.new" "${GITOPS_WORK}/blueprints/kind-collector.yaml"

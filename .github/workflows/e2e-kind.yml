@@ -287,6 +287,7 @@ jobs:
       # diag.sh prints no secret (no get secret -o) and writes into .cache/kind/diag.
       - name: Collect diagnostics of a failed run
         if: failure()
+        timeout-minutes: 5
         run: hack/kind/diag.sh || true
       # Only these files, never the kubeconfig, .cache/kind/secrets (the generated passwords and keys), a cookie jar or the generated values.
       - name: Upload the logs of a failed run

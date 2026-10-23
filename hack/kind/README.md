@@ -26,7 +26,7 @@ make kind-quickstart-all QUICKSTART_SOURCE=commit    # the CI path: all of it, w
 
 It shares the cluster, the registry, the work directory and the helpers with the probe (`up.sh`, `images.sh`, `lib/`), so run one
 of the two at a time. The Git repository of the cluster is built from `quickstart/gitops` (the blueprint and the two fleets),
-`quickstart/sim` (the simulated fleets, `QUICKSTART_SIM=1`) and the demo policies of `examples/quickstart/policies` (health wait
+`quickstart/sim` (the simulated fleets, `QUICKSTART_SIM=1`; commands without the variable use the simulator if the cluster has it) and the demo policies of `examples/quickstart/policies` (health wait
 30 s, `maxConcurrent: 0`, no windows: the same copy as in the Compose Quickstart), plus an inventory that makes the first
 gateway pod and the first worker the canary wave. `values/quickstart.yaml` holds the values of the server chart.
 `KIND_SYSTEM_TOOLS=1` uses `kind`, `kubectl` and `helm` from the `PATH` instead of the pinned ones.
