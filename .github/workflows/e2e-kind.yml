@@ -25,6 +25,11 @@
 # KIND_NODE_IMAGE and KIND_NODE_IMAGE_PREVIOUS of hack/kind/versions.env), starts under the same conditions as the probe and uploads the
 # same allow-list of files after a failure.
 #
+# The third job, quickstart, runs the Kubernetes Quickstart of docs/getting-started/kubernetes-kind.md from the start to the end with
+# the same script as the page (hack/kind/quickstart.sh all, the charts and images of the commit): the installation, the smoke check, a
+# configuration rollout and a version rollout of the gateway. It writes the measured durations into the summary of the run; the page
+# names them. It starts under the same conditions as the other jobs and uploads the same allow-list of files after a failure.
+#
 # GitHub disables scheduled workflows of a public repository after 60 days without repository activity.
 name: e2e-kind
 
@@ -45,6 +50,8 @@ on:
       - 'internal/leader/**'
       # the simulator profile and the component list that the probe uses
       - 'examples/sim/**'
+      # the demo policies that the Quickstart copies into its Git repository
+      - 'examples/quickstart/**'
       # the images of the probe: the build scripts, what they source, and the labels they read
       - 'scripts/build-image-crane.sh'
       - 'contrib/legacy-kubernetes-collector/build-collector-image-crane.sh'
@@ -222,6 +229,71 @@ jobs:
         with:
           name: e2e-kind-charts-${{ matrix.label }}
           path: |
+            .cache/kind/probe.log
+            .cache/kind/results.txt
+            .cache/kind/durations.txt
+            .cache/kind/logs/**
+            .cache/kind/diag/**
+            !.cache/kind/logs/hygiene-dump/**
+            !.cache/kind/**/secrets/**
+            !.cache/kind/**/kubeconfig*
+            !.cache/kind/**/cookies*
+            !.cache/kind/**/*.key
+            !.cache/kind/**/*.pem
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+  quickstart:
+    name: quickstart (newest)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+        with:
+          node: 'true'
+          tools: kind kubectl helm crane yq
+      - name: Describe the runner
+        run: |
+          docker version --format '{{.Server.Version}} {{.Server.Os}}/{{.Server.Arch}}'
+          docker info --format '{{.NCPU}} CPUs, {{.MemTotal}} bytes of memory'
+          df -h . | tail -n 1
+      # A timeout of its own below that of the job, like the other jobs: the upload below must run when the Quickstart hangs. The
+      # script is the one of the page; QUICKSTART_SOURCE=commit takes the charts and images of this commit instead of the release.
+      - name: Run the Quickstart from the start to the end
+        timeout-minutes: 45
+        env:
+          QUICKSTART_SOURCE: commit
+          QUICKSTART_SIM: '1'
+          WEB_BUILD: always
+        run: |
+          KIND_NODE_IMAGE="$(sed -n "s/^KIND_NODE_IMAGE=//p" hack/kind/versions.env)"
+          test -n "${KIND_NODE_IMAGE}" || { echo "hack/kind/versions.env has no pin KIND_NODE_IMAGE" >&2; exit 1; }
+          export KIND_NODE_IMAGE
+          mkdir -p .cache
+          make kind-quickstart-all 2>&1 | tee -a .cache/kind-quickstart.log
+      # The durations that the script measured (install, smoke check, rollouts, and the version rollout after the approval of the last
+      # wave). No secret is in the file (the script never writes one into it).
+      - name: Show the durations of the Quickstart
+        if: always()
+        run: |
+          f=.cache/kind/quickstart-summary.md
+          [ -f "${f}" ] || exit 0
+          cat "${f}" >> "${GITHUB_STEP_SUMMARY}"
+      # Only these files, never the kubeconfig, .cache/kind/secrets (the generated passwords and keys), a cookie jar or the generated values.
+      - name: Upload the logs of a failed run
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-kind-quickstart
+          path: |
+            .cache/kind-quickstart.log
+            .cache/kind/quickstart-summary.md
+            .cache/kind/quickstart-timings.txt
             .cache/kind/probe.log
             .cache/kind/results.txt
             .cache/kind/durations.txt

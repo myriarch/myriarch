@@ -36,7 +36,7 @@ creates a configuration rollout for each fleet whose rendered configuration chan
 
 The policy `config-canary` has two waves. The wave `canary` contains the hosts that the inventory marks with
 `labels.wave=canary`; the wave `rest` follows with all other hosts and **requires approval**. So the rollout applies the
-change to the canary hosts, waits for the health check (`healthWait`), and then stops in the status `waiting_approval`.
+change to the canary hosts, waits for the health check (`healthWait`, 30 seconds in the example policy), and then stops in the status `waiting_approval`.
 
 Approve the next wave in the UI (*Rollouts*, the rollout, then *Approve*) or with the API. Wave indexes start at 0, so the
 wave `rest` has the index 1:

@@ -9,6 +9,28 @@ server pod and the takeover of the leader. Everything runs on your machine with 
 The probe is a test of its own that CI runs too ([In CI](#in-ci)). Other cluster tests can reuse the scripts (`up.sh`, `images.sh`,
 `install.sh`, `diag.sh` and the stage libraries).
 
+## Quickstart for users
+
+`quickstart.sh` is the user-facing sibling of the probe: it installs the **published** charts and release images (or, with
+`QUICKSTART_SOURCE=commit`, the charts and images of this commit) with the collector chart as a gateway and as a node agent, and
+runs a first configuration and version rollout. [docs/getting-started/kubernetes-kind.md](../../docs/getting-started/kubernetes-kind.md)
+is its page, and CI runs the same script (the job `quickstart` of `.github/workflows/e2e-kind.yml`), so the page cannot go stale.
+
+```bash
+make kind-quickstart                                 # = hack/kind/quickstart.sh up
+make kind-quickstart-smoke                           # pods, "helm test", StatefulSet and DaemonSet; never signs in
+hack/kind/quickstart.sh config-change 7s             # the first configuration rollout (push to the Git server of the cluster)
+make kind-quickstart-rollouts                        # signs in with the bootstrap token, runs both rollouts through the API
+make kind-quickstart-all QUICKSTART_SOURCE=commit    # the CI path: all of it, with the durations in .cache/kind/quickstart-summary.md
+```
+
+It shares the cluster, the registry, the work directory and the helpers with the probe (`up.sh`, `images.sh`, `lib/`), so run one
+of the two at a time. The Git repository of the cluster is built from `quickstart/gitops` (the blueprint and the two fleets),
+`quickstart/sim` (the simulated fleets, `QUICKSTART_SIM=1`) and the demo policies of `examples/quickstart/policies` (health wait
+30 s, `maxConcurrent: 0`, no windows: the same copy as in the Compose Quickstart), plus an inventory that makes the first
+gateway pod and the first worker the canary wave. `values/quickstart.yaml` holds the values of the server chart.
+`KIND_SYSTEM_TOOLS=1` uses `kind`, `kubectl` and `helm` from the `PATH` instead of the pinned ones.
+
 ## Quick start
 
 ```bash

@@ -1,0 +1,49 @@
+# Blueprint of the collectors that the collector chart starts in the kind Quickstart (gateway and node agents): OTLP on all pod
+# addresses (the ports 4317 and 4318 of the chart), the debug exporter, and health_check on :13133 for the readiness probe of the
+# chart and the health check of the myriarch-updater.
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: kind-collector
+  description: Quickstart collector (OTLP, debug exporter, health_check on :13133)
+spec:
+  parameters:
+    - name: batchTimeout
+      type: string
+      default: 5s
+      description: Time after which the batch processor sends an incomplete batch (change it in Git for the first configuration rollout)
+  config:
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch:
+        timeout: "[[ .params.batchTimeout ]]"
+    exporters:
+      debug:
+        verbosity: basic
+    service:
+      extensions: [health_check]
+      telemetry:
+        metrics:
+          level: none
+      pipelines:
+        logs:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug]
+        metrics:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug]
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug]

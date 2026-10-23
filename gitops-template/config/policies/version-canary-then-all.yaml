@@ -3,7 +3,7 @@
 # onFailure: pause instead of rollback: the myriarch-updater rolls the host back to the previous version itself if the
 # new one does not become healthy. Whether the rest of the fleet is updated anyway is decided by a human afterwards
 # (resume, retry-failed, abort or rollback).
-# No maintenance windows; for a production variant see policies/canary-then-all.yaml.
+# No maintenance windows; for a production variant see the commented windows in policies/canary-then-all.yaml.
 apiVersion: myriarch.dev/v1alpha1
 kind: RolloutPolicy
 metadata:
@@ -18,7 +18,14 @@ spec:
     - name: rest
       percent: 100
       requireApproval: true
+  # Production-like values. The Quickstarts (examples/quickstart) use healthWait 30s and maxConcurrent 0 so that a demo finishes
+  # in about a minute; do not copy those into a real fleet.
+  # maxConcurrent limits how many hosts download and restart at the same time (and load the download source).
   maxConcurrent: 5
+  # How long a target must stay online and healthy after its collector reported the new version. 5m is longer than the
+  # 2m of a configuration change on purpose: a new collector binary can crash on a rare input or after the first batch
+  # queue fills, and a failure within the wait stops the rollout in the canary wave instead of after the rest of the hosts
+  # updated. The rollout page shows the time that is left and names this policy as the source of the wait.
   healthWait: 5m
   applyTimeout: 30m
   offlineGracePeriod: 30m

@@ -87,44 +87,19 @@ func TestQuickstartRenderStdoutForWindowsEdgeSample(t *testing.T) {
 	assert.Contains(t, out, "gateway.example.com:4317")
 }
 
-// The version policy needs windows in a fixed zone (UTC) and in the zone of
-// the agent, and the agents that use the agent zone report a zone with
-// daylight saving time, so the DST coverage of the maintenance windows stays.
-func TestQuickstartPolicyHasWindowsInUTCAndInTheAgentZone(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(quickstartDir, "policies", "canary-then-all.yaml"))
-	require.NoError(t, err)
-	var policy struct {
-		Spec domain.RolloutPolicySpec `yaml:"spec"`
-	}
-	require.NoError(t, yaml.Unmarshal(raw, &policy))
-	spec := policy.Spec
-	assert.Equal(t, "site.timezone", spec.TimezoneAttribute)
-	assert.Equal(t, "UTC", spec.DefaultTimezone)
-
-	var inUTC, inAgentZone int
-	for _, w := range spec.MaintenanceWindows {
-		switch w.Timezone {
-		case "UTC":
-			inUTC++
-		case "", "agent":
-			inAgentZone++
-		}
-	}
-	assert.Equal(t, 1, inUTC, "one window in UTC")
-	assert.Equal(t, 1, inAgentZone, "one window in the zone of the agent")
-
-	// the zone of the edge samples observes daylight saving time
-	for _, name := range []string{"linux-edge-01", "windows-edge-01"} {
-		sraw, err := os.ReadFile(filepath.Join(quickstartDir, "samples", "agents", name+".yaml"))
+// The Quickstarts (Compose and kind) show a rollout within about a minute: the demo policies wait 30 seconds, do not limit the
+// parallel targets and have no maintenance windows. The production-like values (and their reasons) live in gitops-template.
+func TestQuickstartPoliciesAreDemoValues(t *testing.T) {
+	for _, name := range []string{"canary-then-all", "config-canary"} {
+		raw, err := os.ReadFile(filepath.Join(quickstartDir, "policies", name+".yaml"))
 		require.NoError(t, err)
-		var sample struct {
-			Attributes map[string]string `yaml:"attributes"`
+		var policy struct {
+			Spec domain.RolloutPolicySpec `yaml:"spec"`
 		}
-		require.NoError(t, yaml.Unmarshal(sraw, &sample))
-		loc, err := time.LoadLocation(sample.Attributes[spec.TimezoneAttribute])
-		require.NoError(t, err, name)
-		_, winter := time.Date(2026, time.January, 15, 12, 0, 0, 0, time.UTC).In(loc).Zone()
-		_, summer := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC).In(loc).Zone()
-		assert.NotEqual(t, winter, summer, "%s: the sample zone has daylight saving time", name)
+		require.NoError(t, yaml.Unmarshal(raw, &policy))
+		spec := policy.Spec
+		assert.Equal(t, 30*time.Second, spec.HealthWait.D(), "%s: healthWait", name)
+		assert.Equal(t, 0, spec.MaxConcurrent, "%s: maxConcurrent 0 is unlimited", name)
+		assert.Empty(t, spec.MaintenanceWindows, "%s: no maintenance windows in a demo", name)
 	}
 }

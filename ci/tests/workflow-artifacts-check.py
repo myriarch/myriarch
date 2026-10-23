@@ -150,6 +150,7 @@ KIND_PATHS = [
     "scripts/lib/oci_image.py",
     "ci/image-labels.env",
     "ci/kind-chart-test.sh",
+    "examples/quickstart/**",
     "ci/install-tools.sh",
     "ci/lib.sh",
     "ci/versions.env",
@@ -404,13 +405,15 @@ def check_kind(text, root, findings):
         findings.append("%s: the probe runs through make kind-probe" % name)
     # each job that runs a test has one timeout of its own and its test steps keep the margin below it
     jobs = split_jobs(text)
-    for job, command in (("kind", "make kind-probe"), ("charts", "ci/kind-chart-test.sh")):
+    for job, command in (("kind", "make kind-probe"), ("charts", "ci/kind-chart-test.sh"), ("quickstart", "make kind-quickstart-all")):
         if job not in jobs:
             findings.append("%s: the job `%s` does not exist" % (name, job))
             continue
         job_steps = [(number, lines) for number, lines in read_steps(jobs[job]) if any(command in line for line in step_block(lines, "run"))]
         if job == "charts" and not job_steps:
             findings.append("%s: the charts job runs ci/kind-chart-test.sh" % name)
+        if job == "quickstart" and not job_steps:
+            findings.append("%s: the quickstart job runs make kind-quickstart-all (the script of the page)" % name)
         check_timeouts(name, jobs[job], job_steps, findings)
     if len(re.findall(r"^[ \t]+image-var: KIND_NODE_IMAGE_PREVIOUS$", text, re.M)) != 1 or len(variables) < 3:
         findings.append("%s: the charts job runs on two Kubernetes versions: its matrix needs the entries KIND_NODE_IMAGE and KIND_NODE_IMAGE_PREVIOUS" % name)

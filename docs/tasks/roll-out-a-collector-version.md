@@ -40,11 +40,11 @@ advance.
 
 ### Maintenance windows
 
-The version policy `canary-then-all` of the example repository lets a target **start** only inside a maintenance window:
-Monday to Friday 22:00 to 05:00 in the local time of the host (attribute `site.timezone`) and the whole weekend in UTC.
-Outside a window targets wait in the status `waiting_window`, so a rollout started during the day begins in the evening. To
-watch an update immediately, copy the repository, set `versionPolicy: config-canary` in the fleets of the copy and start
-`myriarchd dev` with `--gitops-dir` on the copy. `config-canary` has no windows and rolls back on a failure.
+The version policy `canary-then-all` of the example repository is a demo policy: it has no maintenance windows, so a target
+starts at once, and its health wait is 30 seconds (`healthWait: 30s`, `maxConcurrent: 0`). A policy with windows lets a target
+**start** only inside one; outside a window targets wait in the status `waiting_window`, so a rollout started during the day
+begins in the evening. The template for your own repository, `gitops-template/config/policies/canary-then-all.yaml`, shows a
+window in local time as a comment. See [Rollouts](../concepts/rollouts.md#maintenance-windows) for the rules.
 
 ### Failures and retries
 
