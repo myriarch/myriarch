@@ -309,9 +309,13 @@ function Test-TransientDownloadError {
   $names = @()
   for ($e = $Exception; $e; $e = $e.InnerException) { $names += $e.GetType().FullName }
   if ($names -contains 'System.Security.Authentication.AuthenticationException') { return $false }
-  if ($Exception -is [System.Net.WebException]) {
-    return (@('Timeout', 'ConnectFailure', 'NameResolutionFailure', 'ProxyNameResolutionFailure', 'ConnectionClosed',
-        'ReceiveFailure', 'SendFailure', 'KeepAliveFailure', 'PipelineFailure') -contains $Exception.Status.ToString())
+  # the WebException of .NET Framework has no inner exception, and a method call of PowerShell may wrap it
+  for ($e = $Exception; $e; $e = $e.InnerException) {
+    if ($e -is [System.Net.WebException]) {
+      if (@('Timeout', 'ConnectFailure', 'NameResolutionFailure', 'ProxyNameResolutionFailure', 'ConnectionClosed',
+          'ReceiveFailure', 'SendFailure', 'KeepAliveFailure', 'PipelineFailure') -contains $e.Status.ToString()) { return $true }
+      break
+    }
   }
   foreach ($n in @('System.Net.Http.HttpRequestException', 'System.Net.Http.HttpIOException', 'System.Net.Sockets.SocketException',
       'System.TimeoutException', 'System.Threading.Tasks.TaskCanceledException')) {
