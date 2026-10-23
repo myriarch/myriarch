@@ -1,6 +1,6 @@
 ---
 title: "myriarch-updater stop"
-weight: 240
+weight: 260
 description: "Stop the service."
 ---
 

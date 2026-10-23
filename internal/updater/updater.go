@@ -180,7 +180,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 }
 
 // NewRootCommand returns the root command: run, container, install,
-// uninstall, start, stop, status, verify-bundle, fetch-trusted-root, licenses,
+// uninstall, start, stop, status, verify-bundle, fetch-trusted-root, install-self,
+// copy, licenses,
 // version.
 func NewRootCommand() *cobra.Command {
 	root := &cobra.Command{
@@ -354,7 +355,45 @@ func NewRootCommand() *cobra.Command {
 	trustedRootCmd.Flags().StringVar(&trOut, "out", "", "output file (trusted_root.json)")
 	trustedRootCmd.Flags().StringVar(&trCache, "tuf-cache", "", "TUF cache directory")
 
-	root.AddCommand(run, container, install, uninstall, start, stop, status, verifyCmd, trustedRootCmd, newLicensesCommand(), &cobra.Command{
+	installSelfCmd := &cobra.Command{
+		Use:   "install-self <dir>",
+		Short: "Copy this binary into a directory as myriarch-updater (for init containers)",
+		Long: "Copies the running binary to <dir>/myriarch-updater with mode 0755. The write is atomic (a temporary file in <dir>, " +
+			"then a rename), <dir> must be an existing absolute directory and an existing target must be a regular file. " +
+			"An init container uses it to put this static binary on a shared volume where the image of the collector has no shell. " +
+			"It makes no network access.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !filepath.IsAbs(args[0]) {
+				return fmt.Errorf("directory %q must be an absolute path", args[0])
+			}
+			dst, err := installSelf(args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "installed %s\n", dst)
+			return nil
+		},
+	}
+	copyCmd := &cobra.Command{
+		Use:   "copy <src> <dst>",
+		Short: "Copy a regular file atomically (for init containers without a shell)",
+		Long: "Copies the regular file <src> to <dst>. Both paths must be absolute. <dst> may be an existing directory, then the file " +
+			"keeps its name. The write is atomic (a temporary file next to <dst>, then a rename) and the execute bit of <src> is kept " +
+			"(mode 0755 with it, 0644 without). A directory, a device or a symlink as destination and a source that is not a regular file " +
+			"are refused; <src> itself may be a symlink to a regular file. Missing directories are not created. It makes no network access.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dst, err := copyRegularFile(args[0], args[1], false, false)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "copied %s to %s\n", args[0], dst)
+			return nil
+		},
+	}
+
+	root.AddCommand(run, container, install, uninstall, start, stop, status, verifyCmd, trustedRootCmd, installSelfCmd, copyCmd, newLicensesCommand(), &cobra.Command{
 		Use:   "version",
 		Short: "Print the version",
 		Run: func(cmd *cobra.Command, args []string) {

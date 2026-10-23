@@ -288,6 +288,20 @@ Development mode weakens these controls, and `--allow-nonlocal` exposes all of t
 
 `myriarchd config validate --config FILE [--skip-files]` loads the configuration exactly as `myriarchd serve` does (defaults, YAML with unknown keys rejected, `${VAR}`, `MYRIARCH_*`) and runs every check that `serve` performs before touching the database or the network. There is one validation, not two. Without `--skip-files` it also reads the referenced files (secrets not empty, CA file with a certificate, key matching certificate, readable `trusted_root.json`). Exit codes: 0 valid (warnings allowed), 1 invalid, 2 usage error. Use it in CI and in deployment pipelines so that a misconfiguration is found before the pod starts. See the [command reference](../reference/cli/myriarchd_config_validate.md).
 
+## Init container commands
+
+**Available from v0.2.0.** `myriarch-updater install-self` and `myriarch-updater copy` put files on a shared volume from an init container whose image has no shell. The behaviour is specified in [Container mode](../design/container-mode.md#init-container-commands).
+
+| Control | Setting and default |
+|---|---|
+| Both paths must be absolute. The destination directory must exist, is not created and must not be a symlink. It is opened once, and the temporary file, the rename and the clean-up all go through that handle, so a swap of the directory entry afterwards changes nothing. | Fixed in code. |
+| An existing destination must be a regular file. A symlink (also a dangling one or one to a directory), a directory used as the target file and a device are refused. The rename replaces the entry itself and never writes through a link. | Fixed in code. |
+| The source must resolve to a regular file. A directory, a device, a named pipe or a socket is refused before it is opened, so a pipe without a writer cannot hang the init container; the type is checked again on the opened file. | Fixed in code. |
+| The temporary file is created with `O_EXCL` and mode 0600, then synced and renamed. The final mode is 0755 or 0644, never with set-user-ID, set-group-ID or sticky bits. A failure removes the temporary file and keeps the old file. | Fixed in code. |
+| The commands make no network access and read no secret. | Fixed in code. |
+
+Residual risk: the directory of the destination is checked, but higher components of the path are resolved normally and are trusted, for example the mount point of the volume. The commands run under the account of the init container, which is the account of the main container (see "Container mode shares one account" under [Known limitations](#known-limitations)).
+
 ## Health check and Helm test
 
 **Available from v0.2.0.** `myriarchd healthcheck` is the health check of the container image, which has neither a shell nor curl, and the program of the Pod that `helm test` runs. It asks `GET /readyz` and then for a WebSocket upgrade at the OpAMP path, and it sends no OpAMP message. The behaviour is specified in [Server behaviour](../design/opamp-server.md#health-check).
@@ -390,6 +404,9 @@ guidance after each item names what to do.
   and the supervisor; the collector configuration can influence that judgement and therefore the rollback decision.
 - **Container mode shares one account.** In container mode the updater, the supervisor and the collector run under the
   same user ID and share the binary volume, so installed versions are not protected against the collector process.
+- **Init container commands trust the path above the destination directory.** `install-self` and `copy` refuse a
+  symlink as destination entry and as destination directory, but resolve higher path components normally; the mount
+  point of the volume must be trusted. They run under the account of the main container.
 - **Scope of upstream signatures.** Sigstore verification proves a genuine artifact of the upstream release workflow
   for the offered version; it does not bind the asset name, platform or distribution. The binary-name extraction and
   the version check before activation catch mismatches.

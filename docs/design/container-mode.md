@@ -42,6 +42,37 @@ Windows it fails with an explanatory error, and the updater runs there as a serv
 (`myriarch-updater run`). The image entry point stays that of the supervisor image, so the image remains backward
 compatible, and the container command overrides it.
 
+## Init container commands
+
+The upstream collector image is built `FROM scratch`: it has no shell and no `cp`. A pod that runs the unchanged
+upstream images therefore needs a static helper to put files on a shared volume, and the updater is one. Two commands
+serve an init container; neither makes a network access.
+
+- `myriarch-updater install-self <dir>` copies the running binary (found with `os.Executable`) to
+  `<dir>/myriarch-updater` with mode 0755. A main container whose image has no updater then starts
+  `<dir>/myriarch-updater container` from the shared volume.
+- `myriarch-updater copy <src> <dst>` copies one regular file, for example the collector binary of the image to the volume.
+  The execute bit of `<src>` is kept (0755 with it, 0644 without). `<dst>` may be an existing directory.
+
+Both write a temporary file in the destination directory (created with `O_EXCL`, mode 0600), sync it and rename it into
+place, so a reader never sees a half-written file and a failed write leaves the old file and no temporary file. The rules
+that keep the commands from being turned against the volume:
+
+- Paths must be absolute. The destination directory must exist; it is not created. It is checked with `lstat` and a
+  symlink is refused (for `install-self <dir>` and for `copy <src> <dir>/<name>` alike). It is then opened once, and the
+  temporary file, the rename and the clean-up go through that handle. Higher components of the path are resolved
+  normally and must be trusted, for example the mount point of the volume.
+- A destination that exists must be a regular file. A symlink (also a dangling one, and a symlink to a directory), a
+  directory used as the target file and a device are refused, so a link planted on the volume cannot redirect the write.
+  The rename replaces the entry itself and never follows it.
+- The source may be a symlink (a mounted ConfigMap is one) but must resolve to a regular file; the type is checked on the
+  opened file. A directory, a device or a pipe is refused before the file is opened, so a pipe without a writer cannot
+  hang the command. Source and destination must not be the same file.
+- An error names the path and the reason on stderr and ends with exit code 1.
+
+An init container runs as the user and the volume of the main container (`runAsNonRoot`, a read-only root file system and
+`emptyDir` for the shared volume are enough); the commands need write access to the destination directory only.
+
 ## Process model
 
 - The updater is PID 1. It starts `container.supervisorCommand` as a child in its own process group and passes the

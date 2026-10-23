@@ -1,6 +1,6 @@
 ---
 title: "myriarch-updater start"
-weight: 220
+weight: 240
 description: "Start the service."
 ---
 

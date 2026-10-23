@@ -1,6 +1,6 @@
 ---
 title: "myriarch-sim"
-weight: 280
+weight: 300
 description: "Simulate OpAMP supervisors and myriarch-updaters against myriarchd."
 ---
 

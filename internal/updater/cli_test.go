@@ -50,7 +50,7 @@ func TestCLIHasAllCommands(t *testing.T) {
 	for _, c := range root.Commands() {
 		have[c.Name()] = true
 	}
-	for _, want := range []string{"run", "container", "install", "uninstall", "start", "stop", "status", "version", "verify-bundle", "fetch-trusted-root", "licenses"} {
+	for _, want := range []string{"run", "container", "install", "uninstall", "start", "stop", "status", "version", "verify-bundle", "fetch-trusted-root", "install-self", "copy", "licenses"} {
 		assert.True(t, have[want], want)
 	}
 	out, err := runCLI(t, "version")
