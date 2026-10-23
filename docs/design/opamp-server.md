@@ -677,6 +677,20 @@ Fleets and agents are matched by selectors over the attribute view.
   directly (catch-up), without a new rollout.
 - Reassigning everyone runs on the leader with a small worker pool, then publishes desired-state changes and an
   assignment event in chunks.
+- Several replicas. `AssignAgent` runs on whichever replica holds the connection, and `ReassignAll` on the leader, so two
+  replicas can evaluate the same agent at the same time. The stripe locks and the record of recent writes
+  (`written`) hold only inside one process and are an optimisation, not the guard. The guard is the database: the
+  assignment is written as a compare-and-set (`AgentStore.CompareAndSetAssignment`) against the assignment that the caller
+  read (fleet, assigned hash, target version and error; no extra column and no migration, the previous assignment is the
+  version). The fleet-change event and the reset of the desired state (which also clears `failed_config_hash`) follow only a
+  write that took effect. A replica that loses the race records nothing, re-reads the agent and evaluates again, at most
+  three times: it then finds the assignment settled, or a newer one that it judges itself. A change therefore takes effect
+  once, however many replicas see it.
+- Stale listings. `ReassignAll` reads the agents in one listing; an agent that this process wrote after the listing is read
+  again before it is judged. A listing older than five minutes counts as stale for every agent, because the record of
+  writes is pruned after that age. The record is pruned at most once a minute, and only when it is large, never as a scan
+  of the whole map under the lock on every write. `AssignAgent` reads the snapshot after it has the agent's lock, so a call
+  that waited works on the snapshot that is current when it runs.
 
 ## Rollout planner and engine
 

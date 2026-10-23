@@ -916,6 +916,35 @@ func (s *agentStore) SetAssignment(ctx context.Context, id domain.AgentID, u sto
 	return rowsAffectedOrNotFound("agents.setAssignment", tag)
 }
 
+// CompareAndSetAssignment implements store.AgentStore. It needs no extra
+// column: the previous assignment is the version.
+func (s *agentStore) CompareAndSetAssignment(ctx context.Context, id domain.AgentID, prev domain.AgentAssignment, u store.AgentAssignmentUpdate) (bool, error) {
+	assignedAt := u.AssignedAt
+	if assignedAt.IsZero() {
+		assignedAt = time.Now()
+	}
+	tag, err := s.db.q.Exec(ctx, `UPDATE agents SET fleet_name = $2, assigned_config_hash = $3, target_version = $4,
+    assignment_error = $5, assigned_at = $6, updated_at = now()
+WHERE id = $1 AND fleet_name IS NOT DISTINCT FROM $7 AND assigned_config_hash IS NOT DISTINCT FROM $8
+  AND target_version = $9 AND assignment_error = $10`,
+		id, textArg(u.FleetName), hashArg(u.AssignedConfigHash), u.TargetVersion, cleanText(u.Error), assignedAt.UTC(),
+		textArg(prev.FleetName), hashArg(prev.AssignedConfigHash), prev.TargetVersion, cleanText(prev.Error))
+	if err != nil {
+		return false, dbErr("agents.compareAndSetAssignment", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return true, nil
+	}
+	var exists bool
+	if err := s.db.q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM agents WHERE id = $1)`, id).Scan(&exists); err != nil {
+		return false, dbErr("agents.compareAndSetAssignment", err)
+	}
+	if !exists {
+		return false, fmt.Errorf("agents.compareAndSetAssignment: %w", domain.ErrNotFound)
+	}
+	return false, nil
+}
+
 // SetFleetTargetVersion implements store.AgentStore.
 func (s *agentStore) SetFleetTargetVersion(ctx context.Context, fleet, version string) (int64, error) {
 	tag, err := s.db.q.Exec(ctx, `UPDATE agents SET target_version = $2, updated_at = now()

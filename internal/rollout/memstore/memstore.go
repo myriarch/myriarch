@@ -459,6 +459,28 @@ func (a *agentStore) SetAssignment(ctx context.Context, id domain.AgentID, u sto
 	return nil
 }
 
+func (a *agentStore) CompareAndSetAssignment(ctx context.Context, id domain.AgentID, prev domain.AgentAssignment, u store.AgentAssignmentUpdate) (bool, error) {
+	a.s.mu.Lock()
+	defer a.s.mu.Unlock()
+	ag, ok := a.s.agents[id]
+	if !ok {
+		return false, fmt.Errorf("agent %s: %w", id, domain.ErrNotFound)
+	}
+	cur := ag.Assignment
+	if cur.FleetName != prev.FleetName || !cur.AssignedConfigHash.Equal(prev.AssignedConfigHash) ||
+		cur.TargetVersion != prev.TargetVersion || cur.Error != prev.Error {
+		return false, nil
+	}
+	at := u.AssignedAt
+	ag.Assignment.FleetName = u.FleetName
+	ag.Assignment.AssignedConfigHash = append(domain.Hash(nil), u.AssignedConfigHash...)
+	ag.Assignment.TargetVersion = u.TargetVersion
+	ag.Assignment.Error = u.Error
+	ag.Assignment.AssignedAt = &at
+	ag.UpdatedAt = a.s.now()
+	return true, nil
+}
+
 func (a *agentStore) SetFleetTargetVersion(ctx context.Context, fleet, version string) (int64, error) {
 	a.s.mu.Lock()
 	defer a.s.mu.Unlock()
