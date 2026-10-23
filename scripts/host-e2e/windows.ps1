@@ -1023,6 +1023,26 @@ function New-InstallCommand {
   return $true
 }
 
+# The message of a failed run of the command, for the failed check. The installer prints its own ERROR line; the command then adds an
+# installer_failed line of its own ("its message is above"), and PowerShell wraps that line and repeats it in the error record, so the
+# last two lines with ERROR or WARNING are only those repetitions. They are left out; the lines of the installer remain.
+function Get-InstallerFailureDetail {
+  param([string]$Log)
+  $lines = @($Log -split "`r?`n" | Where-Object { $_ -match 'ERROR|WARNING' -and $_ -notmatch 'ERROR \[installer_failed\]' })
+  if ($lines.Count -eq 0) { $lines = @($Log -split "`r?`n" | Where-Object { $_.Trim() }) }
+  return ((@($lines | Select-Object -Last 2) | ForEach-Object { $_.Trim() }) -join ' ')
+}
+
+# The text of a file that another process may have open for writing (the log of a running service).
+function Read-SharedText {
+  param([string]$Path)
+  $fs = New-Object System.IO.FileStream($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+  try {
+    $sr = New-Object System.IO.StreamReader($fs, (New-Object System.Text.UTF8Encoding($false)), $true)
+    try { return $sr.ReadToEnd() } finally { $sr.Dispose() }
+  } finally { $fs.Dispose() }
+}
+
 # Runs the rendered command unchanged, the way a person pastes it into an elevated PowerShell: its text is evaluated as it stands, in
 # a new session of the PowerShell that runs this script. The output goes to a log; the token is neither in the command line nor in the
 # output.
@@ -1134,7 +1154,7 @@ function Test-NoSecretsIn {
   }
   $hits = ''
   foreach ($file in @(Get-ChildItem -LiteralPath $Dir -Recurse -File -Force -ErrorAction SilentlyContinue)) {
-    $text = [IO.File]::ReadAllText($file.FullName)
+    $text = Read-SharedText -Path $file.FullName
     foreach ($s in $secrets) { if ($text.Contains($s)) { $hits += ' content-of-a-secret' } }
     if ($text -match 'myr[aed]_[A-Za-z0-9]{16,}' -or $text -match '-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----') { $hits += ' token-or-key-pattern' }
   }
@@ -1157,11 +1177,12 @@ function Export-Artifacts {
       $rel = $f.FullName.Substring($script:Dir.Length).TrimStart('\')
       $out = Join-Path $script:UploadDir $rel
       New-Item -ItemType Directory -Force -Path (Split-Path -Parent $out) | Out-Null
-      Write-Utf8 -Path $out -Text (Invoke-Scrub -Text ([IO.File]::ReadAllText($f.FullName)))
+      # one artifact that cannot be read does not keep back the others
+      try { Write-Utf8 -Path $out -Text (Invoke-Scrub -Text (Read-SharedText -Path $f.FullName)) } catch { Write-HeWarn "artifact $rel not collected: $($_.Exception.Message)" }
     }
   }
   $build = Join-Path $script:Work 'mirror-build.log'
-  if (Test-Path -LiteralPath $build) { Write-Utf8 -Path (Join-Path $script:UploadDir 'mirror-build.log') -Text (Invoke-Scrub -Text ([IO.File]::ReadAllText($build))) }
+  if (Test-Path -LiteralPath $build) { try { Write-Utf8 -Path (Join-Path $script:UploadDir 'mirror-build.log') -Text (Invoke-Scrub -Text (Read-SharedText -Path $build)) } catch { Write-HeWarn "mirror-build.log not collected: $($_.Exception.Message)" } }
   if (-not (Test-NoSecretsIn -Dir $script:UploadDir)) { return }
   Write-HeLog ("artifacts for the upload: {0} ({1} files)" -f $script:UploadDir, @(Get-ChildItem -LiteralPath $script:UploadDir -Recurse -File -ErrorAction SilentlyContinue).Count)
 }
@@ -1374,7 +1395,7 @@ function Invoke-OneCommand {
   if ($code -eq 0) {
     Add-Pass 'the command ran to the end' (($log -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 1))
   } else {
-    $errs = ($log -split "`r?`n" | Where-Object { $_ -match 'ERROR|WARNING' } | Select-Object -Last 2) -join ' '
+    $errs = Get-InstallerFailureDetail -Log $log
     Add-Fail 'the command ran to the end' "exit $code; $errs"
     return
   }

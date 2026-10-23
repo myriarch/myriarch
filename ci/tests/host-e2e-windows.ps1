@@ -79,6 +79,36 @@ Export-Artifacts
 Export-Artifacts
 Check 'collecting twice gives the same directory' 8 @(Get-ChildItem -LiteralPath $script:UploadDir -Recurse -File).Count
 
+# ---- a log that a running process holds open, and the message of a failed installer ----------------------------------------------
+# the log of a running service is open for writing: the artifacts are still collected, and one that cannot be read keeps back no other
+Write-Utf8 -Path (Join-Path $script:Dir 'myriarchd.out.log') -Text 'before'
+$held = New-Object System.IO.FileStream((Join-Path $script:Dir 'myriarchd.log'), [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+try {
+  $null = Export-Artifacts 3>&1 6>&1
+  Check 'a log held open by a writer is collected' 'True' (Test-Path -LiteralPath (Join-Path $script:UploadDir 'myriarchd.log'))
+  Check 'the other artifacts are collected with it' 'True' (Test-Path -LiteralPath (Join-Path $script:UploadDir 'install-command.log'))
+} finally { $held.Dispose() }
+$locked = New-Object System.IO.FileStream((Join-Path $script:Dir 'install-command.log'), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+try {
+  if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+    $null = Export-Artifacts 3>&1 6>&1
+    Check 'an artifact that cannot be read keeps back no other' 'True' (Test-Path -LiteralPath (Join-Path $script:UploadDir 'myriarchd.log'))
+  }
+} finally { $locked.Dispose() }
+# the shape of the log of the command when the installer inside it fails with a message X
+$innerLog = @"
+[myriarch-install] downloading the installer bundle b.zip from https://127.0.0.1:18443
+[myriarch-install] ERROR [archive_invalid] otelcol-contrib.exe not found in the archive root: tar (child): Cannot connect to C: resolve failed
+Exception: [myriarch-install] ERROR [installer_failed] the installer ended with exit code 1; its message is
+above
+At line:52 char:5
+    + FullyQualifiedErrorId : [myriarch-install] ERROR [installer_failed] the installer ended wit
+"@
+$detail = Get-InstallerFailureDetail -Log $innerLog
+Check 'the message of the inner installer reaches the failed check' 'True' ($detail.Contains('[archive_invalid] otelcol-contrib.exe not found in the archive root'))
+Check 'the repetition of the outer error is not the message' 'False' ($detail.Contains('installer_failed'))
+Check 'a log without any ERROR line gives its last line' 'last' (Get-InstallerFailureDetail -Log "first`nlast`n")
+
 # ---- the guard ----------------------------------------------------------------------------------------------------------------
 $env:CI = ''
 $env:HOST_E2E = ''
