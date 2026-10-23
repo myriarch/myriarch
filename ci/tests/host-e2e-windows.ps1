@@ -120,8 +120,13 @@ function Get-HostLeftovers { return @() }
 function Remove-CaTrust { return ($env:CHILD_CA_LEFT -ne '1') }
 '@
 $childScript = Join-Path $Work 'child.ps1'
-[IO.File]::WriteAllText($childScript, ". '$Script'`n$stubs`nif (`$env:CHILD_MODE -eq 'exit') { Invoke-Scenario -Name 'child' -Body { Stop-He 'boom' } } else { Invoke-Scenario -Name 'child' -Body { } }`nexit `$(if (`$script:Failed -eq 0 -and -not `$script:Aborted) { 0 } else { 1 })`n")
+[IO.File]::WriteAllText($childScript, "`$env:GITHUB_STEP_SUMMARY = ''`n. '$Script'`n$stubs`nif (`$env:CHILD_MODE -eq 'exit') { Invoke-Scenario -Name 'child' -Body { Stop-He 'boom' } } else { Invoke-Scenario -Name 'child' -Body { } }`nexit `$(if (`$script:Failed -eq 0 -and -not `$script:Aborted) { 0 } else { 1 })`n")
 $env:HOST_E2E_DIR = $childWork
+# the child runs must not append to the job summary of the real run: a probe file stands in for it
+$oldSummary = $env:GITHUB_STEP_SUMMARY
+$probe = Join-Path $Work 'step-summary.md'
+[IO.File]::WriteAllText($probe, '')
+$env:GITHUB_STEP_SUMMARY = $probe
 foreach ($case in @(@('exit', '0', 'scenario child|ended early'), @('ok', '1', 'the throwaway CA is out of the machine store'))) {
   $env:CHILD_MODE = $case[0]; $env:CHILD_CA_LEFT = $case[1]
   $null = & pwsh -NoProfile -NonInteractive -File $childScript 2>&1 | Out-String
@@ -134,5 +139,7 @@ foreach ($case in @(@('exit', '0', 'scenario child|ended early'), @('ok', '1', '
   if ($rc -ne 0 -and $res.Contains($want)) { Pass $label } else { Fail $label "(exit $rc, results: $res)" }
 }
 $env:CHILD_MODE = ''; $env:CHILD_CA_LEFT = ''
+Check 'the child runs left the job summary untouched' '0' ([string](Get-Item -LiteralPath $probe).Length)
+$env:GITHUB_STEP_SUMMARY = $oldSummary
 $env:HOST_E2E_DIR = $Work
 Write-Output 'END helpers'
