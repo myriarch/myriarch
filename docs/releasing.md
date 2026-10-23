@@ -174,7 +174,8 @@ Rules that hold for all of it:
   Privileged jobs run only the scripts in `ci/release/`.
 - **Artifacts between jobs** are tar files, downloaded by artifact ID and checked against the SHA-256 that the producing job
   reported. They are kept **one day**. This matters for gate 2 (below).
-- **Two approvals.** Exactly the jobs `sign-windows` and `finalize` use the environment `release`. Each asks for its own approval.
+- **Two approvals.** In the release workflow, exactly the jobs `sign-windows` and `finalize` use the environment `release`. The only other job
+  with that environment is `publish` of `.github/workflows/artifacthub.yml` ([Artifact Hub](#artifact-hub)). Each of the two asks for its own approval.
   A gate is passed once per run, not once per attempt (see [Re-runs](#rc-numbering-and-re-runs)), and only `finalize` is stopped
   by gate 2: the job `draft` holds `contents: write` without the environment and runs before it.
 - **No secrets** exist in v0.1.0. The jobs use `GITHUB_TOKEN` and the OIDC token of the run.

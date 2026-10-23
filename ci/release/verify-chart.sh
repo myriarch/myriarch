@@ -64,7 +64,7 @@ try:
     m = json.load(open(sys.argv[1], "rb"))
     ok = (m.get("config", {}).get("mediaType") == "application/vnd.cncf.artifacthub.config.v1+yaml"
           and [l.get("mediaType") for l in m.get("layers") or []] == ["application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml"])
-except (ValueError, AttributeError):
+except (ValueError, AttributeError, TypeError):
     ok = False
 if not ok:
     print("[verify-chart] ERROR [chart_tag_unexpected] the tag artifacthub.io is not an Artifact Hub metadata artifact (config and one layer with the Artifact Hub media types)", file=sys.stderr)

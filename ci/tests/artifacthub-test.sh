@@ -19,6 +19,8 @@ set -uo pipefail
 # shellcheck source=ci/tests/lib-test.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
 need_cmd python3
+# the CI runner sets this: the script appends to it, and a test must not write into the summary of the run
+unset GITHUB_STEP_SUMMARY
 
 REL="${ROOT}/ci/release"
 SCRIPT_AH="${REL}/push-artifacthub.sh"
@@ -165,8 +167,23 @@ eq "upload: the environment cannot change the repository or the tag" "1" "$(coun
 eq "upload: nothing is written to another repository" "0" "$(count 'example/other')"
 # verify-chart.sh admits the tag artifacthub.io only for exactly these media types: they must be the ones this script writes
 for mt in application/vnd.cncf.artifacthub.config.v1+yaml application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml; do
-  eq "cross-check: ${mt} is in both scripts" "2" "$( { grep -Fc -- "\"${mt}\"" "${SCRIPT_AH}"; grep -Fc -- "\"${mt}\"" "${REL}/verify-chart.sh"; } | paste -sd+ - | bc)"
+  for f in "${SCRIPT_AH}" "${REL}/verify-chart.sh"; do
+    if grep -Fq -- "\"${mt}\"" "${f}"; then ok "cross-check: ${mt} is in $(basename "${f}")"; else fail "cross-check: ${mt} is not in $(basename "${f}")"; fi
+  done
 done
+# the job summary: one block with repository, tag and digest after an upload, nothing after a refusal
+SUM="${W}/summary.md"
+run_ah_sum() { ( export PATH="${RB}" TOOLS_BIN="${SB}" STUB_DIR="${S}" HOME="${HOME_DIR}" GITHUB_WORKFLOW_REF="${1:-${REF_WF}}" GITHUB_STEP_SUMMARY="${SUM}"; unset DOCKER_CONFIG; "$SCRIPT_AH" --repository-id "${ID}" ); }
+reset; rm -f "${SUM}"
+expect_ok "summary: an upload" run_ah_sum
+eq "summary: one block" "1" "$(grep -c '^## Artifact Hub metadata' "${SUM}")"
+eq "summary: repository, tag and digest" "1" "$(grep -Fc -- "\`${CHART}:artifacthub.io\` is \`${DIG1}\`" "${SUM}")"
+reset; rm -f "${SUM}"
+expect_fail "summary: a refused workflow ref" "workflow_ref" run_ah_sum "myriarch/myriarch/.github/workflows/artifacthub.yml@refs/heads/main"
+[ ! -s "${SUM}" ] && ok "summary: nothing is written after a refusal" || fail "summary: something was written after a refusal"
+reset; : > "${S}/tags"; rm -f "${SUM}"
+expect_fail "summary: an unpublished chart" "chart_not_published" run_ah_sum
+[ ! -s "${SUM}" ] && ok "summary: nothing is written for an unpublished chart" || fail "summary: something was written for an unpublished chart"
 reset; rm -rf "${HOME_DIR}/.docker"
 expect_fail "upload: no registry login" "push_failed.*registry-login.sh" run_ah
 mkdir -p "${HOME_DIR}/.docker"; printf '{"auths":{"ghcr.io":{"auth":"eDp5"}}}\n' > "${HOME_DIR}/.docker/config.json"
