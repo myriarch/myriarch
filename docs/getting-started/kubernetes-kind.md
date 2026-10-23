@@ -34,13 +34,13 @@ checkout instead: add `QUICKSTART_SOURCE=commit` to the commands ([below](#start
 The Git repository has two demo policies, `config-canary` and `canary-then-all`, copied from
 [`examples/quickstart/policies/`](../../examples/quickstart/policies/): two waves (a canary, then the rest after your approval),
 **a health wait of 30 seconds**, no limit on parallel targets and no maintenance windows. The health wait is the time a target
-must stay healthy after it reported success, so a rollout is `succeeded` about 30 seconds after its last wave started. A
+must stay healthy after it reported success, so a rollout is `completed` about 30 seconds after its last wave started. A
 production-like policy waits minutes; see [Rollouts](../concepts/rollouts.md#health-wait).
 
 ## Prerequisites
 
 - Docker Desktop or Docker Engine with at least 6 GiB of memory and 4 CPUs for the Docker VM, and the free ports `5001` (a local
-  registry) and `8080` (the port-forward to the UI).
+  registry), `8080` (the port-forward to the UI) and `28080` (the port-forward of `make kind-quickstart-rollouts`).
 - `kind`, `kubectl` and `helm` on the `PATH`, or let the script build the pinned versions into `.cache/bin` (leave
   `KIND_SYSTEM_TOOLS` out; that needs Go, `make` and a few minutes more).
 - Go (the script builds the small tool that fetches the Sigstore root of trust and validates the Git repository), `git`, `make`,
@@ -61,7 +61,7 @@ KIND_SYSTEM_TOOLS=1 make kind-quickstart
 
 `make kind-quickstart` is `hack/kind/quickstart.sh up`. It creates the cluster, installs PostgreSQL and the Git server, pushes
 the demo repository, installs the server chart, then the collector chart twice, and waits until every pod is ready. It is
-safe to run again: an existing cluster and releases are upgraded in place. It ends with the commands for the next step.
+safe to run again: an existing cluster and releases are upgraded in place, and the Git repository keeps its commits (a change that you pushed stays). It ends with the commands for the next step.
 Add `QUICKSTART_SIM=1` to also start 20 simulated collectors.
 
 Check the installation (it never signs in, so it does not use up the token of the next step):

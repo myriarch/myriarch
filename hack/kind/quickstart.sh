@@ -107,7 +107,7 @@ qs_gitops_prepare() {
   cp -R "${KIND_DIR}/quickstart/gitops/." "${GITOPS_WORK}/"
   cp "${ROOT}/examples/quickstart/policies/canary-then-all.yaml" "${ROOT}/examples/quickstart/policies/config-canary.yaml" "${GITOPS_WORK}/policies/"
   cat > "${GITOPS_WORK}/inventory/waves.yaml" <<EOF
-# The canary wave of the Quickstart: the first gateway pod and the first worker node (the rest wave follows after your approval).
+# The canary wave of the Quickstart: the first gateway pod and the node agent of the first worker node (the gateway pods report k8s.node.name too, so the node entry names the site; the rest wave follows after your approval).
 apiVersion: myriarch.dev/v1alpha1
 kind: Inventory
 metadata:
@@ -120,6 +120,7 @@ spec:
       labels:
         wave: canary
     - match:
+        site.id: kind-nodes
         k8s.node.name: ${KIND_CLUSTER_NAME}-worker
       labels:
         wave: canary
@@ -139,6 +140,15 @@ EOF
   fi
   ensure_bins
   bin/myrctl validate --strict --components "${ROOT}/examples/sim/components-otelcol-contrib-0.162.0.json" "${GITOPS_WORK}" >&2
+}
+
+# check_canary_entries: the gateway pods report k8s.node.name as well, so an entry that matches a node must name the node site too
+# (the keys of one entry are ANDed); otherwise both gateway pods can land in the canary wave and the rest wave stays empty.
+check_canary_entries() {
+  local bad
+  bad="$(awk '/k8s.node.name:/ && prev !~ /site.id: kind-nodes/ { print NR } { prev = $0 }' "${GITOPS_WORK}/inventory/waves.yaml")"
+  [ -z "${bad}" ] || die "inventory/waves.yaml: the node entry (line ${bad}) must also match site.id: kind-nodes"
+  grep -q 'k8s.pod.name: .*-0$' "${GITOPS_WORK}/inventory/waves.yaml" || die "inventory/waves.yaml: the canary wave lacks the first gateway pod"
 }
 
 # ---- charts -----------------------------------------------------------------------------------------------------------
@@ -261,8 +271,13 @@ cmd_up() {
   install_infra
   wait_infra
   qs_gitops_prepare
-  gitops_publish "quickstart: initial state"
-  log "GitOps repository pushed (${GITOPS_SHA})"
+  # A second run keeps the repository as it is: the tutorial may have changed it since (config-change).
+  if GITOPS_SHA="$(kn "${NS_INFRA}" exec deploy/git -- git --git-dir=/srv/git/fleet.git rev-parse --verify -q refs/heads/main 2>/dev/null)"; then
+    log "the GitOps repository has commits already (${GITOPS_SHA}); it stays as it is"
+  else
+    gitops_publish "quickstart: initial state"
+    log "GitOps repository pushed (${GITOPS_SHA})"
+  fi
   install_server
   install_collectors
   install_sim
@@ -336,7 +351,11 @@ drive_rollout() {
           log "rollout ${id}: wave ${wave} approved"
         fi
         ;;
-      completed) DRIVE_DONE_AT=${SECONDS}; return 0 ;;
+      completed)
+        DRIVE_DONE_AT=${SECONDS}
+        [ "${DRIVE_APPROVED_AT}" != 0 ] || { warn "rollout ${id} completed without waiting for an approval (an empty rest wave?); check the waves in inventory/waves.yaml"; return 1; }
+        return 0
+        ;;
       paused | failed | aborted | rolling_back | rolled_back | superseded)
         warn "rollout ${id} ended as ${st}"
         return 1
@@ -436,7 +455,7 @@ cmd_all() {
 
 case "${1:-}" in
   up) prepare_work_dirs; cmd_up ;;
-  validate) prepare_work_dirs; QUICKSTART_SIM=0 qs_gitops_prepare; QUICKSTART_SIM=1 qs_gitops_prepare ;;
+  validate) prepare_work_dirs; QUICKSTART_SIM=0 qs_gitops_prepare; check_canary_entries; QUICKSTART_SIM=1 qs_gitops_prepare; check_canary_entries ;;
   config-change) shift; cmd_config_change "$@" ;;
   smoke) cmd_smoke ;;
   rollouts) cmd_rollouts ;;

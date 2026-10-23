@@ -57,7 +57,7 @@ bin/myrctl render --dir examples/quickstart --fleet windows-hosts --sample windo
   [Kubernetes on kind](../../docs/getting-started/kubernetes-kind.md) Quickstart copies these two policies into its own Git
   repository, so there is one copy of the demo values. The pages name the duration.
 * **Production-like values** are in `gitops-template/config/policies/`: `healthWait` 2m for a configuration and 5m for a
-  version, `maxConcurrent: 5` and a commented maintenance window in local time and UTC, each with the reason. Do not copy the
+  version, `maxConcurrent: 5` and a commented maintenance window in the local time of the site, each with the reason. Do not copy the
   demo values into a real fleet: a short wait lets a collector that crashes late pass, and no limit lets a bad change reach
   every host at once. [Rollouts](../../docs/concepts/rollouts.md#health-wait) explains the health wait.
 

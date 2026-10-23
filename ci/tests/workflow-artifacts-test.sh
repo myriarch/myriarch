@@ -198,7 +198,7 @@ bites "e2e-kind: an extra path to the kubeconfig after the exclusions is found" 
 fresh_tree; edit "${KIND}" '            .cache/kind/results.txt
 ' '' 3
 bites "e2e-kind: an allow-list that lacks the result list is found" 'does not match \.cache/kind/results\.txt'
-fresh_tree; edit "${KIND}" 'if: failure()' 'if: always()' 3
+fresh_tree; edit "${KIND}" 'if: failure()' 'if: always()' 4
 bites "e2e-kind: an upload for every run is found" 'must run only for a failed job'
 fresh_tree; edit "${KIND}" 'image-var: KIND_NODE_IMAGE' 'image-var: KIND_NODE_IMAGE_OLDEST' 3
 bites "e2e-kind: a matrix entry whose pin does not exist is found" 'is no pin of hack/kind/versions\.env'

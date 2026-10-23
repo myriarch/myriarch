@@ -113,7 +113,7 @@ uses the same dev mode.
 
 A rollout in this setup is quick on purpose. The demo policies wait 30 seconds after a collector reports a change (the
 **health wait**, `healthWait: 30s`), start every target of a wave at once and have no maintenance windows, so a rollout
-is `succeeded` about 30 seconds after the last wave starts, plus the time that you take to approve the wave `rest`. A
+is `completed` about 30 seconds after the last wave starts, plus the time that you take to approve the wave `rest`. A
 production-like policy waits minutes; [Rollouts](../concepts/rollouts.md#health-wait) explains the trade-off.
 
 ## Use your own GitOps directory

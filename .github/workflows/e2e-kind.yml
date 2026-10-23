@@ -284,6 +284,10 @@ jobs:
           f=.cache/kind/quickstart-summary.md
           [ -f "${f}" ] || exit 0
           cat "${f}" >> "${GITHUB_STEP_SUMMARY}"
+      # diag.sh prints no secret (no get secret -o) and writes into .cache/kind/diag.
+      - name: Collect diagnostics of a failed run
+        if: failure()
+        run: hack/kind/diag.sh || true
       # Only these files, never the kubeconfig, .cache/kind/secrets (the generated passwords and keys), a cookie jar or the generated values.
       - name: Upload the logs of a failed run
         if: failure()

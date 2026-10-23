@@ -135,7 +135,7 @@ the rollout is still working on its current wave.
   targets last that much longer. The two Quickstarts ([Docker Compose](../getting-started/docker-compose.md) and
   [Kubernetes on kind](../getting-started/kubernetes-kind.md)) use the demo policies in
   [`examples/quickstart/policies/`](../../examples/quickstart/policies/) with `healthWait: 30s`, `maxConcurrent: 0`
-  (unlimited) and no maintenance windows, so that a rollout is `succeeded` about a minute after you approve the last wave.
+  (unlimited) and no maintenance windows, so that a rollout is `completed` about a minute after you approve the last wave.
   Those are demo values. The policies of [`gitops-template/config/policies/`](../../gitops-template/config/policies/) are
   production-like: `2m` for a configuration, `5m` for a version, and `maxConcurrent: 5`; their comments say why. When a
   rollout "hangs" in the Quickstart, look at the health wait first: it is the time a target spends in `verifying`.
