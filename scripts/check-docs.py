@@ -13,7 +13,8 @@ links
     Checks inline links [text](target) and [text](<target>), reference definitions [id]: target and the HTML
     attributes href, src and srcset. Fenced code blocks, inline code, HTML comments and front matter are ignored.
     Links with the schemes http, https, mailto, tel, ftp and data (and protocol-relative //host links) are skipped
-    (external links are not checked offline). Every other target is resolved relative to the file that contains it:
+    (external links are not checked offline). Every other target is resolved relative to the file that contains it
+    (relative to the repository root for a file below changelog.d/, whose entries move into CHANGELOG.md):
       - an absolute link such as /docs/x.md is a finding,
       - the target must exist in the work tree (file or directory, spelled with exactly the same case), must stay
         inside the repository and must not be ignored by git,
@@ -438,7 +439,9 @@ class Checker:
             trailing_slash = False
         else:
             trailing_slash = path.endswith("/")
-            target = posixpath.normpath(posixpath.join(posixpath.dirname(rel), path))
+            # An entry in changelog.d/ is folded into CHANGELOG.md later, so its links are relative to the root.
+            base = "" if rel.startswith("changelog.d/") else posixpath.dirname(rel)
+            target = posixpath.normpath(posixpath.join(base, path))
             if target == ".." or target.startswith("../"):
                 self.add(rel, line, "link leaves the repository: %s" % dest)
                 return

@@ -107,6 +107,7 @@ put website/content/site/nodesc.md '---' 'title: "T"' 'weight: 1' '---'
 put website/content/site/bare.md '---' 'title: T' 'description: "D."' '---'
 put website/content/site/h1.md '---' 'title: "T"' 'description: "D."' '---' '# T'
 put website/content/site/none.md '## No front matter'
+put changelog.d/entry.md '[root relative](README.md)' '[missing](nowhere.md)'
 git -C "${repo}" add -A
 
 chk() { (cd "${repo}" && python3 -I "${CHECK}" "$@"); }
@@ -125,6 +126,7 @@ README.md:13
 README.md:15
 README.md:19
 README.md:22
+changelog.d/entry.md:2
 docs/assume.md:1
 docs/assume.md:2
 docs/assume.md:3
