@@ -348,6 +348,32 @@ Texts in the archives (the files in the table of [Review the texts before every 
 them `README.md`, `CHANGELOG.md` and the chart) are not touched here: they are right already, or the next release corrects them.
 Other files of the repository, such as `deploy/README.md`, are not in an archive and can follow the release like the pages above.
 
+## Artifact Hub
+
+Artifact Hub lists the server chart (`oci://ghcr.io/myriarch/charts/myriarch`) and shows it as "Verified publisher" when the chart
+repository holds a metadata file under the tag `artifacthub.io`. The file carries the repository ID, which exists only after the board has
+added the repository on Artifact Hub, and that needs a published chart. So the upload is not a job of the release workflow: a workflow of its
+own, `.github/workflows/artifacthub.yml`, does it after the release, started by hand. Do the steps in this order:
+
+1. **Publish the chart.** The release of a candidate or of a final version has finished (`finalize` is green), so the chart repository has a
+   version tag. The workflow refuses to run without one (`chart_not_published`).
+2. **Create the repository on Artifact Hub** (the board, once). Sign in at <https://artifacthub.io>, accept the terms of use and open the control
+   panel. Add a repository of the kind "Helm charts" with the name `myriarch`, the display name `Myriarch` and the URL
+   `oci://ghcr.io/myriarch/charts/myriarch`.
+3. **Copy the repository ID** from the card of the repository in the control panel. It is a UUID in lower case.
+4. **Run the workflow.** On GitHub open Actions, "artifacthub", Run workflow on `main`, and enter the ID. The job `tools` builds the pinned
+   `crane`; the job `publish` waits for the approval in the environment `release`. The ID becomes part of a public file, so enter nothing else.
+   The workflow writes the tag `artifacthub.io` of `ghcr.io/myriarch/charts/myriarch` and nothing else. It can run again (it overwrites only that
+   tag) and works the same whether the repository was added after a candidate or after the final version.
+5. **Check the result.** After the next scan of the repository, Artifact Hub shows "Verified publisher" on the repository card (the control
+   panel shows the time of the last scan and its errors).
+
+The file has exactly one key, `repositoryID`. It has no `owners`; an owners entry would put an e-mail address into a public file, and
+the board has to ask for it explicitly, in a change of its own.
+
+Artifact Hub lists every version tag of the repository, release candidates included. A repository that is added after a candidate therefore
+shows the candidate (as a pre-release) until the final version is published.
+
 ## rc numbering and re-runs
 
 - **Every attempt that needs a code or content change is a new candidate** (`rc.N+1`), prepared by a pull request that bumps

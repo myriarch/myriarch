@@ -1,0 +1,128 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Uploads the Artifact Hub repository metadata file (artifacthub-repo.yml, one key: repositoryID) of the server chart to
+# ghcr.io/myriarch/charts/myriarch under the tag artifacthub.io, so that Artifact Hub shows the chart as "Verified publisher".
+#
+# It is not part of release.yml: the repositoryID exists only after the board has added the chart repository on Artifact Hub, and that
+# is possible only after the chart is published. The board starts this workflow by hand (Actions, "artifacthub", Run workflow, on main)
+# with the ID from the repository card of the Artifact Hub control panel and approves the job `publish` in the environment `release`.
+# The steps are in docs/releasing.md, "Artifact Hub".
+#
+#   - Same tool rule as release.yml (ADR-0035): the job `tools` (contents: read) builds crane from the pinned module in ci/tools; the
+#     job `publish`, which holds packages: write, only unpacks that tool set (SHA-256 checked) and runs ci/release/push-artifacthub.sh.
+#     It sets up neither Go nor Node and downloads no binary.
+#   - The input reaches the script only through env: and is checked there (a UUID in lower case). The script writes the fixed
+#     repository and the fixed tag; neither is an input. The only secret is the job token (github.token).
+#   - The input is public (it ends up in the file). Do not enter anything but the repository ID.
+name: artifacthub
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository_id:
+        description: 'repositoryID from the repository card in the Artifact Hub control panel (a UUID, lower case)'
+        required: true
+        type: string
+
+permissions:
+  contents: read # the default of every job; the job below states its own scope
+
+# A second run waits: it never cancels an upload that is running.
+concurrency:
+  group: artifacthub
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  # Builds crane (and the rest of the signing tool set, which tools.sh builds as one unit) on a runner of its own, before the job with
+  # the write scope runs. No write scope here.
+  tools:
+    name: tools
+    if: github.repository == 'myriarch/myriarch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read # check out the repository
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build the signing tools
+        env:
+          TOOLS_NO_CACHE: '1'
+        run: ci/release/tools.sh build --set signing --out "${RUNNER_TEMP}/tools"
+      - name: Pack signing-tools
+        id: pack
+        run: ci/release/artifact.sh pack --dir "${RUNNER_TEMP}/tools" --out "${RUNNER_TEMP}/out/signing-tools.tar" >> "${GITHUB_OUTPUT}"
+      - name: Upload signing-tools
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/out/signing-tools.tar
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: false
+
+  # Waits for the approval of the board (environment release), then writes the tag artifacthub.io of the chart repository.
+  publish:
+    name: publish
+    needs: [tools]
+    if: github.repository == 'myriarch/myriarch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read # check out the scripts
+      packages: write # write the tag artifacthub.io in the package of this repository in ghcr.io (limited by GitHub to this repository)
+    steps:
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ci/lib.sh
+            ci/versions.env
+            ci/release
+          sparse-checkout-cone-mode: false
+      - name: Download signing-tools
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.tools.outputs.artifact-id }}
+          path: ${{ runner.temp }}/in/signing-tools
+          digest-mismatch: error
+      - name: Unpack signing-tools
+        env:
+          TAR_SHA256: ${{ needs.tools.outputs.sha256 }}
+        run: |
+          ci/release/artifact.sh unpack --file "${RUNNER_TEMP}/in/signing-tools/signing-tools.tar" --sha256 "${TAR_SHA256}" --into "${RUNNER_TEMP}/tools"
+          ci/release/tools.sh check --set signing --dir "${RUNNER_TEMP}/tools" --platform linux-amd64
+      - name: Log in to ghcr.io
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+        run: ci/release/registry-login.sh login
+      - name: Upload the metadata file
+        env:
+          TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          REPOSITORY_ID: ${{ inputs.repository_id }}
+        run: ci/release/push-artifacthub.sh --repository-id "${REPOSITORY_ID}"
+      - name: Log out of ghcr.io
+        if: always()
+        run: ci/release/registry-login.sh logout
