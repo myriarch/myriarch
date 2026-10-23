@@ -55,7 +55,7 @@ docsy:
     # Mermaid 11 (the ELK layout shrinks the overview in docs/architecture.md to an unreadable size at the width of the content
     # column).
     # The version stays first in the line: check-notices.py reads it with a pattern.
-    mermaid: { enable: true, version: 12.1.0, options: '{"layout": "dagre", "look": "classic", "theme": "default"}' }
+    mermaid: { enable: true, version: 12.2.0, options: '{"layout": "dagre", "look": "classic", "theme": "default"}' }
     markmap: { enable: false }
     click-to-copy: { enable: true }
     tabpane-persist: { enable: true }

@@ -314,17 +314,15 @@ decision, an override or a row here:
 | GHSA-j3q9-mxjg-w52f, GHSA-27v5-c462-wpq7 | path-to-regexp 8.3.0 under `vercel > @vercel/backends` | `@vercel/backends` is the builder for backend projects. It runs in `vercel build`, which this repository never calls: the deploy job runs `vercel deploy --prebuilt`. GitHub dismissed the alerts automatically (development scope) |
 | GHSA-2g4f-4pwh-qvx6 | ajv 8.6.3 under `vercel > @vercel/backends > @vercel/static-config` | The same builder, the same reason |
 | GHSA-vfj7-8cjw-p6xm | braces 3.0.3 under `markdownlint-cli2 > micromatch` | No fixed release exists. markdownlint-cli2 expands the glob patterns of its configuration and command line, which maintainers write. GitHub dismissed the alert automatically |
-| GHSA-238p-pmpm-9mq7 | katex 0.16.47 under `mermaid` and under `markdownlint-cli2 > markdownlint > micromark-extension-math` | There is no override; see below |
+| GHSA-238p-pmpm-9mq7 | katex 0.16.47 under `markdownlint-cli2 > markdownlint > micromark-extension-math` | There is no override; see below |
 
-KaTeX has no override because it would not change what the site serves. Mermaid and markdownlint accept only a KaTeX range below
-0.18, which excludes the fix (0.18.2), and the Mermaid files that the site ships (`mermaid.esm.min.mjs` and
-`chunks/mermaid.esm.min/**`) contain their own copy of KaTeX (0.16.47 in Mermaid 11.17.2 and in 12.1.0). An override would only change the
-installed copy under `node_modules`, which nothing that the site ships uses; markdownlint loads it but parses Markdown without
-rendering math. The lockfile would then report a version that the site does not serve, and a later advisory that affects the
-shipped copy but not 0.18.2 would raise no alert. The advisory needs an `Object.prototype` that is already polluted and
-attacker-controlled math in a page, and the site renders only diagrams that maintainers write. The shipped copy changes with a
-Mermaid release that bundles KaTeX 0.18.2 or later; the Dependabot alert for the advisory is dismissed as a tolerable risk with this
-paragraph as the reason.
+KaTeX has no override. The copy that the site serves is bundled into the Mermaid files that the site ships (`mermaid.esm.min.mjs` and
+`chunks/mermaid.esm.min/**`), not taken from `node_modules`: Mermaid 12.2.0 bundles KaTeX 0.18.11, which has the fix (0.18.2), while
+Mermaid 11.17.2 and 12.1.0 bundled 0.16.47. After a Mermaid update, read the bundled version in `chunks/mermaid.esm.min/katex-*.mjs`.
+The finding that remains is the copy under markdownlint, which accepts only a KaTeX range below 0.18 (micromark-extension-math 3.1.0
+has no newer release). markdownlint loads it but parses Markdown without rendering math, and nothing of it is shipped; an override
+would only make the lockfile report a version that no check uses. The copy is in development scope, so GitHub dismisses its alert
+automatically, as for braces.
 
 ## Checks
 
