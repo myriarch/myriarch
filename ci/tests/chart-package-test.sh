@@ -147,7 +147,7 @@ case "$1" in
     elif [ -f "${d}/crane.digest.override" ]; then cat "${d}/crane.digest.override"
     else cat "${d}/chart.digest"; fi ;;
   validate) [ ! -f "${d}/crane.validate.fail" ] || exit 1 ;;
-  manifest) cat "${d}/manifest.json" ;;
+  manifest) if [[ "$2" == *:artifacthub.io ]]; then cat "${d}/ah-manifest.json"; else cat "${d}/manifest.json"; fi ;;
   blob) cat "${d}/chart.tgz" ;;
 esac
 exit 0
@@ -267,6 +267,27 @@ reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; printf '
 expect_fail "verify-chart: a tag latest" "chart_tag_unexpected.*latest" vc
 reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; printf '0.2.0\nnightly\n' > "${S}/tags"
 expect_fail "verify-chart: an unexpected tag" "chart_tag_unexpected.*nightly" vc
+AHC=application/vnd.cncf.artifacthub.config.v1+yaml AHL=application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
+mk_ah() { # config-media-type layer-media-type...
+  local c="$1" layers="" m; shift
+  for m in "$@"; do layers="${layers:+${layers},}{\"mediaType\":\"${m}\",\"digest\":\"${D2}\",\"size\":1}"; done
+  printf '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"%s","digest":"%s","size":0},"layers":[%s]}' "${c}" "${D2}" "${layers}" > "${S}/ah-manifest.json"
+  printf '0.2.0\nsha256-%s\nartifacthub.io\n' "${MDIGEST#sha256:}" > "${S}/tags"
+}
+reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; mk_ah "${AHC}" "${AHL}"
+expect_ok "verify-chart: the tag artifacthub.io with the Artifact Hub media types" vc
+reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; mk_ah application/vnd.cncf.helm.config.v1+json "${AHL}"
+expect_fail "verify-chart: artifacthub.io with another config media type" "chart_tag_unexpected.*artifacthub.io" vc
+reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; mk_ah "${AHC}" application/vnd.cncf.helm.chart.content.v1.tar+gzip
+expect_fail "verify-chart: artifacthub.io with the chart layer" "chart_tag_unexpected.*artifacthub.io" vc
+reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; mk_ah "${AHC}" "${AHL}" "${AHL}"
+expect_fail "verify-chart: artifacthub.io with two layers" "chart_tag_unexpected.*artifacthub.io" vc
+reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; mk_ah "${AHC}"
+expect_fail "verify-chart: artifacthub.io without a layer" "chart_tag_unexpected.*artifacthub.io" vc
+reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; mk_ah "${AHC}" "${AHL}"; printf 'not json' > "${S}/ah-manifest.json"
+expect_fail "verify-chart: artifacthub.io that is not a manifest" "chart_tag_unexpected.*artifacthub.io" vc
+reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; mk_ah "${AHC}" "${AHL}"; printf '0.2.0\nartifacthub.io.x\nartifacthub\n' > "${S}/tags"
+expect_fail "verify-chart: a tag that only looks like artifacthub.io" "chart_tag_unexpected" vc
 reset; mk_registry application/octet-stream
 expect_fail "verify-chart: a manifest without the chart layer" "chart_layer" vc
 reset; mk_registry application/vnd.cncf.helm.chart.content.v1.tar+gzip; cp "${W}/plain/myriarch-0.2.0.tgz" "${S}/chart.tgz"

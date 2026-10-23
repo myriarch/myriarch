@@ -73,3 +73,12 @@ release.yml draft contents
 # (GitHub's asset digests), sets the image tags with crane and publishes the release, which becomes immutable.
 release.yml finalize contents
 release.yml finalize packages
+
+# Artifact Hub metadata (.github/workflows/artifacthub.yml). The workflow runs only by hand (workflow_dispatch) on a release tag v*, never for a
+# pull request, and has no secret but the job token. The job `publish` waits for the approval of the board (environment release) and
+# holds packages: write to push one small OCI artifact (artifacthub-repo.yml with the one key repositoryID) to the tag artifacthub.io
+# of ghcr.io/myriarch/charts/myriarch; the script has the repository and the tag as constants and refuses a version tag. GitHub limits
+# the scope to the packages of this repository. contents is read-only, and there is no id-token, attestations or release access. The
+# job executes only the pinned crane that the job `tools` (contents: read, the only job that builds) built from ci/tools, checked against
+# its SHA-256, and ci/release scripts; it sets up no Go or Node and installs nothing.
+artifacthub.yml publish packages
