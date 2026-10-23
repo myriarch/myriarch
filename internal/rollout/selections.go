@@ -185,6 +185,44 @@ func (e *Engine) markPlanned(ctx context.Context, f *domain.Fleet, sel *domain.F
 	e.publishFleetVersionChanged(ctx, f.Name)
 }
 
+// markTargetPlanned records the effective target version of the fleet that this run has handled (store.PlannedTargetKey):
+// the version rollout for it exists, or none is needed. The installation of hosts from the server reads the record on
+// every replica and gives a new host the target only when the record equals it. Without it, a host that asks between the
+// moment the target reaches the replicas (the event of a Git sync or of a selection in the UI) and the moment this run
+// has created the rollout would take the new version at once and skip the waves and approvals of the rollout.
+//
+// It is called after the version rollout of the fleet was planned without an error, like markPlanned, and for every
+// source of the target, so a selection that is cleared (the target falls back to Git) is a new target too. The record is
+// written when it changes. It is written after the rollout was created, so that a reader that sees the record also
+// sees the rollout.
+func (e *Engine) markTargetPlanned(ctx context.Context, f *domain.Fleet, vt domain.VersionTarget) {
+	e.fleetsMu.RLock()
+	last, known := e.lastPlanned[f.Name]
+	e.fleetsMu.RUnlock()
+	if known && last == vt.Version {
+		return
+	}
+	if err := e.deps.Store.KV().Put(ctx, store.PlannedTargetKey(f.Name), []byte(vt.Version)); err != nil {
+		if ctx.Err() == nil {
+			e.log.Warn("record the planned target version failed (new hosts wait for it)", "fleet", f.Name, "error", err)
+		}
+		return
+	}
+	e.fleetsMu.Lock()
+	if e.lastPlanned == nil {
+		e.lastPlanned = map[string]string{}
+	}
+	e.lastPlanned[f.Name] = vt.Version
+	e.fleetsMu.Unlock()
+}
+
+// forgetPlanned makes the next planning run write the record of every fleet again (see lastPlanned).
+func (e *Engine) forgetPlanned() {
+	e.fleetsMu.Lock()
+	e.lastPlanned = nil
+	e.fleetsMu.Unlock()
+}
+
 func sameUUID(a, b *uuid.UUID) bool {
 	if a == nil || b == nil {
 		return a == b

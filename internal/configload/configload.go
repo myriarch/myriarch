@@ -88,6 +88,7 @@ func loadWith(path string, opts Options, lookup func(string) (string, bool)) (co
 		cfg = config.DevDefaults()
 	}
 	var inline []string
+	grantTTLSet := false
 	if path != "" {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -96,6 +97,7 @@ func loadWith(path string, opts Options, lookup func(string) (string, bool)) (co
 		if err := decodeYAML(data, &cfg); err != nil {
 			return cfg, nil, &fileError{file: path, err: err}
 		}
+		grantTTLSet = installGrantTTLSet(data)
 		if !opts.Dev {
 			inline = inlineSecrets(reflect.ValueOf(&cfg).Elem(), "")
 		}
@@ -103,6 +105,12 @@ func loadWith(path string, opts Options, lookup func(string) (string, bool)) (co
 	expandEnv(reflect.ValueOf(&cfg).Elem(), lookup)
 	if err := applyEnvOverrides(&cfg, lookup); err != nil {
 		return cfg, nil, err
+	}
+	if v, ok := lookup(envName(installGrantTTLPath)); ok && v != "" {
+		grantTTLSet = true
+	}
+	if !grantTTLSet {
+		defaultInstallGrantTTL(&cfg)
 	}
 	// All problems are reported together: unreadable secret files first, then
 	// what the validation finds (it does not read these files again).

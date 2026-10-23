@@ -198,6 +198,17 @@ How to read the tables: **Type** `duration` is a string in Go syntax. **Default*
 | `artifacts.allowedRedirectHosts` | list of strings | empty | `allowedRedirectHosts` lists the hosts upstream downloads may be redirected to (exact or `*.suffix`; https only, at most 5 hops). Default: the GitHub release asset hosts plus the host of `artifacts.sourceBaseUrl`. |
 | `artifacts.allowUnverified` | boolean | `false` | `allowUnverified` permits `artifacts.verify.requireChecksum` = false or `artifacts.verify.requireSignature` = false in production (lab use only). |
 
+## install
+
+`install` configures the installation of hosts from the server (ADR-0046): the plan that a host asks for with its enrollment token, the install grants for its downloads, the installer bundles of the release that the server runs and the rendered install commands.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `install.enabled` | boolean | `true` | `enabled` turns the installation of hosts from the server on (default true). When it is off, every route under `/install` answers 404 and the server fetches no installer bundle. |
+| `install.grantTtl` | duration | `1h` | `grantTtl` is the lifetime of an install grant, the credential with which a host downloads the collector and the supervisor after it asked for its plan (default 1h; when neither the file nor the environment sets it, it is `artifacts.downloadTokenTtl` if that is shorter). A grant is also bound to the enrollment token of that request and stops working when the token is revoked or expires. In production the value must be positive and at most `artifacts.downloadTokenTtl`. |
+| `install.bundleSourceBaseUrl` | string | `"https://github.com/myriarch/myriarch/releases/download"` | `bundleSourceBaseUrl` is where the installer bundles of the release that the server runs come from (default `"https://github.com/myriarch/myriarch/releases/download"`). A mirror keeps the layout `<base>/v<version>/<asset>` with `checksums.txt` and its Sigstore bundle `checksums.txt.sigstore.json` next to the archives; the server verifies both against the identity of the release workflow, whichever server they come from. Production requires https. The value must not be empty while `install.enabled` is on. |
+| `install.platforms` | list of strings | `["linux/amd64", "linux/arm64", "windows/amd64"]` | `platforms` lists the platforms that a host can be installed on from the server, as "os/arch" (default linux/amd64, linux/arm64 and windows/amd64, which is all that is supported). The plan refuses a host on another platform, and the server prepares an installer bundle for each platform listed. |
+
 ## outbound
 
 `outbound` is the destination policy of all outbound connections.

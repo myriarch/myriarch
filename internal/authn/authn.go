@@ -165,6 +165,8 @@ type Service struct {
 	// no valid signed login state was presented.
 	oidcFail  *keyedLimiter
 	oidcAudit *keyedLimiter
+	// installFail charges the failed authentications of the install routes per client address (AuthenticateInstall).
+	installFail *keyedLimiter
 }
 
 type principalEntry struct {
@@ -259,6 +261,7 @@ func New(ctx context.Context, cfg config.AuthConfig, server config.ServerConfig,
 	s.bootstrapBackoff = newAccountBackoff(s.now)
 	s.oidcFail = newKeyedLimiter(rate.Every(oidcFailEvery), oidcFailBurst, s.now)
 	s.oidcAudit = newKeyedLimiter(rate.Every(time.Minute), 1, s.now)
+	s.installFail = newKeyedLimiter(rate.Every(installFailEvery), installFailBurst, s.now)
 	s.tokenFail = newFailureTracker(s.now)
 	s.tokenGood = newGoodTokens(s.now)
 

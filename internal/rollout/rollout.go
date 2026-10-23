@@ -96,6 +96,10 @@ type Engine struct {
 	// lastTarget is the effective target version this engine last wrote to the
 	// members of each fleet (guarded by fleetsMu).
 	lastTarget map[string]string
+	// lastPlanned is the effective target version of each fleet that this engine last recorded as planned
+	// (store.PlannedTargetKey), so that the record is written when it changes only (guarded by fleetsMu). Run forgets
+	// it at the start of every term of leadership: another leader may have written the record in between.
+	lastPlanned map[string]string
 
 	// tzWarned holds the policy names the engine already warned about because
 	// their maintenance windows depend on rollouts.defaultTimezone.
@@ -153,6 +157,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	events, cancel := e.deps.Bus.Subscribe(eventbus.AgentStateChanged, eventbus.RolloutChanged, eventbus.FleetVersionChanged)
 	defer cancel()
 
+	e.forgetPlanned()
 	e.safePlan(ctx)
 	e.safeTick(ctx)
 	lastTick := e.now()

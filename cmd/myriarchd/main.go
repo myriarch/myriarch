@@ -109,6 +109,7 @@ func newRootCommand() *cobra.Command {
 		},
 	}
 	serve.Flags().StringVarP(&configPath, "config", "c", "", "path to myriarchd.yaml (env MYRIARCH_* overrides apply)")
+	refuseInstallBundleDirFlag(serve)
 
 	var dev devOptions
 	devCmd := &cobra.Command{
@@ -130,6 +131,7 @@ func newRootCommand() *cobra.Command {
 	devCmd.Flags().StringVar(&dev.releasesFixtures, "releases-fixtures", "", "read release data from recorded fixtures instead of GitHub")
 	devCmd.Flags().StringVar(&dev.dsn, "dsn", "", "use this PostgreSQL DSN instead of starting embedded PostgreSQL (second dev replica; required when myriarchd was built without the devpg build tag)")
 	devCmd.Flags().StringVar(&dev.replicaID, "replica-id", "", "replica id (default: hostname + random suffix)")
+	addInstallBundleDirFlag(devCmd, &dev.installBundleDir)
 
 	root.AddCommand(serve, devCmd, newMigrateCommand(), newConfigCommand(), newAuthCommand(), &cobra.Command{
 		Use:   "version",

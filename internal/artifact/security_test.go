@@ -243,3 +243,48 @@ func TestDownloadsAreBoundedAndIdleDeadlineApplies(t *testing.T) {
 	require.Error(t, err)
 	assert.Less(t, time.Since(start), 3*time.Second)
 }
+
+// The redirect rule is exported for the installer bundles, which come from a source of their own: the hosts of the
+// request, or the GitHub asset hosts, and the host of the source itself.
+func TestRedirectPolicyOfASource(t *testing.T) {
+	req := func(raw string) *http.Request {
+		u, _ := url.Parse(raw)
+		return &http.Request{URL: u}
+	}
+	check := RedirectPolicy(nil, "https://mirror.example.com/myriarch/releases")
+	for _, ok := range []string{"https://objects.githubusercontent.com/x", "https://mirror.example.com/elsewhere", "https://github.com/myriarch/myriarch/releases/download/v0.2.0/x"} {
+		assert.NoError(t, check(req(ok), nil), ok)
+	}
+	for _, bad := range []string{"http://mirror.example.com/x", "https://evil.example.net/x", "https://169.254.169.254/x", "https://mirror.example.com.evil.net/x"} {
+		assert.Error(t, check(req(bad), nil), bad)
+	}
+	assert.Error(t, check(req("https://github.com/x"), make([]*http.Request, 5)), "hop limit")
+
+	// a list of hosts replaces the GitHub defaults; the host of the source stays
+	check = RedirectPolicy([]string{"cdn.example.com"}, "https://mirror.example.com/r")
+	assert.NoError(t, check(req("https://cdn.example.com/x"), nil))
+	assert.NoError(t, check(req("https://mirror.example.com/x"), nil))
+	assert.Error(t, check(req("https://objects.githubusercontent.com/x"), nil))
+
+	// a source that is not a URL has no host of its own
+	check = RedirectPolicy(nil, "::")
+	assert.NoError(t, check(req("https://github.com/x"), nil))
+	assert.Error(t, check(req("https://mirror.example.com/x"), nil))
+}
+
+func TestOpenNoFollowRefusesALink(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	require.NoError(t, os.WriteFile(real, []byte("x"), 0o644))
+	f, err := OpenNoFollow(real)
+	require.NoError(t, err)
+	f.Close()
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("no symbolic links")
+	}
+	_, err = OpenNoFollow(link)
+	assert.Error(t, err, "a link in place of the file is not followed")
+	_, err = OpenNoFollow(filepath.Join(dir, "missing"))
+	assert.Error(t, err)
+}

@@ -44,6 +44,7 @@ type Config struct {
 	GitOps        GitOpsConfig        `yaml:"gitops"`
 	Releases      ReleasesConfig      `yaml:"releases"`
 	Artifacts     ArtifactsConfig     `yaml:"artifacts"`
+	Install       InstallConfig       `yaml:"install"`
 	Outbound      OutboundConfig      `yaml:"outbound"`
 	Executors     ExecutorsConfig     `yaml:"executors"`
 	Rollouts      RolloutsConfig      `yaml:"rollouts"`
@@ -571,6 +572,33 @@ type ArtifactsConfig struct {
 	AllowUnverified bool `yaml:"allowUnverified"`
 }
 
+// InstallConfig configures the installation of hosts from the server (ADR-0046): the plan that a
+// host asks for with its enrollment token, the install grants for its downloads, the installer
+// bundles of the release that the server runs and the rendered install commands.
+type InstallConfig struct {
+	// Enabled turns the installation of hosts from the server on (default true). When it is off,
+	// every route under `/install` answers 404 and the server fetches no installer bundle.
+	Enabled bool `yaml:"enabled"`
+	// GrantTTL is the lifetime of an install grant, the credential with which a host downloads the
+	// collector and the supervisor after it asked for its plan (default 1h; when neither the file nor
+	// the environment sets it, it is `artifacts.downloadTokenTtl` if that is shorter). A grant is also
+	// bound to the enrollment token of that request and stops working when the token is revoked
+	// or expires. In production the value must be positive and at most `artifacts.downloadTokenTtl`.
+	GrantTTL time.Duration `yaml:"grantTtl"`
+	// BundleSourceBaseURL is where the installer bundles of the release that the server runs come
+	// from (default "https://github.com/myriarch/myriarch/releases/download"). A mirror keeps the
+	// layout `<base>/v<version>/<asset>` with `checksums.txt` and its Sigstore bundle
+	// `checksums.txt.sigstore.json` next to the archives; the server verifies both against the
+	// identity of the release workflow, whichever server they come from. Production requires https.
+	// The value must not be empty while `install.enabled` is on.
+	BundleSourceBaseURL string `yaml:"bundleSourceBaseUrl"`
+	// Platforms lists the platforms that a host can be installed on from the server, as
+	// "os/arch" (default linux/amd64, linux/arm64 and windows/amd64, which is all that is
+	// supported). The plan refuses a host on another platform, and the server prepares an
+	// installer bundle for each platform listed.
+	Platforms []string `yaml:"platforms"`
+}
+
 // ArtifactSourceAuth are the credentials for the artifact mirror: either a
 // bearer token (`artifacts.sourceAuth.tokenFile`) or basic authentication
 // (`artifacts.sourceAuth.username` + `artifacts.sourceAuth.passwordFile`).
@@ -879,6 +907,12 @@ func Default() Config {
 			},
 			MaxCacheBytes:    20 << 30,
 			DownloadTokenTTL: 24 * time.Hour,
+		},
+		Install: InstallConfig{
+			Enabled:             true,
+			GrantTTL:            time.Hour,
+			BundleSourceBaseURL: brand.Repository + "/releases/download",
+			Platforms:           []string{"linux/amd64", "linux/arm64", "windows/amd64"},
 		},
 		Executors: ExecutorsConfig{DefaultTimeout: 30 * time.Second, MaxTimeout: 5 * time.Minute, SecretEnvPrefix: brand.ExecSecretEnvPrefix},
 		Rollouts: RolloutsConfig{

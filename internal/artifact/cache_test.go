@@ -39,6 +39,8 @@ type upstream struct {
 	requests map[string]int
 	status   map[string]int // path -> forced status
 	delay    time.Duration
+	// gate, when set, holds every request until it is closed
+	gate chan struct{}
 }
 
 func newUpstream(t *testing.T) *upstream {
@@ -49,7 +51,11 @@ func newUpstream(t *testing.T) *upstream {
 		body, ok := u.files[r.URL.Path]
 		forced := u.status[r.URL.Path]
 		delay := u.delay
+		gate := u.gate
 		u.mu.Unlock()
+		if gate != nil {
+			<-gate
+		}
 		if delay > 0 {
 			time.Sleep(delay)
 		}
@@ -65,6 +71,16 @@ func newUpstream(t *testing.T) *upstream {
 	}))
 	t.Cleanup(u.srv.Close)
 	return u
+}
+
+// block holds every request of the upstream until the returned function is called (it may be called more than once).
+func (u *upstream) block() (release func()) {
+	g := make(chan struct{})
+	u.mu.Lock()
+	u.gate = g
+	u.mu.Unlock()
+	var once sync.Once
+	return func() { once.Do(func() { close(g) }) }
 }
 
 func (u *upstream) put(path string, body []byte) {

@@ -32,6 +32,9 @@ changed in the configuration unless stated otherwise.
 - Modes: `myriarchd serve` (production), `myriarchd dev` (embedded database, development login and token), `myriarchd migrate`
   (the database settings only, see [Start, migrations and schema compatibility](#start-migrations-and-schema-compatibility)) and
   `myriarchd healthcheck` (a client of a running server, see [Health check](#health-check)).
+- `myriarchd dev --install-bundle-dir DIR` serves the installer bundles from a directory instead of those of a release
+  ([Installer bundles](#installer-bundles)). The flag exists in development mode only: `serve` refuses it with a message that
+  says why, and the start refuses a directory outside development mode before it touches the database.
 
 ## Start, migrations and schema compatibility
 
@@ -256,7 +259,9 @@ sweeper, housekeeping and the periodic gauges. Everything else runs on every rep
 
 - Tokens. API tokens start with `myra_`, enrollment tokens with `myre_` and download tokens with `myrd_`. A token is 32
   random base62 characters; only the SHA-256 is stored, together with a display prefix. Lookups are by hash. Tokens can
-  be revoked or expire, and a token created by another token is capped by the creator's role and expiry.
+  be revoked or expire, and a token created by another token is capped by the creator's role and expiry. A download token
+  is signed, not stored, and comes in two kinds: the token of a package offer (bound to one updater and one artifact) and,
+  from v0.2.0, the install grant of a host that is not enrolled yet ([Artifact cache](#artifact-cache)).
 - Browser sessions are server side. The cookie holds 32 random bytes and the database key is their SHA-256. The cookie is
   `HttpOnly`, `SameSite=Lax` and `Secure` by configuration. A session has a sliding idle timeout (default 2 hours) and
   an absolute lifetime (default 12 hours), after which identity provider changes take effect.
@@ -286,6 +291,13 @@ sweeper, housekeeping and the periodic gauges. Everything else runs on every rep
   `opamp.requireEnrollmentToken` a token is mandatory. With `opamp.requireClientCert` a verified client certificate is
   mandatory too (token and certificate both). A certificate is either verified by myriarchd's own TLS or forwarded in a
   configured header by a trusted proxy and verified against the client CA.
+- Install routes. The plan for installing a host from the server and its downloads need a valid enrollment token,
+  always: also where `opamp.requireEnrollmentToken` is off ([Installation from the server](#installation-from-the-server)).
+  The rules of the OpAMP endpoint apply, including the client certificate rule, the token cache and the bound on lookups.
+  Failed authentications on these routes are limited per client address as well, because the routes can be reached by
+  anyone and share the lookup bound with the OpAMP endpoint. The download of an installer bundle is such a route. Rendering
+  the commands that a person copies to a host is not: it is an ordinary call with a session or an API token and the
+  permission `read`.
 - Credential binding. An instance UID is bound to the enrollment token (or certificate subject) it first registered
   with. A connection that presents another credential for that UID is rejected, an `identity_conflict` event and an
   audit entry are written, and an administrator re-enrolls the agent. Optionally an agent whose bound token was revoked
@@ -738,6 +750,14 @@ last wave. With no active rollout a new one is created for all relevant, non-exc
 created. A rollout in `failed` or `rolling_back` is never replaced automatically. A `paused` rollout can be superseded by
 a fix. Creating a rollout writes the audit entry `rollout.create` and the notification `rollout.started`.
 
+After a fleet was planned without an error, the planner records the effective target version of the fleet in the key-value store
+(`rollout/planned-target/<fleet>`; the value is the version without `v`, and empty for a fleet without a target), when the record changes
+and after it created the rollout for that target; for a version chosen in the UI it also sets `plannedAt` of the selection. Both say
+that the planner has handled the target. A target reaches every replica (the event of a Git sync or of a selection) before the leader
+has created the rollout for it, and the installation of hosts from the server reads these marks, so that a new host does not take the
+new version past the waves ([Installation from the server](#installation-from-the-server)). A leader writes the records of all fleets
+again when it starts a term, because another leader may have written them in between. They are not purged.
+
 ### Engine
 
 The engine is stateless between ticks, so leadership can change at any moment and every step is idempotent. A tick runs
@@ -785,6 +805,30 @@ The executor interface has `Validate` (environment dependent), `Start` (per wave
 - Download endpoint (`downloadArtifact`): verifies the token (signature, artifact ID, and that the agent currently has an
   offer referencing this artifact; age only when a TTL is set). A replica that lacks the file fetches it from the source
   and checks it against the stored SHA-256. It serves ranges with `Content-Type: application/gzip`.
+- Install grants (from v0.2.0). The endpoint also accepts the second kind of `myrd_` token, the install grant of a host
+  that is not enrolled yet. The signed payload holds the artifact ID, the ID of the enrollment token that the host
+  presented to get its plan, the time and the kind `i` (the token of an offer has no kind, and the kind is part of what is
+  signed, so neither can be turned into the other; an unknown kind or a grant without an enrollment token is refused). A
+  grant is accepted while it is younger than `install.grantTtl` and only while its enrollment token exists and is neither
+  revoked nor expired; the token is read from the database on every request, so a revocation applies at once on every
+  replica, and a token that is gone, revoked or expired looks the same. It is accepted only while `install.enabled` is on:
+  a server that runs with the installation turned off (also after a restart on the same database) refuses every grant with
+  401, whatever its lifetime is, and mints none. It needs no package offer. Besides the artifact it
+  gets `<filename>.sha256` (`<hex>  <filename>`, like `sha256sum`) and `<filename>.sigstore.json` from the record, the files
+  that the installer checks the artifact with; the token of an offer gets neither. A grant is issued, and a file is served,
+  only for an artifact that is `ready`, has a pinned SHA-256 and, where signatures are required, a verified bundle. The log
+  names the token of a grant by its ID, never the grant.
+- Preparation without waiting (`Prepare`). The install plan needs an artifact now and cannot wait for a download of
+  100 MB. `Prepare` returns a ready artifact, and otherwise starts `Ensure` in the background (once per replica however
+  many callers ask) and reports that it is pending. A record in the status `downloading` that changed within ten minutes
+  belongs to another replica or to the prefetch of the leader and is not started again; an older one belongs to a replica that
+  is gone and is taken over. A failed record is tried again after a minute, and until then `Prepare` reports the failure, so
+  a host that asks every few seconds cannot make the server request an upstream release in a loop. `Ensure` also fetches a
+  record that claims to be ready but has no pinned hash or no verified bundle again, instead of returning it.
+- The installer bundles of the release that the server runs are not artifacts. They have no row in the table `artifacts`
+  (the API enum `Distribution` knows `otelcol-contrib` and `opampsupervisor` only), are kept by `internal/install` in the
+  subdirectory `install` of the cache directory, and the eviction below neither counts nor removes them ([Installer
+  bundles](#installer-bundles)). No migration is needed.
 - Prefetch on the leader every 10 minutes: for each fleet with executor `updater` and a target, fetch the platforms of
   the members plus `prefetchPlatforms`, then evict least recently used artifacts until the size cap is met. Target
   versions of fleets are never evicted.
@@ -870,3 +914,247 @@ scripts replace (no Go templating, so `${env:...}` stays untouched). Required co
   hardening options. Windows assets are `.tar.gz` too and unpack with the built-in `tar`.
 - The supervisor reads `agent.executable` at start and detects version and components during bootstrap. After a binary
   change the supervisor service is restarted.
+
+### Installation from the server
+
+*Available from v0.2.0.* [ADR-0046](../adr/0046-host-installation-from-the-server.md) decides it: the server provides data
+(versions, artifacts, the endpoint) and the host verifies code (SHA-256 and Sigstore, against an identity that the
+installer builds itself, never one that the server names). Hosts download from `myriarchd` only. The settings are
+`install.enabled` (default true; off, every route of the tag `install` answers 404 before it looks at a token),
+`install.grantTtl`, `install.bundleSourceBaseUrl` and `install.platforms` (`linux/amd64`, `linux/arm64` and
+`windows/amd64`); see the [configuration reference](../reference/configuration.md#install). Four routes serve it: the plan
+(`getInstallPlan`) and the download of an installer bundle (`downloadInstallBundle`) with an enrollment token, the list of
+the bundles (`listInstallBundles`) and the rendering of the commands (`renderInstallCommands`) with a session or an API
+token. A person copies the commands to a host; they download the bundle, and the installer in it asks for the plan.
+
+**Authentication.** A request needs a valid enrollment token, always: `Authorization: Bearer myre_...`, also where
+`opamp.requireEnrollmentToken` is off. The token authenticates the request and binds the grants; it is never part of a
+body, a URL, an answer, a log line, a metric label or an audit entry (the log names it by its ID). Unknown, revoked, expired
+and missing tokens get the same 401. The rules are those of the OpAMP endpoint (see [Authentication and
+authorization](#authentication-and-authorization)); in addition 30 failed authentications per client address are free,
+then one more is allowed per second, and an address without budget gets 429 before any lookup happens.
+
+**The plan.** `POST /api/v1/install/plan` (`getInstallPlan`; a body of at most 16 KiB that holds no secret). The request
+names the platform (`os` `linux` or `windows`, `arch` `amd64` or `arm64`; `x86_64` and `aarch64` are accepted), the
+`attributes` the host would report, an optional `fleet` and an optional `collectorVersion`. The attributes may be
+`host.name`, `site.type`, `site.id`, `site.name`, `site.country`, `site.region`, `site.timezone` and
+`deployment.environment.name`, with values of 1 to 253 characters without control characters or surrounding spaces;
+`os.type` and `host.arch` come from the platform and the labels from the token. The server checks all of this against
+allowlists first (422, one issue per problem) and decides, in this order:
+
+1. **The fleet.** `assignment.Service.Match`, the function that assigns a connected agent, with the attributes, the
+   platform and the `labels.*` of the token. No fleet: 409 `no_fleet`. Several fleets of the same highest priority: 409
+   `fleet_ambiguous`. A `fleet` in the request that is another than the one found: 409 `fleet_mismatch`; nothing is
+   delivered. A fleet that selects on other attributes than the ones above cannot be found. A distribution other than
+   `otelcol-contrib`: 412 `unsupported_distribution`.
+2. **The version** (below).
+3. **The releases.** The release tracker must know the release of the collector and the release of the supervisor for the
+   version (the supervisor has the version of the collector). Otherwise 412 `unknown_version` or
+   `unknown_supervisor_version`; for a version that the host asked for, 422 with the same codes.
+4. **The artifacts.** `Prepare` starts both downloads at once. Until both are ready the answer is 503 with the reason
+   `preparing` and `Retry-After` (10 seconds; 30 after a failed attempt). The first request for a platform downloads about
+   112 MB, so this can last minutes. Nothing is started for a request that failed one of the steps before.
+
+**The version.** The plan gives the effective target of the fleet (`version.source` is `git` or `ui`; see
+[Version selection](version-selection.md)). A fleet on hold or without a target: 412 `no_target_version`. While a version
+rollout of the fleet is `pending`, `running` or `waiting_approval`, it gives the `fromRef` of that rollout instead
+(`version.source` is `rollout`), so that the new host becomes a straggler of the last wave and waves and approvals apply to
+new hosts as well; a rollout that is `paused`, `failed` or `rolling_back`, or whose hosts start from different versions
+(no uniform `fromRef`), is 409 `rollout_blocking`. A `collectorVersion` of the request is accepted if it equals the version
+the plan would give, the target of the fleet or a version inside the frame `spec.update.selection` in Git (`version.source`
+is then `request`); otherwise 422 `version_not_allowed`.
+
+**A target that the planner has not handled.** A target reaches every replica (through the event of a Git sync or of a selection in the
+UI) before the leader has created the rollout that brings the fleet to it. A host that asked in between would find the new target and no
+rollout, take the new version at once and skip the waves and approvals. So the plan does not hand out a target before the rollout planner
+has handled it ([Planner](#planner)): for a version chosen in the UI until the selection has `plannedAt` (a new selection of the fleet,
+also of the same version, clears it), for any other target (the one in Git, also after a selection was cleared) until the record of the
+planner for the fleet equals the target. Until then the answer is 503 `preparing` with `Retry-After` (5 seconds), and nothing is prepared.
+The planner usually needs seconds. A fleet that the planner has never handled has no record, so a new fleet waits for its first run, and so
+does every fleet right after an update from v0.1.0 (the records stay in the database, so the restart of a leader does not make hosts wait
+again). Without a leader nothing is planned, and the hosts of a fleet whose target changed wait until there is one; the other fleets are not
+affected. If the planning of a fleet keeps failing, its hosts wait and the log of the leader names the reason.
+
+The reads are ordered so that a concurrent change cannot send a host past the waves: the target comes from the memory of the assignment
+service, which follows the database and never runs ahead of it, then the record of the planner, and the rollouts last. The planner writes
+its record after it created the rollout, so whoever sees the record that belongs to the target sees the rollout as well; a rollout that
+the leader creates after the target was read is seen with the `fromRef` that belongs to the previous target, or the target is not handed out
+yet. The combination "new target, no rollout yet" does not reach a host.
+
+**The answer.** A plan of format 1 with the OpAMP endpoint (`wss://` for an https public URL, plus `opamp.path`), the fleet,
+the source of the version, the version, the URL of the artifact on the origin of `server.publicUrl` and an install grant for
+each of collector and supervisor, and `updater.install` (true when the executor of the fleet is `updater`). It is
+`text/plain` by default, with `Vary: Accept`, and JSON with `Accept: application/json`. The text is one `key=value` line per
+key, in this order: `format`, `fleet`, `version.source`, `opamp.endpoint`, `collector.version`, `collector.url`,
+`collector.grant`, `supervisor.version`, `supervisor.url`, `supervisor.grant`, `updater.install`. A value consists of the
+characters `A-Z a-z 0-9 . _ : / @ + = -` and nothing else; the three URL values may also contain the brackets of an IPv6 literal in
+the authority (`wss://[2001:db8::1]:8443/v1/opamp`); there are at most 64 lines and 8 KiB; lines end in `\n`; a reader accepts
+only these keys, each once, with `format` first, and stops at a format that it does not know. The server writes nothing that
+breaks the rules (a `server.publicUrl` with another character is a 412 `server_settings`), and `install.ParseText` is the
+reference reader with the rules that the installers implement. The plan is data: the installer takes the values as they are,
+checks each against a pattern and runs nothing that it contains. The URLs of `artifacts.agentBaseUrls` do not apply to a host
+that is not enrolled.
+
+| Status | `code` | Reason (`issues[0].code`) |
+|---|---|---|
+| 400 | `bad_request` | invalid JSON, an unknown field, a body above 16 KiB (415 for another content type) |
+| 401 | `unauthorized` | none: the same answer for every token problem |
+| 404 | `not_found` | `install.enabled` is off |
+| 409 | `conflict` | `fleet_mismatch`, `no_fleet`, `fleet_ambiguous`, `rollout_blocking` |
+| 412 | `precondition_failed` | `no_target_version`, `unsupported_distribution`, `unknown_version`, `unknown_supervisor_version`, `server_settings` |
+| 422 | `validation_failed` | `invalid_value`, `unknown_attribute`, `platform_not_supported`, `version_not_allowed`, `unknown_version`, `unknown_supervisor_version` |
+| 429 | `too_many_requests` | none; `Retry-After` |
+| 503 | `unavailable` | `preparing` (with `Retry-After`: the artifacts are being prepared, or the planner has not handled the new target of the fleet), or none for a database failure |
+
+**Observability.** `myriarch_install_plans_total{result}` counts the requests (`ok`, `disabled`, `unauthorized`,
+`rate_limited`, `bad_request`, `invalid_request`, `unavailable`, `error`, or the reason of a refusal such as `fleet_mismatch`
+or `preparing`). A plan that is issued is logged at info level with the ID of the token, the fleet, the platform and the
+version; it is not an audit entry, because it is a call of a host with its token and changes no configuration (the
+creation of the token is audited).
+
+#### Installer bundles
+
+The installer scripts, the templates that they render and the `myriarch-updater` binary reach a host as one archive: the
+updater archive of the release, `myriarch-updater_<version>_<os>_<arch>.tar.gz` for Linux and `.zip` for Windows, the file that
+a person would download from the release by hand. The server serves the archive of the release that it runs itself and no
+other. It is the bytes of the release and nothing else: the server does not template, repack or re-encode them, so the hash
+rules of App Control (which match byte-identical files) and later Authenticode signatures stay valid.
+
+- **Which server has bundles.** One that runs a release of the project: the version is `MAJOR.MINOR.PATCH` or
+  `MAJOR.MINOR.PATCH-rc.N`, from 0.2.0 on. A build from a Git checkout (`git describe`), a version with build metadata or any other
+  text is a local build and has none: the list says `source` `none` with the reason `local_build`, the server logs it once at the
+  start, and rendering commands is 412 `local_build`. A development server can serve a directory instead
+  (`myriarchd dev --install-bundle-dir`, `source` `directory`): the archives in it are named like the ones of a release, the
+  highest version in the directory wins, only regular files count (links are not followed), and the directory is read again each time commands
+  are rendered. Nothing in it is signed, because the developer put it there; the server copies each archive into its store and
+  delivers it like the others.
+- **Where it comes from, and what is checked first.** The base is `install.bundleSourceBaseUrl` with the layout
+  `<base>/v<version>/<asset>`, which a mirror keeps. The server loads `checksums.txt` and `checksums.txt.sigstore.json` and verifies
+  the keyless signature of `checksums.txt` with the trusted root of `artifacts.verify` (a file, or TUF). The identity is
+  `^<brand.Repository>/\.github/workflows/release\.yml@refs/tags/v<version>$` with the issuer `https://token.actions.githubusercontent.com`
+  and the tag equal to the version: the release workflow of this project at the tag of the version this server runs, derived from
+  the code and not from a setting, whatever source delivered the files. Then `checksums.txt` has to have exactly one line for the
+  archive (two lines are as bad as none, also with equal hashes), and the archive has to have the SHA-256 of that line. Only then it
+  is stored. The signature is checked before any archive is requested, and a failure of any step leaves the bundle `failed` and
+  delivers nothing.
+- **How it is fetched.** Like every outbound connection of the server: the destination policy for every resolved address
+  (`outbound.allowedCidrs`), the proxy of `artifacts.proxyUrl`, redirects to https and to `artifacts.allowedRedirectHosts` (the GitHub asset
+  hosts by default) and the host of the source only, 1 MiB for each of the two small files and 256 MiB for an archive, 60 seconds without
+  data, one download at a time per replica. The source gets no credential: it is the public release, or a mirror that can be read without
+  one.
+- **Where it is kept.** Under its SHA-256 as `<artifacts.dir>/install/sha256/<hex>` (mode 0640), in the subdirectory that the eviction of the
+  artifact cache leaves alone. The state is in memory: every replica keeps its own bundles, and the list shows the replica that answers. A
+  restart finds the files, hashes them again and fetches only the two small documents again. Archives of an earlier version are removed
+  after a day.
+- **When.** Shortly after the start (15 seconds, as the artifact prefetch does), on every replica, and whenever commands are rendered or a
+  bundle is asked for and a bundle is pending or failed a minute ago. A failed attempt is not repeated within a minute, so hosts that ask every
+  few seconds cannot make the server go to the source in a loop. A server that is stopped stops the preparation and waits for it.
+
+| `status` | Meaning |
+|---|---|
+| `pending` | Not fetched yet |
+| `preparing` | The server is fetching and checking it |
+| `ready` | Stored, with a pinned SHA-256 (`sha256`, `size`); delivered |
+| `failed` | The last attempt failed (`error` says why); nothing is delivered; the server tries again after a minute |
+
+**Delivery.** `GET /api/v1/install/bundles/{filename}` needs an enrollment token, with the rules of the plan: the same 401 for every
+problem of a token, 429 for too many failed authentications or lookups, and the token in the header only (a request that carries it in the
+URL has none). A name that is not a bundle of this server (another version, another platform, a checksum or a path) is 404; the answer repeats no
+part of the path. Before every delivery the server opens the stored file without following a link and hashes it again against the pinned
+SHA-256, and it sends the bytes of that open file (`Range` is supported), so a path that is replaced meanwhile changes nothing. An archive that
+is gone or differs is discarded, the bundle becomes `pending` and is fetched and checked again, and the request gets 503 with `Retry-After`. The
+answer has `Content-Type` `application/gzip` or `application/zip`, `Content-Disposition: attachment`, `Cache-Control: private, no-store` and
+`ETag: "sha256-<hex>"`. A bundle that is not ready is 503 with `Retry-After` and the reason `bundle_preparing` (5 seconds) or
+`bundle_failed` (30 seconds).
+
+**Observability.** `myriarch_install_bundle_downloads_total{result}` counts the requests (`ok`, `disabled`, `unauthorized`, `rate_limited`,
+`not_found`, `preparing`, `failed`, `unavailable`, `error`). A delivery is logged at info level with the ID of the token, the file and its
+hash, not as an audit entry; the token is in no log line, label or answer.
+
+#### Install commands
+
+`POST /api/v1/install/commands` (`renderInstallCommands`, permission `read`, the CSRF header for a cookie session; a body of at most 16 KiB)
+renders the command for each platform that is asked for. The server renders it and never sees a token. The person who copies it (the dialog
+of the web UI) puts the token in.
+
+| Request field | Meaning |
+|---|---|
+| `variant` | `token_inline` (the default): the token is part of the command, at the place `tokenPlaceholder` (`@@MYRIARCH_ENROLLMENT_TOKEN@@`), which the UI replaces in the browser, in every command. `token_file`: the command reads the token from a file on the host and has no place for a token. `lab`: `token_inline` over plain http with `--insecure` (`-Insecure`) for the installer; only a development server renders it (422 `variant_not_available` otherwise) |
+| `platforms` | `os/arch` entries of `install.platforms`; none means all of them |
+| `fleet` | The fleet that the person expects. The installer passes it to the plan, which refuses a host that the server assigns elsewhere |
+| `attributes` | `site.type` and `site.id` (required: the installers stop with `option_missing` without them), and optional `site.name`, `site.country`, `site.region`, `site.timezone`, `deployment.environment.name`. The installers get them as their options |
+| `collectorVersion` | A version that the host asks for; the plan accepts it inside the Git frame only |
+| `tokenFiles` | `linux` and `windows`: the path of the token file on the host, required for each operating system that is rendered under `token_file` |
+| `caFile` | The path of the PEM file with the CA of the server on a Linux host (`--cacert` for the download, `--ca-file` for the installer); a Windows host uses the certificate store of the machine |
+
+The answer has the `variant`, the `server` that the commands use (`server.publicUrl`), the `version` of the bundles, `insecure`, the
+`tokenPlaceholder` and for each platform the `shell` (`bash` or `powershell`), the `command`, the `bundle` that it pins (name, `sha256`, `size`)
+and, under `token_file`, the `tokenFile`. A command that carries a token needs `server.publicUrl` to be https (412 `server_settings`). A server with
+`opamp.requireClientCert` renders no command at all (412 `server_settings`, checked before the bundles): the plan and the download of a bundle ask for a verified client
+certificate there, as the OpAMP endpoint does, and neither `curl` nor `Invoke-WebRequest` in the command presents one, so every copy would fail at the download. Hosts of
+such a server are installed on the manual path ([Connect a host](../tasks/connect-a-host.md)). A bundle that is not
+`ready` is 503 `bundle_preparing` or `bundle_failed` and the request starts the preparation; the commands of all platforms that are asked for
+come together or not at all.
+
+**Inputs.** The text of each command is a constant. Every value (the server, the name and SHA-256 of the bundle, the options of the installer) is an
+argument of its own, quoted with single quotes, so that no value is ever pasted into code; a value is checked first, and a refusal is 422 with the issue at
+its path (`invalid_value`, `unknown_attribute`, `platform_not_supported`, `variant_not_available`) and never repeats the value.
+
+| Value | Accepted |
+|---|---|
+| `site.type`, `deployment.environment.name` | A letter or a digit, then letters, digits and `. _ -`, at most 63 characters |
+| `site.id` | The same and `:` |
+| `site.country` | The same, at most 16 characters |
+| `site.name`, `site.region` | A letter or a digit, then letters, digits, spaces (not at the end) and `. , : / @ + ( ) # % = ~ -`, at most 100 characters |
+| `site.timezone` | A letter, then letters, digits and `. _ + / -`, at most 64 characters |
+| `fleet`, `collectorVersion` | The rules of the plan: the name of a fleet, a version such as `0.162.0` |
+| Paths (`tokenFiles`, `caFile`) | An absolute path in the form of the host (`/etc/...`, `C:\...`), at most 240 characters, without `.` or `..` segments, without a space or a separator at the end |
+
+Refused everywhere: quotation marks of every kind (`'`, `"` and the typographic ones of U+2018 to U+201E and U+00AB, U+00BB, which PowerShell reads as quotes), the backtick,
+`$`, `;`, control characters, everything outside printable ASCII, `@@`, a value that looks like a token (`myre_`, `myra_`, `myrd_`), a leading dash (it could pass
+for an option) and a value above its length. A second check refuses to quote a value that has a quote, so the quoting needs no escape. The check looks at the value as it came, before any normalization: `collectorVersion` and each platform are refused (422) with white space or a control
+character anywhere, also at the edges. A platform may be written in upper case or with the alias of an architecture (`LINUX/x86_64`), and a version with a leading `v`; the plan
+request (`getInstallPlan`) trims and folds its values the same way, because it renders nothing: the planner only compares them with what the server knows.
+
+**What the Linux command does.** `sudo sh -c '<script>' sh <values> <<'MYRIARCH_TOKEN_END'` followed by the placeholder, for a root shell (bash or
+another POSIX shell; the here document does not exist in fish). The script, in this order:
+
+1. stops unless it is root, and unless `curl`, `tar`, `gzip`, `sha256sum` and `mktemp` exist (`privilege_required`, `tool_missing`);
+2. makes a private directory with `mktemp -d` below `/root` (`directory_unsafe`) and removes it, with everything in it, when the command ends, also after an error or an interrupt;
+3. reads the token with the builtin `read` from the standard input (variant `token_inline`) or from the file (variant `token_file`), and stops unless it consists of
+   `A-Z a-z 0-9 _ . ~ + / = -` (`option_missing` for no token or an unreplaced placeholder, `option_invalid`, `file_unreadable`); under `token_inline` the builtin `printf`
+   writes it to a file of the private directory (mode 0600);
+4. downloads the bundle with `curl -fsSg --retry 3 --proto =https --tlsv1.2 -K -`, to which `printf` gives the header `Authorization: Bearer <token>` on the standard
+   input (`--proto =http,https` for the lab variant): the token is in no argument vector and no environment variable, the URL is built from the server and the name
+   of the bundle only, and redirects are not followed (`download_failed`);
+5. checks the SHA-256 that the command pins with `sha256sum -c` **before it unpacks anything** (`checksum_mismatch`), unpacks the archive in the private directory
+   (`archive_invalid`) and starts `bash deploy/scripts/install-linux.sh --server <server> --token-file <file> [--ca-file ...] <options>` from there, with no standard
+   input; the exit status of the installer is the status of the command.
+
+**What the Windows command does.** A script block `& { param([hashtable]$P) ... } @{ ... }` for an elevated Windows PowerShell or a session of SYSTEM, which is
+the constant script followed by the values in a hashtable. It uses cmdlets and native programs only (`whoami.exe`, `icacls.exe`, `powershell.exe`) and no
+.NET method or type, because under App Control the typed command runs in Constrained Language Mode. It, in this order:
+
+1. stops unless the session is elevated or runs as SYSTEM (`privilege_required`, from the mandatory integrity level that `whoami.exe /groups` lists: High,
+   `S-1-16-12288`, is an elevated administrator; System, `S-1-16-16384`, is a session of SYSTEM, the context of scheduled tasks, software distribution and management
+   agents, which run the variant `token_file`; an administrator who is not elevated has Medium and is refused, although the group Administrators is in the token "for deny
+   only") and unless Group Policy leaves room for a script: a policy of the scopes `MachinePolicy` or `UserPolicy` that is `AllSigned` or `Restricted` wins over `-ExecutionPolicy`
+   and would stop the unsigned installer later, so the command says so first (`execution_policy_blocked`); then it checks the token as above;
+2. makes the working directory directly below `%ProgramFiles%` with a name that cannot be guessed. Standard users and processes without elevation cannot write there, so no handle
+   with write rights to the new directory (which could set a reparse point) can exist. Users may read there, so the command replaces its DACL with
+   `icacls.exe /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F` (SYSTEM and the administrators) **before the first download** (`acl_failed`) and makes the
+   administrators its owner (`icacls.exe /setowner *S-1-5-32-544`, also `acl_failed`). The directory is removed in a `finally`. This sequence can be checked on real Windows only
+   (the `host-e2e` workflow); the tests of the command cover its structure and its order;
+3. writes the token to a file of the working directory with `Set-Content` (variant `token_inline`) and downloads the bundle with `Invoke-WebRequest -Headers`, without following a redirect
+   (`download_failed`); .NET has to negotiate TLS 1.2, which Windows 10 and Windows Server 2019 and newer do by default;
+4. checks the SHA-256 with `Get-FileHash` before it unpacks (`checksum_mismatch`), unpacks with `Expand-Archive`, runs `Unblock-File` on the verified script and starts it
+   as `powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File install-windows.ps1 -Server ... -TokenFile ...`: the policy is set for that process only, never
+   `Bypass`, never for the machine or the user (`installer_failed` with the exit code when it fails).
+
+The codes are those of the installers ([Connect a host](../tasks/connect-a-host.md)); `execution_policy_blocked` and `installer_failed` are new and belong to the command.
+
+**What the command cannot hide.** Under `token_inline` the token is text of the command, and what records typed text keeps it: the clipboard, the history of a shell, the
+I/O log of `sudo` (`log_input`), the history file of PSReadLine, PowerShell transcription and script block logging (event 4104), the recording of a terminal session. A token that such a record kept counts as
+leaked. The variant `token_file` keeps the token out of the command, and fits production, automation and every host that records its input. The first installation
+trusts the server that displayed the command (trust on first use): the pinned hash shows that the host received the bundle that the server vouched for after it verified
+`checksums.txt`, not that the server is honest. The manual path of [Connect a host](../tasks/connect-a-host.md) stays for sites that cannot accept this.

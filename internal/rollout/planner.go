@@ -88,6 +88,7 @@ func (e *Engine) plan(ctx context.Context) error {
 		}
 		if versionOK {
 			e.markPlanned(ctx, f, sel, vt)
+			e.markTargetPlanned(ctx, f, vt)
 		}
 	}
 	return errors.Join(errs...)

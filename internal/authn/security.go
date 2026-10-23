@@ -50,6 +50,10 @@ const (
 	// burst oidcFailBurst; with an empty bucket both endpoints refuse the address.
 	oidcFailEvery = 6 * time.Second
 	oidcFailBurst = 10
+	// install routes (plan, installer bundle): failed authentications per client address (/64 for IPv6) refill one token per
+	// installFailEvery, burst installFailBurst; with an empty bucket the address is refused before any token lookup.
+	installFailEvery = time.Second
+	installFailBurst = 30
 	// rate-limit audit entries are written at most once per key and minute.
 	limitAuditInterval = time.Minute
 	// DefaultSessionMaxAge applies when auth.sessionMaxAge is not set.
