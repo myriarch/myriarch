@@ -361,8 +361,12 @@ own, `.github/workflows/artifacthub.yml`, does it after the release, started by 
    panel. Add a repository of the kind "Helm charts" with the name `myriarch`, the display name `Myriarch` and the URL
    `oci://ghcr.io/myriarch/charts/myriarch`.
 3. **Copy the repository ID** from the card of the repository in the control panel. It is a UUID in lower case.
-4. **Run the workflow.** On GitHub open Actions, "artifacthub", Run workflow on `main`, and enter the ID. The job `tools` builds the pinned
-   `crane`; the job `publish` waits for the approval in the environment `release`. The ID becomes part of a public file, so enter nothing else.
+4. **Run the workflow on the release tag.** On GitHub open Actions, "artifacthub", Run workflow, choose the release tag (for example `v0.2.0`)
+   under "Use workflow from", and enter the ID. A branch, `main` included, and any other tag are refused: the environment `release` admits only
+   tags `v*`, and the script checks the tag shape again. The workflow file has to be on `main` and in the tag; a fix to it takes effect with the
+   next tag, because a tag is never moved. The job `tools` builds the pinned `crane`; the job `publish` waits for the approval in the
+   environment `release` (three jobs use that environment: `sign-windows` and `finalize` of the release workflow and `publish` of this one) and
+   shows the digest of the uploaded artifact in its job summary. The ID becomes part of a public file, so enter nothing else.
    The workflow writes the tag `artifacthub.io` of `ghcr.io/myriarch/charts/myriarch` and nothing else. It can run again (it overwrites only that
    tag) and works the same whether the repository was added after a candidate or after the final version.
 5. **Check the result.** After the next scan of the repository, Artifact Hub shows "Verified publisher" on the repository card (the control

@@ -8,8 +8,10 @@
 #   TOOLS_BIN=... GH_TOKEN=... ci/release/verify-chart.sh --tag TAG --commit SHA --digest CHART_DIGEST --image-digest SERVER_INDEX_DIGEST
 #
 # 1. tag        RELEASE_CHART@--digest exists, the version tag does not exist yet (finalize.sh sets it after the second approval) or, in
-#               a re-run after finalize, resolves to --digest, and the repository has no tag latest and no tag besides version tags and
-#               sha256-<64 hex> signature tags                                          [chart_digest_mismatch] [chart_tag_unexpected]
+#               a re-run after finalize, resolves to --digest, and the repository has no tag latest and no tag besides version tags,
+#               sha256-<64 hex> signature tags and the tag artifacthub.io, which is accepted only when its manifest is the Artifact Hub
+#               metadata artifact (config and one layer with the Artifact Hub media types; ci/release/push-artifacthub.sh)
+#                                                                                       [chart_digest_mismatch] [chart_tag_unexpected]
 # 2. content    the chart layer (media type application/vnd.cncf.helm.chart.content.v1.tar+gzip) of RELEASE_CHART@--digest is fetched BY
 #               DIGEST and ci/release/chart-package.sh verify runs on it: every image of the default and the OpenShift rendering is
 #               the server image at --image-digest, and the chart and app version are the release version     [chart_layer] [image_not_digest]
@@ -53,6 +55,23 @@ while IFS= read -r t; do
   [ -n "${t}" ] || continue
   [ "${t}" != latest ] || err chart_tag_unexpected "${RELEASE_CHART} has the tag latest, which must not exist during v0.x"
   [[ "${t}" =~ ^sha256-[0-9a-f]{64}(\.sig)?$ ]] && continue
+  if [ "${t}" = artifacthub.io ]; then
+    "${TOOLS_BIN}/crane" manifest "${RELEASE_CHART}:${t}" > "${work}/ah-manifest.json" 2> "${work}/crane.err" || err chart_tag_unexpected "crane could not read the manifest of ${RELEASE_CHART}:${t}"
+    python3 -I - "${work}/ah-manifest.json" <<'PY' || exit 1
+import json, sys
+
+try:
+    m = json.load(open(sys.argv[1], "rb"))
+    ok = (m.get("config", {}).get("mediaType") == "application/vnd.cncf.artifacthub.config.v1+yaml"
+          and [l.get("mediaType") for l in m.get("layers") or []] == ["application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml"])
+except (ValueError, AttributeError):
+    ok = False
+if not ok:
+    print("[verify-chart] ERROR [chart_tag_unexpected] the tag artifacthub.io is not an Artifact Hub metadata artifact (config and one layer with the Artifact Hub media types)", file=sys.stderr)
+    sys.exit(1)
+PY
+    continue
+  fi
   if [[ "${t}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]]; then
     if [ "${t}" = "${version}" ]; then
       got="$("${TOOLS_BIN}/crane" digest "${RELEASE_CHART}:${t}" 2> "${work}/crane.err")" || err chart_digest_mismatch "crane could not read ${RELEASE_CHART}:${t}"
@@ -60,7 +79,7 @@ while IFS= read -r t; do
     fi
     continue
   fi
-  err chart_tag_unexpected "${RELEASE_CHART} has the tag '${t}', which is neither a version tag nor a sha256-<hex> signature tag"
+  err chart_tag_unexpected "${RELEASE_CHART} has the tag '${t}', which is neither a version tag, a sha256-<hex> signature tag nor artifacthub.io"
 done <<EOT
 ${tags}
 EOT

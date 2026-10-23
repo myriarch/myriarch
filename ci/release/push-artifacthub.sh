@@ -23,8 +23,9 @@
 #
 # 1. id       the ID is a UUID in lower case, as a whole string [id_invalid]
 # 2. layout   the OCI layout of the artifact (config, one layer, manifest) is written to a temporary directory, or to --layout-out
-# 3. guard    GITHUB_WORKFLOW_REF names .github/workflows/artifacthub.yml of the release repository on refs/heads/main: a guard against
-#             a push from a laptop, not a security boundary [workflow_ref]
+# 3. guard    GITHUB_WORKFLOW_REF names .github/workflows/artifacthub.yml of the release repository at a release tag refs/tags/vX.Y.Z
+#             or refs/tags/vX.Y.Z-rc.N (the environment `release` admits only such tags); a branch, including main, and any other tag
+#             are refused. A guard against a push from a laptop, not a security boundary [workflow_ref]
 # 4. chart    the chart repository holds at least one version tag (`crane ls`): the chart is published [chart_unreadable] [chart_not_published]
 # 5. push     `crane push LAYOUT RELEASE_CHART:artifacthub.io` with the credentials of $HOME/.docker/config.json (ci/release/registry-login.sh),
 #             then the manifest the registry serves for the tag must be the bytes of the layout [push_failed] [artifact_mismatch]
@@ -107,9 +108,11 @@ fi
 # --- 3. guard ----------------------------------------------------------------------------------------------------------------
 need_tool crane
 [ -n "${HOME:-}" ] && [ -f "${HOME}/.docker/config.json" ] || err push_failed "${HOME:-HOME}/.docker/config.json does not exist: run ci/release/registry-login.sh login first"
-want_ref="${RELEASE_REPOSITORY}/${WORKFLOW_ARTIFACTHUB}@refs/heads/main"
-[ "${GITHUB_WORKFLOW_REF:-}" = "${want_ref}" ] \
-  || err workflow_ref "refusing to write to ${RELEASE_CHART}: GITHUB_WORKFLOW_REF is '${GITHUB_WORKFLOW_REF:-unset}', expected '${want_ref}'"
+want_prefix="${RELEASE_REPOSITORY}/${WORKFLOW_ARTIFACTHUB}@refs/tags/"
+wf_ref="${GITHUB_WORKFLOW_REF:-}"
+if [ "${wf_ref#"${want_prefix}"}" = "${wf_ref}" ] || ! [[ "${wf_ref#"${want_prefix}"}" =~ ${TAG_RE} ]]; then
+  err workflow_ref "refusing to write to ${RELEASE_CHART}: GITHUB_WORKFLOW_REF is '${wf_ref:-unset}', expected '${want_prefix}vX.Y.Z' (a release tag)"
+fi
 
 # --- 4. chart ----------------------------------------------------------------------------------------------------------------
 tags="${work}/tags"
@@ -131,4 +134,5 @@ got="$("${TOOLS_BIN}/crane" digest "${RELEASE_CHART}:${TAG_ARTIFACTHUB}" 2> "${w
 "${TOOLS_BIN}/crane" manifest "${RELEASE_CHART}:${TAG_ARTIFACTHUB}" > "${work}/manifest" 2> "${work}/err" || err artifact_mismatch "crane could not read the manifest of ${RELEASE_CHART}:${TAG_ARTIFACTHUB}"
 [ "sha256:$(sha256_of "${work}/manifest")" = "${digest}" ] || err artifact_mismatch "the manifest the registry serves for ${RELEASE_CHART}:${TAG_ARTIFACTHUB} hashes to another digest"
 info "uploaded ${digest} as ${RELEASE_CHART}:${TAG_ARTIFACTHUB}"
+summary "## Artifact Hub metadata" "" "- \`${RELEASE_CHART}:${TAG_ARTIFACTHUB}\` is \`${digest}\`"
 printf 'artifacthub-digest=%s\n' "${digest}"

@@ -110,7 +110,7 @@ for t in bash sh env python3 sed awk grep mktemp cat cp rm mkdir chmod ls head t
   p="$(command -v "${t}" 2>/dev/null || true)"; [ -n "${p}" ] || continue
   printf '#!/bin/sh\nexec "%s" "$@"\n' "${p}" > "${RB}/${t}"; chmod +x "${RB}/${t}"
 done
-REF_WF="myriarch/myriarch/.github/workflows/artifacthub.yml@refs/heads/main"
+REF_WF="myriarch/myriarch/.github/workflows/artifacthub.yml@refs/tags/v0.2.0"
 reset() { rm -rf "${S}"; mkdir -p "${S}"; printf '0.2.0-rc.1\n' > "${S}/tags"; }
 calls() { cat "${S}/calls.log" 2>/dev/null || true; }
 count() { calls | grep -Ec -- "$1" || true; }
@@ -144,8 +144,16 @@ expect_fail "upload: the registry serves another manifest" "artifact_mismatch.*h
 reset
 expect_fail "upload: a workflow ref of another workflow" "workflow_ref" env GITHUB_WORKFLOW_REF="myriarch/myriarch/.github/workflows/release.yml@refs/tags/v0.2.0" bash -c '
   export PATH="$1" TOOLS_BIN="$2" STUB_DIR="$3" HOME="$4"; exec "$5" --repository-id "$6"' _ "${RB}" "${SB}" "${S}" "${HOME_DIR}" "${SCRIPT_AH}" "${ID}"
-expect_fail "upload: a workflow ref of a branch other than main" "workflow_ref" env GITHUB_WORKFLOW_REF="myriarch/myriarch/.github/workflows/artifacthub.yml@refs/heads/x" bash -c '
+for bad in refs/heads/main refs/heads/x refs/tags/v0.2 refs/tags/0.2.0 refs/tags/v0.2.0-rc.0 refs/tags/v0.2.0-beta refs/tags/nightly 'refs/tags/v0.2.0/x'; do
+  expect_fail "upload: a workflow ref at ${bad} is refused" "workflow_ref" env GITHUB_WORKFLOW_REF="myriarch/myriarch/.github/workflows/artifacthub.yml@${bad}" bash -c '
+    export PATH="$1" TOOLS_BIN="$2" STUB_DIR="$3" HOME="$4"; exec "$5" --repository-id "$6"' _ "${RB}" "${SB}" "${S}" "${HOME_DIR}" "${SCRIPT_AH}" "${ID}"
+done
+expect_fail "upload: a workflow ref of another repository" "workflow_ref" env GITHUB_WORKFLOW_REF="example/other/.github/workflows/artifacthub.yml@refs/tags/v0.2.0" bash -c '
   export PATH="$1" TOOLS_BIN="$2" STUB_DIR="$3" HOME="$4"; exec "$5" --repository-id "$6"' _ "${RB}" "${SB}" "${S}" "${HOME_DIR}" "${SCRIPT_AH}" "${ID}"
+reset
+expect_ok "upload: a release candidate tag is accepted" env GITHUB_WORKFLOW_REF="myriarch/myriarch/.github/workflows/artifacthub.yml@refs/tags/v0.2.0-rc.1" bash -c '
+  export PATH="$1" TOOLS_BIN="$2" STUB_DIR="$3" HOME="$4"; exec "$5" --repository-id "$6"' _ "${RB}" "${SB}" "${S}" "${HOME_DIR}" "${SCRIPT_AH}" "${ID}"
+reset
 expect_fail "upload: no workflow ref" "workflow_ref" env -u GITHUB_WORKFLOW_REF bash -c '
   export PATH="$1" TOOLS_BIN="$2" STUB_DIR="$3" HOME="$4"; exec "$5" --repository-id "$6"' _ "${RB}" "${SB}" "${S}" "${HOME_DIR}" "${SCRIPT_AH}" "${ID}"
 eq "upload: nothing is pushed after a refused workflow ref" "0" "$(count '^push ')"
@@ -155,6 +163,10 @@ reset
   "$SCRIPT_AH" --repository-id "${ID}" > /dev/null 2>&1 )
 eq "upload: the environment cannot change the repository or the tag" "1" "$(count "^push .* ${CHART}:artifacthub.io \$")"
 eq "upload: nothing is written to another repository" "0" "$(count 'example/other')"
+# verify-chart.sh admits the tag artifacthub.io only for exactly these media types: they must be the ones this script writes
+for mt in application/vnd.cncf.artifacthub.config.v1+yaml application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml; do
+  eq "cross-check: ${mt} is in both scripts" "2" "$( { grep -Fc -- "\"${mt}\"" "${SCRIPT_AH}"; grep -Fc -- "\"${mt}\"" "${REL}/verify-chart.sh"; } | paste -sd+ - | bc)"
+done
 reset; rm -rf "${HOME_DIR}/.docker"
 expect_fail "upload: no registry login" "push_failed.*registry-login.sh" run_ah
 mkdir -p "${HOME_DIR}/.docker"; printf '{"auths":{"ghcr.io":{"auth":"eDp5"}}}\n' > "${HOME_DIR}/.docker/config.json"
@@ -217,7 +229,8 @@ for jid, job_node in jobs.items():
     check(got == PERMS.get(jid), "job %s: permissions are %s" % (jid, got))
     check(tx(job.get("timeout-minutes")) is not None, "job %s: no timeout" % jid)
     check(tx(job.get("runs-on")) == "ubuntu-24.04", "job %s: runs-on must be ubuntu-24.04" % jid)
-    check(tx(job.get("if")) == "github.repository == 'myriarch/myriarch' && github.ref == 'refs/heads/main'", "job %s: the if: must test the repository and main" % jid)
+    check(tx(job.get("if")) == "github.repository == 'myriarch/myriarch' && startsWith(github.ref, 'refs/tags/v')", "job %s: the if: must test the repository and a release tag" % jid)
+    check("refs/heads" not in (tx(job.get("if")) or ""), "job %s: no branch in the if:" % jid)
     check("continue-on-error" not in job and "uses" not in job and "container" not in job and "services" not in job and "strategy" not in job,
           "job %s: no continue-on-error, reusable workflow, container, services or matrix" % jid)
 check([tx(n) for n in ls(mp(jobs.get("publish")).get("needs"))] == ["tools"], "publish needs exactly tools")

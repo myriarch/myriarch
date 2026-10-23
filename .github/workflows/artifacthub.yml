@@ -5,8 +5,11 @@
 # ghcr.io/myriarch/charts/myriarch under the tag artifacthub.io, so that Artifact Hub shows the chart as "Verified publisher".
 #
 # It is not part of release.yml: the repositoryID exists only after the board has added the chart repository on Artifact Hub, and that
-# is possible only after the chart is published. The board starts this workflow by hand (Actions, "artifacthub", Run workflow, on main)
+# is possible only after the chart is published. The board starts this workflow by hand (Actions, "artifacthub", Run workflow)
 # with the ID from the repository card of the Artifact Hub control panel and approves the job `publish` in the environment `release`.
+# It must run on a release tag (Run workflow, "Use workflow from": the tag, e.g. v0.2.0): the environment `release` admits only tags v*,
+# and a branch (main included) is refused. The workflow file therefore has to be on main and in that tag; a fix to it takes effect with
+# the next tag, because a tag is never moved.
 # The steps are in docs/releasing.md, "Artifact Hub".
 #
 #   - Same tool rule as release.yml (ADR-0035): the job `tools` (contents: read) builds crane from the pinned module in ci/tools; the
@@ -45,7 +48,7 @@ jobs:
   # the write scope runs. No write scope here.
   tools:
     name: tools
-    if: github.repository == 'myriarch/myriarch' && github.ref == 'refs/heads/main'
+    if: github.repository == 'myriarch/myriarch' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -54,7 +57,7 @@ jobs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
       sha256: ${{ steps.pack.outputs.sha256 }}
     steps:
-      - name: Check out main
+      - name: Check out the release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -84,7 +87,7 @@ jobs:
   publish:
     name: publish
     needs: [tools]
-    if: github.repository == 'myriarch/myriarch' && github.ref == 'refs/heads/main'
+    if: github.repository == 'myriarch/myriarch' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: release
