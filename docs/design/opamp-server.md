@@ -683,8 +683,8 @@ Fleets and agents are matched by selectors over the attribute view.
   assignment is written as a compare-and-set (`AgentStore.CompareAndSetAssignment`) against the assignment that the caller
   read (fleet, assigned hash, target version and error; no extra column and no migration, the previous assignment is the
   version). The fleet-change event and the reset of the desired state (which also clears `failed_config_hash`) follow only a
-  write that took effect. A replica that loses the race records nothing, re-reads the agent and evaluates again, at most
-  three times: it then finds the assignment settled, or a newer one that it judges itself. A change therefore takes effect
+  write that took effect. A replica that loses the race records nothing, re-reads the agent and evaluates again; after
+  three attempts in all it reports an error. It then finds the assignment settled, or a newer one that it judges itself. A change therefore takes effect
   once, however many replicas see it.
 - Stale listings. `ReassignAll` reads the agents in one listing; an agent that this process wrote after the listing is read
   again before it is judged. A listing older than five minutes counts as stale for every agent, because the record of

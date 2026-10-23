@@ -251,8 +251,7 @@ type AgentStore interface {
 	// SetAssignment writes fleet membership and assigned config/version.
 	SetAssignment(ctx context.Context, id domain.AgentID, u AgentAssignmentUpdate) error
 	// CompareAndSetAssignment writes u only if the stored fleet, assigned
-	// config hash, target version and assignment error still equal prev
-	// (fleet name, assigned config hash, target version and error). It
+	// config hash, target version and assignment error still equal prev. It
 	// reports whether the row was written. With several replicas exactly one
 	// of the callers that saw the same previous assignment wins; the others
 	// get false and must not record the change. A missing agent is ErrNotFound.

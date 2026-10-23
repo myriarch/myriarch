@@ -286,3 +286,53 @@ func TestMarkWrittenPrunesAtMostOncePerGap(t *testing.T) {
 	e.svc.markWritten(uuid.Must(uuid.NewV7()))
 	assert.Less(t, size(), 10, "pruned again after the gap")
 }
+
+// loserAgents loses every compare-and-set, as a store whose comparison never
+// matches would.
+type loserAgents struct {
+	*countingAgents
+	cas int
+}
+
+func (l *loserAgents) CompareAndSetAssignment(context.Context, domain.AgentID, domain.AgentAssignment, store.AgentAssignmentUpdate) (bool, error) {
+	l.mu.Lock()
+	l.cas++
+	l.mu.Unlock()
+	return false, nil
+}
+
+// A replica that loses every compare-and-set gives up after maxAssignTries
+// attempts with an error. It records nothing, resets nothing and remembers no
+// write; ReassignAll reports the agent as failed.
+func TestAssignGivesUpWhenEveryCompareAndSetLoses(t *testing.T) {
+	ctx := context.Background()
+	r := newReplicas(t)
+	id := r.addAgents(t, 1)[0]
+
+	loser := &loserAgents{countingAgents: r.counter}
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	bus := eventbus.NewMemory("t", 0)
+	t.Cleanup(func() { bus.Close() })
+	svc := New(Deps{
+		Store: &countingStore{Store: r.db, agents: &countingAgents{AgentStore: loser, resets: r.counter.resets}},
+		Bus:   bus, Renderer: blueprint.NewRenderer(blueprint.Options{}), Logger: quiet, Registerer: prometheus.NewRegistry(),
+	})
+	check := func() {
+		t.Helper()
+		assert.Equal(t, maxAssignTries, loser.cas)
+		assert.Equal(t, 0, r.assignedEvents(t, id))
+		assert.Equal(t, 0, r.counter.resetsOf(id))
+		_, ok := svc.written[id]
+		assert.False(t, ok, "no write is remembered")
+	}
+
+	_, err := svc.AssignAgent(ctx, id)
+	require.ErrorIs(t, err, errConflict)
+	check()
+
+	loser.cas = 0
+	err = svc.ReassignAll(ctx)
+	require.ErrorIs(t, err, errConflict)
+	assert.Contains(t, err.Error(), "1 of 1 agents could not be assigned")
+	check()
+}
