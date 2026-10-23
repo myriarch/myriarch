@@ -23,7 +23,8 @@
 #   commit             the charts of this checkout and images built from it (hack/kind/images.sh); needs a clean work tree
 #                      (ALLOW_DIRTY=1 for development). CI uses this.
 #
-# Environment: QUICKSTART_SOURCE, QUICKSTART_SIM=1 (also start 20 simulated collectors), QUICKSTART_CHART_VERSION (release: default is
+# Environment: QUICKSTART_SOURCE, QUICKSTART_SIM=1 (also start 20 simulated collectors; without it a command uses the simulator if the
+# cluster has it, 0 if the cluster says it has none, and stops if it cannot tell), QUICKSTART_CHART_VERSION (release: default is
 # the version of deploy/helm/myriarch/Chart.yaml), QUICKSTART_OCI_BASE (default oci://ghcr.io/myriarch/charts), KIND_SYSTEM_TOOLS=1 (use
 # kind, kubectl and helm from the PATH instead of building the pinned ones), and the variables of hack/kind/README.md (KIND_CLUSTER_NAME,
 # KIND_NODE_IMAGE, PROBE_WORK, PROBE_PORT_API, ...). The rollout step needs Go (it builds the small tool that fetches the Sigstore trusted
@@ -256,7 +257,11 @@ install_sim() {
 # rebuilds the Git state from this choice, so a later command without QUICKSTART_SIM=1 must not drop the simulated fleets.
 resolve_sim() {
   if [ -z "${QUICKSTART_SIM:-}" ]; then
-    if kn "${NS_APP}" get deploy myriarch-sim >/dev/null 2>&1; then QUICKSTART_SIM=1; else QUICKSTART_SIM=0; fi
+    local found
+    # --ignore-not-found: an absent simulator is 0, but an error (the API server is unreachable, the context is wrong) stops the command
+    # instead of being read as "no simulator", which would drop the simulated fleets from the Git state.
+    found="$(kn "${NS_APP}" get deploy myriarch-sim --ignore-not-found -o name)" || die "cannot tell whether the simulator is installed; set QUICKSTART_SIM=0 or 1 or fix the access to the cluster"
+    if [ -n "${found}" ]; then QUICKSTART_SIM=1; else QUICKSTART_SIM=0; fi
   fi
   export QUICKSTART_SIM
 }
