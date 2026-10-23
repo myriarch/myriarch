@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/myriarch/myriarch/internal/audit"
 	"github.com/myriarch/myriarch/internal/domain"
 	"github.com/myriarch/myriarch/internal/executor"
 	"github.com/myriarch/myriarch/internal/notify"
@@ -54,14 +55,24 @@ func (e *Engine) plan(ctx context.Context) error {
 	for i := range selections {
 		selByFleet[selections[i].Fleet] = &selections[i]
 	}
-	agents, err := e.deps.Store.Agents().ListAll(ctx, store.AgentFilter{Kinds: []domain.AgentKind{domain.AgentKindCollector}})
+	agents, err := e.deps.Store.Agents().ListAll(ctx, store.AgentFilter{Kinds: []domain.AgentKind{domain.AgentKindCollector, domain.AgentKindBridge}})
 	if err != nil {
 		return fmt.Errorf("list agents: %w", err)
 	}
+	// Collectors are the members of both kinds. A Bridge that its fleet
+	// configures (spec.bridge.manage, standalone mode) is a member for config
+	// rollouts only, so waves, approvals and audit apply to its config as well;
+	// it is never a member for versions (ADR-0037).
 	byFleet := map[string][]*domain.Agent{}
+	bridgesByFleet := map[string][]*domain.Agent{}
 	for i := range agents {
 		a := &agents[i]
-		if a.Assignment.FleetName != "" {
+		if a.Assignment.FleetName == "" {
+			continue
+		}
+		if a.Kind == domain.AgentKindBridge {
+			bridgesByFleet[a.Assignment.FleetName] = append(bridgesByFleet[a.Assignment.FleetName], a)
+		} else {
 			byFleet[a.Assignment.FleetName] = append(byFleet[a.Assignment.FleetName], a)
 		}
 	}
@@ -76,9 +87,22 @@ func (e *Engine) plan(ctx context.Context) error {
 		sel := selByFleet[f.Name]
 		vt := domain.ResolveVersionTarget(f, sel)
 		e.syncTargetVersion(ctx, f, vt)
+		if versionRolloutsEnabled(f, vt) {
+			e.noteBridgesSkipped(ctx, bridgesByFleet[f.Name], vt.Version)
+		}
+		configMembers := byFleet[f.Name]
+		for _, b := range bridgesByFleet[f.Name] {
+			if domain.BridgeConfigLock(b, f) == "" {
+				configMembers = append(configMembers[:len(configMembers):len(configMembers)], b)
+			}
+		}
 		versionOK := true
 		for _, kind := range []domain.RolloutKind{domain.RolloutKindConfig, domain.RolloutKindVersion} {
-			if err := e.planFleetKind(ctx, snap, f, kind, vt, byFleet[f.Name]); err != nil {
+			members := byFleet[f.Name]
+			if kind == domain.RolloutKindConfig {
+				members = configMembers
+			}
+			if err := e.planFleetKind(ctx, snap, f, kind, vt, members); err != nil {
 				e.log.Error("plan rollout failed", "fleet", f.Name, "kind", kind, "error", err)
 				errs = append(errs, fmt.Errorf("fleet %s %s: %w", f.Name, kind, err))
 				if kind == domain.RolloutKindVersion {
@@ -92,6 +116,43 @@ func (e *Engine) plan(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// noteBridgesSkipped records, once per agent and target version in a term of
+// leadership, that a Bridge of the fleet is left out of the version rollout
+// and why.
+func (e *Engine) noteBridgesSkipped(ctx context.Context, bridges []*domain.Agent, version string) {
+	var evs []domain.AgentEvent
+	var audits []domain.AuditEvent
+	e.fleetsMu.Lock()
+	if e.bridgeNoted == nil {
+		e.bridgeNoted = map[domain.AgentID]string{}
+	}
+	for _, a := range bridges {
+		if e.bridgeNoted[a.ID] == version {
+			continue
+		}
+		e.bridgeNoted[a.ID] = version
+		details := map[string]any{"action": "version_rollout", "reason": domain.BridgeVersionRefused, "fleet": a.Assignment.FleetName, "version": version}
+		evs = append(evs, domain.AgentEvent{
+			AgentID: a.ID, Time: e.now(), Type: domain.AgentEventBridgeLocked, Severity: "warning",
+			Message: "version rollout to " + version + " skips this agent: " + domain.BridgeVersionRefused,
+			Details: details,
+		})
+		au := audit.System(domain.ActorSystem, "agent.bridge_held_back", "agent", a.ID.String(), details)
+		au.Time = e.now()
+		audits = append(audits, au)
+	}
+	e.fleetsMu.Unlock()
+	if len(evs) == 0 {
+		return
+	}
+	for _, au := range audits {
+		e.audit(ctx, au)
+	}
+	if err := e.deps.Store.Agents().AppendEvents(ctx, evs); err != nil {
+		e.log.Warn("cannot record that OpAMP Bridge agents are left out of a version rollout", "error", err)
+	}
 }
 
 func (e *Engine) setFleets(snap *domain.GitOpsSnapshot) {
@@ -296,7 +357,7 @@ func (e *Engine) planFleetKind(ctx context.Context, snap *domain.GitOpsSnapshot,
 		for _, t := range open {
 			a, ok := byID[t.AgentID]
 			if !ok {
-				continue // left the fleet: handled by the tick (skipped)
+				continue // left the fleet or became a Bridge: handled by the tick (skipped)
 			}
 			if want := currentTarget(kind, f, vt, a); want != t.ToRef {
 				reason = fmt.Sprintf("goal of agent %s changed from %s to %s", a.Hostname, shortRef(kind, t.ToRef), shortRef(kind, want))

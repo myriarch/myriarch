@@ -295,7 +295,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Effective config reported by the agent (expanded, includes defaults, secrets redacted by the collector) */
+        /** Effective config reported by the agent (expanded, includes defaults, secrets redacted by the collector; 404 for an OpAMP Bridge, whose effective config the server does not keep) */
         get: operations["getAgentEffectiveConfig"];
         put?: never;
         post?: never;
@@ -365,7 +365,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Send an OpAMP restart command (agent must have AcceptsRestartCommand) */
+        /** Send an OpAMP restart command (agent must have AcceptsRestartCommand; refused with 412 for an OpAMP Bridge) */
         post: operations["restartAgent"];
         delete?: never;
         options?: never;
@@ -1429,8 +1429,11 @@ export interface components {
             commit: string;
             contentHash?: components["schemas"]["Hash"];
         };
-        /** @enum {string} */
-        AgentKind: "collector" | "updater" | "unknown";
+        /**
+         * @description bridge = the OpAMP Bridge of the OpenTelemetry Operator, recognised by the service.name io.opentelemetry.operator-opamp-bridge or the attribute opentelemetry.io/opamp.bridge.mode. The server sends it remote configuration only when a fleet sets spec.bridge.manage and the Bridge runs in standalone mode, never a restart command, and it is not part of version rollouts.
+         * @enum {string}
+         */
+        AgentKind: "collector" | "updater" | "bridge" | "unknown";
         /** @enum {string} */
         ConnectionStatus: "online" | "offline";
         /** @enum {string} */
@@ -1704,7 +1707,7 @@ export interface components {
             /** Format: date-time */
             time: string;
             /** @enum {string} */
-            type: "connected" | "disconnected" | "registered" | "description_changed" | "version_changed" | "health_changed" | "config_offered" | "config_applied" | "config_failed" | "assigned" | "package_offered" | "package_status" | "command" | "rollout_target" | "identity_conflict";
+            type: "connected" | "disconnected" | "registered" | "description_changed" | "version_changed" | "health_changed" | "config_offered" | "config_applied" | "config_failed" | "assigned" | "package_offered" | "package_status" | "command" | "rollout_target" | "identity_conflict" | "bridge_locked";
             /** @enum {string} */
             severity: "info" | "warning" | "error";
             message: string;

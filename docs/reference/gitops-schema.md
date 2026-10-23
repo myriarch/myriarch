@@ -69,7 +69,7 @@ See [Fleets](../concepts/fleets.md).
 | `spec.rollout.configPolicy` | string | no | `default` | Name of the `RolloutPolicy` for configuration changes. |
 | `spec.rollout.versionPolicy` | string | no | `default` | Name of the `RolloutPolicy` for version changes. |
 | `spec.bridge` | object | no | see fields | How the fleet treats OpAMP Bridge agents of the OpenTelemetry Operator that its selector matches. See [Bridge agents](../concepts/fleets.md#bridge-agents). |
-| `spec.bridge.manage` | bool | no | `false` | Available from v0.2.0. Opts the fleet in to configure the Bridge agents that its selector matches. Without it a Bridge never receives remote configuration from the fleet, and a selector that matches Bridges is the warning `bridge_selected`. The opt-in takes effect for Bridges in standalone mode only: a Bridge in operator mode stays locked with it. |
+| `spec.bridge.manage` | bool | no | `false` | Available from v0.2.0. Opts the fleet in to configure the Bridge agents that its selector matches. Without it a Bridge never receives remote configuration from the fleet, and a selector that matches Bridges is the warning `bridge_selected`. The opt-in takes effect for Bridges in standalone mode only: a Bridge in operator mode stays locked with it. The server enforces this: without the opt-in no remote configuration is offered to a Bridge (see [Bridge agents](../concepts/fleets.md#bridge-agents)), and with it the restart command and version rollouts stay off. |
 
 A policy name that is not `default` and does not exist is `policy_not_found`. If the policy `default` does not exist, the
 built-in policy applies ([Rollouts](../concepts/rollouts.md#which-policy-a-fleet-uses)).

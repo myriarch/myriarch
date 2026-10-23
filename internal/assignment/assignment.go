@@ -35,6 +35,10 @@ const (
 	tokenRefreshGap  = 10 * time.Second
 	renderedPutTTL   = 5 * time.Minute
 	lockStripes      = 64
+	writtenMaxAge    = 5 * time.Minute
+	writtenPruneGap  = time.Minute
+	writtenPruneSize = 20000
+	maxAssignTries   = 3
 	assignmentChunk  = 100
 	maxErrorMessages = 3
 )
@@ -75,6 +79,8 @@ type Service struct {
 	// (ReassignAll re-reads agents whose listing may be stale).
 	writtenMu sync.Mutex
 	written   map[domain.AgentID]time.Time
+	// lastPrune is when written was last pruned (pruning is throttled).
+	lastPrune time.Time
 
 	duration *prometheus.HistogramVec
 }
@@ -91,6 +97,10 @@ type state struct {
 func (st *state) targetVersion(f *domain.Fleet) string {
 	return domain.ResolveVersionTarget(f, st.selections[f.Name]).Version
 }
+
+// errConflict reports that another replica changed the assignment since it was
+// read; assignOnce has recorded nothing then.
+var errConflict = errors.New("assignment changed concurrently")
 
 var _ control.Assigner = (*Service)(nil)
 
@@ -230,6 +240,7 @@ func (s *Service) VersionSelections(ctx context.Context) (map[string]*domain.Fle
 type outcome struct {
 	assignment      domain.Assignment
 	assignmentWrote bool // SetAssignment was written (fleet, hash, version or error changed)
+	bridgeLocked    bool // the agent is a Bridge that its fleet does not configure
 }
 
 func (s *Service) lockFor(id domain.AgentID) *sync.Mutex { return &s.locks[int(id[15])%lockStripes] }
@@ -237,13 +248,16 @@ func (s *Service) lockFor(id domain.AgentID) *sync.Mutex { return &s.locks[int(i
 // AssignAgent implements control.Assigner.
 func (s *Service) AssignAgent(ctx context.Context, id domain.AgentID) (domain.Assignment, error) {
 	start := time.Now()
+	mu := s.lockFor(id)
+	mu.Lock()
+	defer mu.Unlock()
+	// Read the snapshot under the lock: one read before it can be older than
+	// the one the caller we waited for has just used, and would write the
+	// assignment back to an older state.
 	st, err := s.current(ctx)
 	if err != nil {
 		return domain.Assignment{AgentID: id}, err
 	}
-	mu := s.lockFor(id)
-	mu.Lock()
-	defer mu.Unlock()
 	ag, err := s.deps.Store.Agents().Get(ctx, id)
 	if err != nil {
 		return domain.Assignment{AgentID: id}, fmt.Errorf("assign agent %s: %w", id, err)
@@ -252,6 +266,8 @@ func (s *Service) AssignAgent(ctx context.Context, id domain.AgentID) (domain.As
 	result := "ok"
 	if err != nil {
 		result = "error"
+	} else if out.bridgeLocked {
+		result = "bridge_locked"
 	} else if out.assignment.Error != "" {
 		result = "render_error"
 	}
@@ -260,7 +276,9 @@ func (s *Service) AssignAgent(ctx context.Context, id domain.AgentID) (domain.As
 }
 
 // staleSince reports whether ag (listed at listedAt) may be stale because
-// another call wrote it at or after that time. A write in the same clock tick
+// another call wrote it at or after that time, or because the listing is older
+// than writtenMaxAge: the record of writes is pruned after that age and can no
+// longer vouch for it. A write in the same clock tick
 // as the listing counts as later: the clock can be coarse (Windows advances it
 // in steps of up to 15.6 ms), and an equal time says nothing about the order.
 // Both times must come from time.Now(), so that the comparison uses the
@@ -268,6 +286,9 @@ func (s *Service) AssignAgent(ctx context.Context, id domain.AgentID) (domain.As
 func (s *Service) staleSince(id domain.AgentID, listedAt time.Time) bool {
 	if listedAt.IsZero() {
 		return false
+	}
+	if time.Since(listedAt) > writtenMaxAge {
+		return true
 	}
 	s.writtenMu.Lock()
 	defer s.writtenMu.Unlock()
@@ -280,9 +301,12 @@ func (s *Service) markWritten(id domain.AgentID) {
 	defer s.writtenMu.Unlock()
 	now := time.Now()
 	s.written[id] = now
-	if len(s.written) > 20000 {
+	// Prune at most once per writtenPruneGap, never a scan of the whole map
+	// under the lock on every write. Entries live for writtenMaxAge.
+	if len(s.written) > writtenPruneSize && now.Sub(s.lastPrune) >= writtenPruneGap {
+		s.lastPrune = now
 		for k, t := range s.written {
-			if now.Sub(t) > time.Minute {
+			if now.Sub(t) > writtenMaxAge {
 				delete(s.written, k)
 			}
 		}
@@ -292,10 +316,33 @@ func (s *Service) markWritten(id domain.AgentID) {
 // assignOne is the shared implementation of AssignAgent and ReassignAll. The
 // caller holds the agent's stripe lock. listedAt is the time ag was read as
 // part of a list (zero: ag is fresh).
+//
+// The stripe lock holds only inside this process. The assignment is written
+// as a compare-and-set against the one that was read, so that with several
+// replicas one change takes effect once: the replica that loses the race
+// records nothing, re-reads the agent and evaluates again (it then finds the
+// assignment settled, or a newer one it has to judge itself).
 func (s *Service) assignOne(ctx context.Context, st *state, ag *domain.Agent, listedAt time.Time) (outcome, error) {
+	for try := 1; ; try++ {
+		out, err := s.assignOnce(ctx, st, ag, listedAt)
+		if !errors.Is(err, errConflict) {
+			return out, err
+		}
+		if try == maxAssignTries {
+			return out, fmt.Errorf("assign agent %s: %w %d times", ag.ID, errConflict, try)
+		}
+		fresh, err := s.deps.Store.Agents().Get(ctx, ag.ID)
+		if err != nil {
+			return out, fmt.Errorf("re-read agent %s: %w", ag.ID, err)
+		}
+		ag, listedAt = fresh, time.Time{}
+	}
+}
+
+func (s *Service) assignOnce(ctx context.Context, st *state, ag *domain.Agent, listedAt time.Time) (outcome, error) {
 	snap := st.snap
 	res := outcome{assignment: domain.Assignment{AgentID: ag.ID}}
-	if ag.Kind != domain.AgentKindCollector {
+	if ag.Kind != domain.AgentKindCollector && ag.Kind != domain.AgentKindBridge {
 		return res, nil
 	}
 	if s.staleSince(ag.ID, listedAt) {
@@ -340,8 +387,12 @@ func (s *Service) assignOne(ctx context.Context, st *state, ag *domain.Agent, li
 			return nil
 		}
 		u.AssignedAt = now
-		if err := s.deps.Store.Agents().SetAssignment(ctx, ag.ID, u); err != nil {
+		applied, err := s.deps.Store.Agents().CompareAndSetAssignment(ctx, ag.ID, prev, u)
+		if err != nil {
 			return fmt.Errorf("set assignment of agent %s: %w", ag.ID, err)
+		}
+		if !applied {
+			return errConflict
 		}
 		res.assignmentWrote = true
 		return nil
@@ -361,7 +412,26 @@ func (s *Service) assignOne(ctx context.Context, st *state, ag *domain.Agent, li
 
 	fleet := match.Fleet
 	res.assignment.FleetName = fleet.Name
-	res.assignment.TargetVersion = st.targetVersion(fleet)
+	if ag.Kind == domain.AgentKindBridge {
+		// A Bridge is a member of the fleet that selects it, but is rendered a
+		// configuration only when the fleet opted in (ADR-0037). The opamp
+		// server holds the offer back as well.
+		if reason := domain.BridgeConfigLock(ag, fleet); reason != "" {
+			res.assignment.Error = reason
+			res.bridgeLocked = true
+			if err := write(store.AgentAssignmentUpdate{FleetName: fleet.Name, Error: reason}); err != nil {
+				return res, err
+			}
+			if prev.FleetName != fleet.Name {
+				s.fleetEvent(ctx, ag.ID, fleet.Name, prev.FleetName, snap.Commit, "")
+			}
+			return res, nil
+		}
+	}
+	if ag.Kind != domain.AgentKindBridge {
+		// A Bridge is no member for versions (ADR-0037): it gets no target.
+		res.assignment.TargetVersion = st.targetVersion(fleet)
+	}
 
 	render, rerr := s.deps.Renderer.Render(blueprint.RenderInput{
 		Snapshot: snap, Fleet: fleet, Agent: blueprint.AgentInput{ID: &ag.ID, Attributes: view},
@@ -557,7 +627,7 @@ func (s *Service) ReassignAll(ctx context.Context) error {
 	}
 	snap := st.snap
 	listedAt := time.Now()
-	agents, err := s.deps.Store.Agents().ListAll(ctx, store.AgentFilter{Kinds: []domain.AgentKind{domain.AgentKindCollector}})
+	agents, err := s.deps.Store.Agents().ListAll(ctx, store.AgentFilter{Kinds: []domain.AgentKind{domain.AgentKindCollector, domain.AgentKindBridge}})
 	if err != nil {
 		return fmt.Errorf("list agents: %w", err)
 	}

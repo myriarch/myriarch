@@ -76,13 +76,16 @@ func (f *fakeAuth) AuthenticateAgent(r *http.Request) (*authn.AgentCredential, e
 
 // fakeAssigner renders a per-fleet config, stores it and applies the bootstrap rule.
 type fakeAssigner struct {
-	db      *postgres.DB
-	calls   atomic.Int64
-	err     error
-	fleet   string
-	body    func(id domain.AgentID) []byte
-	mu      sync.Mutex
-	calledF []domain.AgentID
+	db    *postgres.DB
+	calls atomic.Int64
+	err   error
+	fleet string
+	body  func(id domain.AgentID) []byte
+	// holdBridge acts like the real assigner for a Bridge that its fleet does not
+	// configure: it sets the fleet and no config.
+	holdBridge bool
+	mu         sync.Mutex
+	calledF    []domain.AgentID
 }
 
 func (a *fakeAssigner) AssignAgent(ctx context.Context, id domain.AgentID) (domain.Assignment, error) {
@@ -96,6 +99,14 @@ func (a *fakeAssigner) AssignAgent(ctx context.Context, id domain.AgentID) (doma
 	fleet := a.fleet
 	if fleet == "" {
 		fleet = "edge-nl"
+	}
+	if a.holdBridge {
+		if ag, err := a.db.Agents().Get(ctx, id); err == nil && ag.Kind == domain.AgentKindBridge {
+			if err := a.db.Agents().SetAssignment(ctx, id, store.AgentAssignmentUpdate{FleetName: fleet, Error: "locked"}); err != nil {
+				return domain.Assignment{}, err
+			}
+			return domain.Assignment{AgentID: id, FleetName: fleet, Error: "locked"}, nil
+		}
 	}
 	body := []byte("receivers:\n  otlp:\n    protocols:\n      grpc: {}\nexporters:\n  debug: {}\nservice:\n  pipelines:\n    metrics:\n      receivers: [otlp]\n      exporters: [debug]\n# fleet " + fleet + "\n")
 	if a.body != nil {
@@ -118,12 +129,14 @@ func (a *fakeAssigner) AssignAgent(ctx context.Context, id domain.AgentID) (doma
 // ------------------------------------------------------------- rig ---
 
 type rigOpts struct {
-	cfg       func(c *config.OpAMPConfig)
-	replica   string
-	pool      *pgxpool.Pool
-	noAssign  bool
-	requireTk bool
-	noRun     bool
+	cfg      func(c *config.OpAMPConfig)
+	replica  string
+	pool     *pgxpool.Pool
+	noAssign bool
+	// holdBridge: see fakeAssigner
+	holdBridge bool
+	requireTk  bool
+	noRun      bool
 	// realAuth uses the real authn.Service (enrollment token lookup in the database)
 	realAuth bool
 	// downloads mints the download tokens of package offers
@@ -181,7 +194,7 @@ func newRig(t *testing.T, o rigOpts) *rig {
 	r.bus = bus
 	r.ctl = control.NewBusControl(bus)
 	r.auth = &fakeAuth{tokens: map[string]*authn.AgentCredential{}, required: o.requireTk}
-	r.assigner = &fakeAssigner{db: r.db}
+	r.assigner = &fakeAssigner{db: r.db, holdBridge: o.holdBridge}
 
 	cfg := config.Default().OpAMP
 	cfg.RequireEnrollmentToken = o.requireTk

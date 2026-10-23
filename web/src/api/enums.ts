@@ -39,7 +39,7 @@ function enumOf<T extends string>() {
   return <const A extends readonly T[]>(values: Exhaustive<T, A>): A => values;
 }
 
-export const AGENT_KINDS = enumOf<AgentKind>()(['collector', 'updater', 'unknown']);
+export const AGENT_KINDS = enumOf<AgentKind>()(['collector', 'updater', 'bridge', 'unknown']);
 export const CONNECTION_STATUSES = enumOf<ConnectionStatus>()(['online', 'offline']);
 export const REMOTE_CONFIG_STATUSES = enumOf<RemoteConfigStatus>()([
   'unset',

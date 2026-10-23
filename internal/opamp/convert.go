@@ -175,6 +175,10 @@ func descriptionUpdate(d *protobufs.AgentDescription, caps uint64, cred *authn.A
 	u.Arch = lookup(domain.AttrHostArch)
 	u.Capabilities = caps
 	switch {
+	case isBridge(id, non):
+		// before the capability test: a Bridge accepts remote config, and it
+		// is never a collector (ADR-0037)
+		u.Kind = domain.AgentKindBridge
 	case u.ServiceName == domain.UpdaterServiceName:
 		u.Kind = domain.AgentKindUpdater
 	case domain.HasCapability(caps, domain.CapAcceptsRemoteConfig):
@@ -191,6 +195,11 @@ func descriptionUpdate(d *protobufs.AgentDescription, caps uint64, cred *authn.A
 		u.InitialLabels = map[string]string{}
 	}
 	return upd
+}
+
+// isBridge reports whether the reported attributes describe an OpAMP Bridge.
+func isBridge(identifying, nonIdentifying map[string]string) bool {
+	return domain.IsOpAMPBridge(identifying) || domain.IsOpAMPBridge(nonIdentifying)
 }
 
 // nanosToTime converts unix nanoseconds (0 = unset) to UTC time.

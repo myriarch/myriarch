@@ -163,6 +163,7 @@ describe('i18n resources', () => {
       'command',
       'rollout_target',
       'identity_conflict',
+      'bridge_locked',
     ]) {
       expect(all.has(`enum.eventType.${t}`), t).toBe(true);
     }

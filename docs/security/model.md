@@ -76,6 +76,24 @@ Residual risk:
 
 Residual risk: a large number of authenticated agents can still load a replica up to the configured limits. Size the limits to the fleet (see [Scaling](../architecture.md#scaling)).
 
+### OpAMP Bridge agents
+
+The OpAMP Bridge of the OpenTelemetry Operator replaces the whole set of collector resources that it manages with the
+configuration it receives, and deletes the resources that a message lacks. The server holds three controls against a
+selector that is too broad:
+
+| Control | Behaviour |
+|---|---|
+| Remote configuration | A Bridge receives none unless its fleet sets `spec.bridge.manage: true` and the Bridge runs in standalone mode. The guard sits in the reconcile step in front of every offer (first message, heartbeat, push, resync, reconnect) and fails closed: a fleet that cannot be read locks the Bridge. |
+| Restart | The restart command is refused for a Bridge, always. The REST action answers `412`, the OpAMP layer refuses a command that arrives by another path, and both are recorded. |
+| Rollouts and data | A Bridge is not a target of version rollouts, and the server stores no effective configuration of it (it holds complete collector resources, and the redaction rules were written for collector configurations). |
+
+Each held-back action is an agent event (`bridge_locked`) and an audit entry (`agent.bridge_held_back`) with the action and the reason.
+Residual risk: the recognition uses the `service.name` and the mode attribute that the agent reports, so it is a safeguard
+against mistakes and no authentication. A Bridge of a release before 0.157.0 in standalone mode reports neither and is treated
+as a collector. Give Bridges an enrollment token of their own and select on `labels.*`; the labels of a token are the attributes that an agent cannot choose
+([ADR-0037](../adr/0037-opamp-bridge-agents-until-the-operator-integration.md)).
+
 ## Artifact verification
 
 `myriarchd` caches collector (and supervisor) release artifacts and offers them to updaters. Verification happens on the server and again on the host.

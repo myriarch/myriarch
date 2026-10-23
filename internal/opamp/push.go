@@ -231,6 +231,9 @@ func requestedBy(c eventbus.AgentCommandPayload) string {
 // displaces all other fields of ServerToAgent).
 func (s *Server) sendRestart(sess *session, c eventbus.AgentCommandPayload) {
 	a := sess.agent
+	if s.refuseBridgeRestart(a, c.RequestedBy) {
+		return
+	}
 	if a == nil || !domain.HasCapability(a.Capabilities, domain.CapAcceptsRestartCommand) {
 		s.emit(sess.id, domain.AgentEventCommand, "warning", "restart not supported by this agent", map[string]any{"command": "restart", "requestedBy": c.RequestedBy})
 		return

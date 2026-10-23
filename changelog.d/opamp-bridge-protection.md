@@ -1,0 +1,9 @@
+<!-- Entry for CHANGELOG.md, section Unreleased. It is folded into CHANGELOG.md when the next release is prepared. -->
+
+### Upgrade notes
+
+- **OpAMP Bridge agents are a kind of their own, and the server holds back what could change their collector resources.** Migration `00007_agent_kind_bridge.sql` (expand only) widens the kinds of `agents.kind` by `bridge`. An agent that reports the `service.name` `io.opentelemetry.operator-opamp-bridge` or the attribute `opentelemetry.io/opamp.bridge.mode` is stored as kind `bridge` with its next description message. Such an agent receives remote configuration only from a fleet with `spec.bridge.manage: true`, and only in standalone mode; it is never sent a restart command (the REST action answers `412`) and never a target of a version rollout. If a Bridge of the OpenTelemetry Operator was connected before, it was treated as a collector so far: check that no fleet relies on configuring it, and scale `myriarchd` to one replica for the update, because replicas of an earlier release classify a Bridge as a collector until all replicas run this version.
+
+### Added
+
+- **OpAMP Bridge protection in the server.** The agent kind `bridge` (REST `kind`, filter `kind=bridge`, database migration `00007_agent_kind_bridge.sql`) and the agent event `bridge_locked`. Without `spec.bridge.manage: true` on its fleet, and without standalone mode, a Bridge is offered no remote configuration whatever starts the offer; the restart command is refused for every Bridge (`412` in the REST API); version rollouts skip it and say why on the agent; the server keeps no effective configuration of it. Each held-back action is an agent event and an audit entry (`agent.bridge_held_back`), written once per reason and not with every heartbeat. See [Fleets](docs/concepts/fleets.md#bridge-agents) and the [OpAMP server notes](docs/design/opamp-server.md#bridge-agents).

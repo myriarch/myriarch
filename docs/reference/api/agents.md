@@ -12,11 +12,11 @@ All paths are relative to the base path `/api/v1` (same origin as the UI). Authe
 | [Value counts for filter UIs (same filters as listAgents)](#value-counts-for-filter-uis-same-filters-as-listagents) | `GET /agents/facets` | `read` (viewer) |
 | [Agent details](#agent-details) | `GET /agents/{id}` | `read` (viewer) |
 | [Forget an agent (only allowed while offline; 412 otherwise)](#forget-an-agent-only-allowed-while-offline-412-otherwise) | `DELETE /agents/{id}` | `agents:delete` (operator) |
-| [Effective config reported by the agent (expanded, includes defaults, secrets redacted by the collector)](#effective-config-reported-by-the-agent-expanded-includes-defaults-secrets-redacted-by-the-collector) | `GET /agents/{id}/effective-config` | `read` (viewer) |
+| [Effective config reported by the agent (expanded, includes defaults, secrets redacted by the collector; 404 for an OpAMP Bridge, whose effective config the server does not keep)](#effective-config-reported-by-the-agent-expanded-includes-defaults-secrets-redacted-by-the-collector-404-for-an-opamp-bridge-whose-effective-config-the-server-does-not-keep) | `GET /agents/{id}/effective-config` | `read` (viewer) |
 | [Rendered config currently offered (desired) or assigned by GitOps](#rendered-config-currently-offered-desired-or-assigned-by-gitops) | `GET /agents/{id}/desired-config` | `read` (viewer) |
 | [Available components reported by the agent](#available-components-reported-by-the-agent) | `GET /agents/{id}/components` | `read` (viewer) |
 | [Event history of the agent (newest first, cursor pagination)](#event-history-of-the-agent-newest-first-cursor-pagination) | `GET /agents/{id}/events` | `read` (viewer) |
-| [Send an OpAMP restart command (agent must have AcceptsRestartCommand)](#send-an-opamp-restart-command-agent-must-have-acceptsrestartcommand) | `POST /agents/{id}/actions/restart` | `agents:operate` (operator) |
+| [Send an OpAMP restart command (agent must have AcceptsRestartCommand; refused with 412 for an OpAMP Bridge)](#send-an-opamp-restart-command-agent-must-have-acceptsrestartcommand-refused-with-412-for-an-opamp-bridge) | `POST /agents/{id}/actions/restart` | `agents:operate` (operator) |
 | [Force resync - clear failed config hash, re-send desired config, request full state](#force-resync---clear-failed-config-hash-re-send-desired-config-request-full-state) | `POST /agents/{id}/actions/resync` | `agents:operate` (operator) |
 | [Clear the credential binding of an agent (the instance uid is bound to the enrollment token / client certificate of its first registration; the next connection with a valid credential claims it)](#clear-the-credential-binding-of-an-agent-the-instance-uid-is-bound-to-the-enrollment-token--client-certificate-of-its-first-registration-the-next-connection-with-a-valid-credential-claims-it) | `POST /agents/{id}/actions/reenroll` | `enrollment:manage` (admin) |
 
@@ -125,7 +125,7 @@ Operation `deleteAgent`. Permission `agents:delete` (lowest role: operator).
 | 404 | Not found (code not_found) | `application/problem+json` | [Problem](data-types.md#problem) |
 | 412 | Invalid state transition or precondition (code precondition_failed) | `application/problem+json` | [Problem](data-types.md#problem) |
 
-## Effective config reported by the agent (expanded, includes defaults, secrets redacted by the collector)
+## Effective config reported by the agent (expanded, includes defaults, secrets redacted by the collector; 404 for an OpAMP Bridge, whose effective config the server does not keep)
 
 `GET /api/v1/agents/{id}/effective-config`
 
@@ -208,7 +208,7 @@ Operation `listAgentEvents`. Permission `read` (lowest role: viewer).
 | 400 | Invalid request (code bad_request) | `application/problem+json` | [Problem](data-types.md#problem) |
 | 404 | Not found (code not_found) | `application/problem+json` | [Problem](data-types.md#problem) |
 
-## Send an OpAMP restart command (agent must have AcceptsRestartCommand)
+## Send an OpAMP restart command (agent must have AcceptsRestartCommand; refused with 412 for an OpAMP Bridge)
 
 `POST /api/v1/agents/{id}/actions/restart`
 

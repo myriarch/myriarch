@@ -59,3 +59,60 @@ func BridgeModeOf(attrs map[string]string) BridgeMode {
 	}
 	return BridgeModeUnknown
 }
+
+// Reasons that the server gives when it holds back an action from a Bridge. They
+// appear in events, audit entries and error messages.
+const (
+	// BridgeRestartRefused is the reason of the refused restart command: in
+	// operator mode the command restarts the workloads of every collector
+	// resource that the Bridge lists, and Kubernetes is the control for
+	// restarts.
+	BridgeRestartRefused = "restart commands are not sent to OpAMP Bridge agents; restart the workloads through Kubernetes"
+	// BridgeVersionRefused is the reason that a Bridge is not a target of a
+	// version rollout.
+	BridgeVersionRefused = "OpAMP Bridge agents are not part of version rollouts; change the version through spec.image of the collector resources or a gitops-pr"
+)
+
+// BridgeModeOfAgent returns the mode that the agent reports as a Bridge.
+func BridgeModeOfAgent(a *Agent) BridgeMode {
+	if a == nil {
+		return BridgeModeUnknown
+	}
+	// Standalone only when every reported value says so: the Bridge writes the
+	// attribute itself, and a contradiction resolves to the stricter reading.
+	var mode BridgeMode
+	found := false
+	for _, attrs := range []map[string]string{a.IdentifyingAttributes, a.NonIdentifyingAttributes} {
+		if _, ok := attrs[AttrBridgeMode]; !ok {
+			continue
+		}
+		m := BridgeModeOf(attrs)
+		if found && m != mode {
+			return BridgeModeUnknown
+		}
+		mode, found = m, true
+	}
+	return mode
+}
+
+// BridgeConfigLock explains why a fleet may not send remote configuration to
+// the Bridge a, or returns "" when it may. f is the fleet the Bridge is
+// assigned to, or nil. Only a fleet with spec.bridge.manage configures a
+// Bridge, and only one in standalone mode: a Bridge in operator mode or in an
+// unknown mode stays locked with the opt-in as well (ADR-0037).
+func BridgeConfigLock(a *Agent, f *Fleet) string {
+	switch {
+	case f == nil:
+		return "the agent is an OpAMP Bridge and no fleet with spec.bridge.manage configures it"
+	case !f.Bridge.Manage:
+		return "the agent is an OpAMP Bridge and fleet " + f.Name + " does not set spec.bridge.manage"
+	}
+	switch m := BridgeModeOfAgent(a); m {
+	case BridgeModeStandalone:
+		return ""
+	case BridgeModeOperator:
+		return "the agent is an OpAMP Bridge in operator mode, which no fleet configures: a message that lacks the key of a collector resource deletes the resource"
+	default:
+		return "the agent is an OpAMP Bridge in a mode that this release does not know, which no fleet configures"
+	}
+}

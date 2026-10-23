@@ -91,8 +91,11 @@ type session struct {
 	forceFullState  bool
 	offeredConfig   domain.Hash
 	offeredConfigAt time.Time
-	offeredPkgs     domain.Hash
-	offeredPkgsAt   time.Time
+	// bridgeHeld is the reason and desired hash of the offer that was last held
+	// back from an OpAMP Bridge on this connection (bridge.go).
+	bridgeHeld    string
+	offeredPkgs   domain.Hash
+	offeredPkgsAt time.Time
 
 	// Stale APPLYING (docs/design/opamp-server.md, "Stale APPLYING after a
 	// reconnect"). applyingHash is the config hash this connection saw the
@@ -491,6 +494,9 @@ func (s *Server) drainHTTPCommands(sess *session) (restart bool) {
 	for _, c := range cmds {
 		switch c.Command {
 		case eventbus.CommandRestart:
+			if s.refuseBridgeRestart(sess.agent, c.RequestedBy) {
+				continue
+			}
 			if sess.agent != nil && domain.HasCapability(sess.agent.Capabilities, domain.CapAcceptsRestartCommand) {
 				restart = true
 				s.emit(sess.id, domain.AgentEventCommand, "info", "restart requested"+requestedBy(c), map[string]any{"command": "restart", "requestedBy": c.RequestedBy})

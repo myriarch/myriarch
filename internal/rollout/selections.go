@@ -216,10 +216,12 @@ func (e *Engine) markTargetPlanned(ctx context.Context, f *domain.Fleet, vt doma
 	e.fleetsMu.Unlock()
 }
 
-// forgetPlanned makes the next planning run write the record of every fleet again (see lastPlanned).
+// forgetPlanned makes the next planning run write the record of every fleet again (see lastPlanned) and note
+// every held-back Bridge again (see bridgeNoted).
 func (e *Engine) forgetPlanned() {
 	e.fleetsMu.Lock()
 	e.lastPlanned = nil
+	e.bridgeNoted = nil
 	e.fleetsMu.Unlock()
 }
 

@@ -110,7 +110,7 @@ func (s *Server) updateGauges(ctx context.Context) {
 	defer cancel()
 	ag := s.deps.Store.Agents()
 	s.m.agents.Reset()
-	for _, kind := range []domain.AgentKind{domain.AgentKindCollector, domain.AgentKindUpdater, domain.AgentKindUnknown} {
+	for _, kind := range []domain.AgentKind{domain.AgentKindCollector, domain.AgentKindUpdater, domain.AgentKindBridge, domain.AgentKindUnknown} {
 		f, err := ag.Facets(gctx, store.AgentFilter{Kinds: []domain.AgentKind{kind}})
 		if err != nil {
 			if ctx.Err() == nil {
