@@ -99,3 +99,40 @@ if ($LASTEXITCODE -eq 2 -and $r.Contains('usage: scripts/host-e2e/windows.ps1'))
 $r = & pwsh -NoProfile -NonInteractive -File $Script nothing 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0 -and $r.Contains("unknown scenario 'nothing'")) { Pass 'an unknown scenario is refused' } else { Fail 'an unknown scenario is refused' $r }
 Check 'a run with the guard but no scenario work changed no work directory' 'False' (Test-Path -LiteralPath (Join-Path $Work 'tls'))
+
+# ---- the guard on a runner that is not GitHub-hosted: checked before the platform, so it is reached on any system -----------
+$env:CI = 'true'; $env:HOST_E2E = '1'; $env:GITHUB_ACTIONS = 'true'; $env:RUNNER_ENVIRONMENT = 'self-hosted'
+$r = & pwsh -NoProfile -NonInteractive -File $Script one-command 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0 -and $r.Contains('not github-hosted')) { Pass 'the script refuses on a runner that is not GitHub-hosted' } else { Fail 'the script refuses on a runner that is not GitHub-hosted' $r }
+$env:GITHUB_ACTIONS = ''; $env:RUNNER_ENVIRONMENT = ''
+
+# ---- a scenario that ends early, and the throwaway CA that stays --------------------------------------------------------------------
+# a child process, because Stop-He exits: the stand-ins replace everything that needs a Windows host
+$childWork = Join-Path $Work 'child'
+$stubs = @'
+function Assert-CiHost { }
+function Assert-FreshHost { }
+function Initialize-Shared { }
+function Stop-Fault { }
+function Stop-Tracked { }
+function Save-Diagnostics { }
+function Get-HostLeftovers { return @() }
+function Remove-CaTrust { return ($env:CHILD_CA_LEFT -ne '1') }
+'@
+$childScript = Join-Path $Work 'child.ps1'
+[IO.File]::WriteAllText($childScript, ". '$Script'`n$stubs`nif (`$env:CHILD_MODE -eq 'exit') { Invoke-Scenario -Name 'child' -Body { Stop-He 'boom' } } else { Invoke-Scenario -Name 'child' -Body { } }`nexit `$(if (`$script:Failed -eq 0 -and -not `$script:Aborted) { 0 } else { 1 })`n")
+$env:HOST_E2E_DIR = $childWork
+foreach ($case in @(@('exit', '0', 'scenario child|ended early'), @('ok', '1', 'the throwaway CA is out of the machine store'))) {
+  $env:CHILD_MODE = $case[0]; $env:CHILD_CA_LEFT = $case[1]
+  $null = & pwsh -NoProfile -NonInteractive -File $childScript 2>&1 | Out-String
+  $rc = $LASTEXITCODE
+  $res = ''
+  $resFile = Join-Path $childWork 'child\results.txt'
+  if (Test-Path -LiteralPath $resFile) { $res = [IO.File]::ReadAllText($resFile) }
+  $want = 'FAIL|' + $case[2]
+  $label = $(if ($case[0] -eq 'exit') { 'a scenario that ends with exit counts as failed and writes the FAIL' } else { 'a throwaway CA that stays in the machine store counts as failed' })
+  if ($rc -ne 0 -and $res.Contains($want)) { Pass $label } else { Fail $label "(exit $rc, results: $res)" }
+}
+$env:CHILD_MODE = ''; $env:CHILD_CA_LEFT = ''
+$env:HOST_E2E_DIR = $Work
+Write-Output 'END helpers'
