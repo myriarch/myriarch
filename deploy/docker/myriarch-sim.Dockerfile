@@ -6,7 +6,7 @@
 #   docker build -f deploy/docker/myriarch-sim.Dockerfile -t myriarch-sim .
 #   docker run --rm myriarch-sim run --server ws://myriarchd:8080/v1/opamp --token myre_... --agents 1000
 # The image holds LICENSE and THIRD_PARTY_NOTICES in /usr/share/licenses/myriarch/ (from the repository root, the build context).
-FROM golang:1.27-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61 AS build
+FROM golang:1.27-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 AS build
 # Package that receives the build metadata (-X); must equal the module path of go.mod plus /internal/version.
 ARG VERSION_PKG=github.com/myriarch/myriarch/internal/version
 ARG VERSION=0.0.0-dev

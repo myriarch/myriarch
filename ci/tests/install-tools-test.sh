@@ -22,7 +22,7 @@ load_versions
 repo="${TEST_TMP}/repo"; tools="${TEST_TMP}/tools"; stub="${TEST_TMP}/stub"; calls="${TEST_TMP}/go-calls"
 mkdir -p "${repo}/ci/tools/helm" "${repo}/ci/tools/go-licenses" "${tools}" "${stub}"
 cp "${CI_DIR}/install-tools.sh" "${CI_DIR}/lib.sh" "${CI_DIR}/versions.env" "${repo}/ci/"
-printf 'module example.test/root\n\ngo 1.27.2\n' > "${repo}/go.mod"   # go-licenses is built with the toolchain of this module
+printf 'module example.test/root\n\ngo 1.27.3\n' > "${repo}/go.mod"   # go-licenses is built with the toolchain of this module
 for t in helm go-licenses; do
   printf 'module example.test/ci/tools/%s\n\ngo 1.26.0\n' "${t}" > "${repo}/ci/tools/${t}/go.mod"
   printf 'example.test/dependency v1.0.0 h1:AAAA\nexample.test/dependency v1.0.0/go.mod h1:BBBB\n' > "${repo}/ci/tools/${t}/go.sum"
@@ -105,9 +105,9 @@ expect_ok "TOOLS_NO_CACHE=1 with a matching stamp" installer_no_cache helm
 expect_calls 5 "... rebuilds the tool"
 expect_ok "another tool, whose go is chosen by the main module" installer go-licenses
 expect_calls 6 "... is built"
-expect_stamps go-licenses ".stamp-go-licenses-${GOLICENSES_VERSION}-$(digest go-licenses)-go1.27.2"
+expect_stamps go-licenses ".stamp-go-licenses-${GOLICENSES_VERSION}-$(digest go-licenses)-go1.27.3"
 expect_stamps helm ".stamp-helm-${HELM_VERSION}-$(digest helm)"
-tail -n 1 "${calls}" | grep -q "GOTOOLCHAIN=go1.27.2 .*dir=go-licenses" && ok "... with the toolchain of the main module" || fail "go-licenses was not built with go1.27.2: $(tail -n 1 "${calls}")"
+tail -n 1 "${calls}" | grep -q "GOTOOLCHAIN=go1.27.3 .*dir=go-licenses" && ok "... with the toolchain of the main module" || fail "go-licenses was not built with go1.27.3: $(tail -n 1 "${calls}")"
 
 # ---- a module file that is missing --------------------------------------------------------------------------------------------------
 mv "${repo}/ci/tools/helm/go.sum" "${TEST_TMP}/go.sum.aside"
