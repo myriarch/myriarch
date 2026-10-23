@@ -426,6 +426,8 @@ vcc() { run_priv "${REL}/verify-chart.sh" --chart-name myriarch-collector --tag 
 CT=application/vnd.cncf.helm.chart.content.v1.tar+gzip
 reset_c; mk_registry_c "${CT}"
 expect_ok "verify-chart (collector): the chart" vcc
+eq "verify-chart (collector): the tags are listed once, in the collector repository" "1" "$(count crane "^ls ${CREPO}\$")"
+eq "verify-chart (collector): the tags are not listed in the server chart repository" "0" "$(count crane "^ls ghcr.io/myriarch/charts/myriarch\$")"
 eq "verify-chart (collector): the signature is verified for the collector chart digest" "1" "$(count cosign "^verify .* ${CREPO}@${MDIGEST}\$")"
 eq "verify-chart (collector): the provenance is verified for the collector chart" "1" "$(count gh "^attestation verify oci://${CREPO}@${MDIGEST} --repo myriarch/myriarch --bundle-from-oci --cert-identity https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG} --source-ref refs/tags/${TAG} --source-digest ${C40} --deny-self-hosted-runners\$")"
 eq "verify-chart (collector): the layer is fetched from the collector repository by its digest" "1" "$(count crane "^blob ${CREPO}@sha256:")"
