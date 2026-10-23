@@ -109,8 +109,11 @@ bites "host-e2e: an upload that skips the dot directory is found" 'include-hidde
 fresh_tree; edit "${HOST}" 'retention-days: 7' 'retention-days: 90'
 bites "host-e2e: a retention of 90 days is found" 'retention-days must be at most 7'
 fresh_tree; edit "${HOST}" "          HOST_E2E: '1'
-" ""
-bites "host-e2e: a scenario step without HOST_E2E is found" "must set HOST_E2E: '1'"
+        run: scripts/host-e2e/linux.sh manual" "        run: scripts/host-e2e/linux.sh manual"
+bites "host-e2e: the manual scenario step without HOST_E2E is found" "must set HOST_E2E: '1'"
+fresh_tree; edit "${HOST}" "          HOST_E2E: '1'
+          HOST_E2E_RELEASE_TAG" "          HOST_E2E_RELEASE_TAG"
+bites "host-e2e: the one-command scenario step without HOST_E2E is found" "must set HOST_E2E: '1'"
 fresh_tree; edit "${HOST}" "  CI: 'true'
 " "  CI: 'true'
   HOST_E2E: '1'
@@ -144,13 +147,15 @@ fresh_tree; rm "${HOST}"
 bites "host-e2e: a missing workflow is found" 'host-e2e.yml: the workflow does not exist'
 fresh_tree; removed_line "${HOST}" 'timeout-minutes: 35'
 bites "host-e2e: a scenario step without a timeout of its own is found" 'host-e2e.yml: the step `Scenario manual[^`]*` needs a timeout-minutes of its own'
-fresh_tree; edit "${HOST}" '        timeout-minutes: 35' '        timeout-minutes: 41'
-bites "host-e2e: a step timeout less than 5 minutes below that of the job is found" 'steps that run the test \(41 minutes together\) must stay at least 5 minutes below that of the job \(45 minutes\)'
-fresh_tree; edit "${HOST}" '        timeout-minutes: 35' '        timeout-minutes: 40'
+fresh_tree; removed_line "${HOST}" '        timeout-minutes: 40'
+bites "host-e2e: the one-command step without a timeout of its own is found" 'the step `Scenario one-command[^`]*` needs a timeout-minutes of its own'
+fresh_tree; edit "${HOST}" '        timeout-minutes: 35' '        timeout-minutes: 46'
+bites "host-e2e: a step timeout less than 5 minutes below that of the job is found" 'steps that run the test \(86 minutes together\) must stay at least 5 minutes below that of the job \(90 minutes\)'
+fresh_tree; edit "${HOST}" '        timeout-minutes: 35' '        timeout-minutes: 45'
 expect_ok "host-e2e: a step timeout exactly 5 minutes below that of the job is fine" run_check "${T}"
 fresh_tree; edit "${HOST}" '        timeout-minutes: 35' '        timeout-minutes: soon'
 bites "host-e2e: a step timeout that is no number is found" 'needs a timeout-minutes of its own, a number of minutes, found `soon`'
-fresh_tree; removed_line "${HOST}" '    timeout-minutes: 45'
+fresh_tree; removed_line "${HOST}" '    timeout-minutes: 90'
 bites "host-e2e: a job without a timeout is found" 'the job must have one timeout-minutes'
 fresh_tree; edit "${HOST}" "    steps:
 " "    steps:
@@ -160,7 +165,7 @@ fresh_tree; edit "${HOST}" "    steps:
           HOST_E2E: '1'
         run: scripts/host-e2e/linux.sh one-command
 "
-bites "host-e2e: scenario steps whose timeouts together do not fit into the job are found" 'steps that run the test \(70 minutes together\)'
+bites "host-e2e: scenario steps whose timeouts together do not fit into the job are found" 'steps that run the test \(110 minutes together\)'
 
 fresh_tree; edit "${KIND}" '            .cache/kind/logs/**
             .cache/kind/diag/**' '            .cache/kind/**'
