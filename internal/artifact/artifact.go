@@ -131,14 +131,18 @@ type Cache struct {
 	// downloads started by Prepare that have not finished yet, by spec key (prepare.go)
 	prepMu    sync.Mutex
 	preparing map[string]struct{}
-	prepWG    sync.WaitGroup
+	// prepWG counts the background downloads of Prepare and of StartPrefetch; WaitPrepared waits for it
+	prepWG sync.WaitGroup
+
+	// rename moves a downloaded file into place (os.Rename; tests replace it to reproduce the Windows behavior)
+	rename func(oldpath, newpath string) error
 
 	downloads *prometheus.CounterVec
 }
 
 // NewCache creates the cache (creates cfg.Dir).
 func NewCache(cfg config.ArtifactsConfig, deps Deps) (*Cache, error) {
-	c := &Cache{cfg: cfg, deps: deps, now: func() time.Time { return time.Now().UTC() }, lastTouch: map[string]time.Time{},
+	c := &Cache{cfg: cfg, deps: deps, now: func() time.Time { return time.Now().UTC() }, lastTouch: map[string]time.Time{}, rename: os.Rename,
 		dlSem: make(chan struct{}, maxConcurrentDownloads), verified: map[string]fileStamp{}}
 	c.log = deps.Logger
 	if c.log == nil {
@@ -548,7 +552,7 @@ func (c *Cache) fetchAndVerify(ctx context.Context, s spec, rec *domain.Artifact
 	if err := os.Chmod(tmp, 0o640); err != nil {
 		return nil, fmt.Errorf("chmod artifact: %w", err)
 	}
-	if err := os.Rename(tmp, final); err != nil {
+	if err := c.moveIntoPlace(tmp, final, sum); err != nil {
 		return nil, fmt.Errorf("move artifact into place: %w", err)
 	}
 

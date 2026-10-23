@@ -98,7 +98,7 @@ func (c *Cache) Prepare(ctx context.Context, distribution, version, os, arch str
 	return nil, PreparePending, nil
 }
 
-// WaitPrepared waits until the downloads that Prepare started have finished, or until ctx is done. Tests use it
+// WaitPrepared waits until the downloads that Prepare and StartPrefetch started have finished, or until ctx is done. Tests use it
 // before they remove the directory of the cache.
 func (c *Cache) WaitPrepared(ctx context.Context) error {
 	done := make(chan struct{})
