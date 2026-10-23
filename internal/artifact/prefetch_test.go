@@ -95,7 +95,7 @@ func TestStartPrefetchDerivesPlatformsFromConnectedCollectors(t *testing.T) {
 	explicit, err := f.cache.StartPrefetch(ctx, domain.DistributionContrib, "0.162.0", []string{"linux/amd64"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"linux/amd64"}, prefetchedPlatforms(explicit))
-	// wait for the background download so it does not outlive the test's temp directory
+	// the third artifact becomes ready
 	require.Eventually(t, func() bool {
 		l, _, _ := f.st.Artifacts().List(ctx, store.ArtifactFilter{Status: []domain.ArtifactStatus{domain.ArtifactReady}})
 		return len(l) == 3
