@@ -375,6 +375,9 @@ func TestValidateProduction(t *testing.T) {
 			c.Notifications.Channels = []config.NotificationChannel{{Name: "a", Type: "sms"}}
 		}, "notifications.channels[0].type"},
 		{"heartbeat too slow", func(c *config.Config) { c.HA.HeartbeatInterval = time.Minute }, "ha.heartbeatInterval"},
+		{"leader session timeout zero", func(c *config.Config) { c.HA.LeaderSessionTimeout = 0 }, "ha.leaderSessionTimeout"},
+		{"leader session timeout too short", func(c *config.Config) { c.HA.LeaderSessionTimeout = 9 * time.Second }, "ha.leaderSessionTimeout"},
+		{"leader session timeout too long", func(c *config.Config) { c.HA.LeaderSessionTimeout = 11 * time.Minute }, "ha.leaderSessionTimeout"},
 		{"negative retention", func(c *config.Config) { c.Retention.Audit = -time.Hour }, "retention.audit"},
 		// AC-14: plaintext listener
 		{"plaintext listener without confirmation", func(c *config.Config) { c.Server.TLS.TerminatedUpstream = false }, "server.tls.terminatedUpstream"},

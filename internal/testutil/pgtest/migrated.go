@@ -76,6 +76,23 @@ func NewPool(t testing.TB) *pgxpool.Pool {
 	return pool
 }
 
+// NewEmptyPool returns a pool to a fresh database without a schema (for tests
+// of the migrations themselves). The database is dropped when the test ends.
+// Requires RunWithMigratedTemplate in TestMain; otherwise the test is skipped.
+func NewEmptyPool(t testing.TB) *pgxpool.Pool {
+	t.Helper()
+	srv := Shared()
+	if srv == nil {
+		t.Skip("pgtest: no server (use pgtest.RunWithMigratedTemplate in TestMain, or PGTEST_SKIP is set)")
+	}
+	pool, cleanup, err := srv.NewEmptyDatabase(context.Background())
+	if err != nil {
+		t.Fatalf("pgtest: new empty database: %v", err)
+	}
+	t.Cleanup(cleanup)
+	return pool
+}
+
 // Shared returns the running server (nil outside RunWithMigratedTemplate).
 func Shared() *Server {
 	sharedMu.Lock()

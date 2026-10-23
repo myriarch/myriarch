@@ -228,9 +228,26 @@ The store interfaces define the semantics; the PostgreSQL implementation follows
 
 ## Leader election
 
-A session advisory lock on a dedicated connection decides the leader. A candidate tries the lock every five seconds.
-The leader checks its connection every five seconds with a short timeout and gives up leadership if the check fails.
-The lock is released automatically when the session ends, so a killed leader is replaced within about 15 seconds.
+A session advisory lock on a dedicated connection decides the leader. A candidate tries the lock every five seconds
+(with 20 percent jitter).
+
+The failover after a hard failure of the leader's node (no FIN or RST) is bounded by `ha.leaderSessionTimeout` T (default
+30 seconds, 10 seconds to 10 minutes) as one end-to-end budget: the server must drop the silent session within
+D = T − 1.2 × min(5 s, T/6) − T/20 (whole seconds), the time the follower needs for its retry (every min(5 s, T/6),
+20 percent jitter) and the acquisition fill the rest. The lock session and the listener session of the event bus get their
+own pool (`internal/pgsession`) and send `tcp_keepalives_idle` = `tcp_keepalives_interval` = I = D/6 (at least 1 second),
+`tcp_keepalives_count` = D/I − 1 and `tcp_user_timeout` = D − I in the startup packet. On Linux the user timeout replaces the count
+as the drop criterion, so PostgreSQL drops a silent client at the first probe time (multiples of I) that is at least D − I
+after the last packet, i.e. after D − I and before D; a server without `tcp_user_timeout` drops after ⌊D/I⌋ × I, which is above D − I and at most D. A server that
+refuses `tcp_user_timeout` (SQLSTATE 22023) is used without it and a warning is logged. The pool of ordinary connections is
+not changed. A unit test checks the budget with models of both drop rules for all timeouts.
+
+The leader pings its lock session every T/6 with a timeout of T/3 and gives up leadership at the latest T/2 after the last
+answer: it first clears the leader flag (`IsLeader` and the metric `myriarch_leader`), then cancels the context of the leader
+jobs. That is before the server can release the lock, so there is no second leader. After giving up, the replica asks the
+server over a regular connection to end the lock session (`pg_terminate_backend`, only a backend that holds the lock), and
+then competes for the lock like a follower. A planned stop unlocks explicitly and closes the session, so a follower takes
+over within one retry interval. Operations: [High availability](../operations/high-availability.md).
 
 Leader-only jobs: GitOps polling, the rollout planner and engine, the release tracker, artifact prefetch, the offline
 sweeper, housekeeping and the periodic gauges. Everything else runs on every replica.
@@ -447,7 +464,7 @@ their next poll response. A resync command clears the failed marker and requests
   everything else serves the embedded UI.
 - Only a header read timeout is set. A global write or read timeout would cut WebSocket and SSE connections. Response
   writer wrappers must pass through hijacking (WebSocket upgrade) and flushing (SSE).
-- Graceful shutdown uses `server.shutdownTimeout`.
+- Graceful shutdown uses `server.shutdownTimeout`; the grace period of the pod must be at least `preStopSleepSeconds` + `server.shutdownTimeout` + 5 seconds ([High availability](../operations/high-availability.md#size-the-shutdown)).
 
 ## REST notes for the core resources
 

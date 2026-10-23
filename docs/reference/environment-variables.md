@@ -100,6 +100,7 @@ Every setting of the [server configuration](configuration.md) except lists of ob
 | `MYRIARCH_GITOPS_WEBHOOKSECRETFILE` | [`gitops.webhookSecretFile`](configuration.md#gitops) | string |
 | `MYRIARCH_HA_HEARTBEATINTERVAL` | [`ha.heartbeatInterval`](configuration.md#ha) | duration |
 | `MYRIARCH_HA_LEADERLOCKKEY` | [`ha.leaderLockKey`](configuration.md#ha) | integer |
+| `MYRIARCH_HA_LEADERSESSIONTIMEOUT` | [`ha.leaderSessionTimeout`](configuration.md#ha) | duration |
 | `MYRIARCH_HA_REPLICAID` | [`ha.replicaId`](configuration.md#ha) | string |
 | `MYRIARCH_OPAMP_ALLOWUNBOUNDEDCOMPRESSION` | [`opamp.allowUnboundedCompression`](configuration.md#opamp) | boolean |
 | `MYRIARCH_OPAMP_AUTOREBINDONTOKENROTATION` | [`opamp.autoRebindOnTokenRotation`](configuration.md#opamp) | boolean |

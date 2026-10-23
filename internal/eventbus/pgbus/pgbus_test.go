@@ -331,7 +331,6 @@ func TestListenerConnectionIsNotReturnedToPool(t *testing.T) {
 	}
 	t.Cleanup(small.Close) // runs after the bus cleanup registered below (LIFO): Close blocks on acquired connections
 	b, _ := newBusT(t, small, "a")
-	_ = b
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
@@ -343,7 +342,12 @@ func TestListenerConnectionIsNotReturnedToPool(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if st := small.Stat(); st.AcquiredConns() != 1 {
+	// the listener session lives on a pool of its own (with the keepalive settings
+	// of the session timeout) and never occupies a connection of the regular pool
+	if st := small.Stat(); st.AcquiredConns() != 0 {
+		t.Fatalf("the regular pool must not hold the listener connection, got %d acquired", st.AcquiredConns())
+	}
+	if st := b.listenPool.Stat(); st.AcquiredConns() != 1 {
 		t.Fatalf("exactly the listener connection stays acquired, got %d", st.AcquiredConns())
 	}
 }

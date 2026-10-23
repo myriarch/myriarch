@@ -11,10 +11,11 @@ These pages are for the people who run a Myriarch installation. They are written
 |---|---|
 | [Install with Helm](install-helm.md) | The server on Kubernetes with the experimental Helm chart: image, database, first sign-in, GitOps repository, access for agents and enrollment tokens. |
 | [Authentication](authentication.md) | How people sign in (OpenID Connect, the bootstrap admin) and how agents enroll, with recipes for common identity providers. |
+| [High availability](high-availability.md) | The leader failover after a hard failure and the setting that bounds it, and how to size `shutdownTimeout` and `terminationGracePeriodSeconds`. |
 | [Production checklist](production-checklist.md) | The settings of `myriarchd serve` that matter for security, and how to check a configuration without starting the server. |
 | [Troubleshooting](troubleshooting.md) | Symptoms, causes and fixes, and the endpoints that help. |
 
-Guides for upgrades, backup and restore, high availability, monitoring, air-gapped installation and an artifact mirror are
+Guides for upgrades, backup and restore, monitoring, air-gapped installation and an artifact mirror are
 planned for v0.2.0. Until then, the [architecture](../architecture.md) describes high availability, the data model and its
 retention, the artifact cache and the metrics and health endpoints of the server.
 

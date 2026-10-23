@@ -395,6 +395,7 @@ is a collapsible log group; a failed job uploads `.cache/check-local/` (the gate
 | `go` | `go` | ubuntu-24.04 |
 | `go-test-linux` | `go-test` with `-race` against a PostgreSQL 17 service (`PGTEST_DSN`, `max_connections` 300), then the render budget test | ubuntu-24.04 and ubuntu-24.04-arm |
 | `go-test-native` | `go-test`: macOS with `-race`, the embedded PostgreSQL and the render budget test; Windows without `-race`, with `PGTEST_SKIP=1` and without the budget test (`GO_TEST_PERF=0`); on Windows a step runs `ci/tests/download-retry.ps1` under Windows PowerShell 5.1 and PowerShell 7 | macos-latest, windows-latest |
+| `db-matrix` | `go test -race` of the packages `internal/store`, `internal/leader`, `internal/eventbus`, `internal/pgsession` and `internal/testutil` on an embedded PostgreSQL, once with `PGTEST_TLS=1` and once with `PGTEST_COLLATION=en_US.UTF-8` | ubuntu-24.04 |
 | `web` | `web` | ubuntu-24.04 |
 | `build` | `build`, `examples`, then `make release-rehearsal` (the full release matrix in stage collect, a signing pass with a throwaway test CA, stage apply, dist and reproducibility checks; nothing is published) | ubuntu-24.04 |
 | `shell-helm` | `shellcheck`, `helm` | ubuntu-24.04 |
@@ -1214,6 +1215,26 @@ replaced. At the end, the template and the test databases are dropped (an aborte
 behind). The tests of `internal/devpg`, which start an embedded PostgreSQL themselves, are skipped in this mode.
 `PGTEST_SKIP=1` skips all database tests. When several packages run in parallel, give the server a `max_connections` of at
 least 300; the embedded server uses 100 per test program.
+
+### Database environments (TLS, collation)
+
+Two environment variables put the embedded server (not an external one: there the DSN decides) into environments that the
+default run does not cover; everything else is unchanged:
+
+| Variable | Effect |
+|---|---|
+| `PGTEST_TLS=1` | The server accepts TLS with a freshly generated certificate for `127.0.0.1` and the tests connect with `sslmode=verify-full`. |
+| `PGTEST_COLLATION=<locale>` | The template database, and with it every test database, is created with this collation, for example `en_US.UTF-8` (a locale of the operating system) or `icu:en-US` (needs a server with ICU). A locale the server does not know fails the run. |
+
+```bash
+PGTEST_TLS=1 go test -race -count=1 ./internal/store/... ./internal/leader/... ./internal/eventbus/...
+PGTEST_COLLATION=en_US.UTF-8 go test -race -count=1 ./internal/store/... ./internal/leader/... ./internal/eventbus/...
+```
+
+CI runs both in the job `db-matrix` (ubuntu-24.04, embedded PostgreSQL). `TestDatabaseEnvironment` in
+`internal/store/migrations` fails when a variable is set but the tests do not run in that environment. The ports are
+random, there are no fixed ports. `pgtest.StartProxy` is a TCP proxy that can stop forwarding without closing the
+connection; the failover test of `internal/leader/pglock` uses it.
 
 ## Documentation
 

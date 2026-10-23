@@ -14,7 +14,10 @@
 // a "resync" event to UI clients after a listener reconnect).
 //
 // The listener connection is checked every 30s with a ping so that half-open
-// TCP connections (firewalls, failovers) are detected and replaced.
+// TCP connections (firewalls, failovers) are detected and replaced. It is opened
+// on a pool of its own with the TCP keepalive and user timeout settings of
+// internal/pgsession, so the server also drops the session of a client whose
+// node died silently.
 package pgbus
 
 import (
@@ -36,6 +39,7 @@ import (
 	"github.com/myriarch/myriarch/internal/brand"
 	"github.com/myriarch/myriarch/internal/eventbus"
 	"github.com/myriarch/myriarch/internal/metrics"
+	"github.com/myriarch/myriarch/internal/pgsession"
 )
 
 // Channel is the Postgres NOTIFY channel name.
@@ -50,10 +54,12 @@ const (
 
 // Bus is the PostgreSQL implementation of eventbus.Bus.
 type Bus struct {
-	pool      *pgxpool.Pool
-	replicaID string
-	log       *slog.Logger
-	dropped   *prometheus.CounterVec
+	pool           *pgxpool.Pool // regular pool (Publish)
+	listenPool     *pgxpool.Pool // pool of the listener session
+	sessionTimeout time.Duration
+	replicaID      string
+	log            *slog.Logger
+	dropped        *prometheus.CounterVec
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -76,14 +82,31 @@ type subscription struct {
 	types map[eventbus.Type]struct{}
 }
 
+// DefaultSessionTimeout is the session timeout of a bus without
+// WithSessionTimeout (the default of ha.leaderSessionTimeout).
+const DefaultSessionTimeout = 30 * time.Second
+
+// Option configures the bus.
+type Option func(*Bus)
+
+// WithSessionTimeout sets the time after which the server drops the listener
+// session of a silently dead client (see internal/pgsession).
+func WithSessionTimeout(d time.Duration) Option {
+	return func(b *Bus) {
+		if d > 0 {
+			b.sessionTimeout = d
+		}
+	}
+}
+
 // New starts the listener and returns the bus. replicaID is used as
 // Event.Origin. The first LISTEN is established before New returns, so events
 // published afterwards (by any replica) are delivered.
-func New(ctx context.Context, pool *pgxpool.Pool, replicaID string, logger *slog.Logger, reg prometheus.Registerer) (eventbus.Bus, error) {
-	return newBus(ctx, pool, replicaID, logger, reg)
+func New(ctx context.Context, pool *pgxpool.Pool, replicaID string, logger *slog.Logger, reg prometheus.Registerer, opts ...Option) (eventbus.Bus, error) {
+	return newBus(ctx, pool, replicaID, logger, reg, opts...)
 }
 
-func newBus(ctx context.Context, pool *pgxpool.Pool, replicaID string, logger *slog.Logger, reg prometheus.Registerer) (*Bus, error) {
+func newBus(ctx context.Context, pool *pgxpool.Pool, replicaID string, logger *slog.Logger, reg prometheus.Registerer, opts ...Option) (*Bus, error) {
 	if pool == nil {
 		return nil, errors.New("pgbus: pool is nil")
 	}
@@ -98,10 +121,21 @@ func newBus(ctx context.Context, pool *pgxpool.Pool, replicaID string, logger *s
 			Help: "Events dropped because a local subscriber was too slow.",
 		}, []string{"subscriber"})),
 		ctx: bctx, cancel: cancel, subs: map[int]*subscription{},
+		sessionTimeout: DefaultSessionTimeout,
 	}
+	for _, o := range opts {
+		o(b)
+	}
+	lp, err := pgsession.NewPool(ctx, pool, b.sessionTimeout, nil, b.log)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("pgbus: listen: %w", err)
+	}
+	b.listenPool = lp
 	conn, err := b.listen(ctx)
 	if err != nil {
 		cancel()
+		lp.Close()
 		return nil, fmt.Errorf("pgbus: listen: %w", err)
 	}
 	b.connected.Store(true)
@@ -123,7 +157,7 @@ func Connected(bus eventbus.Bus) bool {
 func (b *Bus) listen(ctx context.Context) (*pgxpool.Conn, error) {
 	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	conn, err := b.pool.Acquire(cctx)
+	conn, err := b.listenPool.Acquire(cctx)
 	if err != nil {
 		return nil, err
 	}
@@ -309,6 +343,7 @@ func (b *Bus) Close() error {
 	b.mu.Unlock()
 	b.cancel()
 	b.wg.Wait()
+	b.listenPool.Close()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for id, s := range b.subs {

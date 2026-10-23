@@ -19,14 +19,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// shorten the timing so the tests are fast; production defaults are 5s
+	// shorten the retry so the tests are fast; the production default is 5s
 	RetryInterval = 300 * time.Millisecond
-	CheckInterval = 300 * time.Millisecond
-	// A health check that is merely slow ends leadership (that is what the
-	// timeout is for). The tests never make the connection hang, and a loaded
-	// host (the whole suite runs in parallel) must not turn a delayed goroutine
-	// into a lost lock: far above any scheduling delay.
-	CheckTimeout = 10 * time.Second
 	os.Exit(pgtest.RunWithMigratedTemplate(m))
 }
 
@@ -41,6 +35,10 @@ type candidate struct {
 	// windDown is how long the leader function needs to stop after its
 	// context was cancelled.
 	windDown time.Duration
+	// session is the session timeout (default: the elector's).
+	session time.Duration
+	// tweak changes the connection settings of the lock session.
+	tweak func(*pgxpool.Config)
 }
 
 // withWindDown makes the leader function of a candidate slow to stop.
@@ -52,7 +50,15 @@ func startCandidate(t *testing.T, pool *pgxpool.Pool, key int64, name string, op
 	for _, o := range opts {
 		o(c)
 	}
-	c.el = New(pool, key, name, nil, prometheus.NewRegistry()).(*elector)
+	c.el = New(pool, key, name, nil, prometheus.NewRegistry(), WithSessionTimeout(c.session)).(*elector)
+	c.el.connTweak = c.tweak
+	// shortened timing; a health check that is merely slow ends leadership
+	// (that is what the timeout is for), but the tests never make the
+	// connection hang, and a loaded host must not turn a delayed goroutine into
+	// a lost lock: the timeout is far above any scheduling delay
+	if c.session == 0 { // otherwise the timing follows from the session timeout
+		c.el.checkInterval, c.el.checkTimeout = 300*time.Millisecond, 10*time.Second
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
 	go func() {
@@ -315,6 +321,7 @@ func TestOnElectedReturnsReleasesLock(t *testing.T) {
 	const key = 99
 	var calls atomic.Int32
 	el := New(pool, key, "x", nil, nil).(*elector)
+	el.checkInterval, el.checkTimeout = 300*time.Millisecond, 10*time.Second
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
