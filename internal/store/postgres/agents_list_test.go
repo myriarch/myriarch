@@ -498,17 +498,32 @@ func TestHeartbeatWritesAreHotUpdates(t *testing.T) {
 		mustNoErr(t, db.Pool().QueryRow(ctx, `SELECT n_tup_hot_upd, n_tup_upd FROM pg_stat_user_tables WHERE relname = 'agents'`).Scan(&hot, &total))
 		return
 	}
-	// settle: the seeding INSERT/ANALYZE may still be flushing statistics
-	time.Sleep(1500 * time.Millisecond)
+	// settle: wait until the seeding statistics stop moving instead of sleeping a fixed time
 	h0, t0 := read()
+	for i := 0; i < 40; i++ {
+		time.Sleep(100 * time.Millisecond)
+		h, tt := read()
+		if h == h0 && tt == t0 {
+			break
+		}
+		h0, t0 = h, tt
+	}
 	for i := 1; i <= 5; i++ {
 		mustNoErr(t, db.Agents().TouchLastSeen(ctx, ids, time.Now().Add(time.Duration(i)*time.Minute)))
 	}
-	time.Sleep(1500 * time.Millisecond)
-	h1, t1 := read()
+	// the statistics collector flushes asynchronously: poll until all updates are counted
+	var h1, t1 int64
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		h1, t1 = read()
+		if t1-t0 >= 5*2000 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	upd, hot := t1-t0, h1-h0
 	if upd < 5*2000 {
-		t.Skipf("statistics not (yet) visible: %d updates counted", upd)
+		t.Fatalf("statistics not visible within 30s: %d of %d updates counted", upd, 5*2000)
 	}
 	ratio := float64(hot) / float64(upd)
 	t.Logf("%d updates, %d HOT (%.0f%%)", upd, hot, ratio*100)

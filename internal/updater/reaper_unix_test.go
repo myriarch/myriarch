@@ -193,20 +193,23 @@ func TestReaperExecutorDoesNotHangOnPipeHoldingDescendant(t *testing.T) {
 // The preflight of container mode runs the image binary through the same
 // executor: sanity check with a script that looks like otelcol-contrib.
 func TestImageVersionParsing(t *testing.T) {
+	// A zero timeout selects the production default, so the deadline under load
+	// is the one the probe really uses instead of a fixed second.
+	const probeTimeout = 0
 	rp := testReaper(t)
 	dir := t.TempDir()
 	good := writeScript(t, dir, "otelcol-contrib", "echo \"otelcol-contrib version 0.161.0\"\n")
-	v, err := imageVersion(context.Background(), rp.Executor(), good, time.Second)
+	v, err := imageVersion(context.Background(), rp.Executor(), good, probeTimeout)
 	require.NoError(t, err)
 	assert.Equal(t, "0.161.0", v)
 
 	pre := writeScript(t, dir, "pre", "echo \"otelcol-contrib version v0.163.0-rc.1\"\n")
-	v, err = imageVersion(context.Background(), rp.Executor(), pre, time.Second)
+	v, err = imageVersion(context.Background(), rp.Executor(), pre, probeTimeout)
 	require.NoError(t, err)
 	assert.Equal(t, "0.163.0-rc.1", v)
 
 	junk := writeScript(t, dir, "junk", "echo nonsense\n")
-	_, err = imageVersion(context.Background(), rp.Executor(), junk, time.Second)
+	_, err = imageVersion(context.Background(), rp.Executor(), junk, probeTimeout)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot find a version")
 }

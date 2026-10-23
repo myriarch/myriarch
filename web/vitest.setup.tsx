@@ -2,11 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { setMockLatency } from '@/mocks/handlers';
 import { resetDb } from '@/mocks/db';
 import { server } from '@/mocks/server';
 import { setCsrfToken } from '@/api/session';
+
+// findBy*/waitFor poll for 1s by default. Rendering the whole app against the MSW handlers takes longer than that
+// when the machine is loaded (parallel test files, CI runners), which made the update tests time out although the
+// UI was correct. The bound stays well below testTimeout (20s), so a real failure still fails fast enough and the
+// success path is not slowed down.
+configure({ asyncUtilTimeout: 10000 });
 
 // CodeMirror needs layout APIs jsdom does not implement; a plain <pre> is enough for the tests.
 vi.mock('@/components/Yaml', () => ({
