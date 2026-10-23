@@ -16,9 +16,9 @@ and roll out a configuration change and a new collector version.
 > [Install the collector with Helm](../operations/install-collector-helm.md) and the
 > [production checklist](../operations/production-checklist.md).
 
-> **Available from v0.2.0.** The tutorial installs the published OCI charts `oci://ghcr.io/myriarch/charts/myriarch` and
-> `oci://ghcr.io/myriarch/charts/myriarch-collector` and the release images. Before v0.2.0 is released, build both from the
-> checkout instead: add `QUICKSTART_SOURCE=commit` to the commands ([below](#start-from-a-checkout)).
+**Available from v0.2.0.** The tutorial installs the published OCI charts `oci://ghcr.io/myriarch/charts/myriarch` and
+`oci://ghcr.io/myriarch/charts/myriarch-collector` and the release images. Before v0.2.0 is released, build both from the
+checkout instead: add `QUICKSTART_SOURCE=commit` to the commands ([below](#start-from-a-checkout)).
 
 ## What you get
 
