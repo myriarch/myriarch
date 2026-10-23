@@ -2,7 +2,7 @@
 #
 #   kubectl apply -k deploy/examples/production/collector
 #
-# Overlay on the unchanged base deploy/k8s/collector (the base is checked by Go tests and stays the source of
+# Overlay on the unchanged base contrib/legacy-kubernetes-collector/kustomize (the base is checked by Go tests and stays the source of
 # truth): only the StatefulSet otel-gateway (the DaemonSet otel-agent and its NetworkPolicy are removed), image from
 # your registry pinned by digest, site values of the cluster, CA bundle for wss://. A version change is made through
 # the image digest (images: below).
@@ -19,7 +19,7 @@ kind: Kustomization
 namespace: observability
 
 resources:
-  - ../../../k8s/collector
+  - ../../../../contrib/legacy-kubernetes-collector/kustomize
 
 # components:
 #   - components/external-gateway

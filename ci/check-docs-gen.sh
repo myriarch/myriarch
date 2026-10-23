@@ -16,10 +16,10 @@ set -euo pipefail
 need_cmd git make go
 
 cd "${ROOT}"
-log "regenerating the generated references: cli, api, configuration, environment variables, metrics, the chart values schema and the chart values table (make docs-gen)"
+log "regenerating the generated references: cli, api, configuration, environment variables, metrics, the values schemas and values tables of both charts (make docs-gen)"
 make docs-gen >/dev/null
 
-for target in docs/reference/cli docs/reference/api docs/reference/configuration.md docs/reference/environment-variables.md docs/reference/metrics.md deploy/helm/myriarch/values.schema.json deploy/helm/myriarch/README.md; do
+for target in docs/reference/cli docs/reference/api docs/reference/configuration.md docs/reference/environment-variables.md docs/reference/metrics.md deploy/helm/myriarch/values.schema.json deploy/helm/myriarch/README.md deploy/helm/myriarch-collector/values.schema.json deploy/helm/myriarch-collector/README.md; do
   changed="$(git status --porcelain --untracked-files=all -- "${target}")"
   if [ -n "${changed}" ]; then
     printf '%s\n' "${changed}" >&2

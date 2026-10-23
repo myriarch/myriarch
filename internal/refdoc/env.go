@@ -91,13 +91,29 @@ type TemplateVar struct {
 // templateRefRE matches ${env:NAME} and ${env:NAME:-default}.
 var templateRefRE = regexp.MustCompile(`\$\{env:([A-Za-z_][A-Za-z0-9_]*)(:-[^}]*)?\}`)
 
+// legacyKubernetesCollectorDir holds the deprecated Kubernetes templates (supervisor and updater), next to deployDir.
+const legacyKubernetesCollectorDir = "contrib/legacy-kubernetes-collector"
+
 // ScanTemplateVars finds the environment variables that the YAML templates below deployDir/supervisor and deployDir/updater
-// reference. Comment lines are ignored. The file paths in the result start with the name of deployDir ("deploy/...").
+// (and below the deprecated templates in ../contrib/legacy-kubernetes-collector, when that directory exists) reference.
+// Comment lines are ignored. The file paths in the result start with the name of deployDir ("deploy/...") or with
+// "contrib/...".
 func ScanTemplateVars(deployDir string) ([]TemplateVar, error) {
 	files := map[string]map[string]bool{}
 	base := filepath.Base(filepath.Clean(deployDir))
+	type root struct{ dir, namePrefix string }
+	var roots []root
 	for _, sub := range []string{"supervisor", "updater"} {
-		err := filepath.WalkDir(filepath.Join(deployDir, sub), func(p string, d fs.DirEntry, err error) error {
+		roots = append(roots, root{filepath.Join(deployDir, sub), base})
+	}
+	for _, sub := range []string{"supervisor", "updater"} {
+		dir := filepath.Join(deployDir, "..", filepath.FromSlash(legacyKubernetesCollectorDir), sub)
+		if _, err := os.Stat(dir); err == nil {
+			roots = append(roots, root{dir, ""})
+		}
+	}
+	for _, r := range roots {
+		err := filepath.WalkDir(r.dir, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -108,11 +124,20 @@ func ScanTemplateVars(deployDir string) ([]TemplateVar, error) {
 			if err != nil {
 				return err
 			}
-			rel, err := filepath.Rel(deployDir, p)
-			if err != nil {
-				return err
+			var name string
+			if r.namePrefix != "" {
+				rel, err := filepath.Rel(deployDir, p)
+				if err != nil {
+					return err
+				}
+				name = path.Join(r.namePrefix, filepath.ToSlash(rel))
+			} else {
+				rel, err := filepath.Rel(filepath.Join(deployDir, ".."), p)
+				if err != nil {
+					return err
+				}
+				name = filepath.ToSlash(rel)
 			}
-			name := path.Join(base, filepath.ToSlash(rel))
 			for _, line := range strings.Split(string(data), "\n") {
 				if strings.HasPrefix(strings.TrimSpace(line), "#") {
 					continue
@@ -211,7 +236,7 @@ func RenderEnvironment(overrides []configload.EnvOverride, templateVars []Templa
 
 	// ---- deployment templates
 	b.WriteString("## Variables in the deployment templates\n\n")
-	b.WriteString("The templates under `deploy/supervisor` and `deploy/updater` reference these variables as `${env:NAME}`. They are resolved by the OpAMP Supervisor or by `" + brand.UpdaterBinary + "` when they load their configuration, not by `" + brand.ServerBinary + "`.\n\n")
+	b.WriteString("The templates under `deploy/supervisor` and `deploy/updater` (and the deprecated Kubernetes templates under `contrib/legacy-kubernetes-collector`) reference these variables as `${env:NAME}`. They are resolved by the OpAMP Supervisor or by `" + brand.UpdaterBinary + "` when they load their configuration, not by `" + brand.ServerBinary + "`.\n\n")
 	rows = nil
 	for _, v := range templateVars {
 		meaning, ok := templateVarMeaning[v.Name]

@@ -1,0 +1,51 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- if .Values.networkPolicy.enabled }}
+{{- /*
+  Ingress segmentation of the collector pods. The ports of the receivers are reachable from the listed sources, the health ports
+  from the namespace only. Egress stays open: the server, the backends and DNS differ per environment.
+*/ -}}
+{{- $np := .Values.networkPolicy }}
+{{- $sources := list }}
+{{- if $np.ingress.allowSameNamespace }}
+{{- $sources = append $sources (dict "podSelector" (dict)) }}
+{{- end }}
+{{- range $np.ingress.from }}
+{{- $sources = append $sources . }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "myriarch-collector.fullname" . }}
+  labels:
+    {{- include "myriarch-collector.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "myriarch-collector.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- if and $sources .Values.ports }}
+    - from:
+        {{- toYaml $sources | nindent 8 }}
+      ports:
+        {{- range .Values.ports }}
+        - port: {{ .name }}
+          protocol: {{ .protocol | default "TCP" }}
+        {{- end }}
+    {{- end }}
+    - from:
+        - podSelector: {}
+      ports:
+        - port: health
+          protocol: TCP
+        - port: sup-health
+          protocol: TCP
+        {{- if include "myriarch-collector.containerMode" . }}
+        - port: updater-health
+          protocol: TCP
+        {{- end }}
+{{- end }}

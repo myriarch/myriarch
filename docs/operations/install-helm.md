@@ -318,10 +318,8 @@ or Flux) would generate a new value on every render: use `enrollmentTokens[].exi
 
 - **Hosts** (Linux servers, Windows): [Connect a host](../tasks/connect-a-host.md) installs the supervisor, the collector
   and the updater and enrolls them with such a token.
-- **Collectors in Kubernetes:** [`deploy/k8s/collector/README.md`](../../deploy/k8s/collector/README.md) describes the
-  gateway StatefulSet and the node DaemonSet. Container mode, in which the `myriarch-updater` changes the collector version
-  inside the pod, is beta and needs a collector image that you build yourself (`make collector-image-crane`) until the
-  collector chart arrives in v0.2.0.
+- **Collectors in Kubernetes:** [Installing collectors with Helm](install-collector-helm.md) describes the
+  chart `myriarch-collector`, which runs the unchanged upstream images next to the `myriarch-updater` image.
 
 ## Single sign-on
 

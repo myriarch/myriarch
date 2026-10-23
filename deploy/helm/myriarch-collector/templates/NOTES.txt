@@ -1,0 +1,18 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+Myriarch collector {{ include "myriarch-collector.fullname" . }} ({{ .Values.mode }}) is installed.
+
+It connects to {{ .Values.server.endpoint }} with the enrollment token in the Secret "{{ .Values.enrollment.existingSecret }}" (key "{{ .Values.enrollment.key }}").
+The agents appear in the Myriarch UI with site.type={{ include "myriarch-collector.siteType" . }}; the collector configuration comes from the server.
+
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+{{- if and (include "myriarch-collector.daemonset" .) (not .Values.persistence.hostPath.enabled) }}
+
+WARNING: the identity of a node agent is not persistent (persistence.hostPath.enabled=false): every restarted pod is a new agent in the UI.
+{{- end }}
+{{- if include "myriarch-collector.containerMode" . }}
+
+Container mode: the updater is PID 1 and swaps the collector binary on the volume "binaries". The image reference no longer says which collector runs.
+{{- end }}

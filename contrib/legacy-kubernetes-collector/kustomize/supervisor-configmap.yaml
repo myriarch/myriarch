@@ -1,4 +1,4 @@
-# Supervisor and fallback configuration. The content is identical to deploy/supervisor/k8s/*.yaml
+# Supervisor and fallback configuration. The content is identical to contrib/legacy-kubernetes-collector/supervisor/*.yaml
 # (a test checks the match); everything dynamic comes from environment variables of the pod.
 apiVersion: v1
 kind: ConfigMap
@@ -12,7 +12,7 @@ data:
   supervisor.yaml: |
     # Myriarch - OpAMP supervisor configuration (Kubernetes, supervisor + collector in the same pod)
     #
-    # Mounted unchanged as a ConfigMap (deploy/k8s/collector/supervisor-configmap.yaml
+    # Mounted unchanged as a ConfigMap (contrib/legacy-kubernetes-collector/kustomize/supervisor-configmap.yaml
     # contains the same keys). Everything dynamic comes from environment variables
     # of the pod (${env:...}, resolved by the supervisor when it loads the config):
     #   MYRIARCH_OPAMP_ENDPOINT, MYRIARCH_ENROLLMENT_TOKEN (Secret),

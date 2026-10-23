@@ -13,8 +13,9 @@
 #     the digest check, and every download is followed by an unpack against the SHA-256 that the producing job reported;
 #   - no ${{ }} expression in a run text, no write to GITHUB_ENV or GITHUB_PATH, no DOCKER_CONFIG, no secret, no cache;
 #   - the registry writes: push, cosign sign and the six attestations of both images run as strictly sequential steps of the job
-#     push-images, each attestation after the signature of its image; the chart is packaged with the index digest of the server image
-#     in the job chart (no write scope), pushed by digest and signed by one script and attested in the job push-chart; no other job pushes, signs or attests images;
+#     push-images, each attestation after the signature of its image; the server chart is packaged with the index digest of the server
+#     image and the collector chart with the index digest of the updater image in the job chart (no write scope), both pushed by digest
+#     and signed by one script and attested, strictly one after the other, in the job push-chart; no other job pushes, signs or attests images;
 #   - the pins: the six GitHub-owned actions at the SHAs the other workflows use (actions/attest is new);
 #   - tool resolution: the pinned tools are reached only through TOOLS_BIN (the workflow never writes GITHUB_PATH). Every step that
 #     calls a script or a program that needs a pinned tool sets TOOLS_BIN to the directory of a tool set that the same job unpacked
@@ -61,6 +62,7 @@ def check(cond, message):
 REPOSITORY = "myriarch/myriarch"
 IMAGES = {"server": "ghcr.io/myriarch/myriarch", "updater": "ghcr.io/myriarch/myriarch-updater"}
 CHART = "ghcr.io/myriarch/charts/myriarch"
+CHART_COLLECTOR = "ghcr.io/myriarch/charts/myriarch-collector"
 PINS = {
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1": "v7.0.1",
     "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e": "v7.0.0",
@@ -478,7 +480,7 @@ for jid, steps in steps_of.items():
         run = tx(s.get("run")) or ""
         if jid not in ("push-images", "sign-blobs", "finalize"):  # push-chart signs inside push-chart.sh
             check(not re.search(r"\b(crane (push|copy|tag)|cosign (sign|attest))\b", run), "job %s: only push-images, sign-blobs and finalize write to a registry or sign" % jid)
-check(code.count("uses: " + ATTEST) == 8, "actions/attest must appear exactly 8 times")
+check(code.count("uses: " + ATTEST) == 9, "actions/attest must appear exactly 9 times")
 
 # sign-blobs: sign, attest the checksums, name the provenance, in this order
 sb = steps_of.get("sign-blobs", [])
@@ -544,18 +546,24 @@ for k in ("server", "updater"):
     want += ["push:%s" % k, "sign:%s" % k, "provenance:%s" % k, "sbom:%s:amd64" % k, "sbom:%s:arm64" % k]
 want.append("logout")
 check(sequence == want, "push-images: the steps must run in the order %s (found %s)" % (want, sequence))
-# chart: the chart is packaged with the server index digest and turned into a layout; no registry step, no signature
+# chart: the server chart is packaged with the server index digest, the collector chart with the updater index digest, each turned into
+# a layout; no registry step, no signature
 ch = steps_of.get("chart", [])
 check("strategy" not in mp(jobs.get("chart")), "chart must not use a matrix")
 chart_seq = []
 for s in ch:
     run, uses, env = tx(s.get("run")) or "", tx(s.get("uses")) or "", mp(s.get("env"))
     if "chart-package.sh package" in run:
-        chart_seq.append("package")
-        check(tx(env.get("IMAGE_DIGEST")) == "${{ needs.images.outputs.server-index }}", "chart: the chart is packaged with the index digest of the server image")
+        collector = "--chart-name myriarch-collector --chart deploy/helm/myriarch-collector " in run
+        chart_seq.append("package:collector" if collector else "package")
+        check(tx(env.get("IMAGE_DIGEST")) == ("${{ needs.images.outputs.updater-index }}" if collector else "${{ needs.images.outputs.server-index }}"),
+              "chart: the chart is packaged with the index digest of the image that it references (server image, updater image for the collector chart)")
+        check(collector or "--chart deploy/helm/myriarch " in run, "chart: the server chart is packaged from deploy/helm/myriarch")
     elif "chart-package.sh layout" in run:
-        chart_seq.append("layout")
-        check(tx(s.get("id")) == "layout", "chart: the layout step has the id layout")
+        collector = "--chart-name myriarch-collector " in run
+        chart_seq.append("layout:collector" if collector else "layout")
+        check(tx(s.get("id")) == ("layout-collector" if collector else "layout"), "chart: the layout step has the id layout (layout-collector for the collector chart)")
+        check(("/chart-layout/chart-collector" if collector else "/chart-layout/chart\"") in run, "chart: the layout of each chart goes to its own directory of chart-layout")
     elif "artifact.sh pack" in run:
         chart_seq.append("pack")
     elif uses.startswith("actions/upload-artifact"):
@@ -564,9 +572,12 @@ for s in ch:
         pass
     else:
         chart_seq.append("other")
-check(chart_seq == ["package", "layout", "pack", "upload"], "chart: the steps must run in the order package, layout, pack, upload (found %s)" % chart_seq)
+check(chart_seq == ["package", "layout", "package:collector", "layout:collector", "pack", "upload"],
+      "chart: the steps must run in the order package, layout, package and layout of the collector chart, pack, upload (found %s)" % chart_seq)
 check(tx(mp(mp(jobs.get("chart")).get("outputs")).get("chart-digest")) == "${{ steps.layout.outputs.chart-digest }}", "chart: the output chart-digest is the one of the layout step")
-# push-chart: the layout is pushed by digest and signed by one script, then attested, strictly in sequence
+check(tx(mp(mp(jobs.get("chart")).get("outputs")).get("collector-chart-digest")) == "${{ steps.layout-collector.outputs.chart-digest }}", "chart: the output collector-chart-digest is the one of the layout-collector step")
+check("deploy/helm/myriarch-collector" in code.split("  chart:\n", 1)[1].split("  push-chart:\n", 1)[0], "chart: the sparse checkout holds the collector chart")
+# push-chart: each layout is pushed by digest and signed by one script, then attested, strictly in sequence (server chart, then collector chart)
 pc = steps_of.get("push-chart", [])
 check("strategy" not in mp(jobs.get("push-chart")), "push-chart must not use a matrix")
 sequence = []
@@ -580,23 +591,45 @@ for s in pc:
     elif "chart-package.sh" in run:
         sequence.append("package")
     elif "push-chart.sh" in run:
-        sequence.append("push")
-        check(tx(env.get("CHART_DIGEST")) == "${{ needs.chart.outputs.chart-digest }}", "push-chart: the push takes the chart digest of the job chart")
-        check(tx(s.get("id")) == "push", "push-chart: the push step has the id push")
+        collector = "--chart-name myriarch-collector " in run
+        sequence.append("push:collector" if collector else "push")
+        check(tx(env.get("CHART_DIGEST")) == ("${{ needs.chart.outputs.collector-chart-digest }}" if collector else "${{ needs.chart.outputs.chart-digest }}"), "push-chart: the push takes the chart digest of the job chart (collector-chart-digest for the collector chart)")
+        check(tx(s.get("id")) == ("push-collector" if collector else "push"), "push-chart: the push step has the id push (push-collector for the collector chart)")
+        check(("/chart-layout/chart-collector\"" if collector else "/chart-layout/chart\"") in run, "push-chart: each chart is pushed from its own layout directory")
     elif uses == ATTEST:
-        check(tx(w.get("subject-name")) == CHART and tx(w.get("subject-digest")) == "${{ steps.push.outputs.chart-digest }}"
+        collector = tx(w.get("subject-name")) == CHART_COLLECTOR
+        step = "push-collector" if collector else "push"
+        check(tx(w.get("subject-name")) == (CHART_COLLECTOR if collector else CHART) and tx(w.get("subject-digest")) == "${{ steps.%s.outputs.chart-digest }}" % step
               and tx(w.get("push-to-registry")) == "true" and tx(w.get("create-storage-record")) == "false" and set(w) == {"subject-name", "subject-digest", "push-to-registry", "create-storage-record"},
               "push-chart: the attestation takes the chart digest of the push step, pushes to the registry and creates no storage record")
-        sequence.append("provenance")
+        sequence.append("provenance:collector" if collector else "provenance")
     elif uses in (CHECKOUT, DOWNLOAD) or "artifact.sh unpack" in run:
         pass
     else:
         sequence.append("other")
-check(sequence == ["login", "push", "provenance", "logout"], "push-chart: the steps must run in the order login, push, provenance, logout (found %s)" % sequence)
-check(tx(mp(jobs.get("push-chart")).get("outputs") and mp(mp(jobs.get("push-chart")).get("outputs")).get("chart-digest")) == "${{ steps.push.outputs.chart-digest }}", "push-chart: the output chart-digest is the one of the push step")
+check(sequence == ["login", "push", "provenance", "push:collector", "provenance:collector", "logout"], "push-chart: the steps must run in the order login, push, provenance, push and provenance of the collector chart, logout (found %s)" % sequence)
+pco = mp(mp(jobs.get("push-chart")).get("outputs"))
+check(tx(pco.get("chart-digest")) == "${{ steps.push.outputs.chart-digest }}", "push-chart: the output chart-digest is the one of the push step")
+check(tx(pco.get("collector-chart-digest")) == "${{ steps.push-collector.outputs.chart-digest }}", "push-chart: the output collector-chart-digest is the one of the push-collector step")
+# verify-chart verifies both charts, each against the image digest of the image it references; finalize tags both
+vc = steps_of.get("verify-chart", [])
+vseq = []
+for s in vc:
+    run, env = tx(s.get("run")) or "", mp(s.get("env"))
+    if "verify-chart.sh" in run:
+        collector = "--chart-name myriarch-collector " in run
+        vseq.append("collector" if collector else "server")
+        check(tx(env.get("CHART_DIGEST")) == ("${{ needs.push-chart.outputs.collector-chart-digest }}" if collector else "${{ needs.push-chart.outputs.chart-digest }}"), "verify-chart: each chart is verified at the digest that push-chart pushed")
+        check(tx(env.get("IMAGE_DIGEST")) == ("${{ needs.images.outputs.updater-index }}" if collector else "${{ needs.images.outputs.server-index }}"), "verify-chart: each chart is verified against the index digest of the image it references")
+check(vseq == ["server", "collector"], "verify-chart: the server chart and the collector chart are verified, in this order (found %s)" % vseq)
+for s in steps_of.get("finalize", []):
+    if "finalize.sh" in (tx(s.get("run")) or ""):
+        fe = mp(s.get("env"))
+        check(tx(fe.get("CHART_DIGEST")) == "${{ needs.push-chart.outputs.chart-digest }}" and tx(fe.get("COLLECTOR_CHART_DIGEST")) == "${{ needs.push-chart.outputs.collector-chart-digest }}",
+              "finalize: both chart digests of push-chart are passed to finalize.sh")
 # no image repository outside the literals
 repos = set(re.findall(r"ghcr\.io/[A-Za-z0-9._/-]+", code))
-check(repos == set(IMAGES.values()) | {CHART}, "image repositories in the file: %s" % sorted(repos))
+check(repos == set(IMAGES.values()) | {CHART, CHART_COLLECTOR}, "image repositories in the file: %s" % sorted(repos))
 check(code.count(REPOSITORY) >= 1 and set(re.findall(r"myriarch/[a-z-]+", code)) >= {"myriarch/myriarch"}, "the repository literal is missing")
 
 # ---- permissions are commented (zizmor pedantic: undocumented-permissions) ----------------------------------------------------
@@ -705,7 +738,7 @@ expect_fail "an unpack against another producer is refused" 'same producer' \
   mutated 'TAR_SHA256: ${{ needs.build-tools.outputs.sha256 }}' 'TAR_SHA256: ${{ needs.images.outputs.sha256 }}'
 expect_fail "an attestation with a storage record is refused" 'create no storage record' \
   mutated 'create-storage-record: false' 'create-storage-record: true'
-expect_fail "a ninth attestation is refused" 'exactly 8 times' \
+expect_fail "a tenth attestation is refused" 'exactly 9 times' \
   mutated $'      - name: Log out of ghcr.io\n        run: ci/release/registry-login.sh logout\n\n  # Creates the draft' $'      - name: Attest once more\n        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2\n        with:\n          subject-checksums: x\n      - name: Log out of ghcr.io\n        run: ci/release/registry-login.sh logout\n\n  # Creates the draft'
 expect_fail "a changed pin is refused" 'an action outside the allowed pins' \
   mutated 'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2' 'actions/attest@0000000000000000000000000000000000000000 # v4.2.2'
@@ -723,6 +756,14 @@ expect_fail "another image repository is refused" 'image repositories in the fil
   mutated 'subject-name: ghcr.io/myriarch/myriarch-updater' 'subject-name: ghcr.io/example/other'
 expect_fail "an attestation of the chart with another digest is refused" 'push-chart: the attestation takes the chart digest' \
   mutated 'subject-digest: ${{ steps.push.outputs.chart-digest }}' 'subject-digest: ${{ needs.images.outputs.server-index }}'
+expect_fail "an attestation of the collector chart with another digest is refused" 'push-chart: the attestation takes the chart digest' \
+  mutated 'subject-digest: ${{ steps.push-collector.outputs.chart-digest }}' 'subject-digest: ${{ steps.push.outputs.chart-digest }}'
+expect_fail "a collector chart packaged with the server image digest is refused" 'chart: the chart is packaged with the index digest' \
+  mutated $'          IMAGE_DIGEST: ${{ needs.images.outputs.updater-index }}\n        run: ci/release/chart-package.sh package --chart-name' $'          IMAGE_DIGEST: ${{ needs.images.outputs.server-index }}\n        run: ci/release/chart-package.sh package --chart-name'
+expect_fail "a collector chart verified against the server image digest is refused" 'verify-chart: each chart is verified against the index digest' \
+  mutated $'          IMAGE_DIGEST: ${{ needs.images.outputs.updater-index }}\n        run: ci/release/verify-chart.sh' $'          IMAGE_DIGEST: ${{ needs.images.outputs.server-index }}\n        run: ci/release/verify-chart.sh'
+expect_fail "finalize without the collector chart digest is refused" 'finalize: both chart digests' \
+  mutated $'          COLLECTOR_CHART_DIGEST: ${{ needs.push-chart.outputs.collector-chart-digest }}\n' ''
 expect_fail "a chart packaged with another digest is refused" 'chart: the chart is packaged with the index digest' \
   mutated $'          IMAGE_DIGEST: ${{ needs.images.outputs.server-index }}\n        run: ci/release/chart-package.sh' $'          IMAGE_DIGEST: ${{ needs.images.outputs.updater-index }}\n        run: ci/release/chart-package.sh'
 expect_fail "a changed timeout is refused" 'job finalize: timeout-minutes' \

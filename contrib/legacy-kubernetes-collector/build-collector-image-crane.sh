@@ -6,19 +6,17 @@
 # the upstream OpAMP supervisor image plus the upstream otelcol-contrib binary of the SAME version in one image
 # (two processes in one container: the supervisor configures, starts and restarts the collector).
 #
-#   IMAGE_REPO=registry.example.com/<org>/myriarch-collector scripts/build-collector-image-crane.sh 0.161.0
+#   IMAGE_REPO=registry.example.com/<org>/myriarch-collector contrib/legacy-kubernetes-collector/build-collector-image-crane.sh 0.161.0
 #                                                                build + push  <IMAGE_REPO>:0.161.0-<git short sha>
-#   make collector-image-crane IMAGE_REPO=... OTELCOL_VERSION=0.161.0
-#                                                                the same through the Makefile (default: OTELCOL_VERSION of ci/versions.env)
-#   IMAGE_REPO=... DRY_RUN=1 scripts/build-collector-image-crane.sh 0.161.0
+#   IMAGE_REPO=... DRY_RUN=1 contrib/legacy-kubernetes-collector/build-collector-image-crane.sh 0.161.0
 #                                                                read + check the upstream images, build the layer, push nothing
-#   IMAGE_REPO=... WITH_UPDATER=0 scripts/build-collector-image-crane.sh 0.162.0
+#   IMAGE_REPO=... WITH_UPDATER=0 contrib/legacy-kubernetes-collector/build-collector-image-crane.sh 0.162.0
 #                                                                the previous image without myriarch-updater (tag <version>)
-#   IMAGE_REPO=localhost:5000/myriarch-collector scripts/build-collector-image-crane.sh 0.162.0
+#   IMAGE_REPO=localhost:5000/myriarch-collector contrib/legacy-kubernetes-collector/build-collector-image-crane.sh 0.162.0
 #                                                                local registry (crane registry serve)
-#   IMAGE_REPO=<registry>/<path> scripts/build-collector-image-crane.sh login USER
+#   IMAGE_REPO=<registry>/<path> contrib/legacy-kubernetes-collector/build-collector-image-crane.sh login USER
 #                                                                one-time registry login (same as scripts/build-image-crane.sh login)
-#   scripts/build-collector-image-crane.sh layout                print the archive paths of the files of the new layer except the
+#   contrib/legacy-kubernetes-collector/build-collector-image-crane.sh layout                print the archive paths of the files of the new layer except the
 #                                                                binaries (the license files); needs no IMAGE_REPO and no network,
 #                                                                builds nothing (WITH_UPDATER does not change the list)
 #
@@ -32,13 +30,13 @@
 #   3. packs it together with the directories the supervisor needs and the license files (see the image contract) into ONE
 #      deterministic layer tar;
 #   3b. WITH_UPDATER=1 (default): builds myriarch-updater from this repository (static, IMAGE_PLATFORM, `go build -trimpath`, the same
-#      -X version flags as the Makefile) and packs it into the same layer (container mode, deploy/k8s/collector/README.md);
+#      -X version flags as the Makefile) and packs it into the same layer (container mode, contrib/legacy-kubernetes-collector/kustomize/README.md);
 #   4. `crane mutate --append` puts the layer on top of the supervisor image (IMAGE_PLATFORM) and sets user, entrypoint, cmd,
 #      workdir, env and labels in the same push to IMAGE_REPO:TAG (never a half-finished image under the tag);
 #   5. reads the pushed config back (contract check, new diff id = layer built here) and runs `crane validate --remote`;
 #   6. prints the digest. Lines starting with IMAGE_ on stdout are machine readable (everything else goes to stderr).
 #
-# Image contract (mirrors deploy/k8s/collector/Dockerfile; what deploy manifests may rely on)
+# Image contract (mirrors contrib/legacy-kubernetes-collector/kustomize/Dockerfile; what deploy manifests may rely on)
 #   /usr/local/bin/opampsupervisor    from the upstream supervisor image (ENTRYPOINT opampsupervisor)
 #   /usr/local/bin/otelcol-contrib    from the upstream contrib image, 0755 (agent.executable of the supervisor config; in container
 #                                     mode it is only the SEED: myriarch-updater copies it to the volume, see below)
@@ -60,7 +58,7 @@
 #     /usr/share/licenses/opentelemetry-collector/README
 #                                     names otelcol-contrib and opampsupervisor <version>, "Copyright The OpenTelemetry Authors",
 #                                     Apache-2.0, the upstream repositories and tags and the digests of the two upstream images
-#                                     this image was built from (generated here; deploy/k8s/collector/Dockerfile writes the same
+#                                     this image was built from (generated here; contrib/legacy-kubernetes-collector/kustomize/Dockerfile writes the same
 #                                     text with the image references of its build arguments)
 #   writable for an arbitrary UID: OpenShift (restricted-v2) starts the container with a UID from the project range and
 #   GID 0, so /var/lib/otelcol and /var/lib/otelcol/supervisor are owned by 10001:0 and mode 0775 (group 0 can write);
@@ -85,7 +83,7 @@
 #                                                            provide it); arm64 tags get the suffix "-arm64", so they never
 #                                                            overwrite the amd64 tag
 #   WITH_UPDATER      1 = also pack myriarch-updater            default 1
-#   UPDATER_VERSION   version string linked into myriarch-updater   default `git describe --tags --always --dirty` (the Makefile passes VERSION)
+#   UPDATER_VERSION   version string linked into myriarch-updater   default `git describe --tags --always --dirty`
 #   UPDATER_COMMIT    commit linked into myriarch-updater       default `git rev-parse --short HEAD`
 #   GO                go binary used to build myriarch-updater  default go
 #   SUPERVISOR_IMAGE  base image                             default OTELCOL_SUPERVISOR_IMAGE of ci/versions.env (reviewed digest) for
@@ -115,10 +113,10 @@
 # licenses (deploy/README.md, License files). For that reason the image has no org.opencontainers.image.licenses label.
 #
 # One-time login (token via stdin so it never shows up in the process list):
-#   IMAGE_REPO=<registry>/<path> scripts/build-collector-image-crane.sh login '<registry-user>' < token-file
+#   IMAGE_REPO=<registry>/<path> contrib/legacy-kubernetes-collector/build-collector-image-crane.sh login '<registry-user>' < token-file
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TOOLS_BIN="${TOOLS_BIN:-${ROOT}/.cache/bin}"
 
 IMAGE_REPO="${IMAGE_REPO:-}"
@@ -129,7 +127,7 @@ KEEP_WORK="${KEEP_WORK:-0}"
 WITH_UPDATER="${WITH_UPDATER:-1}"
 GO="${GO:-go}"
 PLATFORM="linux/amd64" # replaced by IMAGE_PLATFORM (image_platform_check, after image-common.sh is sourced)
-# the image contract (the same values as deploy/k8s/collector/Dockerfile; lists are comma separated like the crane flags)
+# the image contract (the same values as contrib/legacy-kubernetes-collector/kustomize/Dockerfile; lists are comma separated like the crane flags)
 IMAGE_UID="10001"
 IMAGE_USER="10001:10001"
 IMAGE_ENTRYPOINT="opampsupervisor"
@@ -177,7 +175,7 @@ registry_hint() {
 [collector-image] If a pull from the upstream registry failed: Docker Hub reachable (proxy? anonymous rate limit)? An internal
 [collector-image] mirror works as well: SUPERVISOR_IMAGE=<mirror>/opampsupervisor:<version> CONTRIB_IMAGE=<mirror>/contrib:<version>.
 [collector-image] If the push failed with UNAUTHORIZED / DENIED, you are not logged in or have no write permission:
-[collector-image]   IMAGE_REPO=${IMAGE_REPO} scripts/build-collector-image-crane.sh login '<registry-user>' < token-file     (stored in $(image_docker_config_desc))
+[collector-image]   IMAGE_REPO=${IMAGE_REPO} contrib/legacy-kubernetes-collector/build-collector-image-crane.sh login '<registry-user>' < token-file     (stored in $(image_docker_config_desc))
 EOF
 }
 
@@ -331,7 +329,7 @@ build_updater() {
 }
 
 # ---- license files ------------------------------------------------------------------------------------------------
-# /usr/share/licenses/opentelemetry-collector/README: facts about the upstream software in this image. deploy/k8s/collector/Dockerfile
+# /usr/share/licenses/opentelemetry-collector/README: facts about the upstream software in this image. contrib/legacy-kubernetes-collector/kustomize/Dockerfile
 # writes the same text (there the image references come from its build arguments); change both together.
 write_otel_readme() { # file
   local v="${VERSION}"
@@ -569,8 +567,8 @@ verify_upstream() {
 
 cmd_build() {
   VERSION="${1:-}"
-  [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "usage: scripts/build-collector-image-crane.sh <collector version, e.g. 0.162.0>  (or: layout | login USER | help)"
-  image_require_repo scripts/build-collector-image-crane.sh "registry.example.com/<org>/myriarch-collector"
+  [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "usage: contrib/legacy-kubernetes-collector/build-collector-image-crane.sh <collector version, e.g. 0.162.0>  (or: layout | login USER | help)"
+  image_require_repo contrib/legacy-kubernetes-collector/build-collector-image-crane.sh "registry.example.com/<org>/myriarch-collector"
   image_labels_load
   case "${WITH_UPDATER}" in 0|1) ;; *) die "WITH_UPDATER must be 0 or 1" ;; esac
   if [ -z "${TAG:-}" ]; then
@@ -666,8 +664,8 @@ case "${1:-help}" in
   -h|--help|help) usage ;;
   login)
     shift
-    image_require_repo scripts/build-collector-image-crane.sh "registry.example.com/<org>/myriarch-collector"
-    [ -n "${1:-}" ] || die "usage: IMAGE_REPO=<registry>/<path> scripts/build-collector-image-crane.sh login <user>  (the token is read from stdin; same credentials as scripts/build-image-crane.sh)"
+    image_require_repo contrib/legacy-kubernetes-collector/build-collector-image-crane.sh "registry.example.com/<org>/myriarch-collector"
+    [ -n "${1:-}" ] || die "usage: IMAGE_REPO=<registry>/<path> contrib/legacy-kubernetes-collector/build-collector-image-crane.sh login <user>  (the token is read from stdin; same credentials as scripts/build-image-crane.sh)"
     exec "${ROOT}/scripts/build-image-crane.sh" login "$@" ;;
   layout) cmd_layout ;;
   build) shift; cmd_build "$@" ;;

@@ -3,7 +3,7 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Contract of the crane image scripts (scripts/build-image-crane.sh, scripts/build-collector-image-crane.sh,
+# Contract of the crane image scripts (scripts/build-image-crane.sh, contrib/legacy-kubernetes-collector/build-collector-image-crane.sh,
 # scripts/build-mirror-image-crane.sh) and of their shared helpers (scripts/lib/image-common.sh, ci/image-labels.env):
 # IMAGE_REPO is required and validated, base images must be pinned by digest, the label file is validated, the source URL
 # is derived without host special cases, and DOCKER_CONFIG is never defaulted. Then the release images: the build from
@@ -17,7 +17,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 W="${TEST_TMP}"
 IMG="${REPO}/scripts/build-image-crane.sh"
-COL="${REPO}/scripts/build-collector-image-crane.sh"
+COL="${REPO}/contrib/legacy-kubernetes-collector/build-collector-image-crane.sh"
 MIR="${REPO}/scripts/build-mirror-image-crane.sh"
 COMMON="${REPO}/scripts/lib/image-common.sh"
 DIGEST="sha256:$(printf '0%.0s' $(seq 1 64))"
@@ -153,7 +153,7 @@ chmod +x "${STUB_UPDATER}"
 # ---- (g) help works without IMAGE_REPO -----------------------------------------------------------------------------------
 t_help() { env -u IMAGE_REPO bash "$1" help; }
 expect_ok "build-image-crane.sh help" t_help "${IMG}"
-expect_ok "build-collector-image-crane.sh help" t_help "${COL}"
+expect_ok "contrib/legacy-kubernetes-collector/build-collector-image-crane.sh help" t_help "${COL}"
 expect_ok "build-mirror-image-crane.sh help" t_help "${MIR}"
 
 # ---- (h) label loader ----------------------------------------------------------------------------------------------------
@@ -373,7 +373,7 @@ if OUT="$(t_col_tag_ok 2>&1)"; then fail "unexpected success"; elif printf '%s' 
 
 # the collector Dockerfile builds from the reviewed digests
 for arg in COLLECTOR_IMAGE SUPERVISOR_IMAGE GO_IMAGE; do
-  if grep -Eq "^ARG ${arg}=[^ ]+@sha256:[0-9a-f]{64}\$" "${COL_DOCKERFILE:-${REPO}/deploy/k8s/collector/Dockerfile}"; then ok "collector Dockerfile: ${arg} is pinned by digest"; else fail "collector Dockerfile: ${arg} is not pinned by digest"; fi
+  if grep -Eq "^ARG ${arg}=[^ ]+@sha256:[0-9a-f]{64}\$" "${COL_DOCKERFILE:-${REPO}/contrib/legacy-kubernetes-collector/kustomize/Dockerfile}"; then ok "collector Dockerfile: ${arg} is pinned by digest"; else fail "collector Dockerfile: ${arg} is not pinned by digest"; fi
 done
 
 # the collector image: license files of the project and of the OpenTelemetry software
@@ -382,7 +382,7 @@ for want in usr/share/licenses/myriarch/LICENSE usr/share/licenses/myriarch/THIR
   if printf '%s\n' "${COL_LAYOUT}" | grep -qx -- "${want}"; then ok "collector layout contains ${want}"; else fail "collector layout lacks ${want}"; fi
 done
 # and the Dockerfile of the collector image (same contract) names the same four files
-COL_DOCKERFILE="${REPO}/deploy/k8s/collector/Dockerfile"
+COL_DOCKERFILE="${REPO}/contrib/legacy-kubernetes-collector/kustomize/Dockerfile"
 for want in /usr/share/licenses/myriarch/LICENSE /usr/share/licenses/myriarch/THIRD_PARTY_NOTICES /usr/share/licenses/opentelemetry-collector/LICENSE /usr/share/licenses/opentelemetry-collector/README; do
   if grep -q -- "${want}" "${COL_DOCKERFILE}"; then ok "collector Dockerfile mentions ${want}"; else fail "collector Dockerfile lacks ${want}"; fi
 done

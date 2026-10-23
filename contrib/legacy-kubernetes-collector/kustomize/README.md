@@ -1,4 +1,6 @@
-# Collector + supervisor in Kubernetes
+# Collector + supervisor in Kubernetes (deprecated)
+
+> Deprecated since v0.2.0: use the Helm chart `deploy/helm/myriarch-collector`. See [the README one level up](../README.md).
 
 The OpAMP supervisor and `otelcol-contrib` run in the **same container**; every pod or node is its own OpAMP agent with
 full functionality (remote configuration with rollback, health, effective configuration, component list, restart).
@@ -6,7 +8,7 @@ full functionality (remote configuration with rollback, health, effective config
 | File | Contents |
 |---|---|
 | `Dockerfile` | Image built from the supervisor image + the contrib binary (same version!) |
-| `supervisor-configmap.yaml` | `supervisor.yaml` and `fallback.yaml` (identical to `deploy/supervisor/k8s/`) |
+| `supervisor-configmap.yaml` | `supervisor.yaml` and `fallback.yaml` (identical to `contrib/legacy-kubernetes-collector/supervisor/`) |
 | `site-configmap.yaml` | Cluster-specific values (OpAMP endpoint, cluster name, country, time zone) |
 | `secret.example.yaml` | Examples for the enrollment token and collector secrets (do not commit) |
 | `gateway.yaml` | StatefulSet `otel-gateway` with a PVC (stable identity) + Services (OTLP 4317/4318) |
@@ -16,10 +18,10 @@ full functionality (remote configuration with rollback, health, effective config
 
 ## Image without a container runtime
 
-`scripts/build-collector-image-crane.sh <version>` (make target `collector-image-crane`) builds the same image with crane
+`contrib/legacy-kubernetes-collector/build-collector-image-crane.sh <version>` builds the same image with crane
 from the two upstream images (pinned by digest, versions checked) and pushes it; the image contract (user, directories
 with group 0, ENTRYPOINT/CMD) matches the `Dockerfile` here: change both together.
-Details: `scripts/build-collector-image-crane.sh help` (IMAGE_REPO is required).
+Details: `contrib/legacy-kubernetes-collector/build-collector-image-crane.sh help` (IMAGE_REPO is required).
 
 ## Container mode (myriarch-updater in the pod)
 
@@ -32,7 +34,7 @@ systemd.
 ```yaml
 command: ["/usr/local/bin/myriarch-updater", "container", "--config=/etc/myriarch/updater.yaml"]   # PID 1
 # Volumes: PVC (collector binaries + updater state) at /var/lib/myriarch, ConfigMap with trusted_root.json at /etc/myriarch/trust,
-#          updater.yaml (template: deploy/updater/container/updater.yaml), supervisor storage as before
+#          updater.yaml (template: contrib/legacy-kubernetes-collector/updater/updater.yaml), supervisor storage as before
 # Probes:  startup/liveness GET :13135/healthz (myriarch-updater), readiness GET :13133/ (collector)
 ```
 
@@ -50,7 +52,7 @@ command: ["/usr/local/bin/myriarch-updater", "container", "--config=/etc/myriarc
 
 ```bash
 # Build context = repository root (myriarch-updater is built as well)
-docker build -f deploy/k8s/collector/Dockerfile --build-arg OTELCOL_VERSION=0.162.0 -t <registry>/observability/otel-supervisor-collector:0.162.0 .
+docker build -f contrib/legacy-kubernetes-collector/kustomize/Dockerfile --build-arg OTELCOL_VERSION=0.162.0 -t <registry>/observability/otel-supervisor-collector:0.162.0 .
 docker push <registry>/observability/otel-supervisor-collector:0.162.0
 
 kubectl apply -f namespace.yaml

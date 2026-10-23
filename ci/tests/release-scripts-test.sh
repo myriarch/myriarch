@@ -145,6 +145,7 @@ case "$1" in
   manifest|config|digest|ls)
     if [ -f "${d}/crane.anon.fail" ] && [ -n "${DOCKER_CONFIG:-}" ]; then echo "UNAUTHORIZED: stub" >&2; exit 1; fi
     if [ -f "${d}/crane.anon.fail.chart" ] && [ -n "${DOCKER_CONFIG:-}" ] && [[ "$2" == */charts/* ]]; then echo "UNAUTHORIZED: stub" >&2; exit 1; fi
+    if [ -f "${d}/crane.anon.fail.collector" ] && [ -n "${DOCKER_CONFIG:-}" ] && [[ "$2" == */charts/myriarch-collector@* ]]; then echo "UNAUTHORIZED: stub" >&2; exit 1; fi
     f="${d}/crane/$1.$(key "$2")"
     [ -f "${f}" ] || { echo "stub crane: no state for $1 $2" >&2; exit 1; }
     cat "${f}" ;;
@@ -450,7 +451,8 @@ eq "trigger" "push" "$(idv RELEASE_TRIGGER)"
 eq "server image" "ghcr.io/myriarch/myriarch" "$(idv RELEASE_IMAGE_SERVER)"
 eq "updater image" "ghcr.io/myriarch/myriarch-updater" "$(idv RELEASE_IMAGE_UPDATER)"
 eq "chart" "ghcr.io/myriarch/charts/myriarch" "$(idv RELEASE_CHART)"
-eq "seven keys only" "7" "$(grep -cv '^#\|^$' "${ID}")"
+eq "collector chart" "ghcr.io/myriarch/charts/myriarch-collector" "$(idv RELEASE_CHART_COLLECTOR)"
+eq "eight keys only" "8" "$(grep -cv '^#\|^$' "${ID}")"
 repo_brand="$(sed -n 's|^[[:space:]]*Repository[[:space:]]*=[[:space:]]*"https://github.com/\([^"]*\)".*|\1|p' "${ROOT}/internal/brand/brand.go" | head -n 1)"
 eq "internal/brand Repository" "$(idv RELEASE_REPOSITORY)" "${repo_brand}"
 eq "install-linux.sh RELEASE_REPOSITORY" "$(idv RELEASE_REPOSITORY)" "$(sed -n 's/^readonly RELEASE_REPOSITORY="\(.*\)"$/\1/p' "${ROOT}/deploy/scripts/install-linux.sh")"
@@ -1246,12 +1248,16 @@ fsetup() { # tag [image options...]
   gen release "${S}" 4711 "${FTAG}" "${FV}" "${FVER}/verified-manifest.txt"
   echo '{}' > "${S}/crane/manifest.ghcr.io_myriarch_charts_myriarch_sha256_${FR_CHART#sha256:}"
   : > "${S}/crane/ls.ghcr.io_myriarch_charts_myriarch"
+  echo '{}' > "${S}/crane/manifest.ghcr.io_myriarch_charts_myriarch-collector_sha256_${FR_CCHART#sha256:}"
+  : > "${S}/crane/ls.ghcr.io_myriarch_charts_myriarch-collector"
   printf '{"tagName":"%s","isDraft":false,"isPrerelease":%s,"isImmutable":true,"databaseId":4711}\n' "${FTAG}" "${FPRE}" > "${S}/view.json"
   printf '{"ref":"refs/tags/%s","object":{"type":"commit","sha":"%s"}}\n' "${FTAG}" "${C40}" > "${S}/ref.json"
 }
 FR_CHART="sha256:$(printf '3%.0s' $(seq 64))"
+FR_CCHART="sha256:$(printf '5%.0s' $(seq 64))"
+CC_KEY=ghcr.io_myriarch_charts_myriarch-collector
 fr() {
-  GH_TOKEN=stub-token-not-secret CHART_DIGEST="${FR_CHART_DIGEST-${FR_CHART}}" RELEASE_COMMIT="${FR_COMMIT:-${C40}}" RELEASE_PRERELEASE="${FPRE}" RELEASE_LATEST="${FR_LATEST:-${FLATEST}}" IMAGE_TAGS="${FR_TAGS:-${FTAGS}}" \
+  GH_TOKEN=stub-token-not-secret CHART_DIGEST="${FR_CHART_DIGEST-${FR_CHART}}" COLLECTOR_CHART_DIGEST="${FR_CCHART_DIGEST-${FR_CCHART}}" RELEASE_COMMIT="${FR_COMMIT:-${C40}}" RELEASE_PRERELEASE="${FPRE}" RELEASE_LATEST="${FR_LATEST:-${FLATEST}}" IMAGE_TAGS="${FR_TAGS:-${FTAGS}}" \
     GITHUB_RUN_ATTEMPT="${FR_ATTEMPT:-1}" RELEASE_RETRY_DELAY=0 run_priv "${REL}/finalize.sh" --tag "${FTAG}" --release-id "${FR_ID:-4711}" --verified "${FVER}"
 }
 seq_line() { grep -n "$1" "${S}/calls/all.log" | head -n 1 | cut -d: -f1; }
@@ -1259,10 +1265,11 @@ seq_last() { grep -n "$1" "${S}/calls/all.log" | tail -n 1 | cut -d: -f1; }
 fsetup v9.9.9-rc.1
 expect_ok "finalize: an rc" fr
 contains "finalize rc: stdout is the release URL" "release-url=https://github.com/myriarch/myriarch/releases/tag/v9.9.9-rc.1" "${OUT}"
-eq "finalize rc: seven anonymous manifest reads (six images, the chart) with an empty DOCKER_CONFIG" "7" "$(call_count crane '^manifest [^ ]+ DOCKER_CONFIG=/')"
+eq "finalize rc: eight anonymous manifest reads (six images, both charts) with an empty DOCKER_CONFIG" "8" "$(call_count crane '^manifest [^ ]+ DOCKER_CONFIG=/')"
 eq "finalize rc: no other crane call uses an anonymous config" "0" "$(call_count crane '^(ls|tag|digest|config) .*DOCKER_CONFIG=/')"
-eq "finalize rc: crane tag for both image repositories and the chart" "3" "$(call_count crane '^tag ')"
+eq "finalize rc: crane tag for both image repositories and both charts" "4" "$(call_count crane '^tag ')"
 has_call crane "^tag ghcr.io/myriarch/charts/myriarch@${FR_CHART} 9.9.9-rc.1 " && ok "finalize rc: the chart gets its version tag by digest" || fail "finalize rc: the chart was not tagged"
+has_call crane "^tag ghcr.io/myriarch/charts/myriarch-collector@${FR_CCHART} 9.9.9-rc.1 " && ok "finalize rc: the collector chart gets its version tag by its own digest" || fail "finalize rc: the collector chart was not tagged"
 has_call crane "^tag ${REPO_S}@${SERVER_INDEX_DIGEST} 9.9.9-rc.1 " && has_call crane "^tag ${REPO_U}@${UPDATER_INDEX_DIGEST} 9.9.9-rc.1 " && ok "finalize rc: tag 9.9.9-rc.1 on the index digests" || fail "finalize rc: wrong crane tag calls"
 no_call crane '(^| )latest( |$)' && ok "finalize rc: no call with latest" || fail "finalize rc: a call with latest"
 eq "finalize rc: the publish call (draft=false, make_latest=false)" "api -X PATCH repos/myriarch/myriarch/releases/4711 -F draft=false -f make_latest=false" "$(call_line gh 7)"
@@ -1275,9 +1282,10 @@ has_call gh '^release verify v9.9.9-rc.1 --repo myriarch/myriarch$' && has_call 
 [ "$(seq_last 'crane manifest')" -lt "$(seq_line 'crane tag')" ] && [ "$(seq_last 'crane tag')" -lt "$(seq_line 'PATCH')" ] && ok "finalize rc: anonymous reads, then tags, then the publication" || fail "finalize rc: wrong order"
 fsetup v9.9.9
 expect_ok "finalize: a final tag" fr
-eq "finalize final: five crane tag calls (X.Y.Z and X.Y per image, X.Y.Z for the chart)" "5" "$(call_count crane '^tag ')"
+eq "finalize final: six crane tag calls (X.Y.Z and X.Y per image, X.Y.Z for each chart)" "6" "$(call_count crane '^tag ')"
 has_call crane "^tag ghcr.io/myriarch/charts/myriarch@${FR_CHART} 9.9.9 " && ok "finalize final: the chart gets 9.9.9" || fail "finalize final: the chart was not tagged 9.9.9"
-no_call crane "^tag ghcr.io/myriarch/charts/myriarch@[^ ]+ 9\\.9 " && ok "finalize final: the chart gets no moving tag" || fail "finalize final: the chart got X.Y"
+has_call crane "^tag ghcr.io/myriarch/charts/myriarch-collector@${FR_CCHART} 9.9.9 " && ok "finalize final: the collector chart gets 9.9.9" || fail "finalize final: the collector chart was not tagged 9.9.9"
+no_call crane "^tag ghcr.io/myriarch/charts/[^ ]+ 9\\.9 " && ok "finalize final: the charts get no moving tag" || fail "finalize final: a chart got X.Y"
 for r in "${REPO_S}@${SERVER_INDEX_DIGEST}" "${REPO_U}@${UPDATER_INDEX_DIGEST}"; do
   has_call crane "^tag ${r} 9.9.9 " && has_call crane "^tag ${r} 9.9 " && ok "finalize final: 9.9.9 and 9.9 on ${r:0:40}" || fail "finalize final: tags missing on ${r}"
 done
@@ -1318,7 +1326,13 @@ no_call crane '^tag ' && ok "finalize: no crane tag before the visibility check 
 fsetup v9.9.9-rc.1; touch "${S}/crane.anon.fail.chart"
 refuse_case "the chart is private" "ghcr_not_public.*charts/myriarch cannot be read without credentials.*Change visibility"
 no_call crane '^tag ' && ok "finalize: no crane tag while the chart is private" || fail "finalize: tagged although the chart is private"
+fsetup v9.9.9-rc.1; touch "${S}/crane.anon.fail.collector"
+refuse_case "the collector chart is private" "ghcr_not_public.*charts/myriarch-collector cannot be read without credentials.*Change visibility"
+no_call crane '^tag ' && ok "finalize: no crane tag while the collector chart is private" || fail "finalize: tagged although the collector chart is private"
 fsetup v9.9.9-rc.1; FR_CHART_DIGEST="" refuse_case "no chart digest" "verified_mismatch.*CHART_DIGEST"
+fsetup v9.9.9-rc.1; FR_CCHART_DIGEST="" refuse_case "no collector chart digest" "verified_mismatch.*COLLECTOR_CHART_DIGEST"
+fsetup v9.9.9-rc.1; FR_CCHART_DIGEST="sha256:abc" refuse_case "a malformed collector chart digest" "verified_mismatch.*COLLECTOR_CHART_DIGEST"
+fsetup v9.9.9-rc.1; FR_CCHART_DIGEST="${FR_CHART}" refuse_case "both charts with one digest" "verified_mismatch.*same digest"
 fsetup v9.9.9-rc.1; gen release "${S}" 4711 v9.9.9-rc.1 9.9.9-rc.1 "${FVER}/verified-manifest.txt" draft=0
 refuse_case "published and attempt 1" "release_not_draft.*never publish the draft by hand"
 fsetup v9.9.9-rc.1; gen release "${S}" 4711 v9.9.9-rc.1 9.9.9-rc.1 "${FVER}/verified-manifest.txt" tag=v9.9.8-rc.1
@@ -1350,9 +1364,18 @@ refuse_case "a chart tag that points at another digest" "chart_tag_conflict.*nev
 no_call crane '^tag ' && ok "finalize: no tag at all after a chart tag conflict" || fail "finalize: tagged although the chart tag conflicts"
 fsetup v9.9.9-rc.1; echo latest >> "${S}/crane/ls.ghcr.io_myriarch_charts_myriarch"
 refuse_case "latest in the chart repository" "image_tag_latest"
+fsetup v9.9.9-rc.1; echo 9.9.9-rc.1 >> "${S}/crane/ls.${CC_KEY}"; echo "${FR_CHART}" > "${S}/crane/digest.${CC_KEY}_9.9.9-rc.1"
+refuse_case "a collector chart tag that points at another digest (the digest of the server chart)" "chart_tag_conflict.*myriarch-collector:9.9.9-rc.1.*never moved"
+no_call crane '^tag ' && ok "finalize: no tag at all after a collector chart tag conflict" || fail "finalize: tagged although the collector chart tag conflicts"
+fsetup v9.9.9-rc.1; echo latest >> "${S}/crane/ls.${CC_KEY}"
+refuse_case "latest in the collector chart repository" "image_tag_latest.*myriarch-collector"
+fsetup v9.9.9-rc.1; echo 9.9.9-rc.1 >> "${S}/crane/ls.${CC_KEY}"; echo "${FR_CCHART}" > "${S}/crane/digest.${CC_KEY}_9.9.9-rc.1"
+expect_ok "finalize: a collector chart tag that already points at the collector chart digest" fr
+no_call crane "^tag ghcr.io/myriarch/charts/myriarch-collector" && ok "finalize: the collector chart tag is kept" || fail "finalize: the kept collector chart tag was set again"
+has_call crane "^tag ghcr.io/myriarch/charts/myriarch@${FR_CHART} 9.9.9-rc.1 " && ok "finalize: the server chart is still tagged" || fail "finalize: the server chart was not tagged"
 fsetup v9.9.9-rc.1; echo 9.9.9-rc.1 >> "${S}/crane/ls.ghcr.io_myriarch_charts_myriarch"; echo "${FR_CHART}" > "${S}/crane/digest.ghcr.io_myriarch_charts_myriarch_9.9.9-rc.1"
 expect_ok "finalize: a chart tag that already points at the chart digest" fr
-no_call crane "^tag ghcr.io/myriarch/charts/myriarch" && ok "finalize: the chart tag is kept" || fail "finalize: the kept chart tag was set again"
+no_call crane "^tag ghcr.io/myriarch/charts/myriarch@" && ok "finalize: the chart tag is kept" || fail "finalize: the kept chart tag was set again"
 fsetup v9.9.9-rc.1; FR_TAGS="9.9.9-rc.1,latest"
 refuse_case "latest in IMAGE_TAGS" "image_tag_latest"
 unset FR_TAGS
@@ -1374,6 +1397,7 @@ for t in 9.9.9 9.9; do for r in "${REPO_S}:${SERVER_INDEX_DIGEST}" "${REPO_U}:${
   echo "${r#*:}" > "${S}/crane/digest.$(ckey "${r%%:*}:${t}")"; echo "${t}" >> "${S}/crane/ls.$(ckey "${r%%:*}")"
 done; done
 echo "${FR_CHART}" > "${S}/crane/digest.ghcr.io_myriarch_charts_myriarch_9.9.9"; echo 9.9.9 >> "${S}/crane/ls.ghcr.io_myriarch_charts_myriarch"
+echo "${FR_CCHART}" > "${S}/crane/digest.${CC_KEY}_9.9.9"; echo 9.9.9 >> "${S}/crane/ls.${CC_KEY}"
 gen release "${S}" 4711 v9.9.9 9.9.9 "${FVER}/verified-manifest.txt" draft=0
 FR_ATTEMPT=2 expect_ok "finalize: a re-run after the publication" fr
 no_call gh '-X PATCH' && ok "finalize resume: no PATCH" || fail "finalize resume: PATCH was called"

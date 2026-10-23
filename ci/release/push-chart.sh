@@ -2,12 +2,13 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Pushes the server chart to ghcr.io BY DIGEST and signs it keyless (step of the job `push-chart`, ADR-0035). Privileged (id-token: write,
+# Pushes a chart of the release (the server chart or the collector chart) to ghcr.io BY DIGEST and signs it keyless (step of the job `push-chart`, ADR-0035). Privileged (id-token: write,
 # packages: write). It runs strictly before the provenance attestation of the same digest (actions/attest), like sign-image.sh. Like the
 # images, the chart gets no tag here: the version tag is added by finalize.sh after the second approval, with `crane tag`.
 #
-#   TOOLS_BIN=... GITHUB_WORKFLOW_REF=... ci/release/push-chart.sh --layout DIR --digest CHART_DIGEST --tag TAG --commit SHA
+#   TOOLS_BIN=... GITHUB_WORKFLOW_REF=... ci/release/push-chart.sh [--chart-name NAME] --layout DIR --digest CHART_DIGEST --tag TAG --commit SHA
 #
+#   --chart-name  myriarch (default): RELEASE_CHART, the server chart; myriarch-collector: RELEASE_CHART_COLLECTOR [chart_name]
 #   --layout  the OCI layout that `ci/release/chart-package.sh layout` wrote (job `chart`): one chart manifest [layout_invalid]
 #   --digest  the digest of that manifest, which is the digest of the chart in the registry [layout_invalid]
 #
@@ -30,10 +31,11 @@ set -euo pipefail
 # shellcheck source=ci/release/common.sh
 . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-USAGE="push-chart.sh --layout DIR --digest CHART_DIGEST --tag TAG --commit SHA (environment: TOOLS_BIN, GITHUB_WORKFLOW_REF)"
-layout="" digest="" tag="" commit=""
+USAGE="push-chart.sh [--chart-name NAME] --layout DIR --digest CHART_DIGEST --tag TAG --commit SHA (environment: TOOLS_BIN, GITHUB_WORKFLOW_REF)"
+layout="" digest="" tag="" commit="" name="myriarch"
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --chart-name) need_value "$1" "$#"; name="$2"; shift 2 ;;
     --layout) need_value "$1" "$#"; layout="$2"; shift 2 ;;
     --digest) need_value "$1" "$#"; digest="$2"; shift 2 ;;
     --tag) need_value "$1" "$#"; tag="$2"; shift 2 ;;
@@ -44,6 +46,11 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "${layout}" ] && [ -n "${digest}" ] && [ -n "${tag}" ] && [ -n "${commit}" ] || usage_err "${USAGE}"
 load_identity
+case "${name}" in
+  myriarch) repo="${RELEASE_CHART}" ;;
+  myriarch-collector) repo="${RELEASE_CHART_COLLECTOR}" ;;
+  *) err chart_name "--chart-name must be myriarch or myriarch-collector" ;;
+esac
 check_match tag_invalid "--tag" "${tag}" "${TAG_RE}"
 check_match commit_invalid "--commit" "${commit}" "${COMMIT_RE}"
 check_match digest_invalid "--digest" "${digest}" "${DIGEST_RE}"
@@ -55,7 +62,7 @@ need_tool cosign crane
 # --- 1. guard ----------------------------------------------------------------------------------------------------------------
 want_ref="$(printf '%s' "${RELEASE_REPOSITORY}/${RELEASE_WORKFLOW}@refs/tags/${tag}")"
 [ "${GITHUB_WORKFLOW_REF:-}" = "${want_ref}" ] \
-  || err workflow_ref "refusing to write to ${RELEASE_CHART}: GITHUB_WORKFLOW_REF is '${GITHUB_WORKFLOW_REF:-unset}', expected '${want_ref}'"
+  || err workflow_ref "refusing to write to ${repo}: GITHUB_WORKFLOW_REF is '${GITHUB_WORKFLOW_REF:-unset}', expected '${want_ref}'"
 
 # --- 2. layout ---------------------------------------------------------------------------------------------------------------
 python3 -I - "${layout}" "${digest}" <<'PY' || exit 1
@@ -109,18 +116,18 @@ PY
 # --- 3. push -----------------------------------------------------------------------------------------------------------------
 errfile="$(mktemp "${TMPDIR:-/tmp}/myriarch-push-chart.XXXXXX")"
 trap 'rm -f "${errfile}" "${errfile}.manifest"' EXIT
-info "pushing ${layout} to ${RELEASE_CHART}@${digest} (no tag)"
-"${TOOLS_BIN}/crane" push "${layout}" "${RELEASE_CHART}@${digest}" > /dev/null 2> "${errfile}" \
+info "pushing ${layout} to ${repo}@${digest} (no tag)"
+"${TOOLS_BIN}/crane" push "${layout}" "${repo}@${digest}" > /dev/null 2> "${errfile}" \
   || err push_failed "crane push failed: $(grep -v '^[[:space:]]*$' "${errfile}" | tail -n 1 | cut -c 1-300)"
-got="$("${TOOLS_BIN}/crane" digest "${RELEASE_CHART}@${digest}" 2> "${errfile}")" || err chart_digest_mismatch "crane could not read ${RELEASE_CHART}@${digest} back"
-[ "${got}" = "${digest}" ] || err chart_digest_mismatch "the registry reports ${got} for ${RELEASE_CHART}@${digest}"
-"${TOOLS_BIN}/crane" manifest "${RELEASE_CHART}@${digest}" > "${errfile}.manifest" 2> "${errfile}" || err chart_digest_mismatch "crane could not read the manifest of ${RELEASE_CHART}@${digest}"
-[ "sha256:$(sha256_of "${errfile}.manifest")" = "${digest}" ] || err chart_digest_mismatch "the manifest the registry serves for ${RELEASE_CHART}@${digest} hashes to another digest"
-"${TOOLS_BIN}/crane" validate --remote "${RELEASE_CHART}@${digest}" >&2 || err chart_digest_mismatch "the chart ${RELEASE_CHART}@${digest} in the registry is incomplete or invalid"
+got="$("${TOOLS_BIN}/crane" digest "${repo}@${digest}" 2> "${errfile}")" || err chart_digest_mismatch "crane could not read ${repo}@${digest} back"
+[ "${got}" = "${digest}" ] || err chart_digest_mismatch "the registry reports ${got} for ${repo}@${digest}"
+"${TOOLS_BIN}/crane" manifest "${repo}@${digest}" > "${errfile}.manifest" 2> "${errfile}" || err chart_digest_mismatch "crane could not read the manifest of ${repo}@${digest}"
+[ "sha256:$(sha256_of "${errfile}.manifest")" = "${digest}" ] || err chart_digest_mismatch "the manifest the registry serves for ${repo}@${digest} hashes to another digest"
+"${TOOLS_BIN}/crane" validate --remote "${repo}@${digest}" >&2 || err chart_digest_mismatch "the chart ${repo}@${digest} in the registry is incomplete or invalid"
 
 # --- 4. sign -----------------------------------------------------------------------------------------------------------------
-info "signing ${RELEASE_CHART}@${digest}"
-"${TOOLS_BIN}/cosign" sign --yes "${RELEASE_CHART}@${digest}" >&2 || err sign_failed "cosign sign failed for ${RELEASE_CHART}@${digest}"
-verify_image_signature "${RELEASE_CHART}" "${digest}" "${tag}" "${commit}"
-info "verified the signature of ${RELEASE_CHART}@${digest}"
+info "signing ${repo}@${digest}"
+"${TOOLS_BIN}/cosign" sign --yes "${repo}@${digest}" >&2 || err sign_failed "cosign sign failed for ${repo}@${digest}"
+verify_image_signature "${repo}" "${digest}" "${tag}" "${commit}"
+info "verified the signature of ${repo}@${digest}"
 printf 'chart-digest=%s\n' "${digest}"

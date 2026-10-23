@@ -1,0 +1,300 @@
+# Helm chart for a Myriarch-managed OpenTelemetry Collector: the unchanged upstream OpAMP Supervisor image runs as the main
+# container, the unchanged upstream collector (contrib) image only seeds the collector binary. Nothing is built from these images.
+#
+# The values are validated against values.schema.json: Helm refuses a key that the chart does not know and a value of the wrong
+# type or form in "helm install", "upgrade", "template" and "lint". Secrets are not values: the chart reads the enrollment token
+# (and the optional CA bundle) from Secrets and ConfigMaps that you create, and refers to them by name.
+#
+# Minimal installation: the chart installs once two things exist:
+#   1. a Secret (enrollment.existingSecret, default myriarch-enrollment) with the enrollment token under the key "token", and
+#   2. server.endpoint set to the wss:// address of the OpAMP endpoint of your Myriarch server.
+#
+# How the pod works (init containers in this order, all in one pod; none of the images is modified):
+#   1. myriarch-updater (init) runs "install-self /shared": it copies its own static binary to the shared volume.
+#   2. otelcol-contrib (init) runs "/shared/myriarch-updater copy /otelcol-contrib /shared/": the collector image has no shell
+#      and no cp, so the updater copies the collector binary to the shared volume.
+#   3. opampsupervisor (main container) starts the collector from the shared volume. The configuration of the collector comes
+#      from the Myriarch server over OpAMP; until it arrives, a fallback configuration with the health check runs.
+# With containerMode.enabled the updater is PID 1 of the main container instead and swaps the collector binary on a volume.
+
+# statefulset: a gateway with a stable identity per replica (PVC). daemonset: one collector per node.
+mode: statefulset
+
+# Number of replicas of the StatefulSet (every replica is its own OpAMP agent with its own identity). Ignored by the DaemonSet.
+replicaCount: 1
+
+# The three images. Every image has a tag and an optional digest: with a digest the image is referenced as repository@digest and
+# the tag is ignored (immutable). The tags and digests of the two upstream images are the reviewed ones of ci/versions.env; the
+# supervisor and the collector must have the same version. The release workflow writes the digest of the updater image of the
+# release into images.updater.digest before it packages the chart.
+images:
+  # myriarch-updater: init container 1 and, in container mode, PID 1 of the main container.
+  updater:
+    # Registry host (and optional port). It applies when repository has no registry host of its own; global.imageRegistry replaces it.
+    registry: ghcr.io
+    # Repository without the registry host.
+    repository: myriarch/myriarch-updater
+    # Image tag. Empty = appVersion of the chart.
+    tag: ""
+    # Optional image digest (sha256:<64 hex>); when set, the tag is ignored.
+    digest: ""
+    # Image pull policy.
+    pullPolicy: IfNotPresent
+  # otelcol-contrib: init container 2, which only copies the collector binary.
+  collector:
+    registry: docker.io
+    repository: otel/opentelemetry-collector-contrib
+    tag: 0.162.0
+    digest: sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
+    pullPolicy: IfNotPresent
+  # opampsupervisor: the main container.
+  supervisor:
+    registry: docker.io
+    repository: otel/opentelemetry-collector-opampsupervisor
+    tag: 0.162.0
+    digest: sha256:13af4526381fe8279fb78f211628fea5cae693bf413737f234ee3587d9a44fb6
+    pullPolicy: IfNotPresent
+# Secrets for pulling the images from a private registry.
+imagePullSecrets: []
+
+# Overrides the chart name in resource names.
+nameOverride: ""
+# Overrides the complete resource name.
+fullnameOverride: ""
+
+# Values that a parent chart shares with its subcharts. This chart reads only global.imageRegistry: a registry host that replaces
+# images.*.registry for all three images, for example the host of a mirror (global.imageRegistry=mirror.example.com). It does not
+# apply to a repository that has a registry host of its own.
+global: {}
+
+# A parent chart that includes this chart as a dependency can switch it on and off with a dependency condition. This chart ignores
+# the key "enabled" and the schema accepts it for that reason.
+
+serviceAccount:
+  # Create a ServiceAccount.
+  create: true
+  # Name of the ServiceAccount. Empty = generated from the release name.
+  name: ""
+  # Annotations of the ServiceAccount.
+  annotations: {}
+  # Mount the API token into the pod. Off: the pod runs configuration from Git and needs no Kubernetes API credential. A collector
+  # that needs the API (the k8sattributes processor, for example) needs a dedicated ServiceAccount with a read-only Role that you
+  # create yourself; set serviceAccount.name to it and this value to true.
+  automountToken: false
+
+# --- Connection to the Myriarch server -------------------------------------------------------------
+server:
+  # OpAMP endpoint of the Myriarch server. wss:// is the default; ws:// is refused unless allowInsecureTransport is true.
+  endpoint: wss://fleet.example.com/v1/opamp
+  # Explicit opt-in to an unencrypted ws:// endpoint (for example the in-cluster Service of a server in the same namespace). The
+  # enrollment token then travels in clear text: use it only on a network that you trust.
+  allowInsecureTransport: false
+  tls:
+    # CA bundle that signs the certificate of the server, for a server with a private CA. Name an existing Secret or an existing
+    # ConfigMap (not both); empty = the system roots of the supervisor image.
+    existingSecret: ""
+    existingConfigMap: ""
+    # Key of the PEM bundle in the Secret or ConfigMap.
+    key: ca.pem
+
+# Enrollment token of the collectors: the chart reads it from an existing Secret and never takes it as a value.
+enrollment:
+  # Name of the Secret (same namespace).
+  existingSecret: myriarch-enrollment
+  # Key of the token in the Secret.
+  key: token
+
+# Site attributes that every agent of this release reports (the fleets of the server match on them, for example site.type).
+site:
+  # site.type. Empty = k8s-gateway for the StatefulSet and k8s-node for the DaemonSet.
+  type: ""
+  # site.id
+  id: ""
+  # site.name
+  name: ""
+  # site.country
+  country: ""
+  # site.region
+  region: ""
+  # site.timezone
+  timezone: ""
+  # deployment.environment.name
+  environment: ""
+  # k8s.cluster.name
+  clusterName: ""
+
+# Additional environment variables of the main container, for example secrets that the collector configuration reads with
+# ${env:NAME} (BACKEND_API_TOKEN) or HTTPS_PROXY. The collector inherits the environment of the supervisor.
+extraEnv: []
+# Additional environment sources (Secrets, ConfigMaps) of the main container.
+extraEnvFrom: []
+
+# --- Ports and Service -----------------------------------------------------------------------------
+# Ports that the collector listens on (the receivers of the configuration from the server), declared on the container, offered by
+# the Service of the StatefulSet and allowed by the NetworkPolicy. The health ports 13133 (collector), 13134 (supervisor) and
+# 13135 (updater, container mode) are always declared.
+ports:
+  - name: otlp-grpc
+    port: 4317
+  - name: otlp-http
+    port: 4318
+service:
+  # Create the Service for the ports above (StatefulSet only; the DaemonSet has no Service).
+  enabled: true
+  # Service type.
+  type: ClusterIP
+  # Annotations of the Service.
+  annotations: {}
+
+# --- Identity and storage --------------------------------------------------------------------------
+# The instance UID of a collector is stored in the storage directory of the supervisor. Without durable storage every new pod is a
+# new agent.
+persistence:
+  # StatefulSet: size, class and access modes of the PVC of every replica (volumeClaimTemplate "storage").
+  size: 1Gi
+  # Storage class. Empty = the default class of the cluster.
+  storageClass: ""
+  accessModes: [ReadWriteOnce]
+  # DaemonSet: keep the identity of the node agent on the node. Without it the storage is an emptyDir and a restarted pod is a new
+  # agent. A hostPath volume is not allowed by the Pod Security levels baseline and restricted and needs a privileged namespace (or
+  # on OpenShift an SCC that allows it). The directory must be writable by the pod user (10001 by default): the chart has no root
+  # init container that changes its owner, so prepare it on the nodes.
+  hostPath:
+    enabled: false
+    # Directory on the node. Empty = /var/lib/myriarch/<fullname>.
+    path: ""
+    # Type of the hostPath volume.
+    type: DirectoryOrCreate
+
+# DaemonSet only: read-only access to the logs of the node, for a filelog receiver. This is the one hostPath of the chart that is not
+# about identity. It needs the same privileged namespace as persistence.hostPath, and the files must be readable by the supervisor
+# user. containerd creates the pod log files as 0640 root:root and CRI-O as 0600, so neither "others" nor the user's own group can
+# read them: for containerd add the group ID 0 with podSecurityContext.supplementalGroups: [0] (a group, not a user ID; the OpenShift
+# profile removes supplementalGroups, so grant the group through the SCC there). CRI-O needs another way to read the files.
+nodeLogs:
+  enabled: false
+  # Directory on the node.
+  hostPath: /var/log/pods
+  # Mount path in the container.
+  mountPath: /var/log/pods
+
+# --- Container mode (optional) ---------------------------------------------------------------------
+# myriarch-updater is PID 1 of the main container, starts the supervisor as a child process and swaps the collector binary on a
+# persistent volume when the server asks for a new version (the updater executor), with the same verification, health check and
+# rollback as on a host. The image reference no longer says which collector runs. StatefulSet only. See docs/design/container-mode.md.
+containerMode:
+  enabled: false
+  # Second volumeClaimTemplate "binaries" for the versions of the collector and the state of the updater (two or three times the
+  # unpacked binary plus one archive, about one gigabyte for the contrib distribution).
+  binaries:
+    size: 3Gi
+    # Storage class. Empty = the default class of the cluster.
+    storageClass: ""
+  # newest: the higher version wins (a tie keeps the volume). image: emergency switch, the binary of the image is always activated.
+  seedPolicy: newest
+  # Versions of the collector kept on the volume (at least 2: the active one and the previous one).
+  keepVersions: 2
+  update:
+    # Verify the signature of the downloaded collector (Sigstore bundle). Needs trustedRoot.
+    requireSignature: true
+    # Time to wait for the health check after a swap.
+    healthTimeout: 120s
+  # ConfigMap with the Sigstore trusted root (trusted_root.json) for the offline verification; the updater makes no TUF access.
+  trustedRoot:
+    existingConfigMap: ""
+    key: trusted_root.json
+  # Time for SIGTERM to SIGKILL for the supervisor.
+  stopTimeout: 30s
+
+# --- Pod ---------------------------------------------------------------------------------------------
+# Resources of the main container. The supervisor, the collector and, during an update, a second collector for the validation share
+# the limit: set memory_limiter in the configuration of the collector to about 75 % of the memory limit.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+# Resources of the two init containers.
+initResources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 256Mi
+
+# Seconds for a graceful stop. In container mode the pod gets at least 360, because a running installation may finish its critical
+# section first.
+terminationGracePeriodSeconds: 45
+
+# Security context of the pod. The supervisor image runs under a named user, which the kubelet cannot check against runAsNonRoot
+# without a numeric ID, so the standard profile sets runAsUser, runAsGroup and fsGroup to 10001 for all containers: the init
+# containers and the main container then share one identity that can read and write /shared and the storage volume. These are
+# overridable defaults, not baked-in IDs: set a value to null to leave the field out. The OpenShift profile drops all three, the SCC
+# assigns them from the range of the project.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+# Security context of every container (Pod Security level "restricted").
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop: [ALL]
+# Size of the emptyDir for /tmp.
+tmpSizeLimit: 256Mi
+# Size of the emptyDir "shared" that holds the updater and the seeded collector binary (about 400 MB for the contrib distribution).
+sharedSizeLimit: 1Gi
+
+# Tolerations, for example [{operator: Exists}] for a node agent on every node.
+tolerations: []
+nodeSelector: {}
+affinity: {}
+# Topology spread constraints. The selector labels of the release are added when a constraint has no labelSelector.
+topologySpreadConstraints: []
+priorityClassName: ""
+# Annotations and labels of the pods.
+podAnnotations: {}
+podLabels: {}
+# Update strategy of the DaemonSet.
+updateStrategy:
+  maxUnavailable: 10%
+
+# Additional volumes of the pod (for example a ConfigMap with certificates for the collector configuration).
+extraVolumes: []
+# Additional volume mounts of the main container.
+extraVolumeMounts: []
+
+# --- OpenShift -----------------------------------------------------------------------------------
+# Profile for OpenShift (Security Context Constraints restricted-v2):
+#   true   OpenShift profile
+#   false  standard Kubernetes profile
+#   auto   OpenShift profile when the cluster offers the API security.openshift.io/v1 (.Capabilities)
+# CAVEAT for auto: "helm template" has no cluster access and renders the STANDARD profile unless you pass
+# --api-versions security.openshift.io/v1.
+# The OpenShift profile drops runAsUser, runAsGroup and fsGroup from podSecurityContext (the SCC assigns them from the range of the
+# project; runAsNonRoot and the seccomp profile stay).
+openshift:
+  enabled: false
+
+# --- Network ------------------------------------------------------------------------------------------
+# Segmentation of the ingress (default: on). The ports above are reachable from the listed sources only, the health ports from the
+# namespace of the release only (the kubelet probes are not affected in the usual CNIs). Egress stays open: the destinations
+# (server, backends, DNS) differ per environment. A CNI with NetworkPolicy support is a prerequisite.
+networkPolicy:
+  enabled: true
+  ingress:
+    # Allow every pod of the release namespace to reach the ports.
+    allowSameNamespace: true
+    # Further sources in NetworkPolicy "from" format; the default allows the namespaces that carry the label
+    # myriarch.dev/otlp-client=true. Set [] for none.
+    from:
+      - namespaceSelector:
+          matchLabels:
+            myriarch.dev/otlp-client: "true"

@@ -70,7 +70,7 @@ sha256_of() { # file
 
 # --- the frozen identity ------------------------------------------------------------------------------------------------------
 # load_identity: reads ci/release/identity.env as data into RELEASE_REPOSITORY, RELEASE_WORKFLOW, RELEASE_OIDC_ISSUER,
-# RELEASE_TRIGGER, RELEASE_IMAGE_SERVER, RELEASE_IMAGE_UPDATER and RELEASE_CHART. Nothing is evaluated and the environment does not override a value.
+# RELEASE_TRIGGER, RELEASE_IMAGE_SERVER, RELEASE_IMAGE_UPDATER, RELEASE_CHART and RELEASE_CHART_COLLECTOR. Nothing is evaluated and the environment does not override a value.
 load_identity() {
   local file="${RELEASE_LIB_DIR}/identity.env" line key value seen=" "
   [ -f "${file}" ] || err identity_env "ci/release/identity.env is missing"
@@ -80,7 +80,7 @@ load_identity() {
     key="${line%%=*}"
     value="${line#*=}"
     case "${key}" in
-      RELEASE_REPOSITORY|RELEASE_WORKFLOW|RELEASE_OIDC_ISSUER|RELEASE_TRIGGER|RELEASE_IMAGE_SERVER|RELEASE_IMAGE_UPDATER|RELEASE_CHART) ;;
+      RELEASE_REPOSITORY|RELEASE_WORKFLOW|RELEASE_OIDC_ISSUER|RELEASE_TRIGGER|RELEASE_IMAGE_SERVER|RELEASE_IMAGE_UPDATER|RELEASE_CHART|RELEASE_CHART_COLLECTOR) ;;
       *) err identity_env "identity.env has an unexpected key" ;;
     esac
     case "${seen}" in *" ${key} "*) err identity_env "identity.env sets ${key} twice" ;; esac
@@ -94,9 +94,10 @@ load_identity() {
       RELEASE_IMAGE_SERVER) RELEASE_IMAGE_SERVER="${value}" ;;
       RELEASE_IMAGE_UPDATER) RELEASE_IMAGE_UPDATER="${value}" ;;
       RELEASE_CHART) RELEASE_CHART="${value}" ;;
+      RELEASE_CHART_COLLECTOR) RELEASE_CHART_COLLECTOR="${value}" ;;
     esac
   done < "${file}"
-  for key in RELEASE_REPOSITORY RELEASE_WORKFLOW RELEASE_OIDC_ISSUER RELEASE_TRIGGER RELEASE_IMAGE_SERVER RELEASE_IMAGE_UPDATER RELEASE_CHART; do
+  for key in RELEASE_REPOSITORY RELEASE_WORKFLOW RELEASE_OIDC_ISSUER RELEASE_TRIGGER RELEASE_IMAGE_SERVER RELEASE_IMAGE_UPDATER RELEASE_CHART RELEASE_CHART_COLLECTOR; do
     case "${seen}" in *" ${key} "*) ;; *) err identity_env "identity.env does not set ${key}" ;; esac
   done
   [[ "${RELEASE_REPOSITORY}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || err identity_env "RELEASE_REPOSITORY is not owner/name"
@@ -106,6 +107,7 @@ load_identity() {
   [[ "${RELEASE_IMAGE_SERVER}" =~ ^ghcr\.io/[a-z0-9._/-]+$ ]] || err identity_env "RELEASE_IMAGE_SERVER is not a ghcr.io repository"
   [[ "${RELEASE_IMAGE_UPDATER}" =~ ^ghcr\.io/[a-z0-9._/-]+$ ]] || err identity_env "RELEASE_IMAGE_UPDATER is not a ghcr.io repository"
   [[ "${RELEASE_CHART}" =~ ^ghcr\.io/[a-z0-9._/-]+$ ]] || err identity_env "RELEASE_CHART is not a ghcr.io repository"
+  [[ "${RELEASE_CHART_COLLECTOR}" =~ ^ghcr\.io/[a-z0-9._/-]+$ ]] || err identity_env "RELEASE_CHART_COLLECTOR is not a ghcr.io repository"
 }
 
 # identity_exact <tag> [repository workflow]: the certificate identity of the run for exactly this tag

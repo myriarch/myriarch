@@ -1,0 +1,50 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- if not (include "myriarch-collector.daemonset" .) }}
+{{- $_ := include "myriarch-collector.checks" . }}
+{{- /* Every replica is its own OpAMP agent; the PVC "storage" keeps the instance UID of the collector across restarts. */ -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "myriarch-collector.fullname" . }}
+  labels:
+    {{- include "myriarch-collector.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "myriarch-collector.fullname" . }}-headless
+  replicas: {{ .Values.replicaCount }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "myriarch-collector.selectorLabels" . | nindent 6 }}
+  template:
+    {{- include "myriarch-collector.podTemplate" . | nindent 4 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: storage
+      spec:
+        accessModes:
+          {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+    {{- if include "myriarch-collector.containerMode" . }}
+    - metadata:
+        name: binaries
+      spec:
+        accessModes:
+          {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        {{- with .Values.containerMode.binaries.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.containerMode.binaries.size }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,16 @@
+# Container mode: myriarch-updater is PID 1 and swaps the collector binary on the second volume (StatefulSet only). The trusted root
+# for the offline verification is a ConfigMap that you create:
+#   myriarch-updater fetch-trusted-root --help
+#   kubectl create configmap myriarch-trusted-root --from-file=trusted_root.json
+mode: statefulset
+server:
+  endpoint: wss://fleet.example.com/v1/opamp
+containerMode:
+  enabled: true
+  binaries:
+    size: 3Gi
+  trustedRoot:
+    existingConfigMap: myriarch-trusted-root
+resources:
+  requests: {cpu: 250m, memory: 768Mi}
+  limits: {memory: 768Mi}

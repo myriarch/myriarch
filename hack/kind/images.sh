@@ -8,7 +8,7 @@
 #   hack/kind/images.sh
 #
 #   server     scripts/build-image-crane.sh            localhost:5001/myriarch/myriarch:<sha>[-arm64]
-#   collector  scripts/build-collector-image-crane.sh  localhost:5001/myriarch/myriarch-collector:<otel version>-<sha>[-arm64]
+#   collector  contrib/legacy-kubernetes-collector/build-collector-image-crane.sh  localhost:5001/myriarch/myriarch-collector:<otel version>-<sha>[-arm64]
 #              (upstream supervisor + otelcol-contrib of OTELCOL_PREV_VERSION + myriarch-updater)
 #
 # Environment: ALLOW_DIRTY=1 (the server script refuses a dirty work tree; the final proof never sets it),
@@ -73,7 +73,7 @@ build_collector() {
   log "building the collector image ${OTELCOL_PREV_VERSION} (${platform}, upstream images pulled once)"
   out="$(IMAGE_REPO="${collector_repo}" IMAGE_PLATFORM="${platform}" \
     SUPERVISOR_IMAGE="${OTELCOL_PREV_SUPERVISOR_IMAGE}" CONTRIB_IMAGE="${OTELCOL_PREV_CONTRIB_IMAGE}" \
-    scripts/build-collector-image-crane.sh "${OTELCOL_PREV_VERSION}")" || die "the collector image build failed"
+    contrib/legacy-kubernetes-collector/build-collector-image-crane.sh "${OTELCOL_PREV_VERSION}")" || die "the collector image build failed"
   COLLECTOR_DIGEST="$(parse_digest "${out}")"
 }
 

@@ -140,7 +140,7 @@ STEP_TIMEOUT_MARGIN = 5
 # run covers it.
 KIND_PATHS = [
     "scripts/build-image-crane.sh",
-    "scripts/build-collector-image-crane.sh",
+    "contrib/legacy-kubernetes-collector/build-collector-image-crane.sh",
     "scripts/lib/image-common.sh",
     "scripts/lib/oci_image.py",
     "ci/image-labels.env",

@@ -24,6 +24,7 @@
 # MYRIARCHD_BIN: myriarchd binary for `config validate --skip-files` (default: built with `go build` into DIR).
 # HELM_CONFORM_CONFIG_VALIDATE=0 skips the config validation (only for an isolated checkout whose binary does not know
 # the chart keys yet; CI never sets it). Exit 1 if any render, validation or assertion failed.
+# At its end the script runs ci/helm-conform-collector.sh for the collector chart (deploy/helm/myriarch-collector) into DIR/collector.
 set -euo pipefail
 # shellcheck source=ci/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -534,6 +535,9 @@ if [ -f "${values}" ]; then
 else
   warn "${values} is missing: skipping the production example cases"
 fi
+
+# the collector chart (deploy/helm/myriarch-collector), same Kubernetes version and schema cache
+ci/helm-conform-collector.sh --out "${out}/collector" || status=1
 
 if [ "${status}" = 0 ]; then log "helm-conform: all cases ok (${out})"; else log "helm-conform: FAILED"; fi
 exit "${status}"

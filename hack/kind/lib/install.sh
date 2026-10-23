@@ -188,10 +188,10 @@ chart_upgrade_full() {
 collector_configmaps() {
   local dir="${PROBE_WORK}/collector"
   mkdir -p "${dir}"
-  yq '.agent.executable = "/var/lib/myriarch/collector/current/otelcol-contrib"' "${ROOT}/deploy/supervisor/k8s/supervisor.yaml" > "${dir}/supervisor.yaml"
-  cp "${ROOT}/deploy/supervisor/k8s/fallback.yaml" "${dir}/fallback.yaml"
+  yq '.agent.executable = "/var/lib/myriarch/collector/current/otelcol-contrib"' "${ROOT}/contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml" > "${dir}/supervisor.yaml"
+  cp "${ROOT}/contrib/legacy-kubernetes-collector/supervisor/fallback.yaml" "${dir}/fallback.yaml"
   yq ".update.failedRetryBackoff = \"${UPDATER_RETRY_BACKOFF}s\" | .update.healthTimeout = \"45s\" | .update.healthInterval = \"2s\" | .update.healthSuccesses = 3 | .container.stopTimeout = \"20s\"" \
-    "${ROOT}/deploy/updater/container/updater.yaml" > "${dir}/updater.yaml"
+    "${ROOT}/contrib/legacy-kubernetes-collector/updater/updater.yaml" > "${dir}/updater.yaml"
   kn "${NS_APP}" create configmap kind-gw-config --from-file="${dir}" --dry-run=client -o yaml | k apply -f - >/dev/null
   kn "${NS_APP}" create configmap myriarch-trust --from-file="trusted_root.json=${PROBE_WORK}/trust/trusted_root.json" --dry-run=client -o yaml | k apply -f - >/dev/null
 }

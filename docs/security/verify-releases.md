@@ -310,6 +310,9 @@ For Compose, use `QUICKSTART_IMAGE=ghcr.io/myriarch/myriarch@${DIGEST}` (see the
 
 > **Available from v0.2.0.** The release of v0.1.0 has no OCI chart.
 
+Two charts are published, the server chart and the collector chart; both are signed and attested like the images and are verified
+the same way. This section shows the server chart; [the collector chart](#the-collector-chart) follows below.
+
 The server chart is published at `ghcr.io/myriarch/charts/myriarch` with the version of the release as its tag (`0.2.0`; `0.2.0-rc.1`
 for a candidate). It is signed by the same workflow identity as the files and the images and carries a provenance attestation. The
 workflow writes the digest of the signed server image into `image.digest` of the packaged chart, so the chart references that image
@@ -337,6 +340,32 @@ helm template myriarch "oci://ghcr.io/myriarch/charts/myriarch" --version "${VER
 `helm install oci://...` takes a version, which is a tag; to install exactly what you verified, run `helm pull
 "oci://ghcr.io/myriarch/charts/myriarch" --version "${VERSION}"` and compare the digest that it prints with `${CHART_DIGEST}`.
 The `sha256-<hex>` tags of the chart package are part of the release like those of the images; do not delete them.
+
+### The collector chart
+
+The collector chart is published at `ghcr.io/myriarch/charts/myriarch-collector` with the same tag form (`0.2.0`, `0.2.0-rc.1`), signed
+by the same workflow identity and carrying a provenance attestation. It runs the unchanged upstream OpAMP Supervisor and collector
+(contrib) images, and its updater init container is the signed `ghcr.io/myriarch/myriarch-updater` of the release. The workflow
+writes the digest of that updater image into `images.updater.digest` of the packaged chart; the two upstream images are pinned by
+tag and digest in the chart (the pins of `ci/versions.env`) and are not changed. Before publication the workflow renders the package with
+`helm template` (StatefulSet, DaemonSet, container mode and OpenShift) and requires that every `image:` is the updater at the digest
+of this release or one of the two upstream pins, so no image is referenced by a tag alone.
+
+```bash
+VERSION=0.2.0; TAG="v${VERSION}"
+COLLECTOR_CHART_DIGEST="$(crane digest "ghcr.io/myriarch/charts/myriarch-collector:${VERSION}")"
+cosign verify "ghcr.io/myriarch/charts/myriarch-collector@${COLLECTOR_CHART_DIGEST}" \
+  --certificate-identity "https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG}" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+gh attestation verify "oci://ghcr.io/myriarch/charts/myriarch-collector@${COLLECTOR_CHART_DIGEST}" --repo myriarch/myriarch --bundle-from-oci \
+  --signer-workflow "myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG}"
+helm template myriarch-collector "oci://ghcr.io/myriarch/charts/myriarch-collector" --version "${VERSION}" | grep 'image:'
+# ghcr.io/myriarch/myriarch-updater@sha256:..., and the two docker.io/otel/... images by digest
+```
+
+Compare the updater digest with the one in the release notes. To install exactly what you verified, run `helm pull
+"oci://ghcr.io/myriarch/charts/myriarch-collector" --version "${VERSION}"` and compare the digest that it prints with
+`${COLLECTOR_CHART_DIGEST}`; the chart needs the enrollment Secret and the server address (see its README).
 
 ## macOS
 

@@ -187,20 +187,20 @@ These variables are not part of the configuration overrides.
 
 ## Variables in the deployment templates
 
-The templates under `deploy/supervisor` and `deploy/updater` reference these variables as `${env:NAME}`. They are resolved by the OpAMP Supervisor or by `myriarch-updater` when they load their configuration, not by `myriarchd`.
+The templates under `deploy/supervisor` and `deploy/updater` (and the deprecated Kubernetes templates under `contrib/legacy-kubernetes-collector`) reference these variables as `${env:NAME}`. They are resolved by the OpAMP Supervisor or by `myriarch-updater` when they load their configuration, not by `myriarchd`.
 
 | Variable | Templates | Meaning |
 |---|---|---|
-| `ENVIRONMENT` | `deploy/supervisor/k8s/supervisor.yaml` | Attribute `deployment.environment.name` that the supervisor in the Kubernetes template reports. |
-| `K8S_CLUSTER_NAME` | `deploy/supervisor/k8s/supervisor.yaml` | Kubernetes attribute `k8s.cluster.name` that the supervisor in the Kubernetes template reports. |
-| `K8S_NAMESPACE_NAME` | `deploy/supervisor/k8s/supervisor.yaml` | Kubernetes attribute `k8s.namespace.name` that the supervisor in the Kubernetes template reports (from the Downward API). |
-| `K8S_NODE_NAME` | `deploy/supervisor/k8s/supervisor.yaml` | Kubernetes attribute `k8s.node.name` that the supervisor in the Kubernetes template reports (from the Downward API). |
-| `K8S_POD_NAME` | `deploy/supervisor/k8s/supervisor.yaml` | Kubernetes attribute `k8s.pod.name` that the supervisor in the Kubernetes template reports (from the Downward API). |
-| `MYRIARCH_ENROLLMENT_TOKEN` | `deploy/supervisor/k8s/supervisor.yaml`, `deploy/supervisor/linux/supervisor.yaml`, `deploy/supervisor/windows/supervisor.yaml`, `deploy/updater/container/updater.yaml` | The enrollment token. The supervisor sends it in the `Authorization: Bearer` header to the OpAMP endpoint; in container mode `myriarch-updater` sends it for the updater itself. |
-| `MYRIARCH_OPAMP_ENDPOINT` | `deploy/supervisor/k8s/supervisor.yaml` | The OpAMP endpoint of the server that the supervisor in the Kubernetes template connects to. |
-| `SITE_COUNTRY` | `deploy/supervisor/k8s/supervisor.yaml` | Site attribute `site.country` that the supervisor in the Kubernetes template reports. |
-| `SITE_ID` | `deploy/supervisor/k8s/supervisor.yaml` | Site attribute `site.id` that the supervisor in the Kubernetes template reports. |
-| `SITE_NAME` | `deploy/supervisor/k8s/supervisor.yaml` | Site attribute `site.name` that the supervisor in the Kubernetes template reports. |
-| `SITE_REGION` | `deploy/supervisor/k8s/supervisor.yaml` | Site attribute `site.region` that the supervisor in the Kubernetes template reports. |
-| `SITE_TIMEZONE` | `deploy/supervisor/k8s/supervisor.yaml` | Site attribute `site.timezone` that the supervisor in the Kubernetes template reports. |
-| `SITE_TYPE` | `deploy/supervisor/k8s/supervisor.yaml` | Site attribute `site.type` that the supervisor in the Kubernetes template reports. |
+| `ENVIRONMENT` | `contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml` | Attribute `deployment.environment.name` that the supervisor in the Kubernetes template reports. |
+| `K8S_CLUSTER_NAME` | `contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml` | Kubernetes attribute `k8s.cluster.name` that the supervisor in the Kubernetes template reports. |
+| `K8S_NAMESPACE_NAME` | `contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml` | Kubernetes attribute `k8s.namespace.name` that the supervisor in the Kubernetes template reports (from the Downward API). |
+| `K8S_NODE_NAME` | `contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml` | Kubernetes attribute `k8s.node.name` that the supervisor in the Kubernetes template reports (from the Downward API). |
+| `K8S_POD_NAME` | `contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml` | Kubernetes attribute `k8s.pod.name` that the supervisor in the Kubernetes template reports (from the Downward API). |
+| `MYRIARCH_ENROLLMENT_TOKEN` | `contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml`, `contrib/legacy-kubernetes-collector/updater/updater.yaml`, `deploy/supervisor/linux/supervisor.yaml`, `deploy/supervisor/windows/supervisor.yaml` | The enrollment token. The supervisor sends it in the `Authorization: Bearer` header to the OpAMP endpoint; in container mode `myriarch-updater` sends it for the updater itself. |
+| `MYRIARCH_OPAMP_ENDPOINT` | `contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml` | The OpAMP endpoint of the server that the supervisor in the Kubernetes template connects to. |
+| `SITE_COUNTRY` | `contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml` | Site attribute `site.country` that the supervisor in the Kubernetes template reports. |
+| `SITE_ID` | `contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml` | Site attribute `site.id` that the supervisor in the Kubernetes template reports. |
+| `SITE_NAME` | `contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml` | Site attribute `site.name` that the supervisor in the Kubernetes template reports. |
+| `SITE_REGION` | `contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml` | Site attribute `site.region` that the supervisor in the Kubernetes template reports. |
+| `SITE_TIMEZONE` | `contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml` | Site attribute `site.timezone` that the supervisor in the Kubernetes template reports. |
+| `SITE_TYPE` | `contrib/legacy-kubernetes-collector/supervisor/supervisor.yaml` | Site attribute `site.type` that the supervisor in the Kubernetes template reports. |
