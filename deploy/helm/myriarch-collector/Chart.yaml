@@ -2,8 +2,8 @@ apiVersion: v2
 name: myriarch-collector
 description: "OpenTelemetry Collector with the OpAMP Supervisor from the unchanged upstream images, managed by the Myriarch server (StatefulSet or DaemonSet)"
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0-rc.1
+appVersion: "0.2.0-rc.1"
 kubeVersion: ">=1.30.0-0"
 keywords: [opamp, opentelemetry, opentelemetry-collector, fleet-management]
 home: https://myriarch.dev
