@@ -133,13 +133,13 @@ jobs:
           path: ${{ runner.temp }}/sarif/source
       - name: Upload the report of the release build
         if: ${{ needs.source.result == 'success' }}
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: ${{ runner.temp }}/sarif/source/govulncheck-source-release.sarif
           category: govulncheck/source-release
       - name: Upload the report of the devpg build
         if: ${{ needs.source.result == 'success' }}
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: ${{ runner.temp }}/sarif/source/govulncheck-source-devpg.sarif
           category: govulncheck/source-devpg
@@ -153,13 +153,13 @@ jobs:
       # latest stable release, which the push and daily runs keep up to date, as it is.
       - name: Upload the report of the latest stable release
         if: ${{ needs.binaries.result == 'success' && inputs.release_tag == '' }}
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: ${{ runner.temp }}/sarif/binaries/govulncheck-binaries.sarif
           category: govulncheck/binaries
       - name: Upload the report of the release that a manual run names
         if: ${{ needs.binaries.result == 'success' && inputs.release_tag != '' }}
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: ${{ runner.temp }}/sarif/binaries/govulncheck-binaries.sarif
           category: govulncheck/binaries-manual
