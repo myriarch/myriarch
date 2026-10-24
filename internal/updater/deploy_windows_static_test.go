@@ -71,6 +71,13 @@ func TestInstallWindowsScriptDoesNotAdoptForeignDataDirectories(t *testing.T) {
 	assert.Contains(t, prot, "'/reset'", "children are reset")
 	assert.Contains(t, prot, "'/setowner'")
 	assert.Regexp(t, regexp.MustCompile(`Stop-Install 'directory_unsafe' .*owned by`), prot, "fails closed on a foreign owner")
+	assert.Less(t, strings.Index(prot, "Assert-NoReparsePoint"), strings.Index(prot, "Assert-NoHardLink"), "the link check follows the reparse point check")
+	assert.Less(t, strings.Index(prot, "Assert-NoHardLink"), strings.Index(prot, "Invoke-Icacls"),
+		"a file with several hard links is refused before the first icacls reset")
+	links := psFunctionBody(t, script, "Assert-NoHardLink")
+	assert.Contains(t, links, "Stop-Install 'directory_unsafe'")
+	assert.Contains(t, links, "EnumerateFiles", "every file of the tree is checked")
+	assert.Contains(t, links, "-eq $count) { Stop-Install", "a link count that cannot be determined fails closed")
 	init := psFunctionBody(t, script, "Initialize-DataDirectories")
 	assert.Contains(t, init, "Protect-DirectoryTree")
 	assert.Less(t, strings.Index(init, "Protect-DirectoryTree"), strings.Index(init, "$L.Config"),
