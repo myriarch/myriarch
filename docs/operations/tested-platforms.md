@@ -1,7 +1,7 @@
 ---
 title: "Support levels and tested platforms"
 weight: 27
-description: "The support level of every component in v0.2.0 and the platforms that the automated tests of the project run on: Linux and Windows hosts, and two Kubernetes versions on kind."
+description: "The support level of every component in v0.2.0 and the platforms of the automated tests: Linux and Windows hosts, and two Kubernetes versions on kind."
 ---
 
 This page says what the project supports in v0.2.0 and on which platforms its automated tests run. A platform that is not

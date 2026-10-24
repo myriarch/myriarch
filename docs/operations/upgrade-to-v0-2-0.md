@@ -1,7 +1,7 @@
 ---
 title: "Upgrade from v0.1.0 to v0.2.0"
 weight: 25
-description: "Upgrade notes for v0.2.0: database migrations and the rolling update, new and changed settings, the Helm chart, the installers and the deprecated Kubernetes collector files."
+description: "Upgrade notes for v0.2.0: migrations and the rolling update, new and changed settings, the Helm chart, the installers and the deprecated collector files."
 ---
 
 This page is for people who run v0.1.0 and move to v0.2.0. It gathers what the changelog says in many entries into one
