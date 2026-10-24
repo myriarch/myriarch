@@ -67,7 +67,7 @@ if text.count(old) != count:
 open(path, "w").write(text.replace(old, new))
 ' "$1" "$2" "$3" "${4:-1}"
 }
-removed_line() { # file text [count]: removes the lines that contain the text (exactly count lines, default 1)
+removed_line() { # file text [count]: removes the lines that contain the text, exactly count of them (default 1)
   python3 -I -c '
 import sys
 path, needle, count = sys.argv[1], sys.argv[2], int(sys.argv[3])
