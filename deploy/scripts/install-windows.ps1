@@ -1056,7 +1056,7 @@ function Assert-NoReparsePoint {
 
 # Number of directory entries (hard links) of the file at $Path, from the file system (nNumberOfLinks). The handle asks for no
 # access to the content (attributes only), does not follow a reparse point and lets everyone else read, write and delete.
-# Returns $null if it cannot be read. Its own function so that the helper tests can replace it.
+# Returns $null if it cannot be read or is not at least 1. Its own function so that the helper tests can replace it.
 function Get-FileLinkCount {
   param([string]$Path)
   if (-not ('Myriarch.NativeLinks' -as [type])) {
@@ -1093,21 +1093,21 @@ namespace Myriarch {
 '@
   }
   $n = [Myriarch.NativeLinks]::Count($Path)
-  if ($n -lt 0) { return $null }
+  if ($n -lt 1) { return $null }
   return [int]$n
 }
 
-# Stops (fail-closed) if a file below $Path has more than one hard link, or if the number cannot be determined: resetting the ACL
-# and the owner of such a file would change its other entries outside the data directory too. Runs after Assert-NoReparsePoint,
-# so no reparse point is followed, and while the supervisor is stopped (Stop-ServiceAndWait before Initialize-DataDirectories),
-# so the service cannot create a link between the check and the reset.
+# Stops (fail-closed) if a file below $Path has more than one hard link, or if the number is not exactly 1 or cannot be determined:
+# changing the ACL or the owner of such a file would change its other entries outside the data directory too. Runs after
+# Assert-NoReparsePoint, so no reparse point is followed, and while the supervisor is stopped (Stop-ServiceAndWait before Initialize-DataDirectories),
+# so the service cannot create a link between the check and the change.
 function Assert-NoHardLink {
   param([string]$Path)
   foreach ($file in [System.IO.Directory]::EnumerateFiles($Path, '*', [System.IO.SearchOption]::AllDirectories)) {
     $count = $null
     $err = 'no handle'
     try { $count = Get-FileLinkCount -Path $file } catch { $err = $_.Exception.Message }
-    if ($null -eq $count) { Stop-Install 'directory_unsafe' "could not determine the number of links of $file ($err); inspect the file and remove it, then install again" }
+    if ($null -eq $count -or $count -lt 1) { Stop-Install 'directory_unsafe' "could not determine the number of links of $file ($err); inspect the file and remove it, then install again" }
     if ($count -gt 1) { Stop-Install 'directory_unsafe' "$file has $count hard links, which the data directory does not allow; inspect the file and remove it, then install again" }
   }
 }
@@ -1121,8 +1121,10 @@ function Invoke-Icacls {
 # Adopts a data directory only if it is owned by SYSTEM/Administrators/TrustedInstaller and is not a
 # reparse point (otherwise abort: a local user might have created the directory beforehand). Then the ACL
 # is replaced atomically by a protected DACL (SYSTEM + Administrators only, inherited) and all contents
-# are reset (inherited ACL, owner Administrators). A file with more than one hard link stops the installation before the reset
-# (Assert-NoHardLink); that check relies on the supervisor being stopped already.
+# are reset (inherited ACL, owner Administrators). A reparse point or a file with more than one hard link stops the installation
+# before any permission in the tree is changed (Assert-NoReparsePoint, Assert-NoHardLink): setting the ACL of the root propagates
+# inheritable entries to the existing children. Both checks run again afterwards for entries created before the lock; they rely
+# on the supervisor being stopped already.
 function Protect-DirectoryTree {
   param([string]$Path)
   $item = Get-Item -LiteralPath $Path -Force
@@ -1132,6 +1134,8 @@ function Protect-DirectoryTree {
   if (@($script:SidSystem, $script:SidAdmins, $script:SidTrustedInstaller) -notcontains $owner) {
     Stop-Install 'directory_unsafe' "$Path is owned by $owner instead of SYSTEM/Administrators; inspect and remove the directory, then install again"
   }
+  Assert-NoReparsePoint -Path $Path
+  Assert-NoHardLink -Path $Path
   $sec = New-Object System.Security.AccessControl.DirectorySecurity
   $sec.SetAccessRuleProtection($true, $false)
   foreach ($sid in @($script:SidSystem, $script:SidAdmins)) {
