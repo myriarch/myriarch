@@ -1088,13 +1088,31 @@ function Protect-DirectoryTree {
   }
 }
 
-# Check (fail-closed): trusted owner, ACEs only for allowed principals - for the whole tree.
+# True if $Path is $Root or lies below it (case-insensitive, whole path segments only).
+function Test-PathUnder {
+  param([string]$Path, [string]$Root)
+  $r = $Root.TrimEnd('\', '/')
+  if ($Path.Length -lt $r.Length -or -not $Path.StartsWith($r, [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+  if ($Path.Length -eq $r.Length) { return $true }
+  return ($Path[$r.Length] -eq '\' -or $Path[$r.Length] -eq '/')
+}
+
+# Check (fail-closed): trusted owner, ACEs only for allowed principals - for the whole tree. The owner may also be the
+# virtual service account ($ServiceSid), but only for entries at or below $ServiceOwnedRoots: the directories that
+# Grant-ServiceAccountAccess opens to it for writing, where the running service creates files of its own (for example
+# supervisor\agent.log). Config, the updater state, bin and versions never admit it as the owner.
 function Assert-TreeAcl {
-  param([string]$Path, [string[]]$AllowedSids)
+  param([string]$Path, [string[]]$AllowedSids, [string]$ServiceSid = '', [string[]]$ServiceOwnedRoots = @())
   $paths = @($Path) + @([System.IO.Directory]::EnumerateFileSystemEntries($Path, '*', [System.IO.SearchOption]::AllDirectories))
   foreach ($p in $paths) {
     $owner = Get-OwnerSid -Path $p
-    if (@($script:SidSystem, $script:SidAdmins, $script:SidTrustedInstaller) -notcontains $owner) { Stop-Install 'directory_unsafe' "unexpected owner $owner on $p" }
+    if (@($script:SidSystem, $script:SidAdmins, $script:SidTrustedInstaller) -notcontains $owner) {
+      $serviceOwned = $false
+      if ($ServiceSid -and $owner -eq $ServiceSid) {
+        foreach ($root in $ServiceOwnedRoots) { if (Test-PathUnder -Path $p -Root $root) { $serviceOwned = $true; break } }
+      }
+      if (-not $serviceOwned) { Stop-Install 'directory_unsafe' "unexpected owner $owner on $p" }
+    }
     $acl = Get-Acl -LiteralPath $p
     foreach ($ace in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
       if ($ace.AccessControlType -eq 'Allow' -and $AllowedSids -notcontains $ace.IdentityReference.Value) {
@@ -1854,7 +1872,7 @@ function Invoke-Main {
     # Service (stop before the locked .exe is replaced)
     Install-SupervisorService -L $L
     $svcSid = Grant-ServiceAccountAccess -L $L
-    Assert-TreeAcl -Path $L.ProgramData -AllowedSids @($script:SidSystem, $script:SidAdmins, $svcSid)
+    Assert-TreeAcl -Path $L.ProgramData -AllowedSids @($script:SidSystem, $script:SidAdmins, $svcSid) -ServiceSid $svcSid -ServiceOwnedRoots @($L.SupState, $L.Storage)
     Stop-ServiceAndWait -Name $script:SupervisorService
     $collectorChanged = Enable-CollectorVersion -L $L
     Set-SupervisorEnvironment -TokenValue $script:EffectiveToken
@@ -1863,7 +1881,7 @@ function Invoke-Main {
 
     if ($WithUpdater) {
       Install-UpdaterService -L $L -TmpDir $tmpDir -Staging $false
-      Assert-TreeAcl -Path $L.ProgramData -AllowedSids @($script:SidSystem, $script:SidAdmins, $svcSid)
+      Assert-TreeAcl -Path $L.ProgramData -AllowedSids @($script:SidSystem, $script:SidAdmins, $svcSid) -ServiceSid $svcSid -ServiceOwnedRoots @($L.SupState, $L.Storage)
     }
 
     Start-Sleep -Seconds 2

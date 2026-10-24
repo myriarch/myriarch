@@ -48,6 +48,18 @@ func TestInstallWindowsScriptRunsSupervisorUnderVirtualServiceAccount(t *testing
 	iStart := strings.Index(main, "Start-Service -Name $script:SupervisorService")
 	require.True(t, iSvc > 0 && iGrant > iSvc && iAssert > iGrant && iStart > iAssert,
 		"service created, then granted, then ACLs verified, only then started")
+
+	// The service owns files it creates in its own directories (supervisor\agent.log); both checks, the one before the start and the
+	// one after Install-UpdaterService (the service runs by then), accept its SID as owner for those directories only.
+	assert.Equal(t, 2, strings.Count(main, "Assert-TreeAcl -Path $L.ProgramData"))
+	assert.Equal(t, 2, strings.Count(main, "-ServiceSid $svcSid -ServiceOwnedRoots @($L.SupState, $L.Storage)"),
+		"the owner exception covers exactly the directories that Grant-ServiceAccountAccess opens for writing")
+	assert.Contains(t, grant, `$L.SupState, '/grant', "*${sid}:(OI)(CI)M"`)
+	assert.Contains(t, grant, `$L.Storage, '/grant', "*${sid}:(OI)(CI)M"`)
+	tree := psFunctionBody(t, script, "Assert-TreeAcl")
+	assert.Contains(t, tree, "SidTrustedInstaller")
+	assert.Regexp(t, `Stop-Install 'directory_unsafe' "unexpected owner`, tree, "any other owner fails closed")
+	assert.NotContains(t, tree, "L.Config", "no owner exception names Config, the token or the updater state")
 }
 
 func TestInstallWindowsScriptDoesNotAdoptForeignDataDirectories(t *testing.T) {

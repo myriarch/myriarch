@@ -186,5 +186,39 @@ $script:allowSids = @('S-1-5-18', 'S-1-5-32-544')
 $msg = Message-Of { Set-SupervisorEnvironment -TokenValue 'myre_token' }
 Check 'with SYSTEM and Administrators only the token is written' ($msg -eq '' -and $script:wrote)
 
+# ---- Owners in the data tree (Assert-TreeAcl) ---------------------------------------------------------------------
+# The running service creates files of its own (supervisor\agent.log): its SID may own entries below the directories that it can
+# write, nowhere else, and nobody else may own anything.
+$pd = Join-Path $tmp 'ProgramData'
+foreach ($d in @('supervisor', 'storage', 'config', 'updater')) { New-Item -ItemType Directory -Path (Join-Path $pd $d) -Force | Out-Null }
+$svc = 'S-1-5-80-1-2-3-4-5'
+$script:owners = @{}
+function Get-OwnerSid { param([string]$Path) if ($script:owners.ContainsKey($Path)) { return $script:owners[$Path] } return 'S-1-5-32-544' }
+function Get-Acl { param($LiteralPath) $o = [pscustomobject]@{}; $o | Add-Member -MemberType ScriptMethod -Name GetAccessRules -Value { param($a, $b, $c) @() }; return $o }
+$allowed = @('S-1-5-18', 'S-1-5-32-544', $svc)
+$roots = @((Join-Path $pd 'supervisor'), (Join-Path $pd 'storage'))
+$assertTree = { Assert-TreeAcl -Path $pd -AllowedSids $allowed -ServiceSid $svc -ServiceOwnedRoots $roots }
+$agentLog = Join-Path (Join-Path $pd 'supervisor') 'agent.log'
+$queued = Join-Path (Join-Path $pd 'storage') 'queue.db'
+$token = Join-Path (Join-Path $pd 'config') 'enrollment-token'
+foreach ($f in @($agentLog, $queued, $token)) { Set-Content -LiteralPath $f -Value 'x' -NoNewline }
+Check 'a tree owned by SYSTEM and Administrators passes' ((Message-Of $assertTree) -eq '')
+$script:owners[$agentLog] = $svc
+$script:owners[$queued] = $svc
+Check 'files that the service owns in its supervisor and storage directories pass (second run after the service created them)' ((Message-Of $assertTree) -eq '')
+$script:owners[$token] = $svc
+Check 'a file that the service owns under Config stops the installation with directory_unsafe' ((Message-Of $assertTree) -match '\[directory_unsafe\].*enrollment-token')
+$script:owners.Remove($token)
+$script:owners[(Join-Path $pd 'updater')] = $svc
+Check 'a directory that the service owns outside its directories stops the installation with directory_unsafe' ((Message-Of $assertTree) -match '\[directory_unsafe\].*updater')
+$script:owners.Remove((Join-Path $pd 'updater'))
+$script:owners[$agentLog] = 'S-1-5-21-1-2-3-1001'
+Check 'a file of a local user in the supervisor directory stops the installation with directory_unsafe' ((Message-Of $assertTree) -match '\[directory_unsafe\].*agent\.log')
+$script:owners[$agentLog] = 'S-1-5-80-9-9-9-9-9'
+Check 'a file of another service account in the supervisor directory stops the installation with directory_unsafe' ((Message-Of $assertTree) -match '\[directory_unsafe\].*agent\.log')
+$script:owners[$agentLog] = $svc
+Check 'without -ServiceSid the service is no trusted owner anywhere' ((Message-Of { Assert-TreeAcl -Path $pd -AllowedSids $allowed }) -match '\[directory_unsafe\]')
+Check 'a path that only shares the prefix of a service directory is not below it' (-not (Test-PathUnder -Path "$($roots[0])-other\x" -Root $roots[0]) -and (Test-PathUnder -Path $agentLog -Root $roots[0]) -and (Test-PathUnder -Path $roots[0] -Root $roots[0]))
+
 Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 if ($script:failures -gt 0) { exit 1 }
