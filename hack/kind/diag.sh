@@ -17,6 +17,15 @@ set -uo pipefail
 # shellcheck source=hack/kind/lib/api.sh
 . "${KIND_DIR}/lib/api.sh"
 
+# Filter of the per-container report. A container status has no "state" until the kubelet reports one (a pod that is not yet
+# scheduled), so every field is optional: one such pod must not end the report of the namespace.
+CONTAINERS_JQ='.items[] | .metadata.name as $p
+    | ((.status.initContainerStatuses // []) + (.status.containerStatuses // []))[] | .name as $c
+    | [$p, $c, "restarts=\(.restartCount // 0)", "ready=\(.ready // false)",
+       "last=\(.lastState.terminated // {} | "\(.reason // "-") exit=\(.exitCode // "-") at=\(.finishedAt // "-")")",
+       "now=\(.state // {} | keys[0] // "-")"]
+    | join("  ")'
+
 out="${PROBE_WORK}/diag/$(date +%Y%m%dT%H%M%S)"
 mkdir -p "${out}/logs"
 chmod 700 "${out}"
@@ -43,12 +52,7 @@ for ns in "${NS_APP}" "${NS_INFRA}" "${NS_DEX}" "${NS_DEXIDP}" "${NS_OUTSIDE}" $
     done
   done
   # per container: restarts, the last termination (reason, exit code), the effective resources; the events of the namespace by time
-  kn "${ns}" get pods -o json 2>/dev/null | jq -r '.items[] | .metadata.name as $p
-    | ((.status.initContainerStatuses // []) + (.status.containerStatuses // []))[] | .name as $c
-    | [$p, $c, "restarts=\(.restartCount)", "ready=\(.ready)",
-       "last=\(.lastState.terminated // {} | "\(.reason // "-") exit=\(.exitCode // "-") at=\(.finishedAt // "-")")",
-       "now=\(.state | keys[0])"]
-    | join("  ")' > "${out}/containers-${ns}.txt" 2>&1
+  kn "${ns}" get pods -o json 2>/dev/null | jq -r "${CONTAINERS_JQ}" > "${out}/containers-${ns}.txt" 2>&1
   kn "${ns}" get pods -o json 2>/dev/null | jq -r '.items[] | .metadata.name as $p | (.spec.initContainers // []) + (.spec.containers // []) | .[] | "\($p)/\(.name) resources=\(.resources | tojson)"' > "${out}/resources-${ns}.txt" 2>&1
   kn "${ns}" get events --sort-by=.lastTimestamp > "${out}/events-${ns}.txt" 2>&1
 done

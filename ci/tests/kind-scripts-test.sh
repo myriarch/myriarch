@@ -61,6 +61,20 @@ if [ "$(state "${old}" "${same}")" = identical ]; then ok "check 7.3: equal cont
 if [ "$(state "${old}" "${new}")" = different ]; then ok "check 7.3: other content under the same version is different (the check passes)"; else fail "check 7.3: other content is different"; fi
 cp "${old}/templates/a.yaml" "${new}/templates/a.yaml"; printf 'x\n' > "${new}/templates/extra.yaml"
 if [ "$(state "${old}" "${new}")" = different ]; then ok "check 7.3: an added file is different"; else fail "check 7.3: an added file is different"; fi
-if [ "$(state "${old}" "${TEST_TMP}/missing")" = different ]; then ok "check 7.3: a missing directory is not identical"; else fail "check 7.3: a missing directory is not identical"; fi
+# diff exits 2 for a missing directory: that is an error, never "different" (fail-open) and never "identical"
+if [ "$(state "${old}" "${TEST_TMP}/missing")" = error ]; then ok "check 7.3: a failing diff (missing directory) is an error, so the check fails"; else fail "check 7.3: a failing diff is an error"; fi
+
+# an unreadable file in an existing directory also makes diff exit 2: an error, not "different" (skipped as root, which reads anything)
+printf 'secret\n' > "${new}/templates/locked.yaml"; printf 'secret\n' > "${old}/templates/locked.yaml"; chmod 000 "${new}/templates/locked.yaml"
+if [ -r "${new}/templates/locked.yaml" ]; then
+  echo "  skip  check 7.3: an unreadable file (running as a user that reads anything)"
+elif [ "$(state "${old}" "${new}")" = error ]; then ok "check 7.3: diff exit 2 with existing directories (unreadable file) is an error"; else fail "check 7.3: diff exit 2 is an error"; fi
+chmod 600 "${new}/templates/locked.yaml"
+
+# hack/kind/diag.sh: the per-container jq of the report must survive a container status without "state" (a pod that is not yet
+# scheduled has no state). The filter is taken from the script and run on a status that has none.
+filter="$(awk "/^CONTAINERS_JQ='/ {p=1; sub(/^CONTAINERS_JQ='/, \"\")} p {print} p && /'\$/ {exit}" "${ROOT}/hack/kind/diag.sh" | sed "\$ s/'\$//")"
+nostate='{"items":[{"metadata":{"name":"p"},"status":{"containerStatuses":[{"name":"c","restartCount":0,"ready":false}],"initContainerStatuses":[{"name":"i","restartCount":1,"ready":false,"lastState":{"terminated":{"reason":"OOMKilled","exitCode":137}}}]}}]}'
+if out="$(printf '%s' "${nostate}" | jq -r "${filter}" 2>&1)" && printf '%s' "${out}" | grep -q 'OOMKilled' && printf '%s' "${out}" | grep -q 'now=-'; then ok "diag.sh: a container status without state is reported (now=-)"; else fail "diag.sh: a container status without state is reported" "${out}"; fi
 
 finish_tests "kind-scripts-test"

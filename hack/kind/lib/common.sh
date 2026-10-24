@@ -140,10 +140,17 @@ check_true() { # name [command...]: the command succeeded
   if "$@" >/dev/null 2>&1; then pass "${name}"; else fail "${name}" "command failed: $*"; fi
 }
 
-# chart_content_state DIR_A DIR_B -> "identical" or "different": the files of two chart directories decide, not the version in Chart.yaml
-# (an old and a new chart can carry the same version until the version bump of a release)
+# chart_content_state DIR_A DIR_B -> "identical", "different" or "error": the files of two chart directories decide, not the version in
+# Chart.yaml (an old and a new chart can carry the same version until the version bump of a release). diff exits 1 for a difference and
+# 2 for trouble (a missing directory, an unreadable file): only 1 is "different", so that a failing diff cannot pass check 7.3.
 chart_content_state() {
-  if diff -r -q "$1" "$2" >/dev/null 2>&1; then echo identical; else echo different; fi
+  local rc=0
+  diff -r -q "$1" "$2" >/dev/null 2>&1 || rc=$?
+  case "${rc}" in
+    0) echo identical ;;
+    1) echo different ;;
+    *) echo error ;;
+  esac
 }
 
 skipped_by_key() { # key -> 0 when PROBE_SKIP lists it
