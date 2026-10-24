@@ -325,7 +325,7 @@ done
 api_says() { # JSON function args...: runs the function of the library with a REST helper that answers with the JSON
   local json="$1"
   shift
-  STUB_JSON="${json}" bash -c '. "$1"; shift; he_api() { printf "%s" "${STUB_JSON}"; }; "$@"' _ "${LIB}" "$@" 2>/dev/null
+  STUB_JSON="${json}" bash -c 'set -o pipefail; . "$1"; shift; he_api() { printf "%s" "${STUB_JSON}"; }; "$@"' _ "${LIB}" "$@" 2>/dev/null
 }
 TARGET_ENDED='{"items":[{"status":"failed","progress":{"phase":"rolled_back","steps":[{"name":"health_check","status":"failed"},{"name":"rolling_back","status":"done"}]}}]}'
 GOT="$(api_says "${TARGET_ENDED}" he_target_phase r1)"
@@ -342,6 +342,22 @@ GOT="$(api_says '{"agent":{"packageStatus":{"packages":{"":{"status":"install_fa
 [ "${GOT}" = install_failed ] && ok "he_package_status reads the status of the collector package" || fail "he_package_status: '${GOT}'"
 GOT="$(api_says '{"agent":{}}' he_package_status u1)"
 [ "${GOT}" = none ] && ok "... and says none before the first report" || fail "he_package_status without a report: '${GOT}'"
+# jq writes a long body in more than one write. With "jq | grep -q" under pipefail grep ends at the match, the next write of jq
+# fails with SIGPIPE, and the predicate failed. The sample is about 900 KB (below the 1 MiB the server stores), much more than a
+# pipe holds, so that jq blocks in its write and the failure of the old form does not depend on the scheduler. It is served from a
+# file: a body that size does not fit into the environment of a process.
+LONG_FILE="${W}/long-effective-config.json"
+python3 -I -c 'import json; print(json.dumps({"body": "processors:\n  batch:\n    timeout: 7s\n" + "# padding of the effective configuration\n" * 22000}))' > "${LONG_FILE}"
+[ "$(wc -c < "${LONG_FILE}")" -gt 800000 ] && ok "the sample of an effective configuration is far longer than a pipe holds" || fail "the sample has $(wc -c < "${LONG_FILE}") bytes"
+api_says_file() { # file function args...: like api_says, with the answer read from a file
+  local file="$1"
+  shift
+  STUB_FILE="${file}" bash -c 'set -o pipefail; . "$1"; shift; he_api() { cat "${STUB_FILE}"; }; "$@"' _ "${LIB}" "$@" 2>/dev/null
+}
+api_says_file "${LONG_FILE}" he_effective_config_has a1 'timeout: 7s' && ok "he_effective_config_has finds the text near the start of a very long body" || fail "he_effective_config_has missed 'timeout: 7s' in a long body"
+api_says_file "${LONG_FILE}" he_effective_config_has a1 'timeout: 5s' && fail "he_effective_config_has found a text that is not in the body" || ok "... and does not find a text that is not there"
+api_says '{"body":"processors:\n  batch:\n    timeout: 7s\n"}' he_effective_config_has a1 'timeout: 7s' && ok "... nor does it miss it in a short body" || fail "he_effective_config_has missed 'timeout: 7s' in a short body"
+api_says '{"message":"agent a1 has not reported an effective config"}' he_effective_config_has a1 'timeout: 7s' && fail "he_effective_config_has found a text in an answer without a body" || ok "... and it is false for an answer without a body"
 
 # a getter that says rolling_back twice and rolled_back from the third call on; the counter is a file, because he_settle calls the
 # getter in a subshell
@@ -613,5 +629,49 @@ grep -q "versionRange: \">=${OLD}, <=${NEW}\"" "${HE}/gitops/fleets/host-e2e.yam
 # ---- the scripts and the workflow agree --------------------------------------------------------------------------------------------
 grep -q 'COMPONENTS="contrib supervisor"' "${LIB}" && grep -q 'VERIFIER_BIN=' "${LIB}" && ok "the mirror is built with the supervisor and the updater of this checkout" || fail "he_mirror_build does not pass COMPONENTS and VERIFIER_BIN"
 [ -x "${HE}/linux.sh" ] && [ -x "${HE}/httpsd.py" ] && ok "linux.sh and httpsd.py are executable" || fail "a script of scripts/host-e2e is not executable"
+
+# ---- the Windows test: fixture, versions, parse, helpers and guard --------------------------------------------------------------------
+# scripts/host-e2e/windows.ps1 runs on a Windows runner of GitHub Actions only. What needs no Windows host is checked here: the fleet of its
+# GitOps fixture with the blueprint and the policies it borrows, the two versions, the parse of both PowerShell files, the helpers
+# (ci/tests/host-e2e-windows.ps1, in PowerShell 7) and the guard.
+WIN="${HE}/windows.ps1"
+[ -f "${WIN}" ] && [ -f "${HE}/killer.ps1" ] && [ -f "${HE}/gitops-windows/fleets/windows-hosts.yaml" ] && ok "windows.ps1, killer.ps1 and the Windows fleet exist" || fail "a file of the Windows host test is missing"
+WFLEET="${HE}/gitops-windows/fleets/windows-hosts.yaml"
+grep -q "versionRange: \">=${OLD}, <=${NEW}\"" "${WFLEET}" && grep -q "^    version: ${OLD} " "${WFLEET}" \
+  && ok "the frame and the Git target of the Windows fleet are the two versions of the test" || fail "the Windows fleet does not match ${OLD} and ${NEW}"
+[ "$(sed -n "s/^\$script:VersionOld = '\(.*\)'\$/\1/p" "${WIN}")" = "${OLD}" ] && [ "$(sed -n "s/^\$script:VersionNew = '\(.*\)'\$/\1/p" "${WIN}")" = "${NEW}" ] \
+  && ok "windows.ps1 uses the same two versions as lib.sh" || fail "windows.ps1 and lib.sh name other versions"
+grep -q '^  name: windows-hosts$' "${WFLEET}" && ok "the Windows fleet is called windows-hosts" || fail "the Windows fleet is not called windows-hosts"
+if [ -x "${BIN}/myrctl" ]; then
+  mkdir -p "${W}/wfixture"
+  cp -R "${HE}/gitops/blueprints" "${HE}/gitops/policies" "${W}/wfixture/"
+  cp -R "${HE}/gitops-windows/fleets" "${W}/wfixture/"
+  t_wfixture() { "${BIN}/myrctl" validate --strict --components "${ROOT}/examples/sim/components-otelcol-contrib-0.162.0.json" "${W}/wfixture"; }
+  expect_ok "the GitOps fixture of the Windows host test passes myrctl validate --strict" t_wfixture
+fi
+if have pwsh; then
+  cat > "${W}/parse.ps1" <<'EOF_PS'
+$bad = 0
+foreach ($f in ($env:PARSE_FILES -split '\|')) {
+  $e = $null; $t = $null
+  [void][System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$t, [ref]$e)
+  if ($e.Count) { $e | ForEach-Object { "${f}: $_" }; $bad++ }
+}
+exit $bad
+EOF_PS
+  t_parse() { PARSE_FILES="${WIN}|${HE}/killer.ps1|${CI_DIR}/tests/host-e2e-windows.ps1" pwsh -NoProfile -NonInteractive -File "${W}/parse.ps1"; }
+  expect_ok "windows.ps1, killer.ps1 and the test of the helpers parse" t_parse
+  t_helpers() { pwsh -NoProfile -NonInteractive -File "${CI_DIR}/tests/host-e2e-windows.ps1" -Script "${WIN}" -Work "${W}/winwork" 2>&1; }
+  HRC=0; HOUT="$(t_helpers)" || HRC=$?
+  printf '%s\n' "${HOUT}" | sed -n 's/^ok /ok    windows: /p'
+  # the loop reads from a process substitution, not a pipe: fail must count in this shell
+  while IFS= read -r line; do fail "windows: ${line#FAIL }"; done < <(printf '%s\n' "${HOUT}" | grep '^FAIL ' || true)
+  PASS=$((PASS + $(printf '%s\n' "${HOUT}" | grep -c '^ok ' || true)))
+  if [ "${HRC}" -ne 0 ]; then fail "the test of the helpers of windows.ps1 exited ${HRC}: $(printf '%s\n' "${HOUT}" | tail -n 5)"; fi
+  if ! printf '%s\n' "${HOUT}" | grep -q '^END helpers$'; then fail "the test of the helpers of windows.ps1 did not run to its last line"; fi
+else
+  echo "  note  pwsh not found: the parse check, the helpers and the guard of windows.ps1 are skipped (ci/install-tools.sh pwsh)"
+  if [ "${CI:-}" = true ]; then fail "pwsh is required in CI for the tests of windows.ps1"; fi
+fi
 
 finish_tests "host-e2e-test"

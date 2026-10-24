@@ -2,10 +2,30 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Host end-to-end test (docs/development.md, "Host end-to-end test"). The installer and the myriarch-updater on a fresh runner VM
-# of GitHub Actions (Ubuntu 24.04, amd64 and arm64): install-linux.sh as root, the services under systemd, a real collector and
-# supervisor from a local mirror of the upstream release files (verified offline), a myriarchd built from the commit, an update with
-# a rollback and a retry, then the uninstallation and the proof that nothing is left. The scripts of scripts/host-e2e change the
-# machine they run on and refuse to run anywhere else.
+# of GitHub Actions (job linux: Ubuntu 24.04, amd64 and arm64; job windows: Windows Server 2025, amd64): install-linux.sh as root and
+# the services under systemd, or install-windows.ps1 as an administrator and the services, the registry and the ACLs of Windows; a
+# real collector and supervisor from a local mirror of the upstream release files (verified offline), a myriarchd built from the
+# commit, an update with a rollback and a retry, then the uninstallation and the proof that nothing is left. The scripts of
+# scripts/host-e2e change the machine they run on and refuse to run anywhere else.
+#
+# Two scenarios. "manual" runs the installer as docs/tasks/connect-a-host.md describes it. "one-command" is the installation from the
+# server (ADR-0046): it creates an enrollment token at run time, renders the command through the API and runs that command unchanged
+# as root, then checks the healthy agent in the expected fleet at the target version of the fleet, a configuration rollout, a version
+# update through the updater with a rollback, and the uninstallation. A commit has no signed release, so the scenario builds the
+# installer bundle from the commit and the development server serves it from a directory. A manual run (workflow_dispatch) can name a
+# release in release_tag (for example v0.2.0-rc.1): the scenario then installs from the published installer bundle of that release,
+# after it verified the checksums.txt of the release keyless, and only that scenario runs. It is how the board accepts a release
+# candidate on real runners. The token is masked in the log; the upload takes files of an allow-list, never the token file or the
+# rendered command.
+#
+# The job windows runs the scenario one-command (scripts/host-e2e/windows.ps1) on two runners at the same time: in Windows PowerShell
+# 5.1 (shell powershell) and in PowerShell 7 (shell pwsh). The PowerShell of the run is the administrator session in which the
+# command of the server is pasted and the one that starts the uninstaller; the installer script itself always runs in the
+# powershell.exe that the command starts. The runner is pinned to windows-2025 and not to windows-latest, like the Linux job to
+# ubuntu-24.04: the services, the ACLs and the registry are the subject of the test, and a change of the image behind a floating label
+# must not turn a green test red without a change of ours (the label moves on purpose, in a commit). The script puts the throwaway CA
+# into the certificate store of the machine for the duration of the scenario (the command of the server has no CA option on Windows)
+# and takes it out again.
 #
 # Not part of ci-ok: a pull request starts it only when it touches the installer, the updater, the templates of a host or the
 # harness; every night it runs against main; a manual run (workflow_dispatch) starts it on any branch. A new scenario is a new step
@@ -23,12 +43,21 @@ on:
     branches: [main]
     paths:
       - 'deploy/scripts/install-linux.sh'
+      - 'deploy/scripts/install-windows.ps1'
       - 'deploy/supervisor/linux/**'
+      - 'deploy/supervisor/windows/**'
       - 'deploy/updater/linux/**'
+      - 'deploy/updater/windows/**'
+      - 'deploy/windows/**'
       - 'deploy/systemd/**'
+      - 'deploy/release/goreleaser.yaml'
       - 'cmd/myriarch-updater/**'
+      - 'cmd/myriarchd/**'
       - 'internal/updater/**'
       - 'internal/artifact/**'
+      - 'internal/install/**'
+      - 'internal/testutil/linuxhost/**'
+      - 'VERSION'
       - 'scripts/host-e2e/**'
       - 'scripts/e2e/ui-updates/killer.sh'
       - 'scripts/build-mirror-image-crane.sh'
@@ -36,6 +65,12 @@ on:
   schedule:
     - cron: '27 2 * * *'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Install from the published installer bundle of this release (for example v0.2.0-rc.1) and run only the scenario one-command (on Linux and on Windows); empty: the bundle of this commit'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -56,7 +91,7 @@ jobs:
   linux:
     name: linux (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -83,10 +118,18 @@ jobs:
       # runs; a job that runs out of time is cancelled, and failure() is false for a cancelled job, so nothing would be uploaded.
       # ci/tests/workflow-artifacts-check.py holds the margin for the steps around it (checkout, toolchain, build and upload).
       - name: 'Scenario manual: the installer as the documentation describes it'
+        if: ${{ inputs.release_tag == '' }}
         timeout-minutes: 35
         env:
           HOST_E2E: '1'
         run: scripts/host-e2e/linux.sh manual
+      # The release tag reaches the script through the environment and is checked there (vX.Y.Z or vX.Y.Z-rc.N), never pasted into code.
+      - name: 'Scenario one-command: the command of the server, run unchanged'
+        timeout-minutes: 40
+        env:
+          HOST_E2E: '1'
+          HOST_E2E_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: scripts/host-e2e/linux.sh one-command
       # The upload directory is assembled by the harness from an allow-list of files and scrubbed; the exclusions are a second line.
       - name: Upload the logs of a failed run
         if: failure()
@@ -98,6 +141,85 @@ jobs:
             !.cache/host-e2e/upload/**/cookies*
             !.cache/host-e2e/upload/**/*token*
             !.cache/host-e2e/upload/**/*.key
+            !.cache/host-e2e/upload/**/command.*
+            !.cache/host-e2e/upload/**/commands-response*
+            !.cache/host-e2e/upload/**/kubeconfig*
+            !.cache/host-e2e/upload/**/secrets/**
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---- Windows: install-windows.ps1 as an administrator, services, registry and ACLs ----------------------------------------------
+  windows:
+    name: windows (${{ matrix.shell }})
+    runs-on: windows-2025
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    # The steps that are written in PowerShell run in the shell of the matrix: GitHub allows an expression in the default shell of a
+    # job, not in the shell of a step. The steps that are written in bash say so.
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      # The files of the repository keep their line endings (the installer and its templates are compared byte for byte).
+      - name: Keep the line endings of the repository
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+          git config --global core.longpaths true
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the toolchain
+        uses: ./.github/actions/setup
+      - name: Describe the runner
+        run: |
+          $PSVersionTable.PSVersion.ToString()
+          [Environment]::OSVersion.VersionString
+          python --version
+          & "$env:ProgramFiles\Git\usr\bin\openssl.exe" version
+          curl.exe --version | Select-Object -First 1
+          tar.exe --version
+      # The same flags as `make build`, which names its outputs without the extension that Windows needs. The binaries carry the tag
+      # devpg (the embedded PostgreSQL of `myriarchd dev`).
+      - name: Build the binaries
+        shell: bash
+        run: |
+          mkdir -p bin
+          pkg=github.com/myriarch/myriarch/internal/version
+          version="$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)"
+          commit="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+          built="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          for b in myriarchd myriarch-updater myrctl; do
+            echo "go build ${b}"
+            CGO_ENABLED=0 go build -trimpath -tags devpg -ldflags "-s -w -X ${pkg}.Version=${version} -X ${pkg}.Commit=${commit} -X ${pkg}.BuildDate=${built}" -o "bin/${b}.exe" "./cmd/${b}"
+          done
+      # HOST_E2E=1 says that this machine is a throwaway VM; the script refuses to run without it. The step has a timeout of its own,
+      # below that of the job (see the Linux job). The release tag reaches the script through the environment and is checked there.
+      - name: 'Scenario one-command: the command of the server, run unchanged in an administrator session'
+        timeout-minutes: 60
+        env:
+          HOST_E2E: '1'
+          HOST_E2E_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: scripts/host-e2e/windows.ps1 one-command
+      # The upload directory is assembled by the script from an allow-list of files and scrubbed; the exclusions are a second line.
+      - name: Upload the logs of a failed run
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: host-e2e-windows-${{ matrix.shell }}
+          path: |
+            .cache/host-e2e/upload/**
+            !.cache/host-e2e/upload/**/cookies*
+            !.cache/host-e2e/upload/**/*token*
+            !.cache/host-e2e/upload/**/*.key
+            !.cache/host-e2e/upload/**/command.*
+            !.cache/host-e2e/upload/**/commands-response*
             !.cache/host-e2e/upload/**/kubeconfig*
             !.cache/host-e2e/upload/**/secrets/**
           include-hidden-files: true

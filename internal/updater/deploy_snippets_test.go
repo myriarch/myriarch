@@ -52,12 +52,13 @@ func TestEnrollmentDialogLinuxExampleNamesEveryRequiredInstallerOption(t *testin
 
 	// die option_missing "--site-type is missing": the unconditional inputs of validate_inputs
 	missing := regexp.MustCompile(`die option_missing "(--[a-z-]+) is missing"`).FindAllStringSubmatch(script, -1)
-	require.GreaterOrEqual(t, len(missing), 3, "install-linux.sh reports the site type, the site ID and the collector version as missing")
+	require.GreaterOrEqual(t, len(missing), 2, "install-linux.sh reports the site type and the site ID as missing")
 	required := []string{"--opamp-endpoint", "--token-file", "--verifier"} // endpoint and token (option_invalid, option_missing) and the verifier
 	for _, m := range missing {
 		required = append(required, m[1])
 	}
-	assert.Contains(t, required, "--collector-version", "the collector version is required")
+	// the collector version is no longer required on Linux: without --server and without it the tested version is installed
+	assert.NotContains(t, required, "--collector-version", "the collector version has a default")
 	for _, option := range required {
 		assert.Regexp(t, `(?m)^\s+`+regexp.QuoteMeta(option)+`\)`, script, "install-linux.sh accepts %s", option)
 		assert.True(t, namesOption(body, option), "the Linux example of the token dialog must name %s", option)

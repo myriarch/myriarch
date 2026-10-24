@@ -255,7 +255,7 @@ func TestInstallersUseTheSameCodeForSharedConditions(t *testing.T) {
 		{"option_invalid", "invalid --updater-version", "invalid -UpdaterVersion"},
 		{"option_missing", "--site-type is missing", "-SiteType is missing"},
 		{"option_missing", "--site-id is missing", "-SiteId is missing"},
-		{"option_missing", "--collector-version is missing", "-CollectorVersion is missing"},
+		// "--collector-version is missing" is a Windows condition only: install-linux.sh has the tested version as its default
 		{"option_missing", "--token or --token-file is missing", "-Token or -TokenFile is missing"},
 		{"option_missing", "--with-updater requires --updater-url", "-WithUpdater requires -UpdaterUrl"},
 		{"option_invalid", "invalid --collector-version", "invalid -CollectorVersion"},

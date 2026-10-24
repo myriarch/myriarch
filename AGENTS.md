@@ -73,6 +73,8 @@ Some tests and scripts use fixed ports, a shared local cluster or the machine it
 - `scripts/host-e2e/*.sh`: CI only. They install a service user, systemd units and files below `/etc`, `/opt` and `/var`, and
   refuse to run unless `CI=true` and `HOST_E2E=1` are set, on Linux, as a user other than root and on a host without an
   installation. Never run them on your own machine; `.github/workflows/host-e2e.yml` runs them on a throwaway runner VM.
+  `scripts/host-e2e/windows.ps1` is the same for Windows (two services, files below `C:\Program Files` and `C:\ProgramData`, registry
+  values, the trust of a throwaway CA in the machine store): CI only, on a GitHub-hosted Windows runner.
 
 ## Conventions
 

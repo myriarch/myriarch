@@ -62,6 +62,46 @@ What the start does and what it avoids:
 - `Set-ServiceEnvironment.ps1` is a script too. Start it the same way. `-File` passes strings only, so use `-EnvFile` with it, not
   `-Set`, which takes a hashtable.
 
+## Install from the server
+
+*From v0.2.0.* The installer has a server mode: with `-Server https://fleet.example.com` and `-TokenFile` it takes the versions, the
+OpAMP endpoint and the artifacts from the server instead of from the operator. The command that the server renders
+([Connect a host](../../docs/tasks/connect-a-host.md#one-command-install-a-windows-host-from-the-server)) downloads the installer
+bundle (the zip of this release), checks its pinned SHA-256, unpacks it and starts the installer from it:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\deploy\scripts\install-windows.ps1 `
+  -Server https://fleet.example.com -TokenFile 'C:\Program Files\myriarch-setup\enrollment-token.txt' `
+  -SiteType edge -SiteId 042
+```
+
+- The installer asks `POST <server>/api/v1/install/plan` for a plan (the token only as a request header; the request body holds the
+  platform, the site attributes, `-Fleet` and `-CollectorVersion`) and reads the answer as data, with the rules of
+  [ADR-0046](../../docs/adr/0046-host-installation-from-the-server.md): at most 64 lines and 8 KiB, known keys only, every value
+  against a strict pattern, URLs on the origin of `-Server` only, https only, a redirect only to https on the same origin. Nothing in the
+  plan is evaluated as code. A plan that the server is still preparing is awaited for `-PlanWait` seconds (default 900).
+- Collector and supervisor are downloaded from the server with the install grants of the plan and verified by SHA-256 and by their
+  Sigstore bundle, against an identity, an issuer and a trust root that the installer builds itself (never ones that the server
+  names). The verifier is the `myriarch-updater.exe` of the bundle (`verify-bundle`), which the installer copies into its working
+  directory first; `-Verifier` replaces it for the checks (`cosign.exe` 3.0.4 or newer). The updater of the bundle is installed when
+  the plan says so (`updater.install=true`). The bundle must be in a directory that only SYSTEM and the administrators can write (the
+  command unpacks it into `C:\Program Files\myriarch-setup\package`); otherwise the installer stops with `directory_unsafe` before
+  the first request, because that updater verifies what is installed and runs as a SYSTEM service.
+- The supervisor goes to `C:\Program Files\Myriarch\supervisor\opampsupervisor.exe`, the path of the service. If the file is not
+  there afterwards, the installer stops with `supervisor_missing`, names the path and the next step.
+- The working directory of the installer is made below `%ProgramFiles%` and restricted to SYSTEM and the administrators before the
+  first download. The token file is not copied into it, and a file that the command created is deleted by the command.
+- The certificate of the server is checked against the certificate store of the machine. `-CaFile` only goes into the configuration
+  of the supervisor and the updater.
+- Without `-Server` nothing changes: the options of [Start the installer](#start-the-installer) apply, `-Fleet` and `-PlanWait` are
+  `option_conflict`, and `-CollectorVersion` is required. With `-Server`, `-WithUpdater`, the `-Updater*` options,
+  `-ReleaseBaseUrl`, `-SupervisorVersion` and `-VerifySignatures skip` are `option_conflict`.
+- Token, PSReadLine history, transcription and script block logging: a command that contains the token is recorded where input is
+  recorded, so such a host uses the variant "token from a file"
+  ([Connect a host](../../docs/tasks/connect-a-host.md#one-command-install-a-windows-host-from-the-server)).
+- The files are not Authenticode-signed: `AllSigned` blocks them, and App Control needs a hash rule for each release
+  ([Language mode and App Control](#language-mode-and-app-control)).
+
 ## Packages of the upstream project
 
 Install neither MSI of the upstream project on a host that myriarch manages. The contrib MSI installs a service `otelcol-contrib`,
@@ -229,18 +269,22 @@ is at the top of that script.
 | Code | Meaning |
 |---|---|
 | `usage_error` | raised by `install-linux.sh` only. On Windows, PowerShell itself rejects unknown or valueless parameters before the script runs (non-zero exit, native PowerShell error, no `[code]`) |
-| `option_missing` | a required option is absent (site type/id, collector version, token or token file, `-UpdaterUrl` with `-WithUpdater`, `-UpdaterVersion` when the file name in `-UpdaterUrl` carries no version and `-UpdaterChecksumsUrl` is given) |
+| `option_missing` | a required option is absent (site type/id, collector version (not with `-Server`), token or token file, `-UpdaterUrl` with `-WithUpdater`, `-UpdaterVersion` when the file name in `-UpdaterUrl` carries no version and `-UpdaterChecksumsUrl` is given) |
 | `option_invalid` | malformed value: versions, arch, SHA-256 or thumbprint format, control characters, token characters, endpoint scheme (and an unsupported `-ReleaseBaseUrl` scheme), no file name in `-UpdaterUrl`. A plain `http://` or `file://` base URL raises `https_required` instead |
 | `option_removed` | a removed option: `-SigningKey` or `-UpdaterChecksumsSigUrl`; the message names the replacement (`-UpdaterChecksumsUrl` with its bundle, `-UpdaterBundleUrl`) |
-| `option_conflict` | mutually exclusive or dependent options: `-Token` + `-TokenFile`; updater options (`-UpdaterVersion`, `-UpdaterChecksumsUrl`, `-UpdaterBundleUrl`, `-UpdaterSignerThumbprint`) without `-WithUpdater`; `-UpdaterBundleUrl` without `-UpdaterChecksumsUrl`; `-UpdaterVersion` and the version in `-UpdaterUrl` differ; `-UpdaterChecksumsUrl` with `-VerifySignatures skip` |
+| `option_conflict` | mutually exclusive or dependent options: `-Token` + `-TokenFile`; `-Fleet` or `-PlanWait` without `-Server`; with `-Server`, `-WithUpdater`, the `-Updater*` options, `-ReleaseBaseUrl`, `-SupervisorVersion` and `-VerifySignatures skip`; updater options (`-UpdaterVersion`, `-UpdaterChecksumsUrl`, `-UpdaterBundleUrl`, `-UpdaterSignerThumbprint`) without `-WithUpdater`; `-UpdaterBundleUrl` without `-UpdaterChecksumsUrl`; `-UpdaterVersion` and the version in `-UpdaterUrl` differ; `-UpdaterChecksumsUrl` with `-VerifySignatures skip` |
 | `updater_hash_source_missing` | `-WithUpdater` without `-UpdaterSha256` or `-UpdaterChecksumsUrl` |
 | `insecure_required` | plain `ws://`/`http://` endpoint or `-VerifySignatures skip` without `-Insecure` |
-| `https_required` | non-https download URL or redirect without `-Insecure` |
+| `https_required` | non-https download URL, `-Server`, plan URL or redirect without `-Insecure` |
 | `file_unreadable` | token file, CA file, trusted root or verifier is not usable |
-| `tool_missing` | a required tool is absent (`tar.exe`, or `Get-AuthenticodeSignature` with `-UpdaterSignerThumbprint`); the message names the tool |
-| `sigstore_verifier_missing` | no Sigstore verifier (`-Verifier`, an installed updater, or `cosign.exe` from an administrator-only directory) |
+| `tool_missing` | a required tool is absent (`tar.exe` in the system directory or in a `PATH` directory that only administrators can write, or `Get-AuthenticodeSignature` with `-UpdaterSignerThumbprint`); the message names the tool |
+| `sigstore_verifier_missing` | no Sigstore verifier (`-Verifier`, an installed updater, or `cosign.exe` from an administrator-only directory; with `-Server` the `myriarch-updater.exe` of the installer bundle, which is missing or not a regular file) |
 | `sigstore_verifier_outdated` | `cosign.exe` is older than 3.0.4 or reports no usable version |
 | `privilege_required` | not running as Administrator |
+| `plan_failed` | (from v0.2.0, `-Server`) the request for the plan got no answer: no connection, a certificate that the certificate store of the machine does not trust, or a server error (HTTP 500, 502, 504). Check the address, the network and the certificate of the server; import the CA of a private server into the machine store |
+| `plan_invalid` | (from v0.2.0, `-Server`) the plan or a redirect of the server breaks the rules of the plan: an unknown or repeated key, a value that does not match its pattern, a character that a plan may not have, more than 64 lines or 8 KiB, a URL outside the origin of the server, a collector version other than the one asked for, a redirect to another origin. The message names the rule |
+| `plan_rejected` | (from v0.2.0, `-Server`) the server refused the plan, and the message carries the code of the server (`unauthorized`, `fleet_mismatch`, `no_fleet`, `rollout_blocking`, ...) and what to do about it |
+| `plan_unavailable` | (from v0.2.0, `-Server`) the server cannot give a plan now (HTTP 503 or 429), or it was still preparing the artifacts after `-PlanWait` seconds. Run the command again |
 | `conflicting_install` | (from v0.2.0) a service `opampsupervisor` (supervisor MSI) or `otelcol-contrib` (contrib MSI) exists, in any state. The check runs before the installer stops a service, downloads or writes anything; the message names the service and the next step, and nothing is removed ([Packages of the upstream project](#packages-of-the-upstream-project)). `install-linux.sh` raises the code for an active or enabled unit `otelcol-contrib.service` or `opampsupervisor.service` of a deb or rpm package |
 | `language_mode_unsupported` | (from v0.2.0) PowerShell runs the script in Constrained Language Mode or another mode below `FullLanguage`, usually because App Control for Business with script enforcement allows no unsigned script. It is the first check of a run and changes nothing. Allow the installer with a hash rule ([Language mode and App Control](#language-mode-and-app-control)) |
 | `unsupported_platform` | unsupported CPU architecture, or the supervisor on Windows ARM64 (install with `-Arch amd64`). From v0.2.0 the installer stops as soon as it knows the architecture, before it stops a service, downloads or writes anything. The installer of v0.1.0 stopped at the supervisor step, after it had stopped the service and installed the ARM64 collector |
@@ -257,7 +301,7 @@ is at the top of that script.
 | `collector_start_failed` | the new collector binary cannot be started |
 | `collector_version_mismatch` | the collector reports another version than requested |
 | `supervisor_missing` | (from v0.2.0) the supervisor is not there when its installation step is over: `C:\Program Files\Myriarch\supervisor\opampsupervisor.exe` does not exist, is not the file whose SHA-256 was verified, or is not a regular file (a directory, a link). It is also raised in place of `service_not_running` when the service is not running because the file of its binPath is gone. The message names the path and the next step. A file that is gone or changed is usually the work of a security tool that quarantined the unsigned binary: look at its protection history (Microsoft Defender: *Windows Security*, *Protection history*, or `Get-MpThreatDetection`), allow the folder and run the installer again, which fetches and verifies the file again. A directory or a link is not replaced by the installer, and a new run would stop at the same item without a download: remove it yourself, then run the installer again. `install-linux.sh` raises the code for a missing, non-executable or no regular file at `/opt/myriarch/supervisor/opampsupervisor` |
-| `directory_unsafe` | a data directory is a reparse point, has the wrong owner, has an unexpected ACE, or is not a directory; or `-Verifier` is in a directory that unprivileged accounts can change |
+| `directory_unsafe` | a data directory is a reparse point, has the wrong owner, has an unexpected ACE, or is not a directory; or `-Verifier`, or with `-Server` the installer bundle, is in a directory that unprivileged accounts can change |
 | `acl_failed` | `icacls` failed |
 | `service_config_failed` | `sc.exe` failed |
 | `updater_install_failed` | `myriarch-updater install` failed |
