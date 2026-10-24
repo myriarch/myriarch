@@ -207,14 +207,17 @@ containerMode:
   stopTimeout: 30s
 
 # --- Pod ---------------------------------------------------------------------------------------------
-# Resources of the main container. The supervisor, the collector and, during an update, a second collector for the validation share
-# the limit: set memory_limiter in the configuration of the collector to about 75 % of the memory limit.
+# Resources of the main container. The supervisor, the collector and, during an update or a configuration check, a second collector
+# process (the validation) share the limit. With 512Mi the container was OOM-killed in a test of this chart and did not become Ready;
+# the Quickstart, which runs the same chart with 768Mi, did. The default limit is 1Gi. The collector configuration of the blueprints
+# sets memory_limiter by percentage (limit_percentage, default 75), which the collector takes from the container limit, so a
+# different limit needs no change there.
 resources:
   requests:
     cpu: 100m
-    memory: 256Mi
-  limits:
     memory: 512Mi
+  limits:
+    memory: 1Gi
 # Resources of the two init containers.
 initResources:
   requests:

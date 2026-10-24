@@ -4,8 +4,8 @@
 
 # Deletes the kind cluster of the probe. Idempotent: a missing cluster is not an error.
 #
-#   hack/kind/down.sh          delete the cluster (the registry container and the work directory stay)
-#   hack/kind/down.sh --all    also remove the registry container and $PROBE_WORK (kubeconfig, secrets, logs, results)
+#   hack/kind/down.sh          delete the cluster (the registry container with its volume and the work directory stay)
+#   hack/kind/down.sh --all    also remove the registry container with its anonymous volume and $PROBE_WORK (kubeconfig, secrets, logs, results)
 set -euo pipefail
 # shellcheck source=hack/kind/lib/common.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
@@ -28,7 +28,7 @@ if have docker && docker info >/dev/null 2>&1; then
   if [ "${all}" = 1 ]; then
     if docker inspect "${KIND_REGISTRY_NAME}" >/dev/null 2>&1; then
       log "removing the registry container ${KIND_REGISTRY_NAME}"
-      docker rm -f "${KIND_REGISTRY_NAME}" >/dev/null
+      docker rm -f -v "${KIND_REGISTRY_NAME}" >/dev/null
     fi
   fi
 else

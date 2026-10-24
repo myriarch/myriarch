@@ -176,8 +176,8 @@ schema and `values.yaml`; edit `values.schema.source.yaml`, never the schema or 
 | `containerMode.trustedRoot.existingConfigMap` | string | `""` | Name of an existing ConfigMap with the trusted root. Empty means none. |
 | `containerMode.trustedRoot.key` | string | `"trusted_root.json"` | Key of the trusted root in the ConfigMap. |
 | `containerMode.stopTimeout` | string | `"30s"` | Time from SIGTERM to SIGKILL for the supervisor. |
-| `resources.requests` | object | `{"cpu":"100m","memory":"256Mi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
-| `resources.limits` | object | `{"memory":"512Mi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
+| `resources.requests` | object | `{"cpu":"100m","memory":"512Mi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
+| `resources.limits` | object | `{"memory":"1Gi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
 | `initResources.requests` | object | `{"cpu":"10m","memory":"32Mi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
 | `initResources.limits` | object | `{"memory":"256Mi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
 | `terminationGracePeriodSeconds` | integer | `45` | Grace period of the pod on termination, in seconds. In container mode the pod gets at least 360. |

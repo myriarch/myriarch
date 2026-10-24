@@ -169,7 +169,7 @@ install_server() {
   if [ "${QUICKSTART_SOURCE}" = commit ]; then args+=(--set "image.repository=${SERVER_REPO}" --set "image.digest=${SERVER_DIGEST}"); fi
   chart_version_args
   log "installing the server chart (${QUICKSTART_SOURCE})"
-  h upgrade --install myriarch "$(chart_ref myriarch "${CHART_DIR}")" "${CHART_VER_ARGS[@]}" -n "${NS_APP}" "${args[@]}" \
+  h upgrade --install myriarch "$(chart_ref myriarch "${CHART_DIR}")" ${CHART_VER_ARGS[@]+"${CHART_VER_ARGS[@]}"} -n "${NS_APP}" "${args[@]}" \
     -f "${KIND_DIR}/values/quickstart.yaml" --wait --timeout 8m > "${PROBE_WORK}/notes-quickstart.txt"
 }
 
@@ -237,10 +237,10 @@ install_collectors() {
   kn "${NS_APP}" create configmap myriarch-trust --from-file="trusted_root.json=${PROBE_WORK}/trust/trusted_root.json" --dry-run=client -o yaml | k apply -f - >/dev/null
   chart_version_args
   log "installing the collector chart as a gateway (StatefulSet, container mode)"
-  h upgrade --install "${QS_GW_RELEASE}" "$(chart_ref myriarch-collector "${ROOT}/deploy/helm/myriarch-collector")" "${CHART_VER_ARGS[@]}" \
+  h upgrade --install "${QS_GW_RELEASE}" "$(chart_ref myriarch-collector "${ROOT}/deploy/helm/myriarch-collector")" ${CHART_VER_ARGS[@]+"${CHART_VER_ARGS[@]}"} \
     -n "${NS_APP}" -f "${gw}" --wait --timeout 10m > "${PROBE_WORK}/notes-quickstart-gateway.txt"
   log "installing the collector chart as a node agent (DaemonSet)"
-  h upgrade --install "${QS_NODES_RELEASE}" "$(chart_ref myriarch-collector "${ROOT}/deploy/helm/myriarch-collector")" "${CHART_VER_ARGS[@]}" \
+  h upgrade --install "${QS_NODES_RELEASE}" "$(chart_ref myriarch-collector "${ROOT}/deploy/helm/myriarch-collector")" ${CHART_VER_ARGS[@]+"${CHART_VER_ARGS[@]}"} \
     -n "${NS_APP}" -f "${nodes}" --wait --timeout 10m > "${PROBE_WORK}/notes-quickstart-nodes.txt"
 }
 

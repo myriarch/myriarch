@@ -140,6 +140,12 @@ check_true() { # name [command...]: the command succeeded
   if "$@" >/dev/null 2>&1; then pass "${name}"; else fail "${name}" "command failed: $*"; fi
 }
 
+# chart_content_state DIR_A DIR_B -> "identical" or "different": the files of two chart directories decide, not the version in Chart.yaml
+# (an old and a new chart can carry the same version until the version bump of a release)
+chart_content_state() {
+  if diff -r -q "$1" "$2" >/dev/null 2>&1; then echo identical; else echo different; fi
+}
+
 skipped_by_key() { # key -> 0 when PROBE_SKIP lists it
   case ",${PROBE_SKIP}," in *",$1,"*) return 0 ;; esac
   return 1

@@ -45,8 +45,11 @@ production-like policy waits minutes; see [Rollouts](../concepts/rollouts.md#hea
   `KIND_SYSTEM_TOOLS` out; that needs Go, `make` and a few minutes more).
 - Go (the script builds the small tool that fetches the Sigstore root of trust and validates the Git repository), `git`, `make`,
   `curl`, `jq`, `python3`, `openssl` and `ssh-keygen`.
-- Network access to `ghcr.io`, Docker Hub, GitHub (the collector 0.162.0 is downloaded from its release) and
-  `tuf-repo-cdn.sigstore.dev`.
+- Network access to `ghcr.io`, Docker Hub, GitHub (the collector 0.162.0 is downloaded from its release),
+  `tuf-repo-cdn.sigstore.dev`, the Go module proxy (`proxy.golang.org`, and `sum.golang.org` for the checksums) and the Alpine
+  package mirror (`dl-cdn.alpinelinux.org`, which the pod of the Git server installs `git` and `openssh-server` from). Two more
+  are needed only in some cases: `dl.k8s.io` for the pinned `kubectl` (not with `KIND_SYSTEM_TOOLS=1`), and the npm registry
+  (`registry.npmjs.org`) when `QUICKSTART_SOURCE=commit` builds the web UI because `internal/webui/dist` is missing.
 
 ## Start
 
@@ -58,6 +61,9 @@ git clone --depth 1 --branch "${TAG}" https://github.com/myriarch/myriarch.git
 cd myriarch
 KIND_SYSTEM_TOOLS=1 make kind-quickstart
 ```
+
+If the tag does not exist yet (before the release), `git clone` fails: [start from a checkout](#start-from-a-checkout) instead,
+which builds the images and installs the charts of the sources.
 
 `make kind-quickstart` is `hack/kind/quickstart.sh up`. It creates the cluster, installs PostgreSQL and the Git server, pushes
 the demo repository, installs the server chart, then the collector chart twice, and waits until every pod is ready. It is

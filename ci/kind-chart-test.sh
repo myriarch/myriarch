@@ -305,6 +305,7 @@ step "helm install, StatefulSet with two replicas under Pod Security restricted"
 check_eq "StatefulSet: both pods Ready" 2 "$(kn "${NS_STS}" get sts ${STS_NAME} -o jsonpath='{.status.readyReplicas}' 2>/dev/null)"
 check_eq "StatefulSet: the namespace enforces restricted" restricted "$(k get ns "${NS_STS}" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')"
 check_eq "StatefulSet: the pods run as the numeric user 10001" 10001 "$(kn "${NS_STS}" get pod ${STS_NAME}-0 -o jsonpath='{.spec.securityContext.runAsUser}')"
+diag_if_failed   # directly after a failure: restarts, last termination, resources and events are gone after the uninstall
 
 # The documented exception: the hostPath volume of nodeLogs is refused by baseline and restricted, so this namespace is privileged.
 ct_namespace "${NS_DS}" privileged 1
@@ -315,9 +316,11 @@ step "helm install, DaemonSet with nodeLogs in a privileged namespace" \
 want_ds="$(kn "${NS_DS}" get ds ${DS_NAME} -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null)"
 check_ge "DaemonSet: at least one node is scheduled" 1 "${want_ds}"
 check_eq "DaemonSet: every scheduled pod is Ready" "${want_ds}" "$(kn "${NS_DS}" get ds ${DS_NAME} -o jsonpath='{.status.numberReady}' 2>/dev/null)"
+diag_if_failed
 
 if wait_until 300 "[ \"\$(agents_healthy ct-sts)\" = 2 ]" 3; then pass "StatefulSet: two agents are registered, online and healthy at the server"; else fail "StatefulSet: two agents are registered, online and healthy at the server" "healthy $(agents_healthy ct-sts) of $(agents_total ct-sts)"; fi
 if wait_until 300 "[ \"\$(agents_healthy ct-ds)\" = '${want_ds}' ]" 3; then pass "DaemonSet: one healthy agent per node at the server" "${want_ds}"; else fail "DaemonSet: one healthy agent per node at the server" "healthy $(agents_healthy ct-ds) of $(agents_total ct-ds), want ${want_ds}"; fi
+diag_if_failed
 
 # a restarted pod keeps its identity: the storage volume holds the instance UID
 before="$(agents_total ct-sts)"
@@ -325,6 +328,7 @@ step "StatefulSet: a deleted pod comes back" kn "${NS_STS}" delete pod ${STS_NAM
 step "StatefulSet: the StatefulSet is Ready again" kn "${NS_STS}" rollout status sts/${STS_NAME} --timeout=300s
 check_eq "StatefulSet: two agents before the restart" 2 "${before}"
 if wait_until 300 "[ \"\$(agents_healthy ct-sts)\" = 2 ] && [ \"\$(agents_total ct-sts)\" = '${before}' ]" 3; then pass "StatefulSet: the restarted pod is the same agent (no third agent)" "$(agents_total ct-sts) agents, before ${before}"; else fail "StatefulSet: the restarted pod is the same agent (no third agent)" "healthy $(agents_healthy ct-sts) of $(agents_total ct-sts), before ${before}"; fi
+diag_if_failed
 
 # ---- stage 6: uninstall -----------------------------------------------------------------------------------------------
 stage_begin 6 "clean uninstall"
@@ -357,7 +361,10 @@ mkdir -p "${OLD_CHART_DIR}"
 if git archive "${UPGRADE_FROM}" deploy/helm/myriarch | tar -x -C "${OLD_CHART_DIR}"; then pass "the chart of ${UPGRADE_FROM} is taken from Git"; else fail "the chart of ${UPGRADE_FROM} is taken from Git"; fatal; fi
 OLD_CHART="${OLD_CHART_DIR}/deploy/helm/myriarch"
 old_version="$(sed -n 's/^version: //p' "${OLD_CHART}/Chart.yaml" | head -n 1)"
-check_ne "the old chart is not the chart of the commit" "$(sed -n 's/^version: //p' "${CHART_DIR}/Chart.yaml" | head -n 1)" "${old_version}"
+new_version="$(sed -n 's/^version: //p' "${CHART_DIR}/Chart.yaml" | head -n 1)"
+log "chart versions: ${UPGRADE_FROM} has ${old_version}, the commit has ${new_version}"
+# the content decides, not the version: until the version bump of the release preparation both charts carry the same version
+check_eq "the old chart is not the chart of the commit (content differs; versions ${old_version} and ${new_version})" different "$(chart_content_state "${OLD_CHART}" "${CHART_DIR}")"
 
 # A second database (the Dex stage of the probe uses it too), so that the old image meets an empty schema. The old chart runs the image
 # of its own release (appVersion); the chart of the commit runs the image of the commit.

@@ -88,7 +88,7 @@ apply_secret() {
   local ns="$1" name="$2" args=() spec
   shift 2
   for spec in "$@"; do args+=("--from-file=${spec}"); done
-  kn "${ns}" create secret generic "${name}" "${args[@]}" --dry-run=client -o yaml | k apply -f - >/dev/null
+  kn "${ns}" create secret generic "${name}" ${args[@]+"${args[@]}"} --dry-run=client -o yaml | k apply -f - >/dev/null
 }
 
 install_infra() {

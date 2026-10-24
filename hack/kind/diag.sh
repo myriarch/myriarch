@@ -37,8 +37,20 @@ for ns in "${NS_APP}" "${NS_INFRA}" "${NS_DEX}" "${NS_DEXIDP}" "${NS_OUTSIDE}" $
   kn "${ns}" describe pods > "${out}/describe-${ns}.txt" 2>&1
   for pod in $(kn "${ns}" get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
     kn "${ns}" logs "${pod}" --all-containers --prefix --tail=2000 > "${out}/logs/${ns}-${pod}.log" 2>&1
-    kn "${ns}" logs "${pod}" --all-containers --prefix --previous --tail=500 > "${out}/logs/${ns}-${pod}.previous.log" 2>&1 || rm -f "${out}/logs/${ns}-${pod}.previous.log"
+    # one --previous log per container that restarted (with --all-containers kubectl stops at the first container without one)
+    for ctr in $(kn "${ns}" get pod "${pod}" -o json 2>/dev/null | jq -r '(.status.initContainerStatuses // []) + (.status.containerStatuses // []) | .[] | select(.restartCount > 0) | .name'); do
+      kn "${ns}" logs "${pod}" -c "${ctr}" --previous --tail=500 > "${out}/logs/${ns}-${pod}-${ctr}.previous.log" 2>&1
+    done
   done
+  # per container: restarts, the last termination (reason, exit code), the effective resources; the events of the namespace by time
+  kn "${ns}" get pods -o json 2>/dev/null | jq -r '.items[] | .metadata.name as $p
+    | ((.status.initContainerStatuses // []) + (.status.containerStatuses // []))[] | .name as $c
+    | [$p, $c, "restarts=\(.restartCount)", "ready=\(.ready)",
+       "last=\(.lastState.terminated // {} | "\(.reason // "-") exit=\(.exitCode // "-") at=\(.finishedAt // "-")")",
+       "now=\(.state | keys[0])"]
+    | join("  ")' > "${out}/containers-${ns}.txt" 2>&1
+  kn "${ns}" get pods -o json 2>/dev/null | jq -r '.items[] | .metadata.name as $p | (.spec.initContainers // []) + (.spec.containers // []) | .[] | "\($p)/\(.name) resources=\(.resources | tojson)"' > "${out}/resources-${ns}.txt" 2>&1
+  kn "${ns}" get events --sort-by=.lastTimestamp > "${out}/events-${ns}.txt" 2>&1
 done
 # shellcheck disable=SC2086
 for ns in "${NS_APP}" "${NS_DEX}" "${NS_DEXIDP}" ${DIAG_EXTRA_NS:-}; do
