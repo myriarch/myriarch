@@ -24,7 +24,9 @@
 #   4. CHANGELOG_SECTION: for an rc tag the body of "## Unreleased" (or "## [Unreleased]"), for a final tag the body of
 #      "## [X.Y.Z] - YYYY-MM-DD", up to the next "## " heading, without the heading. Fenced code blocks keep their text but hide
 #      headings; HTML comments are removed. An empty section is [changelog_missing]. A section of more than 60,000 characters is
-#      replaced by one line that links CHANGELOG.md at the tag.
+#      replaced by its subsections "Upgrade notes" and "Security", unchanged, plus one sentence that links CHANGELOG.md at the tag
+#      for the rest. If neither subsection exists, or both with the sentence are longer than 60,000 characters as well, one line
+#      that links CHANGELOG.md at the tag is used instead.
 #   5. The text is at most 100,000 characters [notes_too_long], contains no SPDX line, and ends with exactly one newline.
 #
 # Exit status: 0 ok, 1 refused, 2 usage error.
