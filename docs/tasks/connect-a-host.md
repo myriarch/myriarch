@@ -248,7 +248,6 @@ use the command; the installer there also takes `-Server` when you run it from a
 
 ## The manual path
 
-
 The steps below are the manual path. They stay supported for sites that cannot accept the trust on first use of the pinned hash, and
 for hosts that the dialog cannot serve.
 
@@ -259,7 +258,6 @@ installer](#2-download-and-verify-the-installer) and
 [choose how the host verifies downloads](#3-choose-how-the-host-verifies-downloads). Step 4 [installs on
 Linux](#4-install-on-linux), step 5 [installs on Windows](#5-install-on-windows), and step 6 [checks the
 result](#6-check-the-result).
-
 
 ## What you need
 
