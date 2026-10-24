@@ -140,6 +140,25 @@ Check 'with -VerifySignatures skip no verifier is run, so its location does not 
 function Test-AclEnforced { return $false }
 function Test-AdminOnlyDirectory { param([string]$Path) return $true }
 
+# tar from the PATH (no tar.exe in the system directory, as on POSIX): only from an administrator-only directory
+function Test-AclEnforced { return $true }
+function Test-AdminOnlyDirectory { param([string]$Path) return -not ($Path -like '*unsafe*') }
+foreach ($d in @('unsafe-tar', 'safe-tar')) {
+  New-Item -ItemType Directory -Path (Join-Path $tmp $d) -Force | Out-Null
+  Set-Content -LiteralPath (Join-Path (Join-Path $tmp $d) 'tar.exe') -Value "#!/bin/sh`nexit 0`n" -NoNewline
+  & chmod 755 (Join-Path (Join-Path $tmp $d) 'tar.exe')
+}
+$env:PATH = (Join-Path $tmp 'unsafe-tar') + [IO.Path]::PathSeparator + $origPath
+$msg = Message-Of { Resolve-TarPath }
+Check 'tar from a directory that unprivileged accounts can write is refused with tool_missing' ($msg -match '\[tool_missing\].*unsafe-tar')
+$env:PATH = (Join-Path $tmp 'safe-tar') + [IO.Path]::PathSeparator + $origPath
+Check 'tar from an administrator-only directory is used' ((Resolve-TarPath) -eq (Join-Path (Join-Path $tmp 'safe-tar') 'tar.exe'))
+$env:PATH = (Join-Path $tmp 'unsafe-tar') + [IO.Path]::PathSeparator + $origPath
+function Test-AclEnforced { return $false }
+Check 'without ACL enforcement (not Windows) the tar of the PATH is used' ((Resolve-TarPath) -eq (Join-Path (Join-Path $tmp 'unsafe-tar') 'tar.exe'))
+$env:PATH = $origPath
+function Test-AdminOnlyDirectory { param([string]$Path) return $true }
+
 # ---- Copy with re-hash ---------------------------------------------------------------------------------------
 $src = Join-Path $tmp 'src.bin'
 Set-Content -LiteralPath $src -Value 'payload' -NoNewline

@@ -1359,6 +1359,24 @@ function Assert-SupervisorPlatform {
   }
 }
 
+# The tar that unpacks the collector archive. The bsdtar of Windows comes first: a GNU tar earlier in the PATH (Git for Windows) reads
+# C:\... as host:path and fails. A tar from the PATH is taken only from a directory that only administrators can write, like cosign.exe.
+function Resolve-TarPath {
+  $sysDir = [Environment]::SystemDirectory
+  if ($sysDir) {
+    $sysTar = Join-Path $sysDir 'tar.exe'
+    if (Test-Path -LiteralPath $sysTar -PathType Leaf) { return $sysTar }
+  }
+  $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
+  if (-not $tar) { $tar = Get-Command tar -ErrorAction SilentlyContinue }
+  if (-not $tar) { Stop-Install 'tool_missing' 'tar.exe not found (requires Windows 10 1803 / Server 2019 or newer)' }
+  $tarDir = Split-Path -Parent $tar.Source
+  if ((Test-AclEnforced) -and -not (Test-AdminOnlyDirectory -Path $tarDir)) {
+    Stop-Install 'tool_missing' "tar.exe not found in the system directory; the one in $tarDir is not used because unprivileged accounts can change that directory"
+  }
+  return $tar.Source
+}
+
 function Install-Collector {
   param($L, [string]$Arch, [string]$TmpDir)
   $version = $script:CollectorVersion
@@ -1382,18 +1400,7 @@ function Install-Collector {
   if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
   New-Item -ItemType Directory -Path $stage -Force | Out-Null
   # extract only the binary from the archive root (tar.exe: Windows 10 1803+ / Server 2019+)
-  # The bsdtar of Windows comes first: a GNU tar earlier in the PATH (Git for Windows) reads C:\... as host:path and fails.
-  $tarPath = ''
-  if ($env:SystemRoot) {
-    $sysTar = Join-Path $env:SystemRoot 'System32\tar.exe'
-    if (Test-Path -LiteralPath $sysTar -PathType Leaf) { $tarPath = $sysTar }
-  }
-  if (-not $tarPath) {
-    $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
-    if (-not $tar) { $tar = Get-Command tar -ErrorAction SilentlyContinue }
-    if ($tar) { $tarPath = $tar.Source }
-  }
-  if (-not $tarPath) { Stop-Install 'tool_missing' 'tar.exe not found (requires Windows 10 1803 / Server 2019 or newer)' }
+  $tarPath = Resolve-TarPath
   $r = Invoke-Native -File $tarPath -Arguments @('-xzf', $archive, '-C', $stage, $script:CollectorBinary)
   if ($r.ExitCode -ne 0) {
     $r = Invoke-Native -File $tarPath -Arguments @('-xzf', $archive, '-C', $stage, "./$($script:CollectorBinary)")

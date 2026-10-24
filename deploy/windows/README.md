@@ -277,7 +277,7 @@ is at the top of that script.
 | `insecure_required` | plain `ws://`/`http://` endpoint or `-VerifySignatures skip` without `-Insecure` |
 | `https_required` | non-https download URL, `-Server`, plan URL or redirect without `-Insecure` |
 | `file_unreadable` | token file, CA file, trusted root or verifier is not usable |
-| `tool_missing` | a required tool is absent (`tar.exe`, or `Get-AuthenticodeSignature` with `-UpdaterSignerThumbprint`); the message names the tool |
+| `tool_missing` | a required tool is absent (`tar.exe` in the system directory or in a `PATH` directory that only administrators can write, or `Get-AuthenticodeSignature` with `-UpdaterSignerThumbprint`); the message names the tool |
 | `sigstore_verifier_missing` | no Sigstore verifier (`-Verifier`, an installed updater, or `cosign.exe` from an administrator-only directory; with `-Server` the `myriarch-updater.exe` of the installer bundle, which is missing or not a regular file) |
 | `sigstore_verifier_outdated` | `cosign.exe` is older than 3.0.4 or reports no usable version |
 | `privilege_required` | not running as Administrator |

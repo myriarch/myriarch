@@ -1028,9 +1028,17 @@ function New-InstallCommand {
 # last two lines with ERROR or WARNING are only those repetitions. They are left out; the lines of the installer remain.
 function Get-InstallerFailureDetail {
   param([string]$Log)
-  $lines = @($Log -split "`r?`n" | Where-Object { $_ -match 'ERROR|WARNING' -and $_ -notmatch 'ERROR \[installer_failed\]' })
-  if ($lines.Count -eq 0) { $lines = @($Log -split "`r?`n" | Where-Object { $_.Trim() }) }
-  return ((@($lines | Select-Object -Last 2) | ForEach-Object { $_.Trim() }) -join ' ')
+  $all = @($Log -split "`r?`n")
+  $lines = @($all | Where-Object { $_ -match 'ERROR|WARNING' -and $_ -notmatch 'ERROR \[installer_failed\]' })
+  if ($lines.Count -eq 0) {
+    # no message of the installer with a level: its last line before the first repetition of the outer error
+    $cut = @($all | Where-Object { $_ -match 'ERROR \[installer_failed\]' } | Select-Object -First 1)
+    $before = $all
+    if ($cut.Count -gt 0) { $before = @($all[0..([Array]::IndexOf($all, $cut[0]))] | Select-Object -SkipLast 1) }
+    $lines = @($before | Where-Object { $_.Trim() } | Select-Object -Last 1)
+  }
+  $detail = ((@($lines | Select-Object -Last 2) | ForEach-Object { $_.Trim() }) -join ' ')
+  return (Invoke-Scrub -Text $detail)
 }
 
 # The text of a file that another process may have open for writing (the log of a running service).

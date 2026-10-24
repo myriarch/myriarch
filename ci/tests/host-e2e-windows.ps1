@@ -92,7 +92,8 @@ $locked = New-Object System.IO.FileStream((Join-Path $script:Dir 'install-comman
 try {
   if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
     $null = Export-Artifacts 3>&1 6>&1
-    Check 'an artifact that cannot be read keeps back no other' 'True' (Test-Path -LiteralPath (Join-Path $script:UploadDir 'myriarchd.log'))
+    # install-*.log is collected before api\*.json, so the artifact after the locked one is the proof (it only runs on Windows, where files lock)
+    Check 'an artifact that cannot be read keeps back the ones collected after it' 'True' (Test-Path -LiteralPath (Join-Path $script:UploadDir 'api\agents.json'))
   }
 } finally { $locked.Dispose() }
 # the shape of the log of the command when the installer inside it fails with a message X
@@ -108,6 +109,8 @@ $detail = Get-InstallerFailureDetail -Log $innerLog
 Check 'the message of the inner installer reaches the failed check' 'True' ($detail.Contains('[archive_invalid] otelcol-contrib.exe not found in the archive root'))
 Check 'the repetition of the outer error is not the message' 'False' ($detail.Contains('installer_failed'))
 Check 'a log without any ERROR line gives its last line' 'last' (Get-InstallerFailureDetail -Log "first`nlast`n")
+Check 'a log with only the repetition of the outer error gives the line before it' 'inner message' (Get-InstallerFailureDetail -Log "start`ninner message`n[myriarch-install] ERROR [installer_failed] the installer ended with exit code 1`nrepeated`n")
+Check 'a token in the message of the installer is removed' 'False' ((Get-InstallerFailureDetail -Log "[myriarch-install] ERROR [x] failed with Authorization: Bearer abcdefghijkl1234 and myra_secretvalue1`n").Contains('abcdefghijkl1234'))
 
 # ---- the guard ----------------------------------------------------------------------------------------------------------------
 $env:CI = ''
