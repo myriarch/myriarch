@@ -37,6 +37,8 @@ pin() { sed -n "s/^$1=//p" ci/versions.env | head -n 1; }
 otelcol_version="$(pin OTELCOL_VERSION)"
 contrib_image="$(pin OTELCOL_CONTRIB_IMAGE)"
 supervisor_image="$(pin OTELCOL_SUPERVISOR_IMAGE)"
+# the updater image of the chart is the one of the release (appVersion), which is VERSION
+app_version="$(head -n 1 VERSION)"
 [ -n "${otelcol_version}" ] && [ -n "${contrib_image}" ] && [ -n "${supervisor_image}" ] || die "ci/versions.env lacks OTELCOL_VERSION, OTELCOL_CONTRIB_IMAGE or OTELCOL_SUPERVISOR_IMAGE"
 contrib_digest="${contrib_image##*@}"
 supervisor_digest="${supervisor_image##*@}"
@@ -105,7 +107,7 @@ check_restricted() {
 # check_images <case>: the three images of the pod, unchanged upstream images pinned by the digests of ci/versions.env
 check_images() {
   local c="$1"
-  expect "${c}" "init container 1: the updater, by command install-self" "ghcr.io/myriarch/myriarch-updater:0.1.0 /usr/local/bin/myriarch-updater install-self /shared" \
+  expect "${c}" "init container 1: the updater, by command install-self" "ghcr.io/myriarch/myriarch-updater:${app_version} /usr/local/bin/myriarch-updater install-self /shared" \
     "$(wl "${c}" '.spec.template.spec.initContainers[0] | [.image, .command[0], .args[0], .args[1]] | join(" ")')"
   expect "${c}" "init container 2: the unchanged collector image runs the updater from the volume" \
     "docker.io/otel/opentelemetry-collector-contrib@${contrib_digest} /shared/myriarch-updater copy /otelcol-contrib /shared/" \
