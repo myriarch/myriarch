@@ -32,7 +32,7 @@ The levels of v0.1.0 were: container mode and Linux hosts beta, Windows hosts an
 
 ### Hosts
 
-The host test installs a host with the one-command installer of the server (and with the manual path), enrolls it, rolls out a
+The host test installs a host with the one-command installer of the server (on Linux also with the manual path), enrolls it, rolls out a
 configuration and a collector version, and updates the host. It runs in GitHub Actions on every change of the installers and the
 updater.
 

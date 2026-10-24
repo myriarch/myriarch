@@ -72,6 +72,7 @@ Myriarch as a whole stays **alpha** until all of the following hold. The change 
 ## Later
 
 - **A production Docker Compose setup with TLS and a Git source.** The Compose file of v0.1.0 is for evaluation only. This was planned for v0.2.0 and is not part of it.
+- **Authenticode signing of the Windows release files** ([ADR-0034](docs/adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Until then they carry the Sigstore signature of the release only.
 - **Pull and merge requests from the UI for other changes**, for example raising a fleet's Git target version (GitLab and GitHub APIs), beyond the Kubernetes image update.
 - **MCP, later stage:** an embedded `/mcp` endpoint with OAuth 2.1 and no token passthrough, and write tools after channel-independent controls exist: four-eyes approval for risky operations across UI, API, CLI and MCP, a distinct audit channel attribute, rate limits, a dry-run mode and a control audit. Wave approvals are never possible through MCP.
 - **Supervisor binary updates** through `myriarch-updater` (package name `opampsupervisor`), and a supervisor-native executor once the upstream supervisor supports packages ([opentelemetry-collector-contrib #47272](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/47272)).

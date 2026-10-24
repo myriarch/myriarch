@@ -128,9 +128,10 @@ fleet and a rollout policy of your own, read
 
 ### Connect a real collector
 
-Create an enrollment token in the UI and run the installer on the host
-(`deploy/scripts/install-linux.sh` or `deploy/scripts/install-windows.ps1`). The step-by-step guide is
-[docs/tasks/connect-a-host.md](docs/tasks/connect-a-host.md).
+Create an enrollment token in the UI. The dialog *Add host* renders the install command for Linux or Windows, which you copy to
+the host; the installer (`deploy/scripts/install-linux.sh --server …` or `deploy/scripts/install-windows.ps1 -Server …`) then
+fetches everything else from the server. Alternatively, run the installer with your own inputs on the manual path. The
+step-by-step guide is [docs/tasks/connect-a-host.md](docs/tasks/connect-a-host.md).
 
 ## Architecture
 

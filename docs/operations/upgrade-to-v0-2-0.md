@@ -120,7 +120,7 @@ With the default `install.enabled: true`, v0.2.0 changes three things that you s
   credentials: one token for each channel or region, and revoke one that may have leaked, which stops its grants at once.
   Set `install.enabled: false` if the hosts of your sites are installed on the manual path only.
 
-A new host that is installed from the server joins at the effective target version of its fleet. The plan waits (503
+A new host that is installed from the server joins at the effective target version of its fleet or, while a version rollout of the fleet is under way, at the version before it, as a straggler of the last wave; a paused or failed rollout blocks the installation. The plan waits (503
 `preparing`) until the rollout planner has created the rollout for a new target, so a host cannot take a new version past the
 waves and approvals. The controls are in the [security model](../security/model.md#host-installation-from-the-server), the
 design in [Server behaviour](../design/opamp-server.md#installation-from-the-server).
@@ -204,8 +204,8 @@ touch them. The installers of v0.2.0 differ from those of v0.1.0 in these points
 - **More codes with a next step.** `supervisor_missing` (both installers), `language_mode_unsupported` (Windows, in a
   PowerShell language mode below `FullLanguage`, for example under App Control script enforcement) and, on Windows,
   `unsupported_platform` for ARM64 without `-Arch amd64`, now before the installer stops the service. The table "When the
-  installer stops" in [Connect a host](../tasks/connect-a-host.md#when-the-installer-stops) lists the cause and the next step
-  of every code.
+  installer stops" in [Connect a host](../tasks/connect-a-host.md#when-the-installer-stops) lists the codes with their cause and the
+  next step.
 - **The unit of the updater changes.** `myriarch-updater.service` no longer sets `NoNewPrivileges=true`, which made every update
   through the updater fail in the step `verifying` with "operation not permitted". Hosts installed with v0.1.0 get the new unit
   when the installer of v0.2.0 runs again. Until then, a drop-in with `NoNewPrivileges=false` helps; see
@@ -235,7 +235,7 @@ explains how to move. Container mode stays an explicit opt-in (`containerMode.en
   compatibility level.
 - The UI shows the agents back online, and no rollout is stuck. A leader is elected (`myriarch_leader` in the
   [metrics reference](../reference/metrics.md)).
-- If you left `install.enabled` on, the enrollment-token dialog in the UI shows the install commands for the platforms you use.
+- If you left `install.enabled` on, the dialog *Add host* (*Agents*, *Add host*) renders the install commands for the platforms you use.
 
 ## Going back
 

@@ -83,7 +83,7 @@ shows `state: ok` when it has read your repository, and the fleets appear in the
 
 ## 6. Enroll the hosts
 
-Create an enrollment token in the UI (*Settings*, *Tokens*) and run the installation script on each host. The script sets up the
+Create an enrollment token in the UI (*Settings*, *Tokens*). The dialog *Add host* renders the install command for each platform; copy it to the host and run it (the installer runs with `--server` on Linux and `-Server` on Windows). The manual path, with the installation script and its own inputs, is the alternative. The script sets up the
 upstream supervisor, the collector and optionally `myriarch-updater`. The `site.*` options become attributes that your fleet
 selectors match on. [Connect a host](connect-a-host.md) has the inputs and the exact commands; Linux hosts with systemd are beta and
 Windows hosts are experimental ([levels and tested platforms](../operations/tested-platforms.md)). Collectors in Kubernetes run as pods of the Helm chart `myriarch-collector` with
