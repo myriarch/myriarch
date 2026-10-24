@@ -4,8 +4,9 @@
 #Requires -Version 5.1
 
 # The part of the test of the Windows host end-to-end test (scripts/host-e2e/windows.ps1) that needs no Windows host: the helpers of the
-# script, run in PowerShell 7 on any system after the script has been dot-sourced (it does nothing then). ci/tests/host-e2e-test.sh
-# starts it and turns its lines "ok ..." and "FAIL ..." into results. The scenario itself runs on a runner of GitHub Actions only.
+# script, run in PowerShell 7 on any system after the script has been dot-sourced (it does nothing then); one block at the end needs a
+# Windows host and runs only by hand there. ci/tests/host-e2e-test.sh starts it and turns its lines "ok ..." and "FAIL ..." into
+# results. The scenario itself runs on a runner of GitHub Actions only.
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)][string]$Script,
@@ -176,7 +177,40 @@ foreach ($case in @(@('exit', '0', 'scenario child|ended early'), @('ok', '1', '
 $env:CHILD_MODE = ''; $env:CHILD_CA_LEFT = ''
 Check 'the child runs left the job summary untouched' '0' ([string](Get-Item -LiteralPath $probe).Length)
 $env:GITHUB_STEP_SUMMARY = $oldSummary
+
 # ---- the ACL of a registry key: Get-Acl -LiteralPath fails on it in Windows PowerShell 5.1 --------------------------------------------
+# A stand-in for Get-Acl records the parameter it is called with, so that this part runs on every system. It is removed afterwards, so
+# that it does not hide the real cmdlet in the part below.
+$script:AclCalls = @()
+$script:AclMode = 'empty'
+function Get-Acl {
+  param([string]$Path, [string]$LiteralPath)
+  $script:AclCalls += ,@($(if ($PSBoundParameters.ContainsKey('Path')) { 'Path' } else { 'LiteralPath' }), $Path, $LiteralPath)
+  if ($script:AclMode -eq 'throw') { throw 'stand-in: cannot find the path' }
+  if ($script:AclMode -eq 'null') { return $null }
+  return [pscustomobject]@{ Access = @() }
+}
+foreach ($p in @('HKLM:\SYSTEM\CurrentControlSet\Services\x', 'HKCU:\Software\x', 'Registry::HKEY_LOCAL_MACHINE\x')) {
+  $script:AclCalls = @()
+  $null = Get-PathAcl -Path $p
+  Check "a registry path is read with -Path: $p" "Path|$p" ($script:AclCalls[0][0] + '|' + $script:AclCalls[0][1])
+}
+$script:AclCalls = @()
+$null = Get-PathAcl -Path 'C:\a[1]\b'
+Check 'a file path is read with -LiteralPath, brackets are no wildcards' 'LiteralPath|C:\a[1]\b' ($script:AclCalls[0][0] + '|' + $script:AclCalls[0][2])
+foreach ($p in @('HKLM:\SYSTEM\*', 'HKLM:\SYSTEM\Services\a?', 'HKCU:\Software\[a]')) {
+  $threw = $false
+  try { $null = Get-AllowSids -Path $p } catch { $threw = $true }
+  Check "a registry path with wildcard characters is an error: $p" 'True' $threw
+}
+foreach ($mode in @('throw', 'null')) {
+  $script:AclMode = $mode
+  $threw = $false
+  try { $null = Get-AllowSids -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\x' } catch { $threw = $true }
+  Check "a registry key whose ACL cannot be read ($mode) is an error, not an empty list" 'True' $threw
+}
+Remove-Item function:\Get-Acl
+# the real cmdlet, on a Windows host (a run by hand: no CI job runs this part; Windows PowerShell 5.1 is covered by the host test only)
 if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
   $regKey = 'HKCU:\Software\myriarch-host-e2e-test-' + [guid]::NewGuid().ToString('N')
   try {
@@ -191,8 +225,6 @@ if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
   $threw = $false
   try { $null = Get-AllowSids -Path $regKey } catch { $threw = $true }
   Check 'a registry key that does not exist is an error, not an empty list' 'True' $threw
-} else {
-  Write-Output 'ok (skipped: the registry ACL needs Windows) the allow SIDs of a registry key'
 }
 
 $env:HOST_E2E_DIR = $Work

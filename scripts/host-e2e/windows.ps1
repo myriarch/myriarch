@@ -840,16 +840,21 @@ function Get-ServiceConfig { # service name, field of `sc.exe qc` (START_TYPE, S
 }
 # The ACL of a file, a directory or a registry key. Windows PowerShell 5.1 resolves a registry path given as -LiteralPath to its
 # provider path (HKEY_LOCAL_MACHINE\...) and then does not find it, so a path of the registry provider is read with -Path, as the
-# installer does. A file path keeps -LiteralPath, so that brackets in it are no wildcards.
+# installer does. -Path reads *, ? and [ ] as wildcards and returns nothing when they match nothing, so a registry path with one is
+# refused. A file path keeps -LiteralPath, so that brackets in it are no wildcards.
 function Get-PathAcl {
   param([string]$Path)
-  if ($Path -match '^(HKLM|HKCU|HKCR|HKU|HKCC):' -or $Path -like 'Registry::*') { return (Get-Acl -Path $Path) }
+  if ($Path -match '^(HKLM|HKCU|HKCR|HKU|HKCC):' -or $Path -like 'Registry::*') {
+    if ([Management.Automation.WildcardPattern]::ContainsWildcardCharacters($Path)) { throw "refusing a registry path with wildcard characters: $Path" }
+    return (Get-Acl -Path $Path)
+  }
   return (Get-Acl -LiteralPath $Path)
 }
 # The SIDs of the allow entries of the ACL of a file, a directory or a registry key
 function Get-AllowSids {
   param([string]$Path)
   $acl = Get-PathAcl -Path $Path
+  if ($null -eq $acl) { throw "no ACL for $Path" }
   $sids = @()
   foreach ($ace in $acl.Access) {
     if ($ace.AccessControlType -ne 'Allow') { continue }
