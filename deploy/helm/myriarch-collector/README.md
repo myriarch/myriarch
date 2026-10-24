@@ -179,7 +179,7 @@ schema and `values.yaml`; edit `values.schema.source.yaml`, never the schema or 
 | `resources.requests` | object | `{"cpu":"100m","memory":"512Mi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
 | `resources.limits` | object | `{"memory":"1Gi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
 | `initResources.requests` | object | `{"cpu":"10m","memory":"32Mi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
-| `initResources.limits` | object | `{"memory":"256Mi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
+| `initResources.limits` | object | `{"memory":"1Gi"}` | Quantities by resource name, for example cpu, memory and ephemeral-storage. |
 | `terminationGracePeriodSeconds` | integer | `45` | Grace period of the pod on termination, in seconds. In container mode the pod gets at least 360. |
 | `podSecurityContext.runAsNonRoot` | boolean | `true` |  |
 | `podSecurityContext.runAsUser` | integer | `10001` |  |

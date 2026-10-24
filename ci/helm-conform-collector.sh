@@ -110,6 +110,9 @@ check_images() {
   expect "${c}" "init container 2: the unchanged collector image runs the updater from the volume" \
     "docker.io/otel/opentelemetry-collector-contrib@${contrib_digest} /shared/myriarch-updater copy /otelcol-contrib /shared/" \
     "$(wl "${c}" '.spec.template.spec.initContainers[1] | [.image, .command[0], .args[0], .args[1], .args[2]] | join(" ")')"
+  # The seed container writes the whole collector binary (about 400 MB) to the shared volume; 256Mi was OOM-killed in a chart test.
+  expect "${c}" "init containers: the memory limit covers the collector binary that the seed container writes (1Gi)" "1Gi 1Gi" \
+    "$(wl "${c}" '.spec.template.spec.initContainers | map(.resources.limits.memory) | join(" ")')"
   expect "${c}" "main container: the unchanged supervisor image" "docker.io/otel/opentelemetry-collector-opampsupervisor@${supervisor_digest}" \
     "$(wl "${c}" '.spec.template.spec.containers[0].image')"
 }

@@ -218,13 +218,18 @@ resources:
     memory: 512Mi
   limits:
     memory: 1Gi
-# Resources of the two init containers.
+# Resources of the two init containers. The seed container (seed-collector) streams the collector binary (about 400 MB for the contrib
+# distribution) from the image to the "shared" volume. With 256Mi the container was OOM-killed (exit 137) on some pods of a test of this
+# chart. The copy streams the file, so the likely cause is the file cache: the written bytes are charged to the memory of the container
+# until they are written back. The limit therefore has to cover the whole binary, not only the copy process; it equals sharedSizeLimit,
+# which the binary cannot exceed. The request stays small: the init containers run one after the other and before the main container, so
+# only their request is counted for scheduling and it does not add to the pod.
 initResources:
   requests:
     cpu: 10m
     memory: 32Mi
   limits:
-    memory: 256Mi
+    memory: 1Gi
 
 # Seconds for a graceful stop. In container mode the pod gets at least 360, because a running installation may finish its critical
 # section first.
