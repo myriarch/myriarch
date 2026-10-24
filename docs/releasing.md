@@ -250,10 +250,11 @@ release.
    - **Windows signing.** `deploy/release/windows-signing.env` says what you expect (see [Windows signing rule](#windows-signing-rule)):
      `off` is allowed for a candidate.
 2. **Wait for `ci-ok`** on the merge commit of `main`. The guard refuses a commit without it. `ci-ok` does not contain the two
-   workflows that need real machines, so also read their last runs on the merge commit, or start them by hand (`workflow_dispatch`
-   on `main`) if the pull request did not touch their paths:
+   workflows that need real machines. They do not run on a push to `main` (only on pull requests that touch their paths, on a
+   schedule and by hand), so after the merge start both by hand (`workflow_dispatch` on `main`, `release_tag` empty), or use a
+   scheduled run that ran on the merge commit:
    - `host-e2e`: the installers, the updater and the services on fresh Ubuntu 24.04 runners (amd64 and arm64) and on Windows Server 2025
-     (Windows PowerShell 5.1 and PowerShell 7), scenarios `manual` and `one-command`.
+     (Windows PowerShell 5.1 and PowerShell 7). The scenario `one-command` runs everywhere; `manual` runs on Linux only.
    - `e2e-kind`: the probe of `hack/kind`, and from v0.2.0 the job `charts` (both charts on two Kubernetes versions, the uninstall and
      the upgrade from the chart of the last release) and the job `quickstart` (the Kubernetes Quickstart from a checkout).
    A red row here is fixed before the tag: the smoke jobs after the publication cannot undo a release.
@@ -370,7 +371,7 @@ When `finalize` is green and the smoke jobs have been checked, open a pull reque
 the archives, so they can follow the release:
 
 1. **`website/data/release.yaml`**, the single source of the release status. After a candidate set `candidate: "vX.Y.Z-rc.N"` (and
-   `final: ""`); after a final release set `final: "vX.Y.Z"` and `candidate: ""`. The status chip of the landing page
+   `final: ""` only while no final release exists; otherwise `final` keeps the last final release); after a final release set `final: "vX.Y.Z"` and `candidate: ""`. The status chip of the landing page
    (`website/layouts/_partials/landing/hero.html`) is derived from it, and `website/scripts/check-landing.py` fails when the
    chip and the file differ. So is the `version` in the structured data of the home page (`website/layouts/_partials/seo/`), which
    `website/scripts/check-seo.py` compares with the file. A candidate of a later version does not replace a final release in the chip. The release workflow
@@ -423,17 +424,18 @@ shows the candidate (as a pre-release) until the final version is published.
 
 ## Release post
 
-The website has a news section (`website/content/project/news/`, described in `website/README.md`). The post for a release is prepared
+The news section of the website (`website/content/project/news/`, described in the section "News" of `website/README.md`) comes with
+the branch of the first post; it is not on `main` before. The post for a release is prepared
 in advance on a branch of its own and is **not merged before the release exists**, because it names the version, the date and the
 links of a published release. It carries open markers (`[[PLACEHOLDER: …]]`, `[[ONLY IF IN RELEASE: …]]`, `[[ONLY FOR RC: …]]`). Whether
 the first post comes with a candidate or only with the final version is the maintainers' decision; the steps are the same, and for a
 candidate the post says that it is a release candidate.
 
-1. **Rebase the branch** on the current `origin/main`. It needs the website changes of the SEO work to be merged first.
+1. **Rebase the branch** on the current `origin/main`.
 2. **Fill the markers.** Version, date, the link of the release and of the chart (`oci://ghcr.io/myriarch/charts/myriarch`). Keep a
    line marked "only if in release" if the release contains what it says (check it against the release notes) and delete it
    otherwise. The command in the section "News" of `website/README.md` lists every open marker and must print nothing. Then
-   `make website-check` is green, and the scrub of the private checks finds nothing.
+   `make website-check` is green.
 3. **Review and merge** on the day of the tag: a second pair of eyes reads the post against the release notes, and the pull request
    is merged once the release is published.
 
