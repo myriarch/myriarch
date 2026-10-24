@@ -34,6 +34,11 @@ if (-not $python) { Write-Host 'download-retry.ps1: python3 is not available, sk
 $isCore = $PSVersionTable.PSEdition -eq 'Core'
 Write-Host "download-retry.ps1: PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))"
 
+# install-windows.ps1 has a parameter -Server of its own: dot-sourcing it below sets $Server to $null in this scope. The fault server
+# is therefore taken from a variable that no script under test uses, and it must exist before anything is started.
+if (-not (Test-Path -LiteralPath $Server -PathType Leaf)) { throw "download-retry.ps1: -Server must be the file of the fault server, there is no file '$Server'" }
+$FaultServer = (Resolve-Path -LiteralPath $Server).Path
+
 New-Item -ItemType Directory -Path $Work -Force | Out-Null
 $Work = (Resolve-Path $Work).Path
 $served = Join-Path $Work 'served'
@@ -54,8 +59,45 @@ Set-Content -LiteralPath $rulesFile -Value ($rules | ConvertTo-Json -Compress) -
 $logFile = Join-Path $Work 'server.log'
 $portFile = Join-Path $Work 'port'
 Set-Content -LiteralPath $logFile -Value '' -NoNewline
-$srv = Start-Process -FilePath $python.Source -PassThru -RedirectStandardOutput (Join-Path $Work 'server.out') -RedirectStandardError (Join-Path $Work 'server.err') `
-  -ArgumentList @('-I', "`"$Server`"", '--rules', "`"$rulesFile`"", '--log', "`"$logFile`"", '--port-file', "`"$portFile`"", '--root', "`"$served`"")
+
+# One argument string, every argument in double quotes (the arguments here hold paths and fixed words, never a quote): Start-Process
+# joins an array of arguments in Windows PowerShell 5.1 and PowerShell 7 alike, but a single string is the same in both.
+function ConvertTo-ArgumentString { param([string[]]$Arguments) return (($Arguments | ForEach-Object { '"' + $_ + '"' }) -join ' ') }
+
+# Starts the fault server with rules, a log and a port file; the output of the process goes to NAME.out and NAME.err.
+function Start-FaultServerProcess {
+  param([string]$Name, [string]$RulesPath, [string]$LogPath, [string]$PortPath)
+  $outPath = Join-Path $Work "$Name.out"
+  $errPath = Join-Path $Work "$Name.err"
+  $arguments = ConvertTo-ArgumentString @('-I', $FaultServer, '--rules', $RulesPath, '--log', $LogPath, '--port-file', $PortPath, '--root', $served)
+  $p = Start-Process -FilePath $python.Source -PassThru -RedirectStandardOutput $outPath -RedirectStandardError $errPath -ArgumentList $arguments
+  $null = $p.Handle   # keeps the handle, so that ExitCode is readable after the exit (Windows PowerShell 5.1)
+  return [pscustomobject]@{ Name = $Name; Process = $p; Out = $outPath; Err = $errPath; PortPath = $PortPath; Command = "$($python.Source) $arguments" }
+}
+
+function Read-ProcessOutput {
+  param([string]$Path)
+  try { $t = [IO.File]::ReadAllText($Path) } catch { return "(not readable: $($_.Exception.Message))" }
+  if ([string]::IsNullOrWhiteSpace($t)) { return '(empty)' }
+  return $t.Trim()
+}
+
+# Waits for the port file. A slow start of python on a loaded runner (several seconds) is not a failure; a process that has exited
+# is, at once. The message holds the exit code, stderr and stdout of the process, so it is never empty.
+function Wait-FaultServer {
+  param($Started, [int]$TimeoutSeconds = 90)
+  $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+  while (-not (Test-Path -LiteralPath $Started.PortPath)) {
+    if ($Started.Process.HasExited -or [DateTime]::UtcNow -ge $deadline) {
+      $state = $(if ($Started.Process.HasExited) { "exited with code $($Started.Process.ExitCode)" } else { "still running after $TimeoutSeconds s" })
+      throw ("the fault server $($Started.Name) did not start: the process $state; command: $($Started.Command); stderr: $(Read-ProcessOutput $Started.Err); stdout: $(Read-ProcessOutput $Started.Out)")
+    }
+    [System.Threading.Thread]::Sleep(100)   # not Start-Sleep: the cases below replace it by a fake clock
+  }
+}
+
+$firstServer = Start-FaultServerProcess -Name 'server' -RulesPath $rulesFile -LogPath $logFile -PortPath $portFile
+$srv = $firstServer.Process
 
 function Get-Requests { param([string]$Path, [string]$Log = $logFile) return @(Get-Content -LiteralPath $Log | Where-Object { $_ -like "$Path *" }).Count }
 function Get-Failure { param([scriptblock]$Block) try { & $Block; return '' } catch { return $_.Exception.Message } }
@@ -71,17 +113,14 @@ function Start-FaultServer {
   $portPath = Join-Path $Work "$Name.port"
   Set-Content -LiteralPath $rulesPath -Value (@{ '/connect' = $ConnectStatus } | ConvertTo-Json -Compress) -NoNewline
   Set-Content -LiteralPath $log -Value '' -NoNewline
-  $p = Start-Process -FilePath $python.Source -PassThru -RedirectStandardOutput (Join-Path $Work "$Name.out") -RedirectStandardError (Join-Path $Work "$Name.err") `
-    -ArgumentList @('-I', "`"$Server`"", '--rules', "`"$rulesPath`"", '--log', "`"$log`"", '--port-file', "`"$portPath`"", '--root', "`"$served`"")
-  $script:proxyServers += $p
-  for ($i = 0; $i -lt 100 -and -not (Test-Path -LiteralPath $portPath); $i++) { [System.Threading.Thread]::Sleep(100) }
-  if (-not (Test-Path -LiteralPath $portPath)) { throw "the fault server $Name did not start: $(Get-Content -LiteralPath (Join-Path $Work "$Name.err") -Raw)" }
+  $started = Start-FaultServerProcess -Name $Name -RulesPath $rulesPath -LogPath $log -PortPath $portPath
+  $script:proxyServers += $started.Process
+  Wait-FaultServer -Started $started
   return [pscustomobject]@{ Port = [int](Get-Content -LiteralPath $portPath -Raw).Trim(); Log = $log }
 }
 
 try {
-  for ($i = 0; $i -lt 100 -and -not (Test-Path -LiteralPath $portFile); $i++) { Start-Sleep -Milliseconds 100 }
-  if (-not (Test-Path -LiteralPath $portFile)) { throw "the fault server did not start: $(Get-Content -LiteralPath (Join-Path $Work 'server.err') -Raw)" }
+  Wait-FaultServer -Started $firstServer
   $port = [int](Get-Content -LiteralPath $portFile -Raw).Trim()
   # a port that nothing listens on
   $probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
