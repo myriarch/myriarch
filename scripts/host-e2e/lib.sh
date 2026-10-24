@@ -504,6 +504,14 @@ he_target_phase() { # rollout-id: the stored phase of the first target; nothing 
 he_package_status() { # updater-agent-id: the OpAMP package status of the collector package; "none" before the first report
   he_api GET "/agents/$1" | jq -r '.agent.packageStatus.packages[""].status // "none"'
 }
+he_effective_config_has() { # agent-id text: a predicate, the effective configuration the collector reports contains the text
+  # The answer is read to the end and compared inside the shell: "jq | grep -q" ends grep at the first match, the next write of jq
+  # fails with SIGPIPE, and pipefail turns that into a failed predicate. GNU grep does the same for any grep whose stdout is
+  # /dev/null, so no pipe and no external process stands between the answer and the comparison.
+  local body
+  body="$(he_api GET "/agents/$1/effective-config" | jq -r '.body // empty')" || return 1
+  [[ "${body}" == *"$2"* ]]
+}
 he_select_version() { # fleet version reason expected-target-version: prints the id of the rollout the UI action starts
   local resp="${HE_DIR}/api/select-version-$2.json"
   he_api POST "/fleets/$1/actions/select-version" "{\"version\":\"$2\",\"reason\":\"$3\",\"expectedTargetVersion\":\"$4\"}" > "${resp}"
@@ -686,6 +694,10 @@ he_diag() {
     he_api GET '/agents?limit=50' 2>/dev/null | jq '[.items[]? | {id, kind, hostname, version, status: .connection.status, healthy: .health.healthy, configSync}]' > "${HE_DIR}/api/agents.json" 2>/dev/null || true
     he_api GET '/rollouts?limit=20' > "${HE_DIR}/api/rollouts.json" 2>/dev/null || true
     he_api GET '/gitops/status' > "${HE_DIR}/api/gitops-status.json" 2>/dev/null || true
+    # what each agent reports as its effective configuration (redacted by the server), for a check on it that fails
+    for id in $(jq -r '.[].id' "${HE_DIR}/api/agents.json" 2>/dev/null); do
+      he_api GET "/agents/${id}/effective-config" > "${HE_DIR}/api/effective-config-${id}.json" 2>/dev/null || true
+    done
   fi
 }
 

@@ -325,7 +325,7 @@ done
 api_says() { # JSON function args...: runs the function of the library with a REST helper that answers with the JSON
   local json="$1"
   shift
-  STUB_JSON="${json}" bash -c '. "$1"; shift; he_api() { printf "%s" "${STUB_JSON}"; }; "$@"' _ "${LIB}" "$@" 2>/dev/null
+  STUB_JSON="${json}" bash -c 'set -o pipefail; . "$1"; shift; he_api() { printf "%s" "${STUB_JSON}"; }; "$@"' _ "${LIB}" "$@" 2>/dev/null
 }
 TARGET_ENDED='{"items":[{"status":"failed","progress":{"phase":"rolled_back","steps":[{"name":"health_check","status":"failed"},{"name":"rolling_back","status":"done"}]}}]}'
 GOT="$(api_says "${TARGET_ENDED}" he_target_phase r1)"
@@ -342,6 +342,22 @@ GOT="$(api_says '{"agent":{"packageStatus":{"packages":{"":{"status":"install_fa
 [ "${GOT}" = install_failed ] && ok "he_package_status reads the status of the collector package" || fail "he_package_status: '${GOT}'"
 GOT="$(api_says '{"agent":{}}' he_package_status u1)"
 [ "${GOT}" = none ] && ok "... and says none before the first report" || fail "he_package_status without a report: '${GOT}'"
+# jq writes a long body in more than one write. With "jq | grep -q" under pipefail grep ends at the match, the next write of jq
+# fails with SIGPIPE, and the predicate failed. The sample is about 900 KB (below the 1 MiB the server stores), much more than a
+# pipe holds, so that jq blocks in its write and the failure of the old form does not depend on the scheduler. It is served from a
+# file: a body that size does not fit into the environment of a process.
+LONG_FILE="${W}/long-effective-config.json"
+python3 -I -c 'import json; print(json.dumps({"body": "processors:\n  batch:\n    timeout: 7s\n" + "# padding of the effective configuration\n" * 22000}))' > "${LONG_FILE}"
+[ "$(wc -c < "${LONG_FILE}")" -gt 800000 ] && ok "the sample of an effective configuration is far longer than a pipe holds" || fail "the sample has $(wc -c < "${LONG_FILE}") bytes"
+api_says_file() { # file function args...: like api_says, with the answer read from a file
+  local file="$1"
+  shift
+  STUB_FILE="${file}" bash -c 'set -o pipefail; . "$1"; shift; he_api() { cat "${STUB_FILE}"; }; "$@"' _ "${LIB}" "$@" 2>/dev/null
+}
+api_says_file "${LONG_FILE}" he_effective_config_has a1 'timeout: 7s' && ok "he_effective_config_has finds the text near the start of a very long body" || fail "he_effective_config_has missed 'timeout: 7s' in a long body"
+api_says_file "${LONG_FILE}" he_effective_config_has a1 'timeout: 5s' && fail "he_effective_config_has found a text that is not in the body" || ok "... and does not find a text that is not there"
+api_says '{"body":"processors:\n  batch:\n    timeout: 7s\n"}' he_effective_config_has a1 'timeout: 7s' && ok "... nor does it miss it in a short body" || fail "he_effective_config_has missed 'timeout: 7s' in a short body"
+api_says '{"message":"agent a1 has not reported an effective config"}' he_effective_config_has a1 'timeout: 7s' && fail "he_effective_config_has found a text in an answer without a body" || ok "... and it is false for an answer without a body"
 
 # a getter that says rolling_back twice and rolled_back from the third call on; the counter is a file, because he_settle calls the
 # getter in a subshell

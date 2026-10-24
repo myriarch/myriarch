@@ -275,9 +275,6 @@ scenario_manual() {
 he_config_rollouts_above() { # fleet count: a predicate, there are more configuration rollouts than count
   [ "$(he_api GET "/rollouts?kind=config&fleet=$1&limit=50" | jq '[.items[]?] | length')" -gt "$2" ]
 }
-he_effective_config_has() { # agent-id text: a predicate, the effective configuration the collector reports contains the text
-  he_api GET "/agents/$1/effective-config" | jq -r '.body // empty' | grep -qF -- "$2"
-}
 
 scenario_one_command() {
   local fleet=host-e2e site_id=host-e2e-01 v_old="${HE_VERSION_OLD}" v_new="${HE_VERSION_NEW}"
@@ -402,7 +399,8 @@ scenario_one_command() {
   he_check_eq "configuration rollout completed" completed "$(he_api GET "/rollouts/${r2}" | jq -r .status)"
   he_wait_for 90 he_agent_is "${col}" .configSync in_sync
   he_check_eq "collector in sync again" in_sync "$(he_api GET "/agents/${col}" | jq -r .configSync)"
-  he_wait_for 90 he_effective_config_has "${col}" 'timeout: 7s'
+  # what the server holds when the wait ends, not what a later step leaves behind (he_diag runs after the whole scenario)
+  he_wait_for 90 he_effective_config_has "${col}" 'timeout: 7s' || he_api GET "/agents/${col}/effective-config" > "${HE_DIR}/api/effective-config-after-config-rollout.json" 2>/dev/null || true
   he_check_true "the collector reports the changed configuration" he_effective_config_has "${col}" 'timeout: 7s'
   he_wait_for 60 he_agent_is "${col}" .agent.health.healthy true
   he_check_eq "collector healthy after the rollout" true "$(he_api GET "/agents/${col}" | jq -r .agent.health.healthy)"
