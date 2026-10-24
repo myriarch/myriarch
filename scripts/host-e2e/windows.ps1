@@ -838,10 +838,18 @@ function Get-ServiceConfig { # service name, field of `sc.exe qc` (START_TYPE, S
   $m = [regex]::Match($r.Output, '(?m)^\s*' + [regex]::Escape($Field) + '\s*:\s*(.*?)\s*$')
   return $(if ($m.Success) { $m.Groups[1].Value } else { '' })
 }
+# The ACL of a file, a directory or a registry key. Windows PowerShell 5.1 resolves a registry path given as -LiteralPath to its
+# provider path (HKEY_LOCAL_MACHINE\...) and then does not find it, so a path of the registry provider is read with -Path, as the
+# installer does. A file path keeps -LiteralPath, so that brackets in it are no wildcards.
+function Get-PathAcl {
+  param([string]$Path)
+  if ($Path -match '^(HKLM|HKCU|HKCR|HKU|HKCC):' -or $Path -like 'Registry::*') { return (Get-Acl -Path $Path) }
+  return (Get-Acl -LiteralPath $Path)
+}
 # The SIDs of the allow entries of the ACL of a file, a directory or a registry key
 function Get-AllowSids {
   param([string]$Path)
-  $acl = Get-Acl -LiteralPath $Path
+  $acl = Get-PathAcl -Path $Path
   $sids = @()
   foreach ($ace in $acl.Access) {
     if ($ace.AccessControlType -ne 'Allow') { continue }
@@ -1094,7 +1102,7 @@ function Save-Diagnostics {
   foreach ($n in $script:Services) {
     $key = Join-Path $script:ServiceKeyRoot $n
     if (Test-Path -LiteralPath $key) {
-      try { $acls += "registry key $n`n" + (((Get-Acl -LiteralPath $key).Access | Format-Table IdentityReference, AccessControlType, RegistryRights -AutoSize | Out-String)) + "`n" } catch { $acls += "registry key ${n}: $($_.Exception.Message)`n" }
+      try { $acls += "registry key $n`n" + (((Get-PathAcl -Path $key).Access | Format-Table IdentityReference, AccessControlType, RegistryRights -AutoSize | Out-String)) + "`n" } catch { $acls += "registry key ${n}: $($_.Exception.Message)`n" }
     }
   }
   Write-Utf8 -Path (Join-Path $d 'acl.txt') -Text $acls

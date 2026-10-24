@@ -176,5 +176,24 @@ foreach ($case in @(@('exit', '0', 'scenario child|ended early'), @('ok', '1', '
 $env:CHILD_MODE = ''; $env:CHILD_CA_LEFT = ''
 Check 'the child runs left the job summary untouched' '0' ([string](Get-Item -LiteralPath $probe).Length)
 $env:GITHUB_STEP_SUMMARY = $oldSummary
+# ---- the ACL of a registry key: Get-Acl -LiteralPath fails on it in Windows PowerShell 5.1 --------------------------------------------
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+  $regKey = 'HKCU:\Software\myriarch-host-e2e-test-' + [guid]::NewGuid().ToString('N')
+  try {
+    New-Item -Path $regKey -Force | Out-Null
+    $regSids = @(Get-AllowSids -Path $regKey)
+    if ($regSids.Count -ge 1 -and $regSids[0] -match '^S-1-') { Pass 'the allow SIDs of a registry key are read' } else { Fail 'the allow SIDs of a registry key are read' "(got '$($regSids -join ',')')" }
+    $dirSids = @(Get-AllowSids -Path $script:Dir)
+    if ($dirSids.Count -ge 1) { Pass 'the allow SIDs of a directory are read' } else { Fail 'the allow SIDs of a directory are read' }
+  } finally {
+    Remove-Item -Path $regKey -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  $threw = $false
+  try { $null = Get-AllowSids -Path $regKey } catch { $threw = $true }
+  Check 'a registry key that does not exist is an error, not an empty list' 'True' $threw
+} else {
+  Write-Output 'ok (skipped: the registry ACL needs Windows) the allow SIDs of a registry key'
+}
+
 $env:HOST_E2E_DIR = $Work
 Write-Output 'END helpers'
