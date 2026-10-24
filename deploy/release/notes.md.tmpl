@@ -39,7 +39,12 @@ Myriarch is alpha software: interfaces and configuration may change between mino
 | Linux hosts (systemd) | beta | Installer and updater from the release files. |
 | Container mode | beta | Enabled with `containerMode.enabled` of the collector chart ([container mode](https://github.com/{{REPOSITORY}}/blob/{{TAG}}/docs/design/container-mode.md)). |
 | Windows hosts | experimental | |
-| Helm chart | experimental | Installed from the tag, or from v0.2.0 on as a signed OCI chart. The collector chart `oci://ghcr.io/myriarch/charts/myriarch-collector` (version `{{VERSION}}`) runs the unchanged upstream OpAMP Supervisor and collector images; both charts are signed and attested by `release.yml` at `{{TAG}}`, verify them as in [verify releases](https://github.com/{{REPOSITORY}}/blob/{{TAG}}/docs/security/verify-releases.md#verify-the-helm-chart). |
+| Server Helm chart | beta | Installed from the tag, or as the signed OCI chart `oci://ghcr.io/myriarch/charts/myriarch` (version `{{VERSION}}`). |
+| Collector Helm chart | experimental | `oci://ghcr.io/myriarch/charts/myriarch-collector` (version `{{VERSION}}`) runs the unchanged upstream OpAMP Supervisor and collector images. Both charts are signed and attested by `release.yml` at `{{TAG}}`, verify them as in [verify releases](https://github.com/{{REPOSITORY}}/blob/{{TAG}}/docs/security/verify-releases.md#verify-the-helm-chart). |
+
+## Tested platforms
+
+The automated tests of this release run on Ubuntu 24.04 (amd64 and arm64) and on Windows Server 2025 (amd64, Windows PowerShell 5.1 and PowerShell 7) for hosts, and on kind with two Kubernetes versions for the charts. The pins are in [`hack/kind/versions.env`](https://github.com/{{REPOSITORY}}/blob/{{TAG}}/hack/kind/versions.env), the full list is in [support levels and tested platforms](https://github.com/{{REPOSITORY}}/blob/{{TAG}}/docs/operations/tested-platforms.md).
 
 ## Known limitations
 

@@ -6,7 +6,7 @@ params:
   placeholder:
     tracking: "operations-manual"
     replaces: "docs/operations/monitoring.md"
-    planned: "v0.2.0"
+    planned: "v0.3.0"
 ---
 
 {{< placeholder >}}

@@ -56,7 +56,8 @@ included, is signed keyless and carries build provenance; [verify it](docs/secur
 | Container mode of `myriarch-updater` (Kubernetes pods) | Beta |
 | Linux hosts (systemd) | Beta |
 | Windows hosts | Experimental |
-| Helm chart `deploy/helm/myriarch` | Experimental |
+| Server Helm chart `deploy/helm/myriarch` | Beta |
+| Collector Helm chart `deploy/helm/myriarch-collector` | Experimental |
 
 What the levels mean:
 
@@ -65,8 +66,9 @@ What the levels mean:
   [changelog](CHANGELOG.md).
 - **Experimental:** limited testing; it can change incompatibly or be removed.
 
-The scope of v0.1.0 is in [ADR-0021](docs/adr/0021-publication-gates-and-v0-1-0-scope.md); plans are in
-[ROADMAP.md](ROADMAP.md).
+The platforms that the automated tests run on are in [Support levels and tested platforms](docs/operations/tested-platforms.md).
+If you run v0.1.0, read the [upgrade notes for v0.2.0](docs/operations/upgrade-to-v0-2-0.md) first. The scope of v0.1.0 is in
+[ADR-0021](docs/adr/0021-publication-gates-and-v0-1-0-scope.md); plans are in [ROADMAP.md](ROADMAP.md).
 
 ## Quickstart
 
@@ -185,7 +187,7 @@ parallel. Details: [docs/architecture.md](docs/architecture.md).
 | `myrctl` | CLI for the CI pipelines of the GitOps repository (`validate`, `render`); a short alias `myr` is documented in [docs/reference/cli/myrctl.md](docs/reference/cli/myrctl.md) |
 | `myriarch-updater` | Host agent for collector binary updates (systemd, Windows service, container mode) |
 | `myriarch-sim` | Load simulator (1,000 and more simulated supervisors and updaters) |
-| Helm chart | [`deploy/helm/myriarch`](deploy/helm/myriarch/README.md); install it from the repository or, from v0.2.0, as a signed OCI chart |
+| Helm charts | [`deploy/helm/myriarch`](deploy/helm/myriarch/README.md) (the server) and `deploy/helm/myriarch-collector` (collectors on Kubernetes); from v0.2.0 both are also signed OCI charts |
 | Container images | `ghcr.io/myriarch/myriarch` (the server, with `myrctl`, `myriarch-sim` and the example repositories) and `ghcr.io/myriarch/myriarch-updater`, for `linux/amd64` and `linux/arm64`; published with every release, release candidates included (tags `X.Y.Z` and `X.Y`, `X.Y.Z-rc.N` for a candidate, no `latest`). `myrctl` and the simulator are also in the release archives |
 
 ## Documentation

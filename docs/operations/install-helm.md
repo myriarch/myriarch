@@ -10,8 +10,8 @@ the values file step by step; the complete file is
 [`deploy/helm/myriarch/examples/install-guide.yaml`](../../deploy/helm/myriarch/examples/install-guide.yaml), and CI
 renders it with every change of the chart.
 
-> **Support level.** The Helm chart is experimental in the first release ([ADR-0021](../adr/0021-publication-gates-and-v0-1-0-scope.md)).
-> v0.1.0 installs the chart from a checkout of the repository at a release tag; from v0.2.0 the chart is also a signed OCI
+> **Support level.** The server chart is beta from v0.2.0; it was experimental in v0.1.0 ([ADR-0021](../adr/0021-publication-gates-and-v0-1-0-scope.md),
+> [Support levels and tested platforms](tested-platforms.md)). v0.1.0 installs the chart from a checkout of the repository at a release tag; from v0.2.0 the chart is also a signed OCI
 > artifact ([below](#install-the-signed-oci-chart)). Read the [production checklist](production-checklist.md) before you rely
 > on an installation.
 
@@ -454,7 +454,8 @@ it at start: it refuses to start on a schema that it cannot work with, with an e
 `helm rollback` between versions that have this check therefore works as long as the migrations since then were compatible.
 
 From v0.2.0 on the chart validates its values against a strict schema: run `helm lint` with your values file before the upgrade
-([The values schema](#the-values-schema)). An upgrade guide is planned for v0.2.0.
+([The values schema](#the-values-schema)). The steps for the move from the chart of v0.1.0 are in the
+[upgrade notes for v0.2.0](upgrade-to-v0-2-0.md#helm-chart); a general upgrade guide is planned for v0.3.0.
 
 `helm uninstall myriarch -n myriarch` removes what the chart created, including the generated Secrets (the bootstrap
 token and the declared enrollment tokens). It keeps the Secret `myriarch-secrets`, the namespace and every external
