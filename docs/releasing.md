@@ -238,8 +238,25 @@ release.
 
 1. **Prepare.** Open a pull request that runs `scripts/set-version.sh X.Y.Z-rc.N` (see [One version source](#one-version-source))
    and has the entries of the candidate under "Unreleased" in `CHANGELOG.md`. In the same pull request, or one merged before it,
-   do the [review of the texts](#review-the-texts-before-every-tag): the archives cannot be corrected after the tag. Squash-merge it.
-2. **Wait for `ci-ok`** on the merge commit of `main`. The guard refuses a commit without it.
+   do the [review of the texts](#review-the-texts-before-every-tag): the archives cannot be corrected after the tag. Before you
+   squash-merge it, check the contents of the release:
+   - **Changelog.** Every change stands once, in its section. Changes to a security control are named under "Security". The upgrade
+     notes come first and agree with the page that describes the upgrade from the last final release (for v0.2.0 that is
+     `docs/operations/upgrade-to-v0-2-0.md`): the migrations, the new and changed settings, the chart values and the installers. The
+     notes of the release are rendered from this section, so what is not in it is not in the release.
+   - **Charts.** `Chart.yaml` of both charts (`deploy/helm/myriarch`, `deploy/helm/myriarch-collector`) has the version of `VERSION`,
+     and `make check-local` renders both with their schemas. The release packages the charts; it does not take them from the
+     repository as they are.
+   - **Windows signing.** `deploy/release/windows-signing.env` says what you expect (see [Windows signing rule](#windows-signing-rule)):
+     `off` is allowed for a candidate.
+2. **Wait for `ci-ok`** on the merge commit of `main`. The guard refuses a commit without it. `ci-ok` does not contain the two
+   workflows that need real machines, so also read their last runs on the merge commit, or start them by hand (`workflow_dispatch`
+   on `main`) if the pull request did not touch their paths:
+   - `host-e2e`: the installers, the updater and the services on fresh Ubuntu 24.04 runners (amd64 and arm64) and on Windows Server 2025
+     (Windows PowerShell 5.1 and PowerShell 7), scenarios `manual` and `one-command`.
+   - `e2e-kind`: the probe of `hack/kind`, and from v0.2.0 the job `charts` (both charts on two Kubernetes versions, the uninstall and
+     the upgrade from the chart of the last release) and the job `quickstart` (the Kubernetes Quickstart from a checkout).
+   A red row here is fixed before the tag: the smoke jobs after the publication cannot undo a release.
 3. **Tag** the merge commit with an annotated tag and push it:
 
    ```bash
@@ -257,6 +274,9 @@ release.
    - the notes show the expected banners (the release candidate banner; the unsigned banner while `WINDOWS_SIGNING=off`) and
      the right changes section;
    - the digests of both images in the notes equal the digests in the summary of `verify`;
+   - both charts, `ghcr.io/myriarch/charts/myriarch` and `ghcr.io/myriarch/charts/myriarch-collector`, passed `verify-chart` (the job
+     is green for each of them). They are pushed by digest and get their version tag only in `finalize`, so the version tag must not
+     exist yet. Their digests are the ones you check again after the publication (step 8);
    - the summary names the identity `https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/vX.Y.Z-rc.N`
      and the commit you tagged.
 6. **First release only: make all four packages public.** After `push-images` and `push-chart` of the first candidate and before
@@ -269,8 +289,19 @@ release.
    [Re-runs](#rc-numbering-and-re-runs)). `finalize` tags the images and the charts, publishes the release, and checks that GitHub made it
    immutable.
 8. **Check the smoke jobs** (`smoke-assets`, `smoke-linux`, `smoke-windows`, `smoke-kind`). They run after publication. A failure
-   here is fixed forward (see [When something fails](#when-something-fails)).
-9. **Update the status** in a pull request after the publication, see [After every publication](#after-every-publication).
+   here is fixed forward (see [When something fails](#when-something-fails)). Then check the two charts as a user does, on a machine
+   without credentials: for each chart, `crane digest` of the version tag, `cosign verify` and `gh attestation verify` of that digest
+   with the identity of the tag, as in [Verify releases](security/verify-releases.md#verify-the-helm-chart); the version tag is
+   `X.Y.Z-rc.N` (no `v`), and the chart version and `appVersion` equal it.
+9. **Test the published release on real hosts.** In Actions, run the workflow `host-e2e` by hand (`workflow_dispatch`, branch `main`)
+   with `release_tag` set to the tag. It runs only the scenario `one-command`: it verifies the `checksums.txt` of the release keyless
+   and installs from the published installer bundle of the release, on Ubuntu 24.04 (amd64 and arm64) and on Windows Server 2025 in
+   both PowerShell versions. A green run is the acceptance of the candidate on real runners; a red one is fixed forward in the next
+   candidate. The run proves the bundle of the release, which the run of step 2 (a bundle built from the commit) cannot.
+10. **Publish the chart's metadata on Artifact Hub** when the board wants the repository listed or verified: follow
+    [Artifact Hub](#artifact-hub). It needs the published chart and runs on the tag.
+11. **Update the status** in a pull request after the publication, see [After every publication](#after-every-publication), and
+    decide about the [release post](#release-post).
 
 ## Release a final version
 
@@ -285,8 +316,14 @@ A final release is a normal release and is marked as the latest release when it 
    "Status" section of `README.md`, "Supported versions" in `SECURITY.md` and the first paragraph of "Unreleased" in
    `CHANGELOG.md` (before v0.1.0, all three said that v0.1.0 is published first as release candidates). `README.md` and
    `CHANGELOG.md` are in the archives, so they change before the tag, not after it.
-2. Follow steps 2 to 9 of [Release a candidate](#release-a-candidate) with the tag `vX.Y.Z`. Step 6 is not needed any more.
-3. A final tag can be used **once**. If a problem shows up after publication, fix it and release `vX.Y.(Z+1)`.
+2. **Windows signing decides before the tag.** A final tag with `WINDOWS_SIGNING=off` and no exception is refused by the guard. Before
+   the pull request of step 1 is merged, the maintainers either set `signpath` or `kms` (the signing then has to be set up and
+   tested) or review the exception for that one tag, which puts an "unsigned" banner on the release notes. This page does not choose.
+   The state at the time of writing: `WINDOWS_SIGNING=off`, no exception, which is enough for release candidates only.
+3. Follow steps 2 to 11 of [Release a candidate](#release-a-candidate) with the tag `vX.Y.Z`. Step 6 is not needed any more. If the
+   repository on Artifact Hub exists already, step 10 is skipped: the next scan lists the new version by itself, and the workflow
+   runs again only when the metadata file has to change.
+4. A final tag can be used **once**. If a problem shows up after publication, fix it and release `vX.Y.(Z+1)`.
 
 ## Review the texts before every tag
 
@@ -322,7 +359,10 @@ read as part of the release as well.
 3. **Other texts may name the state, but only if the update after publication changes them.** `SECURITY.md`, `docs/` and the
    website are not in the archives. Prefer wording that needs no edit; where a page must name the state, it is on the list of
    [After every publication](#after-every-publication).
-4. **Run the gates for the texts:** `make docs-check` and `make website-check`.
+4. **Upgrade notes and support statements.** The upgrade page, the "Upgrade notes" of the changelog, the support levels and the list
+   of tested platforms (`docs/operations/tested-platforms.md`) say the same, and what they say about migrations, settings and
+   platforms is what the tests of this release cover. The notes of the release repeat the list of tested platforms.
+5. **Run the gates for the texts:** `make docs-check` and `make website-check`.
 
 ## After every publication
 
@@ -344,6 +384,8 @@ the archives, so they can follow the release:
    `docs/security/model.md`, and remove the wording that defers them. The kind result is known from before the tag and the
    result of the `cosign.exe` directory from the log of `smoke-windows`; the re-run observation may need a throw-away
    candidate, so it can follow in a pull request of its own.
+
+4. **The release post** if it is due now, see [Release post](#release-post), and the website pages that name the release.
 
 Texts in the archives (the files in the table of [Review the texts before every tag](#review-the-texts-before-every-tag), among
 them `README.md`, `CHANGELOG.md` and the chart) are not touched here: they are right already, or the next release corrects them.
@@ -378,6 +420,22 @@ the board has to ask for it explicitly, in a change of its own.
 
 Artifact Hub lists every version tag of the repository, release candidates included. A repository that is added after a candidate therefore
 shows the candidate (as a pre-release) until the final version is published.
+
+## Release post
+
+The website has a news section (`website/content/project/news/`, described in `website/README.md`). The post for a release is prepared
+in advance on a branch of its own and is **not merged before the release exists**, because it names the version, the date and the
+links of a published release. It carries open markers (`[[PLACEHOLDER: …]]`, `[[ONLY IF IN RELEASE: …]]`, `[[ONLY FOR RC: …]]`). Whether
+the first post comes with a candidate or only with the final version is the maintainers' decision; the steps are the same, and for a
+candidate the post says that it is a release candidate.
+
+1. **Rebase the branch** on the current `origin/main`. It needs the website changes of the SEO work to be merged first.
+2. **Fill the markers.** Version, date, the link of the release and of the chart (`oci://ghcr.io/myriarch/charts/myriarch`). Keep a
+   line marked "only if in release" if the release contains what it says (check it against the release notes) and delete it
+   otherwise. The command in the section "News" of `website/README.md` lists every open marker and must print nothing. Then
+   `make website-check` is green, and the scrub of the private checks finds nothing.
+3. **Review and merge** on the day of the tag: a second pair of eyes reads the post against the release notes, and the pull request
+   is merged once the release is published.
 
 ## rc numbering and re-runs
 
