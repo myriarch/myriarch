@@ -1024,6 +1024,17 @@ with open(d + "/long-changelog.md", "w") as f:
     f.write("# Changelog\n\n## Unreleased\n\n" + "".join("- entry number %05d with some words to fill the line up\n" % i for i in range(1700)) + "\n## [0.0.1] - 2026-01-01\n\n- x\n")
 with open(d + "/mid-changelog.md", "w") as f:
     f.write("# Changelog\n\n## Unreleased\n\n" + "".join("- entry number %05d with some words to fill the line up\n" % i for i in range(1000)) + "\n## [0.0.1] - 2026-01-01\n\n- x\n")
+fill = "### Added\n\n" + "".join("- entry number %05d with some words to fill the line up\n" % i for i in range(1700)) + "\n"
+upg = "### Upgrade notes\n\n- upgrade note alpha\n\n"
+sec = "### Security\n\n- security note beta\n\n"
+def changelog(name, body):
+    with open(d + "/" + name, "w") as f:
+        f.write("# Changelog\n\n## Unreleased\n\n" + body + "## [0.0.1] - 2026-01-01\n\n- x\n")
+changelog("both-changelog.md", upg + fill + sec)
+changelog("upgrade-only-changelog.md", upg + fill)
+changelog("security-only-changelog.md", fill + sec)
+changelog("big-subsections-changelog.md", upg + sec.rstrip("\n") + "\n" + "".join("- security entry %05d with some words to fill the line up\n" % i for i in range(1500)) + "\n" + fill)
+changelog("fenced-changelog.md", "### Added\n\n```text\n### Security\n- security in a fence\n```\n\n<!--\n### Upgrade notes\n- upgrade in a comment\n-->\n\n" + fill)
 with open(d + "/huge.tmpl", "w") as f:
     f.write("# header\n\n## T\n\n" + "".join("filler line %05d of the template padding it out and out\n" % i for i in range(800)) + "\n{{CHANGELOG_SECTION}}\n")
 PY
@@ -1032,6 +1043,38 @@ expect_ok "a changelog section of more than 60,000 characters" notes_run v0.1.0-
 n="$(cat "${NT}/long.md")"
 contains "the long section is replaced by the link" "[CHANGELOG.md](https://github.com/myriarch/myriarch/blob/v0.1.0-rc.1/CHANGELOG.md)" "${n}"
 lacks "the long section is not in the notes" "entry number 00001" "${n}"
+CL="${NT}/both-changelog.md"
+expect_ok "a long section with Upgrade notes and Security" notes_run v0.1.0-rc.1 off "" "${NT}/signer-off.json" "${NT}/both.md"
+n="$(cat "${NT}/both.md")"
+contains "long, both: the Upgrade notes stay" "upgrade note alpha" "${n}"
+contains "long, both: the Security notes stay" "security note beta" "${n}"
+contains "long, both: the heading of the Upgrade notes stays" "### Upgrade notes" "${n}"
+contains "long, both: the link for the rest" "The other changes of this release are listed in [CHANGELOG.md](https://github.com/myriarch/myriarch/blob/v0.1.0-rc.1/CHANGELOG.md)." "${n}"
+lacks "long, both: the other entries are not in the notes" "entry number 00001" "${n}"
+CL="${NT}/upgrade-only-changelog.md"
+expect_ok "a long section with Upgrade notes only" notes_run v0.1.0-rc.1 off "" "${NT}/signer-off.json" "${NT}/upg.md"
+n="$(cat "${NT}/upg.md")"
+contains "long, Upgrade notes only: they stay" "upgrade note alpha" "${n}"
+contains "long, Upgrade notes only: the link for the rest" "[CHANGELOG.md](https://github.com/myriarch/myriarch/blob/v0.1.0-rc.1/CHANGELOG.md)" "${n}"
+lacks "long, Upgrade notes only: no entries" "entry number 00001" "${n}"
+CL="${NT}/security-only-changelog.md"
+expect_ok "a long section with Security only" notes_run v0.1.0-rc.1 off "" "${NT}/signer-off.json" "${NT}/secu.md"
+n="$(cat "${NT}/secu.md")"
+contains "long, Security only: it stays" "security note beta" "${n}"
+contains "long, Security only: the link for the rest" "[CHANGELOG.md](https://github.com/myriarch/myriarch/blob/v0.1.0-rc.1/CHANGELOG.md)" "${n}"
+lacks "long, Security only: no entries" "entry number 00001" "${n}"
+CL="${NT}/big-subsections-changelog.md"
+expect_ok "a long section whose two subsections are too long as well" notes_run v0.1.0-rc.1 off "" "${NT}/signer-off.json" "${NT}/big.md"
+n="$(cat "${NT}/big.md")"
+contains "long, subsections too long: the link" "[CHANGELOG.md](https://github.com/myriarch/myriarch/blob/v0.1.0-rc.1/CHANGELOG.md)" "${n}"
+lacks "long, subsections too long: no upgrade note" "upgrade note alpha" "${n}"
+lacks "long, subsections too long: no security entry" "security entry 00001" "${n}"
+CL="${NT}/fenced-changelog.md"
+expect_ok "a long section with the headings only in a fence and a comment" notes_run v0.1.0-rc.1 off "" "${NT}/signer-off.json" "${NT}/fenced.md"
+n="$(cat "${NT}/fenced.md")"
+lacks "long, fenced: a heading in a code block is no heading" "security in a fence" "${n}"
+lacks "long, fenced: a heading in a comment is no heading" "upgrade in a comment" "${n}"
+contains "long, fenced: only the link" "[CHANGELOG.md](https://github.com/myriarch/myriarch/blob/v0.1.0-rc.1/CHANGELOG.md)" "${n}"
 CL="${NT}/mid-changelog.md"
 expect_fail "notes_too_long" "notes_too_long" notes_run v0.1.0-rc.1 off "" "${NT}/signer-off.json" "${NT}/toolong.md" --template "${NT}/huge.tmpl"
 CL="${cl_save}"

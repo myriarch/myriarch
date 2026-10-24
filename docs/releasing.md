@@ -243,7 +243,9 @@ release.
    - **Changelog.** Every change stands once, in its section. Changes to a security control are named under "Security". The upgrade
      notes come first and agree with the page that describes the upgrade from the last final release (for v0.2.0 that is
      `docs/operations/upgrade-to-v0-2-0.md`): the migrations, the new and changed settings, the chart values and the installers. The
-     notes of the release are rendered from this section, so what is not in it is not in the release.
+     notes of the release are rendered from this section, so what is not in it is not in the release. If the section has more than
+     60,000 characters, the notes keep only its "Upgrade notes" and "Security" subsections and link to `CHANGELOG.md` for the rest
+     (to `CHANGELOG.md` alone if those two are missing or too long as well), so these two stay complete and short enough.
    - **Charts.** `Chart.yaml` of both charts (`deploy/helm/myriarch`, `deploy/helm/myriarch-collector`) has the version of `VERSION`,
      and `make check-local` renders both with their schemas. The release packages the charts; it does not take them from the
      repository as they are.
@@ -273,7 +275,8 @@ release.
      draft was created, not the draft: the count is yours to check, and `finalize` binds the draft to the verified files by
      their digests;
    - the notes show the expected banners (the release candidate banner; the unsigned banner while `WINDOWS_SIGNING=off`) and
-     the right changes section;
+     the right changes section (the "Upgrade notes" and "Security" subsections of "Unreleased", and a link to `CHANGELOG.md` for
+     the rest when the section is longer than 60,000 characters);
    - the digests of both images in the notes equal the digests in the summary of `verify`;
    - both charts, `ghcr.io/myriarch/charts/myriarch` and `ghcr.io/myriarch/charts/myriarch-collector`, passed `verify-chart` (the job
      is green for each of them). They are pushed by digest and get their version tag only in `finalize`, so the version tag must not
