@@ -1,7 +1,7 @@
 ---
 title: "Agents"
 weight: 20
-description: "Collectors and updaters as seen by the server, how agents are identified, the attribute view that selectors and templates work on, server labels and the configuration sync states."
+description: "Collectors and updaters as the server sees them: how agents are identified, the attribute view, server labels and configuration sync states."
 ---
 
 An **agent** is anything that connects to `myriarchd` over OpAMP. The server keeps its description, health, reported

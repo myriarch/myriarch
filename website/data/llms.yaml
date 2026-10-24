@@ -54,6 +54,17 @@ sections:
       - page: /docs/getting-started/docker-compose/
         note: "Evaluate the system on one machine from the release images, with the server in development mode (well-known logins, no TLS), PostgreSQL and simulated collectors; not a production setup."
 
+  - title: Facts and comparison
+    links:
+      - page: /project/what-is-myriarch/
+        title: Facts about myriarch
+        note: "What myriarch is and is not: scope, license, size, maturity and version, in one page."
+      - page: /project/comparison/
+        title: Supervisor, own server or myriarch compared
+        note: "The OpAMP Supervisor alone, a server of your own on opamp-go and myriarch, with sources and dates, and when myriarch is not the right choice."
+      - page: /project/faq/
+        note: "Short answers about managing many collectors, version updates, rollouts, the relation to OpenTelemetry and the license."
+
   - title: Concepts
     links:
       - page: /docs/concepts/gitops/
@@ -73,6 +84,10 @@ sections:
 
   - title: How-to guides
     links:
+      - page: /docs/tasks/manage-many-collectors/
+        note: "Set up the server, a GitOps repository, the hosts and the first rollout; the server in the tutorials runs in development mode."
+      - page: /docs/tasks/upgrade-collectors-on-many-hosts/
+        note: "Set the target collector version in Git and roll it out with an executor, because the OpAMP Supervisor cannot replace the collector binary."
       - page: /docs/tasks/connect-a-host/
         note: "Enroll a Linux or Windows host with the installation scripts."
       - page: /docs/tasks/roll-out-a-collector-version/
@@ -108,8 +123,6 @@ sections:
 
   - title: Optional
     links:
-      - page: /project/faq/
-        note: "Short answers about the relation to OpenTelemetry, the support levels and the license."
       - page: /project/roadmap/
         note: "What the first release contains, what comes next, what is intended for later and what is deliberately not planned."
       - page: /project/changelog/

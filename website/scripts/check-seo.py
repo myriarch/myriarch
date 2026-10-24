@@ -27,6 +27,11 @@ Fails when
     the latest release of data/release.yaml, without the leading v); a page with a visible breadcrumb has exactly one BreadcrumbList that
     equals it: the home page, then the items of the visible breadcrumb with the same names and URLs (a breadcrumb that Docsy hides with the
     class td-breadcrumbs--single, a trail of one item, is not visible: such a page has no list); every other page has no JSON-LD,
+  - two pages have the same title (the 404 page is no page here), or a page outside docs/reference/ and docs/adr/ has a description of fewer
+    than 70 or more than 160 characters (the generated references and the decision records are exempt: their descriptions come from the
+    generators),
+  - the sitemap has a URL without a <lastmod> or with one that is not a W3C date or date and time (the date comes from Git, never from the
+    time of the build),
   - the title of the home page differs from params.seo.homeTitle, which must say more than the bare site title in at most 70 characters,
     or either is spelled against ADR-0015,
   - llms.txt is missing, has not the shape of the llms.txt format (one heading with the site title, a summary in a block quote, no HTML,
@@ -63,6 +68,9 @@ SCHEMA_CONTEXT = "https://schema.org"
 # The Apache-2.0 URLs that name the license of the code (the structured data of the home page names one of them).
 APACHE_URLS = ("https://www.apache.org/licenses/LICENSE-2.0", "https://spdx.org/licenses/Apache-2.0.html")
 HOME_TITLE_MAX = 70
+DESCRIPTION_MIN, DESCRIPTION_MAX = 70, 160
+DESCRIPTION_EXEMPT = ("docs/reference/", "docs/adr/")  # generated pages and decision records: the generators write their descriptions
+LASTMOD = re.compile(r"^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$")
 LLMS_MAX_BYTES = 64 * 1024
 # The properties that the types of the structured data define in schema.org (https://schema.org/<Type>), restricted to the ones the site
 # uses: a property that is not in the list is reported, because the Schema Markup Validator reports a property that the type does not
@@ -594,6 +602,7 @@ def check_page(rel, parsed, cfg, base):
         out.append("%s: has %d titles, expected exactly one that is not empty" % (rel, len(parsed.titles)))
     if len(parsed.descriptions) != 1 or not parsed.descriptions[0].strip():
         out.append("%s: has %d descriptions, expected exactly one that is not empty" % (rel, len(parsed.descriptions)))
+    out.extend(check_description_length(rel, parsed))
     out.extend(check_describedby(rel, parsed, cfg, base))
     out.extend(check_images(rel, parsed))
     is_home = rel == "index.html"
@@ -601,6 +610,22 @@ def check_page(rel, parsed, cfg, base):
         out.extend(check_home_title(rel, parsed, cfg))
     out.extend(check_json_ld(rel, parsed, cfg, canonical, is_home))
     return out, canonical
+
+
+def check_description_length(rel, parsed):
+    """A description of 70 to 160 characters says what the page answers and is not cut off in a result; references and ADRs are exempt."""
+    if len(parsed.descriptions) != 1 or rel.startswith(DESCRIPTION_EXEMPT):
+        return []
+    text = " ".join(parsed.descriptions[0].split())
+    if text and not DESCRIPTION_MIN <= len(text) <= DESCRIPTION_MAX:
+        return ["%s: the description has %d characters, expected %d to %d: %r" % (rel, len(text), DESCRIPTION_MIN, DESCRIPTION_MAX, text)]
+    return []
+
+
+def check_unique_titles(titles):
+    """titles: title -> list of built files. Two pages with one title cannot be told apart in a result list."""
+    return ["%s: has the same title as %s: %r" % (rels[i], ", ".join(r for r in rels if r != rels[i]), title)
+            for title, rels in sorted(titles.items()) if len(rels) > 1 for i in range(len(rels))]
 
 
 def check_describedby(rel, parsed, cfg, base):
@@ -667,6 +692,24 @@ def check_sitemap(root, paths, base):
         out.append("sitemap.xml: lists %s, which is the URL of no page" % url)
     for url in sorted(want - listed):
         out.append("sitemap.xml: does not list %s" % url)
+    return out
+
+
+def check_lastmod(root):
+    """Every URL of the sitemap has a lastmod in the format of the sitemap protocol. Hugo takes it from Git, so a page without one has no commit yet."""
+    try:
+        text = read_text(os.path.join(root, "sitemap.xml"))
+    except OSError:
+        return []  # check_sitemap reports a missing file in production
+    out = []
+    for block in re.findall(r"<url>(.*?)</url>", text, re.S):
+        loc = re.search(r"<loc>([^<]*)</loc>", block)
+        name = loc.group(1).strip() if loc else "(an entry without loc)"
+        dates = re.findall(r"<lastmod>([^<]*)</lastmod>", block)
+        if not dates:
+            out.append("sitemap.xml: %s has no lastmod" % name)
+        elif len(dates) > 1 or not LASTMOD.match(dates[0].strip()):
+            out.append("sitemap.xml: %s has the lastmod %r, expected one W3C date or date and time" % (name, ", ".join(dates)))
     return out
 
 
@@ -801,6 +844,7 @@ def check_site(root, cfg, mode):
     indexing = load_sibling("check-indexing")
     base = build_base(cfg)
     paths = set()
+    titles = {}
     scanned = 0
     for rel in list_pages(root):
         text = read_text(os.path.join(root, rel))
@@ -810,10 +854,14 @@ def check_site(root, cfg, mode):
         parsed = parse_page(text)
         page_findings, canonical = check_page(rel, parsed, cfg, base)
         findings.extend(page_findings)
+        if len(parsed.titles) == 1 and parsed.titles[0].strip():
+            titles.setdefault(" ".join(parsed.titles[0].split()), []).append(rel)
         if canonical:
             paths.add(page_path(rel))
     if not os.path.isfile(os.path.join(root, "index.html")):
         findings.append("index.html: missing")
+    findings.extend(check_unique_titles(titles))
+    findings.extend(check_lastmod(root))
     findings.extend(check_llms(root, cfg))
     findings.extend(check_404(root, cfg))
     findings.extend(check_robots(root, mode))

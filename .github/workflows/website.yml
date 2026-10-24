@@ -85,10 +85,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
+      # The full history: the dates of the sitemap and of the page metadata are the commit dates of the source files (hugo.yaml,
+      # enableGitInfo), and ci/website.sh refuses a shallow clone.
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       # Hugo fetches the Docsy theme as a Go module.
       - name: Set up Go

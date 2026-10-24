@@ -16,6 +16,8 @@
 # dependencies of website/ (pnpm install --frozen-lockfile), and keeps Hugo's module cache in .cache/hugo. The first run needs network
 # access (Go proxy, npm registry, release downloads); later runs use the caches.
 #
+# Dates: build, serve and preview write website/data/source_dates.json first (website/scripts/source-dates.py) and need the full Git history.
+#
 # check: hugo mod verify, lychee over the built pages (offline, with fragments), markdownlint over the Markdown sources, the front
 # matter of the site content, every website/scripts/check-*.py over the built site and the unit tests of those checks.
 #
@@ -74,6 +76,9 @@ log "installing the Node dependencies of website/ (pnpm install --frozen-lockfil
 (cd website && CI=true pnpm install --frozen-lockfile) >&2 || die "pnpm install failed in website/ (network access? pnpm-lock.yaml up to date?)"
 
 hugo_build() {
+  # The dates of the sitemap and the page metadata come from Git (enableGitInfo, and data/source_dates.json for the pages of the content
+  # adapters); the script refuses a shallow clone, whose files would all carry the date of one commit.
+  python3 -I website/scripts/source-dates.py
   local args=(--source website --environment production --gc --minify --panicOnWarning --cleanDestinationDir --destination public)
   if [ -n "${WEBSITE_BASEURL:-}" ]; then args+=(--baseURL "${WEBSITE_BASEURL}"); fi
   log "hugo ${args[*]}"
@@ -120,6 +125,7 @@ website_check() {
 case "${cmd}" in
   build) hugo_build ;;
   serve)
+    python3 -I website/scripts/source-dates.py
     log "hugo server on http://127.0.0.1:${PORT}/ (Ctrl-C stops it)"
     exec hugo server --source website --bind 127.0.0.1 --port "${PORT}" --disableFastRender
     ;;

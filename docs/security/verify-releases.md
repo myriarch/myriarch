@@ -1,7 +1,7 @@
 ---
 title: "Verify releases"
 weight: 20
-description: "Check a myriarch release before you run it: checksums.txt and its keyless Sigstore bundle, the build provenance, the immutable release, the container images and the macOS binaries."
+description: "Check a myriarch release before you run it: checksums, the Sigstore bundle, build provenance, container images and macOS binaries."
 ---
 
 Every release of myriarch is built and signed by one GitHub Actions workflow, `release.yml` of the repository

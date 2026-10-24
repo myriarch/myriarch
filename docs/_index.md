@@ -21,6 +21,8 @@ Until then, the kind probe is described in [hack/kind/README.md](../hack/kind/RE
 ## How-to guides: solve a problem
 
 [How-to guides](tasks/_index.md) are step-by-step instructions for one job each, for example
+[manage many collectors with OpAMP and Git](tasks/manage-many-collectors.md),
+[upgrade the collector on many hosts](tasks/upgrade-collectors-on-many-hosts.md),
 [connect a host](tasks/connect-a-host.md), [validate a GitOps repository](tasks/validate-a-gitops-repository.md),
 [roll out a configuration change](tasks/roll-out-a-config-change.md),
 [roll out a collector version](tasks/roll-out-a-collector-version.md),

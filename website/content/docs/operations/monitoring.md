@@ -1,7 +1,7 @@
 ---
 title: "Monitoring"
 weight: 100
-description: "Monitor the server: metrics, health endpoints and alerts."
+description: "Monitor the myriarch server with its metrics, health endpoints and alerts. The full page is planned for v0.2.0."
 params:
   placeholder:
     tracking: "operations-manual"

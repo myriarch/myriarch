@@ -1,7 +1,7 @@
 ---
 title: "Install the collector with Helm"
 weight: 45
-description: "Run OpenTelemetry Collectors that Myriarch manages on Kubernetes and OpenShift with the Helm chart myriarch-collector: StatefulSet or DaemonSet, unchanged upstream images, Pod Security and container mode."
+description: "Run OpenTelemetry Collectors that Myriarch manages on Kubernetes and OpenShift with the Helm chart myriarch-collector and unchanged upstream images."
 ---
 
 This guide runs collectors on Kubernetes with the Helm chart `deploy/helm/myriarch-collector`. Every pod is its own OpAMP agent

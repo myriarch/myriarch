@@ -29,6 +29,7 @@ myriarch-sim
 **/*.pyc
 website/node_modules
 website/public
+website/data/source_dates.json
 website/resources
 website/.hugo_build.lock
 cmd/myriarch-updater/rsrc_windows_*.syso

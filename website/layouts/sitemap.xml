@@ -1,0 +1,24 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+Replaces Hugo's embedded sitemap template. Every URL carries <lastmod>, the date of the last commit that changed the source file of
+the page (enableGitInfo in hugo.yaml; website/README.md, "Sitemap and dates"), never the time of the build, so that two builds of one
+commit write the same file. <changefreq> and <priority> are left out: Google ignores them, and the values of the embedded template
+(weekly, 0.5, and 0 for the pages of the content adapters) said nothing true. A page without a date gets no <lastmod>, and
+scripts/check-seo.py fails on it.
+*/ -}}
+{{ printf "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>" | safeHTML }}
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  {{- range where .Data.Pages "Sitemap.Disable" "ne" true }}
+  {{- if .Permalink }}
+  <url>
+    <loc>{{ .Permalink }}</loc>
+    {{- if not .Lastmod.IsZero }}
+    <lastmod>{{ .Lastmod.UTC.Format "2006-01-02T15:04:05Z07:00" }}</lastmod>
+    {{- end }}
+  </url>
+  {{- end }}
+  {{- end }}
+</urlset>

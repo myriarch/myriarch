@@ -1,7 +1,7 @@
 ---
 title: "Releasing"
 weight: 110
-description: "How to release Myriarch: the VERSION file, the release workflow and its two approvals, release candidates and final releases, re-runs, failures and the settings a maintainer has to make once."
+description: "How to release Myriarch: the VERSION file, the release workflow and its two approvals, release candidates, re-runs and one-time maintainer settings."
 ---
 
 This page is for maintainers who prepare and tag a release. It describes how the version is kept in one place, how the release

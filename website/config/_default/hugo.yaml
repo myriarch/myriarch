@@ -10,8 +10,12 @@ timeZone: UTC
 # No taxonomies (nothing uses tags) and no RSS feeds. The sitemap, robots.txt and 404.html are generated.
 disableKinds: [taxonomy, term, rss]
 enableRobotsTXT: true
-# The output must not depend on the Git history (reproducible builds, mounted files); "last modified" is not shown.
-enableGitInfo: false
+# Git supplies the date of each page: the commit that last changed its source file is the lastmod of the sitemap and the modified time
+# of the page's metadata. The output depends on the Git history of the commit that is built and on nothing else (never on the time of
+# the build, so two builds of one commit are identical), which needs a clone with the full history (ci/website.sh refuses a shallow one).
+# "Last modified" is not shown on the page. The pages of the content adapters have no source file for Hugo; they get their date from
+# the adapters (website/README.md, "Sitemap and dates").
+enableGitInfo: true
 enableEmoji: false
 pluralizeListTitles: false
 canonifyURLs: false
@@ -51,9 +55,8 @@ outputs:
   section: [HTML]
   page: [HTML]
 
+# The sitemap template is layouts/sitemap.xml: lastmod only, no changefreq and no priority.
 sitemap:
-  changefreq: weekly
-  priority: 0.5
   filename: sitemap.xml
 
 # Pages below /project/ and /legal/ use the documentation layout. The generated references are flagged, so that the page meta links

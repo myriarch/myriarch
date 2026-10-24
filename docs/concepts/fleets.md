@@ -1,7 +1,7 @@
 ---
 title: "Fleets"
 weight: 40
-description: "How fleets select agents, how the highest priority wins, when the offered configuration changes, and how the target collector version is chosen in the UI within a frame set in Git."
+description: "How fleets select agents, how the highest priority wins, when the offered configuration changes and how the target collector version is chosen."
 ---
 
 A **fleet** groups agents by their attributes and decides what they run: which blueprint is rendered, which parameter

@@ -39,6 +39,7 @@ data/repo_pages.yaml        repository files that adapters render (the root file
 data/third_party.yaml       the notices of /legal/third-party/
 data/release.yaml           the release status (latest final release or newest candidate): the one value behind the status chip of the landing page and the version in the structured data of the home page; set by hand after a publication (docs/releasing.md)
 data/llms.yaml              the content of /llms.txt (see SEO and GEO)
+data/seo_titles.yaml        titles of single pages (see Titles, descriptions and dates)
 layouts/                    render hooks (_markup), partials (repo/*, seo/*, csp.html), shortcodes, overrides of Docsy files, 404.html, robots.txt, home.llms.txt (the template of /llms.txt)
 assets/scss/                brand tokens (_variables_project.scss) and project styles
 assets/js/                  landing-mark.js: the loop of the mark on the landing page and its click-to-pause behaviour (the site's own script; the rest comes with the theme);
@@ -202,6 +203,26 @@ twice; every list item below a level-2 heading is a link, `- [name](url)` with o
 and at most 64 KiB, and it is spelled as described above. Write only what the documentation backs, and name neither the release status
 nor the support levels, which change. A note carries the caveat of its page: a tutorial that runs the server in development mode says so,
 because a reader of `llms.txt` does not open the page.
+
+### Titles, descriptions and dates
+
+`check-seo.py` fails the gate when two built pages have the same `<title>`, when a page outside `docs/reference/` and `docs/adr/` has a
+description of fewer than 70 or more than 160 characters, and when a URL of `sitemap.xml` has no valid `<lastmod>`.
+
+- **Title.** `layouts/_partials/seo/title.html` writes `<title>`: the home title, a title from `data/seo_titles.yaml` (key: the URL path
+  of the page, value: the title without the suffix), `<title> API` for the pages of the REST API reference below `/docs/reference/api/`
+  (their titles are the tags of the OpenAPI contract and would equal those of the concept pages), or the title of the page; then
+  the suffix "| myriarch". The H1 and the navigation keep the title of the page, so a short name such as "Agents" can get a title that says more in a
+  list of results. A listed title has at most 49 characters, so that the whole title stays within 60; the gate does not enforce this, and the
+  titles of the decision records are longer. `docs/` pages cannot carry another front matter key, which is why the map is a data file.
+- **Description.** The `description` of the front matter (`repo_pages.yaml` for the root files). The generated references and the decision
+  records are exempt, because their generators write the text.
+- **Sitemap and dates.** `layouts/sitemap.xml` writes `<lastmod>` and nothing else per URL; Google ignores `changefreq` and `priority`. The date is
+  the date of the last commit that changed the source file of the page: Hugo gets it from Git for ordinary pages (`enableGitInfo`), and
+  `scripts/source-dates.py` writes the dates of the files behind the content adapters (decision records, root files, READMEs) to
+  `data/source_dates.json` before every build (`ci/website.sh`; the file is ignored by Git). The date is never the time of the build, so two
+  builds of one commit write the same sitemap. It needs the full history: the script refuses a shallow clone, and the website jobs of the
+  workflows check out with `fetch-depth: 0`. A page whose file is not committed yet has no date; commit it before you run the gate.
 
 ### Crawler policy
 

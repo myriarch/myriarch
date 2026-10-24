@@ -27,6 +27,7 @@ ORIGIN = "https://example.test"
 REPO = "https://git.example.test/myriarch/myriarch"
 APACHE = "https://www.apache.org/licenses/LICENSE-2.0"
 DESCRIPTION = "Fleet manager for OpenTelemetry Collectors, built on OpAMP."
+PAGE_DESCRIPTION = "How fleets select agents and how the target collector version is chosen within a frame set in Git."  # 70 to 160 characters
 HOME_TITLE = "Myriarch: GitOps fleet manager for OpenTelemetry Collectors"
 
 HUGO = "baseURL: https://example.test/\ntitle: myriarch\nlocale: en\n"
@@ -120,7 +121,7 @@ def docs_index(canonical=ORIGIN + "/docs/"):
     return page("Documentation | myriarch", canonical, body=nav(("Documentation", ""), single=True))
 
 
-def page(title="A page | myriarch", canonical=None, ld=(), body="", description=DESCRIPTION, robots="index, follow", describedby="/llms.txt",
+def page(title="A page | myriarch", canonical=None, ld=(), body="", description=PAGE_DESCRIPTION, robots="index, follow", describedby="/llms.txt",
          lang="en", extra_head=""):
     head = '<meta charset=utf-8><meta name=robots content="%s">' % robots
     head += "<title>%s</title>" % title if title is not None else ""
@@ -200,7 +201,7 @@ class SeoCase(unittest.TestCase):
     @staticmethod
     def sitemap(paths):
         return ('<?xml version="1.0" encoding="utf-8" standalone="yes"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">%s</urlset>'
-                % "".join("<url><loc>%s%s</loc></url>" % (ORIGIN, p) for p in paths))
+                % "".join("<url><loc>%s%s</loc><lastmod>2026-10-15T22:28:28+02:00</lastmod></url>" % (ORIGIN, p) for p in paths))
 
     def write_site(self):
         shutil.rmtree(self.public, ignore_errors=True)
@@ -243,7 +244,7 @@ class CleanSiteTest(SeoCase):
     def test_a_preview_site_passes_with_the_same_canonical_links(self):
         os.environ["WEBSITE_ENV"] = "preview"
         # a preview is built with the base URL "/": its sitemap has root-relative locations, its robots.txt blocks everything
-        self.files["sitemap.xml"] = '<urlset><url><loc>/docs/</loc></url></urlset>'
+        self.files["sitemap.xml"] = '<urlset><url><loc>/docs/</loc><lastmod>2026-10-15</lastmod></url></urlset>'
         self.files["robots.txt"] = "User-agent: *\nDisallow: /\n"
         for rel in list(self.files):
             if rel.endswith("index.html") or rel == "404.html":
@@ -716,6 +717,120 @@ class RobotsAndSitemapTest(SeoCase):
         self.assert_finding("sitemap.xml: missing or unreadable")
 
 
+class TitleAndDescriptionTest(SeoCase):
+    """Unique titles and descriptions of 70 to 160 characters, except for the generated references and the decision records."""
+
+    GITOPS = "docs/concepts/gitops/index.html"
+
+    def test_two_pages_with_one_title_fail(self):
+        self.files["legal/third-party/index.html"] = page("Git as the source of truth | myriarch", ORIGIN + "/legal/third-party/")
+        out = self.assert_finding("has the same title as", "'Git as the source of truth | myriarch'")
+        self.assertIn("legal/third-party/index.html: has the same title as " + self.GITOPS, out)
+        self.assertIn(self.GITOPS + ": has the same title as legal/third-party/index.html", out)
+
+    def test_the_title_of_the_home_page_counts_too(self):
+        self.files["legal/third-party/index.html"] = page(HOME_TITLE, ORIGIN + "/legal/third-party/")
+        self.assert_finding("legal/third-party/index.html: has the same title as index.html")
+
+    def test_titles_that_differ_only_in_white_space_are_the_same(self):
+        self.files["legal/third-party/index.html"] = page("Git as the   source of truth | myriarch", ORIGIN + "/legal/third-party/")
+        self.assert_finding("has the same title as")
+
+    def test_references_and_decision_records_need_unique_titles_too(self):
+        for rel in ("docs/reference/api/agents/index.html", "docs/adr/0003-gitops-as-source-of-truth/index.html"):
+            self.reset_site()
+            self.files[rel] = page("Git as the source of truth | myriarch", ORIGIN + "/" + rel[: -len("index.html")], description="Short.")
+            self.files["sitemap.xml"] = self.sitemap(["/", "/docs/", "/docs/concepts/gitops/", "/legal/third-party/", "/" + rel[: -len("index.html")]])
+            self.assert_finding("%s: has the same title as" % rel)
+
+    def test_the_404_page_is_no_page_for_the_titles(self):
+        self.files["404.html"] = page("Git as the source of truth | myriarch", None, robots="noindex, nofollow", body=NOT_FOUND_BODY)
+        self.assert_clean()
+
+    def test_a_description_that_is_too_short_fails(self):
+        self.files["legal/third-party/index.html"] = page("Third-party | myriarch", ORIGIN + "/legal/third-party/", description="Notices.")
+        self.assert_finding("legal/third-party/index.html: the description has 8 characters, expected 70 to 160: 'Notices.'")
+
+    def test_a_description_that_is_too_long_fails(self):
+        long = "x" * 161
+        self.files["legal/third-party/index.html"] = page("Third-party | myriarch", ORIGIN + "/legal/third-party/", description=long)
+        self.assert_finding("legal/third-party/index.html: the description has 161 characters, expected 70 to 160")
+
+    def test_the_limits_are_inclusive(self):
+        for n in (70, 160):
+            self.reset_site()
+            self.files["legal/third-party/index.html"] = page("Third-party | myriarch", ORIGIN + "/legal/third-party/", description="x" * n)
+            self.assert_clean()
+        self.reset_site()
+        self.files["legal/third-party/index.html"] = page("Third-party | myriarch", ORIGIN + "/legal/third-party/", description="x" * 69)
+        self.assert_finding("the description has 69 characters")
+
+    def test_the_home_page_needs_a_description_in_range_too(self):
+        self.files["index.html"] = page(HOME_TITLE, ORIGIN + "/", [software(), website()], description=DESCRIPTION)
+        self.assert_finding("index.html: the description has %d characters" % len(DESCRIPTION))
+
+    def test_references_and_decision_records_are_exempt_from_the_length(self):
+        paths = ["docs/reference/cli/myriarchd/", "docs/reference/", "docs/adr/0001-single-server-binary/", "docs/adr/"]
+        for path in paths:
+            self.files[path + "index.html"] = page("Title of %s | myriarch" % path, ORIGIN + "/" + path, description="Decision record 0001 (Accepted).")
+        self.files["sitemap.xml"] = self.sitemap(["/", "/docs/", "/docs/concepts/gitops/", "/legal/third-party/"] + ["/" + p for p in paths])
+        self.assert_clean()
+
+    def test_the_exemption_is_for_the_two_directories_only(self):
+        for rel in ("docs/referencing/index.html", "docs/concepts/reference/index.html", "docs/adr-notes/index.html", "project/adr/index.html"):
+            self.reset_site()
+            path = "/" + rel[: -len("index.html")]
+            self.files[rel] = page("Title of %s | myriarch" % rel, ORIGIN + path, description="Short.")
+            self.files["sitemap.xml"] = self.sitemap(["/", "/docs/", "/docs/concepts/gitops/", "/legal/third-party/", path])
+            self.assert_finding("%s: the description has 6 characters" % rel)
+
+    def test_the_length_counts_what_a_reader_sees(self):
+        padded = "word " * 20  # 100 characters, with a trailing space that the browser does not count
+        self.files["legal/third-party/index.html"] = page("Third-party | myriarch", ORIGIN + "/legal/third-party/", description=padded)
+        self.assert_clean()
+
+
+class LastmodTest(SeoCase):
+    def test_a_url_without_lastmod_fails(self):
+        self.files["sitemap.xml"] = self.sitemap(["/", "/docs/", "/docs/concepts/gitops/"]).replace(
+            "</urlset>", "<url><loc>%s/legal/third-party/</loc></url></urlset>" % ORIGIN)
+        self.assert_finding("sitemap.xml: https://example.test/legal/third-party/ has no lastmod")
+
+    def test_every_url_is_checked(self):
+        self.files["sitemap.xml"] = '<urlset>%s</urlset>' % "".join(
+            "<url><loc>%s%s</loc></url>" % (ORIGIN, p) for p in ("/", "/docs/", "/docs/concepts/gitops/", "/legal/third-party/"))
+        out = self.assert_finding("sitemap.xml: https://example.test/ has no lastmod")
+        self.assertEqual(out.count("has no lastmod"), 4)
+
+    def test_a_lastmod_must_be_a_w3c_date(self):
+        for good in ("2026-10-15", "2026-10-15T22:28:28+02:00", "2026-10-15T20:28:28Z", "2026-10-15T20:28Z", "2026-10-15T20:28:28.123Z"):
+            self.reset_site()
+            self.files["sitemap.xml"] = self.files["sitemap.xml"].replace("2026-10-15T22:28:28+02:00", good)
+            self.assert_clean()
+        for bad in ("", "yesterday", "15.10.2026", "2026-10-15 22:28:28", "2026-10-15T22:28:28", "2026-13"):
+            self.reset_site()
+            self.files["sitemap.xml"] = self.files["sitemap.xml"].replace("2026-10-15T22:28:28+02:00", bad, 1)
+            self.assert_finding("has the lastmod %r, expected one W3C date or date and time" % bad)
+
+    def test_two_lastmods_of_one_url_fail(self):
+        self.files["sitemap.xml"] = self.files["sitemap.xml"].replace("</url>", "<lastmod>2026-10-16</lastmod></url>", 1)
+        self.assert_finding("has the lastmod '2026-10-15T22:28:28+02:00, 2026-10-16'")
+
+    def test_a_preview_sitemap_needs_lastmod_too(self):
+        os.environ["WEBSITE_ENV"] = "preview"
+        os.environ["WEBSITE_BASEURL"] = "/"
+        self.files["sitemap.xml"] = '<urlset><url><loc>/docs/</loc></url></urlset>'
+        for rel in list(self.files):
+            if rel.endswith("index.html") or rel == "404.html":
+                self.files[rel] = self.files[rel].replace('content="index, follow"', 'content="noindex, nofollow"')
+        self.assert_finding("sitemap.xml: /docs/ has no lastmod")
+
+    def test_a_missing_sitemap_is_reported_once(self):
+        del self.files["sitemap.xml"]
+        out = self.assert_finding("sitemap.xml: missing or unreadable")
+        self.assertNotIn("lastmod", out)
+
+
 class BuildForAnotherHostTest(SeoCase):
     """WEBSITE_BASEURL builds the site for another host (ci/website.sh): the canonical links stay on the production origin."""
 
@@ -743,7 +858,7 @@ class BuildForAnotherHostTest(SeoCase):
 
     def test_a_relative_base_url_has_no_sitemap_to_compare(self):
         os.environ["WEBSITE_BASEURL"] = "/"
-        self.files["sitemap.xml"] = '<urlset><url><loc>/docs/</loc></url></urlset>'
+        self.files["sitemap.xml"] = '<urlset><url><loc>/docs/</loc><lastmod>2026-10-15</lastmod></url></urlset>'
         self.assert_clean()
 
 
