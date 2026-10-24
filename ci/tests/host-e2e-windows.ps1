@@ -64,6 +64,7 @@ Write-Utf8 -Path (Join-Path $script:Dir 'api\agents.json') -Text '[]'
 New-Item -ItemType Directory -Force -Path (Join-Path $script:Dir 'data\postgres') | Out-Null
 Write-Utf8 -Path (Join-Path $script:Dir 'data\postgres\PG_VERSION') -Text '17'
 Export-Artifacts
+Check 'no artifact failed to be collected' '' (@($script:ArtifactFailures) -join ' ')
 $got = (Get-ChildItem -LiteralPath $script:UploadDir -Recurse -File | ForEach-Object { $_.FullName.Substring($script:UploadDir.Length).TrimStart('\', '/').Replace('\', '/') } | Sort-Object) -join ' '
 Check 'the upload directory holds the allow-listed files only' 'api/agents.json diag/environment.txt diag/status-otelcol-supervisor.txt diag/supervisor.yaml install-command.log myriarchd.log myriarchd.out.log results.txt' $got
 $all = (Get-ChildItem -LiteralPath $script:UploadDir -Recurse -File | ForEach-Object { [IO.File]::ReadAllText($_.FullName) }) -join "`n"
@@ -87,6 +88,7 @@ try {
   $null = Export-Artifacts 3>&1 6>&1
   Check 'a log held open by a writer is collected' 'True' (Test-Path -LiteralPath (Join-Path $script:UploadDir 'myriarchd.log'))
   Check 'the other artifacts are collected with it' 'True' (Test-Path -LiteralPath (Join-Path $script:UploadDir 'install-command.log'))
+  Check 'no artifact failed to be collected while the log is held open' '' (@($script:ArtifactFailures) -join ' ')
 } finally { $held.Dispose() }
 $locked = New-Object System.IO.FileStream((Join-Path $script:Dir 'install-command.log'), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
 try {

@@ -1044,7 +1044,7 @@ function Get-InstallerFailureDetail {
 # The text of a file that another process may have open for writing (the log of a running service).
 function Read-SharedText {
   param([string]$Path)
-  $fs = New-Object System.IO.FileStream($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+  $fs = New-Object System.IO.FileStream($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
   try {
     $sr = New-Object System.IO.StreamReader($fs, (New-Object System.Text.UTF8Encoding($false)), $true)
     try { return $sr.ReadToEnd() } finally { $sr.Dispose() }
@@ -1180,17 +1180,18 @@ function Export-Artifacts {
   if (-not $script:Dir -or -not (Test-Path -LiteralPath $script:Dir)) { return }
   if (Test-Path -LiteralPath $script:UploadDir) { Remove-Item -LiteralPath $script:UploadDir -Recurse -Force }
   New-Item -ItemType Directory -Force -Path $script:UploadDir | Out-Null
+  $script:ArtifactFailures = @()
   foreach ($pattern in $script:ArtifactFiles) {
     foreach ($f in @(Get-ChildItem -Path (Join-Path $script:Dir $pattern) -File -ErrorAction SilentlyContinue)) {
       $rel = $f.FullName.Substring($script:Dir.Length).TrimStart('\')
       $out = Join-Path $script:UploadDir $rel
       New-Item -ItemType Directory -Force -Path (Split-Path -Parent $out) | Out-Null
-      # one artifact that cannot be read does not keep back the others
-      try { Write-Utf8 -Path $out -Text (Invoke-Scrub -Text (Read-SharedText -Path $f.FullName)) } catch { Write-HeWarn "artifact $rel not collected: $($_.Exception.Message)" }
+      # one artifact that cannot be read does not keep back the others; ArtifactFailures names them (the helper test fails on any)
+      try { Write-Utf8 -Path $out -Text (Invoke-Scrub -Text (Read-SharedText -Path $f.FullName)) } catch { $script:ArtifactFailures += $rel; Write-HeWarn "artifact $rel not collected: $($_.Exception.Message)" }
     }
   }
   $build = Join-Path $script:Work 'mirror-build.log'
-  if (Test-Path -LiteralPath $build) { try { Write-Utf8 -Path (Join-Path $script:UploadDir 'mirror-build.log') -Text (Invoke-Scrub -Text (Read-SharedText -Path $build)) } catch { Write-HeWarn "mirror-build.log not collected: $($_.Exception.Message)" } }
+  if (Test-Path -LiteralPath $build) { try { Write-Utf8 -Path (Join-Path $script:UploadDir 'mirror-build.log') -Text (Invoke-Scrub -Text (Read-SharedText -Path $build)) } catch { $script:ArtifactFailures += 'mirror-build.log'; Write-HeWarn "mirror-build.log not collected: $($_.Exception.Message)" } }
   if (-not (Test-NoSecretsIn -Dir $script:UploadDir)) { return }
   Write-HeLog ("artifacts for the upload: {0} ({1} files)" -f $script:UploadDir, @(Get-ChildItem -LiteralPath $script:UploadDir -Recurse -File -ErrorAction SilentlyContinue).Count)
 }
