@@ -96,6 +96,8 @@ Windows is experimental in the first release ([ADR-0021](0021-publication-gates-
      test CA that exists only in the pull-request rehearsal), and the SignPath application goes out right after `v0.1.0`.
      Published files are never signed with a throwaway key.
 
+   (The file and the release guard arrive with the release tag guard and the release build change; until then, the tree has no such setting.)
+
    **Exception for v0.2.0.** The SignPath signing is not set up yet, so `v0.2.0` also ships unsigned Windows files. The
    maintainer has reviewed the exception for exactly that tag: the pull request "Prepare v0.2.0" sets
    `WINDOWS_UNSIGNED_FINAL_TAG=v0.2.0` in `deploy/release/windows-signing.env` and keeps `WINDOWS_SIGNING=off`. The rules of
@@ -103,7 +105,6 @@ Windows is experimental in the first release ([ADR-0021](0021-publication-gates-
    covers no other tag, the release notes of `v0.2.0` carry the "unsigned" banner, and operators verify the Windows files with
    cosign before they run them. The first pull request after the release empties the setting again; a later final tag needs
    signing or a new, reviewed exception.
-   (The file and the release guard arrive with the release tag guard and the release build change; until then, the tree has no such setting.)
 9. **A change of publisher is announced.** The publisher shown by Windows is part of the identity that SmartScreen
    reputation and App Control rules refer to. Every change (unsigned to SignPath, IV certificate to SignPath, later to a
    foundation) resets reputation and breaks publisher rules that operators wrote, and is announced in the release notes of the

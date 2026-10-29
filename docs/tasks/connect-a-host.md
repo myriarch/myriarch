@@ -512,7 +512,7 @@ Remove-Item "$Setup\enrollment-token.txt"
 
 **Why this start.** A Windows client runs scripts under the execution policy `Restricted`, which refuses every script, and
 Windows Server under `RemoteSigned`, which refuses a script that still carries the Mark of the Web. The Windows files of
-v0.1.0 are not Authenticode-signed. Do not change the policy of the machine to get past this:
+v0.1.0 and v0.2.0 are not Authenticode-signed. Do not change the policy of the machine to get past this:
 
 - `-ExecutionPolicy RemoteSigned` on the command line sets the policy for this one PowerShell process (scope *Process*), and it
   is gone when the process ends. `RemoteSigned` runs a script that is local and unblocked and still refuses one that carries the
@@ -523,7 +523,7 @@ v0.1.0 are not Authenticode-signed. Do not change the policy of the machine to g
   which stays after the installation and weakens the host for everyone.
 - A policy set by Group Policy wins over the parameter. `Get-ExecutionPolicy -List` shows it: a value other than `Undefined`
   for `MachinePolicy` or `UserPolicy` decides. If it forbids the script (`Restricted`, or `AllSigned`, which also refuses the
-  unsigned files of v0.1.0), the installer cannot start; ask the owner of the policy for an exception.
+  unsigned files of v0.1.0 and v0.2.0), the installer cannot start; ask the owner of the policy for an exception.
 - Under App Control for Business with script enforcement an unsigned script runs in Constrained Language Mode and
   `install-windows.ps1` fails. Allow it by its hash, after you verified the archive. The execution policy does not change
   this. From v0.2.0 the installer recognizes the mode first and stops with `language_mode_unsupported`

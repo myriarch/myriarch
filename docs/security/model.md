@@ -864,7 +864,7 @@ guidance after each item names what to do.
   binaries it downloads. Use `Unblock-File` only after that. Hosts with App Control allow the unsigned installer,
   `myriarch-updater.exe`, `myrctl.exe` and `Set-ServiceEnvironment.ps1` by their hashes, one set of rules per release and each
   only after its cosign verification, because there is no publisher to trust; a hash rule for a file that was not verified first trusts whatever the
-  file contains. Signing starts with a later release (the exception covers no tag after `v0.2.0`); a change of publisher resets SmartScreen reputation and breaks publisher
+  file contains. Signing starts with a later release (each exception covers exactly one tag; a later final tag needs signing or a new, reviewed exception); a change of publisher resets SmartScreen reputation and breaks publisher
   rules that operators wrote, so it is announced in the release notes.
 - **Website deployment uses a team-scoped Vercel token.** The token and the Vercel IDs exist only as secrets of the GitHub
   environments `website-preview` and `website-production`; the build job of `.github/workflows/website.yml`, which runs
