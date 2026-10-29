@@ -1459,7 +1459,7 @@ Used by: myriarchd (web UI)
 License text: [T75]
 
 --------------------------------------------------------------------------------
-Component: @mantine/charts 9.7.2
+Component: @mantine/charts 9.7.3
 License: MIT
 Used by: myriarchd (web UI)
 
@@ -1467,7 +1467,7 @@ Used by: myriarchd (web UI)
 License text: [T76]
 
 --------------------------------------------------------------------------------
-Component: @mantine/core 9.7.2
+Component: @mantine/core 9.7.3
 License: MIT
 Used by: myriarchd (web UI)
 
@@ -1475,7 +1475,7 @@ Used by: myriarchd (web UI)
 License text: [T76]
 
 --------------------------------------------------------------------------------
-Component: @mantine/dates 9.7.2
+Component: @mantine/dates 9.7.3
 License: MIT
 Used by: myriarchd (web UI)
 
@@ -1483,7 +1483,7 @@ Used by: myriarchd (web UI)
 License text: [T76]
 
 --------------------------------------------------------------------------------
-Component: @mantine/form 9.7.2
+Component: @mantine/form 9.7.3
 License: MIT
 Used by: myriarchd (web UI)
 
@@ -1491,7 +1491,7 @@ Used by: myriarchd (web UI)
 License text: [T76]
 
 --------------------------------------------------------------------------------
-Component: @mantine/hooks 9.7.2
+Component: @mantine/hooks 9.7.3
 License: MIT
 Used by: myriarchd (web UI)
 
@@ -1499,7 +1499,7 @@ Used by: myriarchd (web UI)
 License text: [T76]
 
 --------------------------------------------------------------------------------
-Component: @mantine/notifications 9.7.2
+Component: @mantine/notifications 9.7.3
 License: MIT
 Used by: myriarchd (web UI)
 
@@ -1507,7 +1507,7 @@ Used by: myriarchd (web UI)
 License text: [T76]
 
 --------------------------------------------------------------------------------
-Component: @mantine/store 9.7.2
+Component: @mantine/store 9.7.3
 License: MIT
 Used by: myriarchd (web UI)
 
@@ -1539,7 +1539,7 @@ Used by: myriarchd (web UI)
 License text: [T79]
 
 --------------------------------------------------------------------------------
-Component: @tanstack/query-core 5.104.2
+Component: @tanstack/query-core 5.104.4
 License: MIT
 Used by: myriarchd (web UI)
 
@@ -1547,7 +1547,7 @@ Used by: myriarchd (web UI)
 License text: [T80]
 
 --------------------------------------------------------------------------------
-Component: @tanstack/react-query 5.104.2
+Component: @tanstack/react-query 5.104.4
 License: MIT
 Used by: myriarchd (web UI)
 
@@ -1711,7 +1711,7 @@ Used by: myriarchd (web UI)
 License text: [T94]
 
 --------------------------------------------------------------------------------
-Component: i18next 26.4.3
+Component: i18next 26.5.2
 License: MIT
 Used by: myriarchd (web UI)
 
@@ -1751,7 +1751,7 @@ Used by: myriarchd (web UI)
 License text: [T98]
 
 --------------------------------------------------------------------------------
-Component: react 19.3.0
+Component: react 19.3.1
 License: MIT
 Used by: myriarchd (web UI)
 
@@ -1759,7 +1759,7 @@ Used by: myriarchd (web UI)
 License text: [T99]
 
 --------------------------------------------------------------------------------
-Component: react-dom 19.3.0
+Component: react-dom 19.3.1
 License: MIT
 Used by: myriarchd (web UI)
 
@@ -1767,7 +1767,7 @@ Used by: myriarchd (web UI)
 License text: [T99]
 
 --------------------------------------------------------------------------------
-Component: react-i18next 17.0.16
+Component: react-i18next 17.1.0
 License: MIT
 Used by: myriarchd (web UI)
 
@@ -7629,7 +7629,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==== [T76] ====
-First used by: @mantine/charts 9.7.2 (LICENSE)
+First used by: @mantine/charts 9.7.3 (LICENSE)
 Begins with: MIT License
 Referenced by 7 component entries.
 
@@ -7737,7 +7737,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==== [T80] ====
-First used by: @tanstack/query-core 5.104.2 (LICENSE)
+First used by: @tanstack/query-core 5.104.4 (LICENSE)
 Begins with: MIT License
 Referenced by 2 component entries.
 
@@ -8089,7 +8089,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==== [T95] ====
-First used by: i18next 26.4.3 (LICENSE)
+First used by: i18next 26.5.2 (LICENSE)
 Begins with: The MIT License (MIT)
 Referenced by 1 component entry.
 
@@ -8189,7 +8189,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==== [T99] ====
-First used by: react 19.3.0 (LICENSE)
+First used by: react 19.3.1 (LICENSE)
 Begins with: MIT License
 Referenced by 4 component entries.
 
@@ -8216,7 +8216,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==== [T100] ====
-First used by: react-i18next 17.0.16 (LICENSE)
+First used by: react-i18next 17.1.0 (LICENSE)
 Begins with: The MIT License (MIT)
 Referenced by 1 component entry.
 
