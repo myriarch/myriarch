@@ -173,8 +173,8 @@ $script:MinCosignVersion = [Version]'3.0.4'
 # updater_unauthenticated) is at the top of install-linux.sh.
 # Windows-only codes:
 #   authenticode_invalid       the Authenticode signature of the updater is invalid or from another certificate
-#   directory_unsafe           reparse point, wrong owner, unexpected ACE, or not a directory; also a -Verifier in a directory
-#                              that unprivileged accounts can change
+#   directory_unsafe           reparse point, hard link, wrong owner, unexpected ACE, or not a directory; also a -Verifier in a
+#                              directory that unprivileged accounts can change
 #   acl_failed                 icacls failed
 #   service_config_failed      sc.exe failed
 #   updater_install_failed     "myriarch-updater install" failed
@@ -1054,6 +1054,64 @@ function Assert-NoReparsePoint {
   }
 }
 
+# Number of directory entries (hard links) of the file at $Path, from the file system (nNumberOfLinks). The handle asks for no
+# access to the content (attributes only), does not follow a reparse point and lets everyone else read, write and delete.
+# Returns $null if it cannot be read or is not at least 1. Its own function so that the helper tests can replace it.
+function Get-FileLinkCount {
+  param([string]$Path)
+  if (-not ('Myriarch.NativeLinks' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+namespace Myriarch {
+  public static class NativeLinks {
+    [StructLayout(LayoutKind.Sequential)]
+    struct FILETIME { public uint Low; public uint High; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct ByHandleFileInformation {
+      public uint FileAttributes; public FILETIME CreationTime; public FILETIME LastAccessTime; public FILETIME LastWriteTime;
+      public uint VolumeSerialNumber; public uint FileSizeHigh; public uint FileSizeLow; public uint NumberOfLinks;
+      public uint FileIndexHigh; public uint FileIndexLow;
+    }
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetFileInformationByHandle(SafeFileHandle handle, out ByHandleFileInformation info);
+    // the number of links, or the negated Win32 error code if it cannot be read
+    public static long Count(string path) {
+      // access 0; share read|write|delete; OPEN_EXISTING; BACKUP_SEMANTICS | OPEN_REPARSE_POINT
+      using (SafeFileHandle h = CreateFileW(@"\\?\" + path, 0, 7, IntPtr.Zero, 3, 0x02000000 | 0x00200000, IntPtr.Zero)) {
+        if (h.IsInvalid) return -Marshal.GetLastWin32Error();
+        ByHandleFileInformation info;
+        if (!GetFileInformationByHandle(h, out info)) return -Marshal.GetLastWin32Error();
+        return info.NumberOfLinks;
+      }
+    }
+  }
+}
+'@
+  }
+  $n = [Myriarch.NativeLinks]::Count($Path)
+  if ($n -lt 1) { return $null }
+  return [int]$n
+}
+
+# Stops (fail-closed) if a file below $Path has more than one hard link, or if the number is not exactly 1 or cannot be determined:
+# changing the ACL or the owner of such a file would change its other entries outside the data directory too. Runs after
+# Assert-NoReparsePoint, so no reparse point is followed, and while the supervisor is stopped (Stop-ServiceAndWait before Initialize-DataDirectories),
+# so the service cannot create a link between the check and the change.
+function Assert-NoHardLink {
+  param([string]$Path)
+  foreach ($file in [System.IO.Directory]::EnumerateFiles($Path, '*', [System.IO.SearchOption]::AllDirectories)) {
+    $count = $null
+    $err = 'no handle'
+    try { $count = Get-FileLinkCount -Path $file } catch { $err = $_.Exception.Message }
+    if ($null -eq $count -or $count -lt 1) { Stop-Install 'directory_unsafe' "could not determine the number of links of $file ($err); inspect the file and remove it, then install again" }
+    if ($count -gt 1) { Stop-Install 'directory_unsafe' "$file has $count hard links, which the data directory does not allow; inspect the file and remove it, then install again" }
+  }
+}
+
 function Invoke-Icacls {
   param([string[]]$Arguments)
   $r = Invoke-Native -File 'icacls.exe' -Arguments $Arguments
@@ -1063,7 +1121,10 @@ function Invoke-Icacls {
 # Adopts a data directory only if it is owned by SYSTEM/Administrators/TrustedInstaller and is not a
 # reparse point (otherwise abort: a local user might have created the directory beforehand). Then the ACL
 # is replaced atomically by a protected DACL (SYSTEM + Administrators only, inherited) and all contents
-# are reset (inherited ACL, owner Administrators).
+# are reset (inherited ACL, owner Administrators). A reparse point or a file with more than one hard link stops the installation
+# before any permission in the tree is changed (Assert-NoReparsePoint, Assert-NoHardLink): setting the ACL of the root propagates
+# inheritable entries to the existing children. Both checks run again afterwards for entries created before the lock; they rely
+# on the supervisor being stopped already.
 function Protect-DirectoryTree {
   param([string]$Path)
   $item = Get-Item -LiteralPath $Path -Force
@@ -1073,6 +1134,8 @@ function Protect-DirectoryTree {
   if (@($script:SidSystem, $script:SidAdmins, $script:SidTrustedInstaller) -notcontains $owner) {
     Stop-Install 'directory_unsafe' "$Path is owned by $owner instead of SYSTEM/Administrators; inspect and remove the directory, then install again"
   }
+  Assert-NoReparsePoint -Path $Path
+  Assert-NoHardLink -Path $Path
   $sec = New-Object System.Security.AccessControl.DirectorySecurity
   $sec.SetAccessRuleProtection($true, $false)
   foreach ($sid in @($script:SidSystem, $script:SidAdmins)) {
@@ -1081,6 +1144,7 @@ function Protect-DirectoryTree {
   }
   (New-Object System.IO.DirectoryInfo($Path)).SetAccessControl($sec)
   Assert-NoReparsePoint -Path $Path
+  Assert-NoHardLink -Path $Path
   $first = [System.IO.Directory]::EnumerateFileSystemEntries($Path) | Select-Object -First 1
   if ($first) {
     Invoke-Icacls -Arguments @("$Path\*", '/reset', '/T', '/C', '/Q')
@@ -1088,17 +1152,16 @@ function Protect-DirectoryTree {
   }
 }
 
-# True if $Path is $Root or lies below it (case-insensitive, whole path segments only).
+# True if $Path lies strictly below $Root (case-insensitive, whole path segments only); $Root itself is not below it.
 function Test-PathUnder {
   param([string]$Path, [string]$Root)
   $r = $Root.TrimEnd('\', '/')
-  if ($Path.Length -lt $r.Length -or -not $Path.StartsWith($r, [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
-  if ($Path.Length -eq $r.Length) { return $true }
+  if ($Path.Length -le $r.Length -or -not $Path.StartsWith($r, [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
   return ($Path[$r.Length] -eq '\' -or $Path[$r.Length] -eq '/')
 }
 
 # Check (fail-closed): trusted owner, ACEs only for allowed principals - for the whole tree. The owner may also be the
-# virtual service account ($ServiceSid), but only for entries at or below $ServiceOwnedRoots: the directories that
+# virtual service account ($ServiceSid), but only for entries strictly below $ServiceOwnedRoots (not the roots themselves): the directories that
 # Grant-ServiceAccountAccess opens to it for writing, where the running service creates files of its own (for example
 # supervisor\agent.log). Config, the updater state, bin and versions never admit it as the owner.
 function Assert-TreeAcl {

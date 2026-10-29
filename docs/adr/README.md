@@ -56,7 +56,7 @@ Some early operational decisions were not kept as separate records. They are des
 | [0031](0031-website-with-hugo-and-docsy.md) | Project website myriarch.dev with Hugo and Docsy, built from the repository and served as static files | Accepted |
 | [0032](0032-continuous-integration-on-github-actions.md) | Continuous integration on GitHub Actions with GitHub-owned, SHA-pinned actions and one aggregate check | Accepted, amended by [0033](0033-openssf-scorecard-as-the-only-third-party-action.md) |
 | [0033](0033-openssf-scorecard-as-the-only-third-party-action.md) | OpenSSF Scorecard as the only third-party action, and policy rules for the Scorecard and release workflows | Accepted |
-| [0034](0034-authenticode-signing-of-windows-release-artifacts.md) | Authenticode signing of Windows release artifacts by the SignPath Foundation, with a defined fallback and an exception for v0.1.0 | Accepted |
+| [0034](0034-authenticode-signing-of-windows-release-artifacts.md) | Authenticode signing of Windows release artifacts by the SignPath Foundation, with a defined fallback and exceptions for v0.1.0 and v0.2.0 | Accepted |
 | [0035](0035-release-workflow-with-keyless-signing-and-verification-before-publication.md) | Release workflow: tag-only, isolated jobs, keyless signing and provenance, verification before an immutable publication, and a frozen signing identity | Accepted |
 | [0036](0036-database-schema-compatibility-and-rollback.md) | Database schema compatibility and rollback | Accepted |
 | [0037](0037-opamp-bridge-agents-until-the-operator-integration.md) | OpAMP Bridge agents are recognised and locked until the Operator integration | Accepted |

@@ -29,7 +29,7 @@
 name: myriarch-quickstart
 
 # The image of myriarchd and of the simulator. The default tag is the version of the release this file belongs to.
-x-image: &image ${QUICKSTART_IMAGE:-ghcr.io/myriarch/myriarch:0.1.0}
+x-image: &image ${QUICKSTART_IMAGE:-ghcr.io/myriarch/myriarch:0.2.0}
 
 services:
   postgres:

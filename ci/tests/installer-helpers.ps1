@@ -218,7 +218,91 @@ $script:owners[$agentLog] = 'S-1-5-80-9-9-9-9-9'
 Check 'a file of another service account in the supervisor directory stops the installation with directory_unsafe' ((Message-Of $assertTree) -match '\[directory_unsafe\].*agent\.log')
 $script:owners[$agentLog] = $svc
 Check 'without -ServiceSid the service is no trusted owner anywhere' ((Message-Of { Assert-TreeAcl -Path $pd -AllowedSids $allowed }) -match '\[directory_unsafe\]')
-Check 'a path that only shares the prefix of a service directory is not below it' (-not (Test-PathUnder -Path "$($roots[0])-other\x" -Root $roots[0]) -and (Test-PathUnder -Path $agentLog -Root $roots[0]) -and (Test-PathUnder -Path $roots[0] -Root $roots[0]))
+Check 'a path that only shares the prefix of a service directory, and the directory itself, are not below it' (-not (Test-PathUnder -Path "$($roots[0])-other\x" -Root $roots[0]) -and (Test-PathUnder -Path $agentLog -Root $roots[0]) -and (-not (Test-PathUnder -Path $roots[0] -Root $roots[0])))
+
+$script:owners[$roots[0]] = $svc
+Check 'the service as the owner of the supervisor directory itself stops the installation with directory_unsafe' ((Message-Of $assertTree) -match '\[directory_unsafe\].*supervisor')
+$script:owners.Remove($roots[0])
+$script:owners[$roots[1]] = $svc
+Check 'the service as the owner of the storage directory itself stops the installation with directory_unsafe' ((Message-Of $assertTree) -match '\[directory_unsafe\].*storage')
+$script:owners.Remove($roots[1])
+
+# ---- Hard links in the data tree (Assert-NoHardLink, Protect-DirectoryTree) ----------------------------------------------
+# A file with several hard links must stop the installation before the first permission change (SetAccessControl on the root
+# propagates to the children, icacls resets them), because that would also change the other entries of that file. The link count,
+# SetAccessControl, icacls and the owner lookup are replaced.
+$hd = Join-Path $tmp 'HardLinkData'
+foreach ($d in @('supervisor', 'storage', 'config')) { New-Item -ItemType Directory -Path (Join-Path $hd $d) -Force | Out-Null }
+$hlFiles = @{}
+foreach ($f in @('supervisor/agent.log', 'storage/queue.db', 'config/supervisor.yaml')) {
+  $hlFiles[$f] = Join-Path $hd $f
+  Set-Content -LiteralPath $hlFiles[$f] -Value 'x' -NoNewline
+}
+$script:SidSystem = 'S-1-5-18'; $script:SidAdmins = 'S-1-5-32-544'; $script:SidTrustedInstaller = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
+$script:linkCounts = @{}
+$script:linkFails = @{}
+$script:linkNulls = @{}
+$script:icaclsCalls = 0
+$script:setAclCalls = 0
+function Get-FileLinkCount {
+  param([string]$Path)
+  if ($script:linkFails.ContainsKey($Path)) { throw 'access denied' }
+  if ($script:linkNulls.ContainsKey($Path)) { return $null }
+  if ($script:linkCounts.ContainsKey($Path)) { return $script:linkCounts[$Path] }
+  return 1
+}
+function Invoke-Icacls { param([string[]]$Arguments) $script:icaclsCalls++ }
+# The DACL objects of the real function exist on Windows only: stand-ins keep the rest of Protect-DirectoryTree real.
+function New-Object {
+  param([string]$TypeName, $ArgumentList)
+  if ($TypeName -match '^System\.Security\.(AccessControl|Principal)\.|^System\.IO\.DirectoryInfo$') {
+    $o = [pscustomobject]@{}
+    foreach ($m in @('SetAccessRuleProtection', 'AddAccessRule')) { $o | Add-Member -MemberType ScriptMethod -Name $m -Value { param($a, $b) } }
+    $o | Add-Member -MemberType ScriptMethod -Name 'SetAccessControl' -Value { param($a) $script:setAclCalls++ }
+    return $o
+  }
+  Microsoft.PowerShell.Utility\New-Object @PSBoundParameters
+}
+foreach ($f in $hlFiles.Keys) {
+  $script:linkCounts = @{ $hlFiles[$f] = 2 }
+  $script:icaclsCalls = 0; $script:setAclCalls = 0
+  $msg = Message-Of { Protect-DirectoryTree -Path $hd }
+  Check "a file with 2 links under $($f.Split('/')[0]) stops the installation with directory_unsafe before any permission change" ($msg -match '\[directory_unsafe\].*2 hard links' -and $script:icaclsCalls -eq 0 -and $script:setAclCalls -eq 0)
+}
+$script:linkCounts = @{}
+$script:linkFails = @{ $hlFiles['storage/queue.db'] = $true }
+$script:icaclsCalls = 0; $script:setAclCalls = 0
+$msg = Message-Of { Protect-DirectoryTree -Path $hd }
+Check 'a link count that cannot be read (error) stops the installation with directory_unsafe before any permission change' ($msg -match '\[directory_unsafe\].*could not determine' -and $script:icaclsCalls -eq 0 -and $script:setAclCalls -eq 0)
+$script:linkFails = @{}
+$script:linkNulls = @{ $hlFiles['storage/queue.db'] = $true }
+$script:icaclsCalls = 0; $script:setAclCalls = 0
+$msg = Message-Of { Protect-DirectoryTree -Path $hd }
+Check 'a link count of $null stops the installation with directory_unsafe before any permission change' ($msg -match '\[directory_unsafe\].*could not determine' -and $script:icaclsCalls -eq 0 -and $script:setAclCalls -eq 0)
+$script:linkNulls = @{}
+$script:linkCounts = @{ $hlFiles['storage/queue.db'] = 0 }
+$script:icaclsCalls = 0; $script:setAclCalls = 0
+$msg = Message-Of { Protect-DirectoryTree -Path $hd }
+Check 'a link count of 0 stops the installation with directory_unsafe before any permission change' ($msg -match '\[directory_unsafe\]' -and $script:icaclsCalls -eq 0 -and $script:setAclCalls -eq 0)
+# Directories are not files: even with a count of 2 they do not stop the installation.
+$script:linkCounts = @{ $hd = 2 }
+foreach ($d in @('supervisor', 'storage', 'config')) { $script:linkCounts[(Join-Path $hd $d)] = 2 }
+$script:icaclsCalls = 0; $script:setAclCalls = 0
+$msg = Message-Of { Protect-DirectoryTree -Path $hd }
+Check 'directories with a count of 2 do not stop the installation; the reset runs' ($msg -eq '' -and $script:icaclsCalls -eq 2 -and $script:setAclCalls -eq 1)
+$script:linkCounts = @{}
+$script:icaclsCalls = 0; $script:setAclCalls = 0
+$msg = Message-Of { Protect-DirectoryTree -Path $hd }
+Check 'with one link on every file the reset runs' ($msg -eq '' -and $script:icaclsCalls -eq 2 -and $script:setAclCalls -eq 1)
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+  Remove-Item -Path Function:\Get-FileLinkCount
+  . $Installer   # restores the real Get-FileLinkCount (Add-Type only once)
+  $one = Join-Path $tmp 'one.txt'; $two = Join-Path $tmp 'two.txt'
+  Set-Content -LiteralPath $one -Value 'x' -NoNewline
+  Check 'on NTFS a file has one link' ((Get-FileLinkCount -Path $one) -eq 1)
+  New-Item -ItemType HardLink -Path $two -Target $one | Out-Null
+  Check 'on NTFS both entries of a hard-linked file have 2 links' ((Get-FileLinkCount -Path $one) -eq 2 -and (Get-FileLinkCount -Path $two) -eq 2)
+}
 
 Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 if ($script:failures -gt 0) { exit 1 }

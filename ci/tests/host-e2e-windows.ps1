@@ -97,6 +97,7 @@ try {
     $null = Export-Artifacts 3>&1 6>&1
     # install-*.log is collected before api\*.json, so the artifact after the locked one is the proof (it only runs on Windows, where files lock)
     Check 'an artifact that cannot be read keeps back the ones collected after it' 'True' (Test-Path -LiteralPath (Join-Path $script:UploadDir 'api\agents.json'))
+    Check 'the artifact that cannot be read is named in the failures' 'True' ([string]((@($script:ArtifactFailures) -join ' ') -match 'install-command\.log'))
   }
 } finally { $locked.Dispose() }
 # the shape of the log of the command when the installer inside it fails with a message X

@@ -24,7 +24,9 @@
 #   4. CHANGELOG_SECTION: for an rc tag the body of "## Unreleased" (or "## [Unreleased]"), for a final tag the body of
 #      "## [X.Y.Z] - YYYY-MM-DD", up to the next "## " heading, without the heading. Fenced code blocks keep their text but hide
 #      headings; HTML comments are removed. An empty section is [changelog_missing]. A section of more than 60,000 characters is
-#      replaced by one line that links CHANGELOG.md at the tag.
+#      replaced by its subsections "Upgrade notes" and "Security", unchanged, plus one sentence that links CHANGELOG.md at the tag
+#      for the rest. If neither subsection exists, or both with the sentence are longer than 60,000 characters as well, one line
+#      that links CHANGELOG.md at the tag is used instead.
 #   5. The text is at most 100,000 characters [notes_too_long], contains no SPDX line, and ends with exactly one newline.
 #
 # Exit status: 0 ok, 1 refused, 2 usage error.
@@ -239,6 +241,25 @@ def sections(path):
     return out
 
 
+def subsections(lines):
+    """[(name, [lines])] of the '### ' subsections of a section (the lines of sections() above, comments already removed). A '### '
+    line in a fenced code block is no heading. The lines keep their heading."""
+    out, fence = [], None
+    for line in lines:
+        if fence is None:
+            m = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+            if m:
+                fence = m.group(1)[0] * 3
+            elif line.startswith("### "):
+                out.append((line[4:].strip(), [line]))
+                continue
+        elif re.match(r"^ {0,3}" + re.escape(fence[0]) + r"{3,}\s*$", line):
+            fence = None
+        if out:
+            out[-1][1].append(line)
+    return out
+
+
 version = tag[1:]
 if kind == "rc":
     pick = [b for h, b in sections(changelog_path) if re.match(r"^## \[?Unreleased\]?\s*$", h)]
@@ -264,9 +285,20 @@ section = "\n".join(body)
 if not section.strip():
     fail("changelog_missing", "the CHANGELOG.md section for %s is empty" % ("Unreleased" if kind == "rc" else version))
 if len(section) > SECTION_LIMIT:
-    info = "The changes of this release are listed in [CHANGELOG.md](%s)." % values["CHANGELOG_URL"]
-    print("[%s] the changelog section has %d characters; the notes link to CHANGELOG.md instead" % (SCRIPT, len(section)), file=sys.stderr)
-    section = info
+    full = len(section)
+    kept = []
+    for name, sub in subsections(body):
+        if name in ("Upgrade notes", "Security"):
+            while sub and sub[-1].strip() == "":
+                sub.pop()
+            kept.append("\n".join(sub))
+    rest = "The other changes of this release are listed in [CHANGELOG.md](%s)." % values["CHANGELOG_URL"]
+    if kept and len("\n\n".join(kept + [rest])) <= SECTION_LIMIT:
+        section = "\n\n".join(kept + [rest])
+        print("[%s] the changelog section has %d characters; the notes keep its Upgrade notes and Security and link to CHANGELOG.md for the rest" % (SCRIPT, full), file=sys.stderr)
+    else:
+        section = "The changes of this release are listed in [CHANGELOG.md](%s)." % values["CHANGELOG_URL"]
+        print("[%s] the changelog section has %d characters; the notes link to CHANGELOG.md instead" % (SCRIPT, full), file=sys.stderr)
 text = text.replace(SENTINEL, section)
 
 text = text.rstrip("\n") + "\n"

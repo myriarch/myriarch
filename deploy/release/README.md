@@ -288,8 +288,8 @@ installers and the updater trust its Sigstore identity. The decision is
   first year, and the legal name and locality appear in every signature.
 * No PFX file and no long-lived signing secret in the release workflow.
 
-**v0.1.0 is unsigned.** The Windows files of `v0.1.0` carry no Authenticode signature, under a reviewed exception for exactly
-that tag (`WINDOWS_UNSIGNED_FINAL_TAG` in `deploy/release/windows-signing.env`). Verify them with cosign before you run
+**v0.1.0 and v0.2.0 are unsigned.** The Windows files of `v0.1.0` and of `v0.2.0` carry no Authenticode signature, each under a reviewed
+exception for exactly that tag (`WINDOWS_UNSIGNED_FINAL_TAG` in `deploy/release/windows-signing.env` holds one tag at a time). Verify them with cosign before you run
 them; the release notes say so.
 
 **In this tree.** The build holds no key. The signing hook contract, the Windows version resources and the acceptance check are

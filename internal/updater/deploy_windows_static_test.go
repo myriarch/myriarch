@@ -71,6 +71,19 @@ func TestInstallWindowsScriptDoesNotAdoptForeignDataDirectories(t *testing.T) {
 	assert.Contains(t, prot, "'/reset'", "children are reset")
 	assert.Contains(t, prot, "'/setowner'")
 	assert.Regexp(t, regexp.MustCompile(`Stop-Install 'directory_unsafe' .*owned by`), prot, "fails closed on a foreign owner")
+	assert.Less(t, strings.Index(prot, "Assert-NoReparsePoint"), strings.Index(prot, "Assert-NoHardLink"), "the link check follows the reparse point check")
+	assert.Less(t, strings.Index(prot, "Assert-NoHardLink"), strings.Index(prot, "SetAccessControl"),
+		"a file with several hard links is refused before the first permission change (SetAccessControl propagates to the children)")
+	assert.Less(t, strings.Index(prot, "Assert-NoReparsePoint"), strings.Index(prot, "SetAccessControl"), "no reparse point is followed by the first permission change")
+	assert.Greater(t, strings.LastIndex(prot, "Assert-NoHardLink"), strings.Index(prot, "SetAccessControl"), "the tree is checked again after the lock")
+	assert.Less(t, strings.Index(prot, "Assert-NoHardLink"), strings.Index(prot, "Invoke-Icacls"),
+		"a file with several hard links is refused before the first icacls reset")
+	links := psFunctionBody(t, script, "Assert-NoHardLink")
+	assert.Contains(t, links, "Stop-Install 'directory_unsafe'")
+	assert.Contains(t, links, "EnumerateFiles", "every file of the tree is checked")
+	assert.Contains(t, links, "-eq $count -or $count -lt 1) { Stop-Install", "a link count that cannot be determined fails closed")
+	count := psFunctionBody(t, script, "Get-FileLinkCount")
+	assert.Contains(t, count, "if ($n -lt 1) { return $null }", "only a count of at least 1 is a count")
 	init := psFunctionBody(t, script, "Initialize-DataDirectories")
 	assert.Contains(t, init, "Protect-DirectoryTree")
 	assert.Less(t, strings.Index(init, "Protect-DirectoryTree"), strings.Index(init, "$L.Config"),

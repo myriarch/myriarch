@@ -4,7 +4,7 @@ weight: 30
 description: "The OpenAPI 3.1 contract of the management API under /api/v1: authentication, roles, error format and every operation with its permission."
 ---
 
-Generated from `api/openapi.yaml` (Myriarch REST API, contract version `0.1.0`). Management API of myriarchd (OpAMP based OpenTelemetry Collector fleet management).
+Generated from `api/openapi.yaml` (Myriarch REST API, contract version `0.2.0`). Management API of myriarchd (OpAMP based OpenTelemetry Collector fleet management).
 
 REST API used by the myriarch web UI, myrctl and automation.
 
