@@ -23,8 +23,10 @@
 #
 # Updated by hand, not listed here: the container image digests (ci/pin-images.sh; ci/check.sh keeps the Dockerfiles, the
 # compose file and ci/versions.env in step), reuse (ci/tools/reuse, hash-pinned for Python 3.9; a security update can still
-# reach it, see docs/development.md) and the Docsy theme (website/go.mod, whose overrides are pinned in
-# website/overrides.txt).
+# reach it, see docs/development.md), the Docsy theme (website/go.mod, whose overrides are pinned in
+# website/overrides.txt) and golang.org/x/crypto/x509roots/fallback (a nested module without tags, see the gomod entry for "/").
+# Raise the last one with "go get golang.org/x/crypto/x509roots/fallback@latest", then "go mod tidy" and "make notices". It only
+# carries the embedded root certificate bundle, and ci/vulncheck.sh still reports findings for the module.
 version: 2
 updates:
   # GitHub Actions (ADR-0032). Dependabot rewrites both the commit SHA and the "# vX.Y.Z" comment, which is the format that
@@ -53,6 +55,11 @@ updates:
     groups:
       go-modules:
         patterns: ['*']
+    # golang.org/x/crypto/x509roots/fallback is a nested module without tags (go.mod holds a pseudo-version). Dependabot takes
+    # it for the parent module golang.org/x/crypto, cannot resolve it and fails the weekly run. It is updated by hand (see the
+    # header). The entry also hides its security updates, so ci/vulncheck.sh is the check for this module.
+    ignore:
+      - dependency-name: golang.org/x/crypto/x509roots/fallback
     open-pull-requests-limit: 3
 
   # The CI tool modules (one module per tool): security updates only. Every requirement in them is marked "// indirect" (a
