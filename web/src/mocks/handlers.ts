@@ -20,7 +20,12 @@ import type {
   Role,
   Selector,
 } from '@/api/types';
-import { API_TOKEN_PREFIX, ENROLLMENT_TOKEN_PREFIX, STORAGE_KEY_PREFIX } from '@/brand';
+import {
+  API_TOKEN_PREFIX,
+  ENROLLMENT_TOKEN_PLACEHOLDER,
+  ENROLLMENT_TOKEN_PREFIX,
+  STORAGE_KEY_PREFIX,
+} from '@/brand';
 import { compareVersions } from '@/lib/format';
 import { compareTargetsByActivity, compareTargetsByWave } from '@/lib/targetOrder';
 import { toYaml } from '@/lib/yaml';
@@ -66,6 +71,24 @@ function problem(
     status,
     headers: { 'Content-Type': 'application/problem+json' },
   });
+}
+
+/** The three platforms of install.platforms, all ready (tests override the handler for the other states). */
+function mockInstallBundles() {
+  const platform = (os: 'linux' | 'windows', arch: 'amd64' | 'arm64') => ({
+    os,
+    arch,
+    version: '0.2.0',
+    filename: `myriarch-updater_0.2.0_${os}_${arch}.${os === 'windows' ? 'zip' : 'tar.gz'}`,
+    status: 'ready' as const,
+    sha256: `${os === 'windows' ? 'b' : 'a'}${arch === 'arm64' ? '1' : '0'}`.repeat(32),
+    size: 25_000_000,
+  });
+  return {
+    source: 'release' as const,
+    version: '0.2.0',
+    items: [platform('linux', 'amd64'), platform('linux', 'arm64'), platform('windows', 'amd64')],
+  };
 }
 
 const unauthorized = () => problem(401, 'unauthorized', 'Unauthorized', 'authentication required');
@@ -390,6 +413,78 @@ export const handlers: HttpHandler[] = [
       t.revokedAt = iso(0);
       getDb().recordAudit(role, 'enrollment_token.revoke', 'enrollment-token', t.id);
       return new HttpResponse(null, { status: 204 });
+    }),
+  ),
+
+  /* ------------------------------------------------------------------ install */
+  // listInstallBundles
+  http.get(
+    `${BASE}/install/bundles`,
+    guarded('read', () => json(mockInstallBundles())),
+  ),
+  // renderInstallCommands
+  http.post(
+    `${BASE}/install/commands`,
+    guarded('read', async ({ request }) => {
+      const body = (await request.json()) as {
+        variant?: string;
+        platforms?: string[];
+        attributes?: Record<string, string>;
+        tokenFiles?: { linux?: string; windows?: string };
+      };
+      const issues: NonNullable<Problem['issues']> = [];
+      for (const k of ['site.type', 'site.id']) {
+        if (!body.attributes?.[k]) {
+          issues.push({
+            severity: 'error',
+            code: 'invalid_value',
+            message: `${k} is required`,
+            path: `attributes.${k}`,
+          });
+        }
+      }
+      const variant = body.variant ?? 'token_inline';
+      const bundles = mockInstallBundles().items.filter(
+        (b) => !body.platforms?.length || body.platforms.includes(`${b.os}/${b.arch}`),
+      );
+      // Like the server: the variant token_file needs a path for every operating system it renders.
+      if (variant === 'token_file') {
+        for (const os of ['linux', 'windows'] as const) {
+          if (bundles.some((b) => b.os === os) && !body.tokenFiles?.[os]) {
+            issues.push({
+              severity: 'error',
+              code: 'invalid_value',
+              message: `a token file path for ${os} is required`,
+              path: `tokenFiles.${os}`,
+            });
+          }
+        }
+      }
+      if (issues.length) {
+        return problem(422, 'validation_failed', 'Validation failed', 'invalid request', issues);
+      }
+      const commands = bundles.map((bundle) => {
+        const windows = bundle.os === 'windows';
+        const token =
+          variant === 'token_file' ? '(read from the token file)' : ENROLLMENT_TOKEN_PLACEHOLDER;
+        return {
+          platform: `${bundle.os}/${bundle.arch}`,
+          shell: windows ? ('powershell' as const) : ('bash' as const),
+          command: `# mock command for ${bundle.filename}\ninstall --server https://fleet.example.com --token ${token} --site-type ${body.attributes?.['site.type']} --site-id ${body.attributes?.['site.id']}\n`,
+          bundle,
+        };
+      });
+      return json(
+        {
+          variant: variant as 'token_inline' | 'token_file' | 'lab',
+          server: 'https://fleet.example.com',
+          version: '0.2.0',
+          insecure: variant === 'lab',
+          tokenPlaceholder: variant === 'token_file' ? undefined : ENROLLMENT_TOKEN_PLACEHOLDER,
+          commands,
+        },
+        { headers: { 'Cache-Control': 'no-store' } },
+      );
     }),
   ),
 

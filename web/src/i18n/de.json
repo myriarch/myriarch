@@ -1296,13 +1296,8 @@
       "secretTitle": "Token erstellt",
       "secretWarning": "Dieses Geheimnis wird nur jetzt angezeigt. Kopieren Sie es und bewahren Sie es sicher auf – es kann später nicht erneut abgerufen werden.",
       "secretDone": "Ich habe das Token gesichert",
-      "install": {
-        "title": "Installation",
-        "hint": "Beispiele – Platzhalter in spitzen Klammern anpassen. Das Token landet dabei nicht im Git-Repository.",
-        "supervisor": "Supervisor-Config",
-        "envFile": "Env-Datei",
-        "copy": "Kopieren"
-      }
+      "addHostHint": "Verwende dieses Token auf einem Host: Der Dialog „Host hinzufügen“ setzt es in einen fertigen Befehl ein. Es bleibt im Speicher und wird beim Schließen der Dialoge verworfen.",
+      "addHostWithToken": "Host mit diesem Token hinzufügen"
     },
     "users": {
       "title": "Benutzer & Rollen",
@@ -1457,6 +1452,121 @@
       "selectionActive": "Der Rollout wurde zurückgerollt, die UI-Auswahl {{version}} bleibt aber aktiv.",
       "selectionActiveStopped": "Der Rollout ist nicht abgeschlossen, die UI-Auswahl {{version}} bleibt aber aktiv. Dieselbe Version bietet der Host nach einem Rollback erst nach seiner Wartezeit (failedRetryBackoff) erneut an.",
       "clearLink": "Zur Fleet, Auswahl zurücknehmen"
+    }
+  },
+  "addHost": {
+    "title": "Host hinzufügen",
+    "intro": "Kopiere je Plattform einen Befehl und führe ihn auf dem Host aus. Der Installer lädt alles von diesem Server und prüft es auf dem Host.",
+    "platforms": "Plattformen",
+    "platformsHint": "Ein Befehl je gewählter Plattform.",
+    "siteType": "Standorttyp",
+    "siteId": "Standort-ID",
+    "siteIdHint": "Fleets wählen Hosts über ihre Standortattribute aus.",
+    "fleet": "Fleet (optional)",
+    "fleetHint": "Die Fleet, die du erwartest. Der Server lehnt den Host ab, wenn er ihn einer anderen Fleet zuordnet.",
+    "moreSite": "Weitere Standortattribute",
+    "lessSite": "Weniger Standortattribute",
+    "siteName": "Standortname",
+    "siteCountry": "Land",
+    "siteRegion": "Region",
+    "siteTimezone": "Zeitzone",
+    "environment": "Umgebung",
+    "variant": "Wie das Token auf den Host kommt",
+    "variantInline": "Token im Befehl",
+    "variantFile": "Token aus Datei",
+    "variantInlineHint": "Am schnellsten für einen Host: Der Befehl schreibt das Token in eine private Datei und löscht sie nach dem Lauf.",
+    "variantFileHint": "Für Produktion, Automatisierung und Hosts, die Eingaben aufzeichnen: Der Befehl enthält das Token nicht, sondern liest es aus einer Datei, die du auf dem Host ablegst.",
+    "tokenFileLinux": "Token-Datei unter Linux",
+    "tokenFileWindows": "Token-Datei unter Windows",
+    "mtlsNote": "Installation mit mTLS ohne Enrollment-Token wird nicht unterstützt. Ein Server, der Client-Zertifikate verlangt (opamp.requireClientCert), kann keine Install-Befehle liefern.",
+    "show": "Befehle anzeigen",
+    "retry": "Erneut versuchen",
+    "copy": "Befehl kopieren",
+    "commandFor": "Befehl für {{platform}}",
+    "shellBash": "In einem Terminal auf dem Host ausführen. Er beginnt mit sudo.",
+    "shellPowershell": "In einer PowerShell mit Administratorrechten ausführen.",
+    "pinned": "Angepinnte SHA-256 des Installer-Bundles {{version}}: {{sha}}",
+    "maskedHint": "Das Token ist hier verborgen. Der Kopier-Knopf kopiert den vollständigen Befehl.",
+    "insecure": "Dies ist ein Entwicklungsserver über unverschlüsseltes http. Die Befehle senken die Prüfungen des Installers. Nie in Produktion verwenden.",
+    "manualGuide": "Host manuell verbinden",
+    "token": {
+      "title": "Enrollment-Token",
+      "modeFresh": "Das eben erzeugte Token",
+      "modeCreate": "Token erzeugen",
+      "modePaste": "Vorhandenes Token einfügen",
+      "freshHint": "Das eben erzeugte Token kommt in die Befehle. Es bleibt nur in diesem Dialog.",
+      "name": "Name des neuen Tokens",
+      "nameHint": "z. B. „Standorte Nord 2026“",
+      "create": "Token erzeugen",
+      "created": "Token erzeugt. Es kommt in die Befehle, bleibt nur in diesem Dialog und wird beim Schließen verworfen. Es lässt sich nicht erneut anzeigen.",
+      "paste": "Enrollment-Token",
+      "pasteHint": "Wird im Browser in die Befehle eingesetzt. Dieser Dialog schickt es nie an den Server.",
+      "invalid": "Das sieht nicht wie ein Enrollment-Token aus (myre_ und keine Leerzeichen).",
+      "noPermission": "Deine Rolle darf keine Enrollment-Tokens erzeugen (Recht enrollment:manage). Füge ein Token ein, das dir ein Administrator gegeben hat, oder wähle „Token aus Datei“ und lege das Token in einer Datei auf dem Host ab."
+    },
+    "warning": {
+      "title": "Der Befehl enthält das Token",
+      "text": "Alles, was Eingaben oder Einfügen aufzeichnet, behält das Token:",
+      "clipboard": "die Zwischenablage",
+      "history": "die History deiner Shell",
+      "psreadline": "die History-Datei von PSReadLine (Windows PowerShell 5.1)",
+      "transcription": "die PowerShell-Transkription",
+      "scriptblock": "das PowerShell Script Block Logging (Ereignis 4104)",
+      "recording": "die Aufzeichnung einer Terminalsitzung",
+      "leaked": "Ein Token, das eines davon festgehalten hat, gilt als offengelegt: widerrufe es. Auf einem Host, der Eingaben aufzeichnet, nimm „Token aus Datei“."
+    },
+    "bundleState": {
+      "pending": "wartet",
+      "preparing": "wird vorbereitet",
+      "ready": "bereit",
+      "failed": "fehlgeschlagen"
+    },
+    "state": {
+      "disabled": "Die Installation von Hosts vom Server ist auf diesem Server ausgeschaltet (install.enabled).",
+      "noBundleTitle": "Dieser Server hat keine Installer-Bundles",
+      "noBundleText": "Er ist ein lokaler Build und kein Release des Projekts. Installiere den Host über den manuellen Weg oder betreibe ein Release von myriarchd."
+    },
+    "error": {
+      "localBuild": {
+        "title": "Dieser Server ist ein lokaler Build",
+        "text": "Ein lokaler Build hat kein Installer-Bundle und kann deshalb keine Install-Befehle liefern.",
+        "next": "Nimm den manuellen Weg der Anleitung „Connect a host“ oder betreibe ein Release von myriarchd."
+      },
+      "serverSettings": {
+        "title": "Der Server kann keine Install-Befehle liefern",
+        "text": "Der Server hat die Anfrage wegen seiner eigenen Einstellungen abgelehnt. Häufig verlangt er Client-Zertifikate (opamp.requireClientCert; Installation mit mTLS ohne Token wird nicht unterstützt). Es kann auch sein, dass server.publicUrl fehlt, keine https-Adresse ist oder Zugangsdaten, eine Query oder Zeichen enthält, die ein Befehl nicht tragen kann.",
+        "next": "Lies die Meldung des Servers unten, bitte den Betrieb, die Einstellung zu korrigieren, oder nimm den manuellen Weg der Anleitung „Connect a host“."
+      },
+      "preparing": {
+        "title": "Die Installer-Bundles werden vorbereitet",
+        "text": "Der Server lädt und prüft gerade die Installer-Bundles seines Releases.",
+        "next": "Warte einen Moment und versuche es erneut."
+      },
+      "bundleFailed": {
+        "title": "Ein Installer-Bundle ist fehlgeschlagen",
+        "text": "Der Server konnte das Bundle nicht vorbereiten. Er versucht es nach einer Minute erneut.",
+        "next": "Versuche es später erneut oder bitte den Betrieb, die Verbindung zu install.bundleSourceBaseUrl zu prüfen."
+      },
+      "platformNotSupported": {
+        "title": "Eine Plattform wird nicht unterstützt",
+        "text": "Dieser Server bietet für eine der gewählten Plattformen keinen Installer an.",
+        "next": "Wähle diese Plattform ab und versuche es erneut."
+      },
+      "variantNotAvailable": {
+        "title": "Diese Variante ist nicht verfügbar",
+        "text": "Die Variante „lab“ (einfaches http) gibt es nur auf Entwicklungsservern.",
+        "next": "Wähle „Token im Befehl“ oder „Token aus Datei“."
+      },
+      "disabled": {
+        "title": "Die Installation von Hosts vom Server ist ausgeschaltet",
+        "text": "Der Server liefert keine Install-Befehle (install.enabled ist false).",
+        "next": "Nimm den manuellen Weg der Anleitung „Connect a host“."
+      },
+      "conflict": {
+        "title": "Die Anfrage widerspricht dem Zustand des Servers",
+        "text": "Der Zustand des Servers hat sich während deiner Arbeit geändert.",
+        "next": "Schließe den Dialog, öffne ihn neu und wiederhole die Schritte."
+      }
     }
   }
 }

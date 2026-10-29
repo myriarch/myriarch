@@ -17,8 +17,10 @@ The scripts deliberately do not use the packages of the upstream project (deb, r
 collector service of their own, and a supervisor from a package is another service in another place than the one that
 myriarch manages.
 
-There are two ways to install a host:
+There are three ways to install a host:
 
+- **The dialog "Add host"** (*from v0.2.0*, web UI): the web UI renders the one command for each platform. [This is the quick
+  way](#the-quick-way-the-dialog-add-host).
 - **One command** (*from v0.2.0*, Linux and Windows): the server renders a command, you paste it into a root shell on the
   host (an elevated Windows PowerShell on Windows), and the host comes up healthy in the right fleet. The server tells the
   installer which version its fleet targets, and the installer verifies everything it runs. [This is the way to
@@ -27,13 +29,43 @@ There are two ways to install a host:
   options. It stays supported, for sites that cannot accept the trust of the first command (see below), for hosts without access
   to the server and for the installers of v0.1.0. The rest of this page describes it.
 
-The manual path describes the installers of the release v0.1.0; what the installers of v0.2.0 do differently is marked *from
-v0.2.0* (they check the host before they change anything, see [When the installer stops](#when-the-installer-stops), and on Linux
-the collector version has a default; on Windows the collector version stays required without the server). Steps 1 to 3 are the same on both systems: [create an enrollment token](#1-create-an-enrollment-token), [download and verify the
-installer](#2-download-and-verify-the-installer) and
-[choose how the host verifies downloads](#3-choose-how-the-host-verifies-downloads). Step 4 [installs on
-Linux](#4-install-on-linux), step 5 [installs on Windows](#5-install-on-windows), and step 6 [checks the
-result](#6-check-the-result).
+## The quick way: the dialog "Add host"
+
+*Available from v0.2.0.* If your server runs a release of myriarch, the web UI gives you one ready command for each platform, and you do
+not need steps 1 to 5 by hand. Open *Agents*, button *Add host* (or *Settings*, tab *Tokens*, section *Enrollment tokens*, button
+*Add host*, or *Add host with this token* in the dialog that shows a new token), and then:
+
+1. Select the platforms (Linux amd64, Linux arm64, Windows amd64), enter the site type and the site ID and, if you want, the fleet that you
+   expect and more site attributes. The server refuses the host if it assigns it to another fleet.
+2. Choose how the token reaches the host. **Token in the command** (the default) is the quickest way for one host: create a token in the
+   dialog (an administrator with the permission `enrollment:manage`), use the one that you have just created, or paste an existing one
+   (`myre_...`). **Token from a file** leaves the token out of the command: the command reads it from a file that you place on the host, for
+   example `/etc/myriarch/enrollment-token` on Linux. The dialog needs the path of that file for every operating system of the platforms that you selected (Linux and Windows), because the command names it. Use it for production, for automation and for every host that records its input. A user
+   without `enrollment:manage` can open the dialog and render commands, but cannot create a token: they paste a token that an administrator
+   gave them, or use the variant with the file.
+3. Select *Show commands*, copy the command for the host and run it: on Linux in a terminal (it starts with `sudo`), on Windows in an
+   elevated Windows PowerShell. The command downloads the installer bundle of the server, checks the SHA-256 that it pins before it
+   unpacks anything, and starts the installer, which asks the server for the plan (fleet, versions and artifacts) and verifies every file
+   on the host. The dialog shows the pinned hash next to the command: it is the line of the archive in the signed `checksums.txt` of the
+   release, so you can compare it with the release before the first run. What the command does on the host is described under [One
+   command](#one-command-install-a-linux-host-from-the-server) (Linux) and [One command](#one-command-install-a-windows-host-from-the-server) (Windows).
+
+The token lives in the dialog only. It is never stored in the browser or put into a URL, the server never sees it when it renders the
+commands, and the dialog drops it when you close it. The dialog shows the token masked and the copy button copies the full command. The
+copied command is text, though: the clipboard, the history of a shell, the history file of PSReadLine (Windows PowerShell 5.1), PowerShell
+transcription, PowerShell script block logging (event 4104) and the recording of a terminal session keep it. A token that one of these kept
+counts as leaked: revoke it. On a host that records its input, use *Token from a file*.
+
+The dialog explains what it cannot do:
+
+| What the dialog says | Cause | Next step |
+|---|---|---|
+| This server has no installer bundles; *local build* | The server is a build from a Git checkout, not a release | Use the manual steps below, or run a release of `myriarchd` |
+| The installer bundles are being prepared | The server fetches and verifies the bundles of its release (usually a few seconds after the start) | Wait and select *Try again* |
+| An installer bundle failed | The server could not fetch it from `install.bundleSourceBaseUrl`; it tries again after a minute | Ask the operator to check that address |
+| The server cannot give install commands | The server refused because of its own settings, and the dialog shows its message. `opamp.requireClientCert` is on (the commands cannot present a certificate; installation with mutual TLS but without a token is not supported), or `server.publicUrl` is not set, is plain `http` (both variants need https), or has credentials, a query or characters that a command cannot carry | Ask the operator to correct the setting (an https `server.publicUrl`), or use the manual steps below |
+| This variant is not available | The variant `lab` (plain http) exists on development servers only; the dialog does not offer it | Choose *Token in the command* or *Token from a file* |
+| Installing hosts from the server is turned off | `install.enabled` is `false` | Use the manual steps below |
 
 ## One command: install a Linux host from the server
 
@@ -216,7 +248,16 @@ use the command; the installer there also takes `-Server` when you run it from a
 
 ## The manual path
 
-The rest of this page is the manual, verified path.
+The steps below are the manual path. They stay supported for sites that cannot accept the trust on first use of the pinned hash, and
+for hosts that the dialog cannot serve.
+
+The manual path describes the installers of the release v0.1.0; what the installers of v0.2.0 do differently is marked *from
+v0.2.0* (they check the host before they change anything, see [When the installer stops](#when-the-installer-stops), and on Linux
+the collector version has a default; on Windows the collector version stays required without the server). Steps 1 to 3 are the same on both systems: [create an enrollment token](#1-create-an-enrollment-token), [download and verify the
+installer](#2-download-and-verify-the-installer) and
+[choose how the host verifies downloads](#3-choose-how-the-host-verifies-downloads). Step 4 [installs on
+Linux](#4-install-on-linux), step 5 [installs on Windows](#5-install-on-windows), and step 6 [checks the
+result](#6-check-the-result).
 
 ## What you need
 
@@ -278,10 +319,11 @@ optional expiry date. The secret is shown **once**. Labels are *server labels*: 
 with the token, and a host cannot claim them for itself. Use them for decisions that matter, such as `update-via=awx`, and the
 self-reported `site.*` attributes only for coarse selection of fleets.
 
-The dialog that shows the secret also shows an install example. Treat it as a reminder of the options and take the complete
-commands from this page: in v0.1.0 the example leaves out the collector version and the Sigstore verifier, so the installer
-stops with `option_missing`, and the Windows example starts the script directly, which the default execution policy refuses.
-From v0.2.0 the command of the server replaces the example on Linux ([One command](#one-command-install-a-linux-host-from-the-server)).
+The dialog that shows the secret of v0.1.0 also shows an install example. It leaves out the collector version and the Sigstore
+verifier, so the installer stops with `option_missing`, and the Windows example starts the script directly, which the default
+execution policy refuses: take the complete commands from this page. From v0.2.0 the dialog has no example. It has the button *Add host
+with this token*, which opens [the dialog "Add host"](#the-quick-way-the-dialog-add-host) with the new token; the command it renders is the one under
+[One command](#one-command-install-a-linux-host-from-the-server).
 
 Tokens can also be declared in the server configuration (`opamp.enrollmentTokens`, fed from a mounted secret). See
 [Authentication](../operations/authentication.md) for that and for how people sign in.

@@ -1296,13 +1296,8 @@
       "secretTitle": "Token created",
       "secretWarning": "This secret is shown only now. Copy it and store it safely – it cannot be retrieved again.",
       "secretDone": "I have saved the token",
-      "install": {
-        "title": "Installation",
-        "hint": "Examples – adjust the placeholders in angle brackets. The token never ends up in the Git repository.",
-        "supervisor": "Supervisor config",
-        "envFile": "Env file",
-        "copy": "Copy"
-      }
+      "addHostHint": "Use this token on a host: the dialog “Add host” puts it into a ready command. It stays in memory and is dropped when you close the dialogs.",
+      "addHostWithToken": "Add host with this token"
     },
     "users": {
       "title": "Users & roles",
@@ -1457,6 +1452,121 @@
       "selectionActive": "The rollout was rolled back, but the UI selection {{version}} is still active.",
       "selectionActiveStopped": "The rollout is not finished, but the UI selection {{version}} is still active. After a rollback the host offers the same version again only after its wait time (failedRetryBackoff).",
       "clearLink": "Go to the fleet, clear the selection"
+    }
+  },
+  "addHost": {
+    "title": "Add host",
+    "intro": "Copy one command for each platform and run it on the host. The installer downloads everything from this server and verifies it on the host.",
+    "platforms": "Platforms",
+    "platformsHint": "One command for each platform that you select.",
+    "siteType": "Site type",
+    "siteId": "Site ID",
+    "siteIdHint": "Fleets select hosts by their site attributes.",
+    "fleet": "Fleet (optional)",
+    "fleetHint": "The fleet that you expect. The server refuses the host if it assigns it to another fleet.",
+    "moreSite": "More site attributes",
+    "lessSite": "Fewer site attributes",
+    "siteName": "Site name",
+    "siteCountry": "Country",
+    "siteRegion": "Region",
+    "siteTimezone": "Time zone",
+    "environment": "Environment",
+    "variant": "How the token reaches the host",
+    "variantInline": "Token in the command",
+    "variantFile": "Token from a file",
+    "variantInlineHint": "Quickest for one host: the command writes the token into a private file and deletes it after the run.",
+    "variantFileHint": "For production, automation and hosts that record their input: the command does not contain the token, it reads it from a file that you place on the host.",
+    "tokenFileLinux": "Token file on Linux",
+    "tokenFileWindows": "Token file on Windows",
+    "mtlsNote": "Installation with mutual TLS but without an enrollment token is not supported. A server that requires client certificates (opamp.requireClientCert) cannot give install commands.",
+    "show": "Show commands",
+    "retry": "Try again",
+    "copy": "Copy command",
+    "commandFor": "Command for {{platform}}",
+    "shellBash": "Run it in a terminal on the host. It starts with sudo.",
+    "shellPowershell": "Run it in an elevated Windows PowerShell.",
+    "pinned": "Pinned SHA-256 of the installer bundle {{version}}: {{sha}}",
+    "maskedHint": "The token is hidden here. The copy button copies the complete command.",
+    "insecure": "This server is a development server over plain http. The commands lower the checks of the installer. Never use them in production.",
+    "manualGuide": "Connect a host manually",
+    "token": {
+      "title": "Enrollment token",
+      "modeFresh": "The token I just created",
+      "modeCreate": "Create a token",
+      "modePaste": "Paste an existing token",
+      "freshHint": "The token that you just created goes into the commands. It stays in this dialog only.",
+      "name": "Name of the new token",
+      "nameHint": "e.g. “Sites north 2026”",
+      "create": "Create token",
+      "created": "Token created. It goes into the commands, stays in this dialog only and is dropped when you close it. It cannot be shown again.",
+      "paste": "Enrollment token",
+      "pasteHint": "Pasted into the commands in your browser. It is never sent to the server by this dialog.",
+      "invalid": "This does not look like an enrollment token (myre_ and no spaces).",
+      "noPermission": "Your role cannot create enrollment tokens (permission enrollment:manage). Paste a token that an administrator gave you, or choose “Token from a file” and place the token in a file on the host."
+    },
+    "warning": {
+      "title": "The command contains the token",
+      "text": "Anything that records what you type or paste keeps the token:",
+      "clipboard": "the clipboard",
+      "history": "the history of your shell",
+      "psreadline": "the history file of PSReadLine (Windows PowerShell 5.1)",
+      "transcription": "PowerShell transcription",
+      "scriptblock": "PowerShell script block logging (event 4104)",
+      "recording": "the recording of a terminal session",
+      "leaked": "A token that one of these kept counts as leaked: revoke it. On a host that records its input, use “Token from a file”."
+    },
+    "bundleState": {
+      "pending": "waiting",
+      "preparing": "preparing",
+      "ready": "ready",
+      "failed": "failed"
+    },
+    "state": {
+      "disabled": "Installing hosts from the server is turned off on this server (install.enabled).",
+      "noBundleTitle": "This server has no installer bundles",
+      "noBundleText": "It is a local build and not a release of the project. Install the host with the manual path, or run a release of myriarchd."
+    },
+    "error": {
+      "localBuild": {
+        "title": "This server is a local build",
+        "text": "A local build has no installer bundle, so it cannot give install commands.",
+        "next": "Use the manual path of the guide “Connect a host”, or run a release of myriarchd."
+      },
+      "serverSettings": {
+        "title": "The server cannot give install commands",
+        "text": "The server refused the request because of its own settings. A common cause is that the client certificates are required (opamp.requireClientCert; installation with mutual TLS but without a token is not supported). Another is that server.publicUrl is missing, is not an https address or has credentials, a query or characters that a command cannot carry.",
+        "next": "Read the message of the server below, ask the operator to correct that setting, or use the manual path of the guide “Connect a host”."
+      },
+      "preparing": {
+        "title": "The installer bundles are being prepared",
+        "text": "The server is fetching and verifying the installer bundles of its release.",
+        "next": "Wait a moment and try again."
+      },
+      "bundleFailed": {
+        "title": "An installer bundle failed",
+        "text": "The server could not prepare the bundle. It tries again after a minute.",
+        "next": "Try again later, or ask the operator to check the connection to install.bundleSourceBaseUrl."
+      },
+      "platformNotSupported": {
+        "title": "A platform is not supported",
+        "text": "This server does not offer an installer for one of the selected platforms.",
+        "next": "Deselect that platform and try again."
+      },
+      "variantNotAvailable": {
+        "title": "This variant is not available",
+        "text": "The variant “lab” (plain http) exists on development servers only.",
+        "next": "Choose “Token in the command” or “Token from a file”."
+      },
+      "disabled": {
+        "title": "Installing hosts from the server is turned off",
+        "text": "The server does not give install commands (install.enabled is false).",
+        "next": "Use the manual path of the guide “Connect a host”."
+      },
+      "conflict": {
+        "title": "The request conflicts with the state of the server",
+        "text": "The state of the server changed while you worked.",
+        "next": "Close the dialog, open it again and repeat the steps."
+      }
     }
   }
 }

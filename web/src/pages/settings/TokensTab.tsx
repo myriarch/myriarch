@@ -9,7 +9,6 @@ import {
   Code,
   Group,
   Modal,
-  SegmentedControl,
   Select,
   Skeleton,
   Stack,
@@ -22,7 +21,13 @@ import {
 } from '@mantine/core';
 import { DateTimePicker } from '@mantine/dates';
 import { useDisclosure } from '@mantine/hooks';
-import { IconAlertTriangle, IconKey, IconPlus, IconTrash } from '@tabler/icons-react';
+import {
+  IconAlertTriangle,
+  IconKey,
+  IconPlus,
+  IconServerCog,
+  IconTrash,
+} from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -35,24 +40,17 @@ import {
   useRevokeApiToken,
   useRevokeEnrollmentToken,
 } from '@/api/hooks/admin';
-import { useSystemInfo } from '@/api/hooks/overview';
 import type { APIToken, EnrollmentToken, Role } from '@/api/types';
 import { useAuth } from '@/auth/useAuth';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { CopyIconButton, CopyTextButton } from '@/components/CopyButton';
+import { AddHostDialog } from '@/components/AddHostDialog';
+import { CopyIconButton } from '@/components/CopyButton';
 import { KeyValueEditor } from '@/components/KeyValueEditor';
 import { rowsToRecord, type KVRow } from '@/components/kv';
 import { SectionCard } from '@/components/SectionCard';
 import { StatusBadge } from '@/components/StatusBadge';
 import { EmptyState, ErrorAlert, ErrorState, NoPermission } from '@/components/states';
 import { DateTime, TimeAgo } from '@/components/TimeAgo';
-import { YamlView } from '@/components/Yaml';
-import {
-  envFileLine,
-  linuxInstallCommand,
-  supervisorSnippet,
-  windowsInstallCommand,
-} from './enrollmentSnippets';
 
 function tokenState(tok: {
   revokedAt?: string;
@@ -84,18 +82,14 @@ function toIso(v: string | null): string | undefined {
 function SecretDialog({
   secret,
   kind,
-  labels,
   onClose,
 }: {
   secret: string | null;
   kind: 'api' | 'enrollment';
-  labels?: Record<string, string>;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const sys = useSystemInfo();
-  const endpoint = sys.data?.opampEndpoint ?? 'wss://fleet.example.com/v1/opamp';
-  const [tab, setTab] = useState<string>('linux');
+  const [addHostOpen, addHost] = useDisclosure(false);
   return (
     <Modal
       opened={secret !== null}
@@ -103,6 +97,8 @@ function SecretDialog({
       title={t('settings.tokens.secretTitle')}
       size="lg"
       closeOnClickOutside={false}
+      // Escape closes the dialog on top only: the secret is shown once and must be confirmed.
+      closeOnEscape={!addHostOpen}
     >
       {secret && (
         <Stack gap="md">
@@ -117,49 +113,26 @@ function SecretDialog({
           </Group>
           {kind === 'enrollment' && (
             <Stack gap="xs">
-              <Text fw={600} fz="sm">
-                {t('settings.tokens.install.title')}
-              </Text>
-              <Text fz="xs" c="dimmed">
-                {t('settings.tokens.install.hint')}
-              </Text>
-              <SegmentedControl
-                size="xs"
-                w="fit-content"
-                value={tab}
-                onChange={setTab}
-                data={[
-                  { value: 'linux', label: 'Linux' },
-                  { value: 'windows', label: 'Windows' },
-                  { value: 'supervisor', label: t('settings.tokens.install.supervisor') },
-                  { value: 'env', label: t('settings.tokens.install.envFile') },
-                ]}
-              />
-              {(() => {
-                const input = { endpoint, secret, labels };
-                const text =
-                  tab === 'linux'
-                    ? linuxInstallCommand(input)
-                    : tab === 'windows'
-                      ? windowsInstallCommand(input)
-                      : tab === 'supervisor'
-                        ? supervisorSnippet(input)
-                        : envFileLine(secret);
-                return (
-                  <Stack gap="xs">
-                    <YamlView value={text} language="plain" lineNumbers={false} maxHeight="260px" />
-                    <Group>
-                      <CopyTextButton text={text} label={t('settings.tokens.install.copy')} />
-                    </Group>
-                  </Stack>
-                );
-              })()}
+              <Text fz="sm">{t('settings.tokens.addHostHint')}</Text>
+              <Group>
+                <Button
+                  variant="light"
+                  size="xs"
+                  leftSection={<IconServerCog size={14} />}
+                  onClick={addHost.open}
+                >
+                  {t('settings.tokens.addHostWithToken')}
+                </Button>
+              </Group>
             </Stack>
           )}
           <Group justify="flex-end">
             <Button onClick={onClose}>{t('settings.tokens.secretDone')}</Button>
           </Group>
         </Stack>
+      )}
+      {secret && kind === 'enrollment' && (
+        <AddHostDialog opened={addHostOpen} onClose={addHost.close} freshToken={secret} />
       )}
     </Modal>
   );
@@ -332,15 +305,14 @@ function ApiTokensSection() {
 function EnrollmentTokensSection() {
   const { t } = useTranslation();
   const { data, isPending, error, refetch } = useEnrollmentTokens();
-  const create = useCreateEnrollmentToken();
+  const create = useCreateEnrollmentToken({ discard: true });
   const revoke = useRevokeEnrollmentToken();
   const [open, dlg] = useDisclosure(false);
   const [name, setName] = useState('');
   const [labels, setLabels] = useState<KVRow[]>([]);
   const [expires, setExpires] = useState<string | null>(null);
-  const [secret, setSecret] = useState<{ value: string; labels: Record<string, string> } | null>(
-    null,
-  );
+  const [secret, setSecret] = useState<string | null>(null);
+  const [addHostOpen, addHost] = useDisclosure(false);
   const [toRevoke, setToRevoke] = useState<EnrollmentToken | null>(null);
 
   const submit = () => {
@@ -353,7 +325,8 @@ function EnrollmentTokensSection() {
       },
       {
         onSuccess: (res) => {
-          setSecret({ value: res.secret, labels: l });
+          setSecret(res.secret);
+          create.reset();
           dlg.close();
           setName('');
           setLabels([]);
@@ -369,9 +342,19 @@ function EnrollmentTokensSection() {
       title={t('settings.tokens.enrollmentTitle')}
       description={t('settings.tokens.enrollmentHint')}
       actions={
-        <Button size="xs" leftSection={<IconPlus size={14} />} onClick={dlg.open}>
-          {t('settings.tokens.create')}
-        </Button>
+        <Group gap="xs">
+          <Button
+            size="xs"
+            variant="default"
+            leftSection={<IconServerCog size={14} />}
+            onClick={addHost.open}
+          >
+            {t('addHost.title')}
+          </Button>
+          <Button size="xs" leftSection={<IconPlus size={14} />} onClick={dlg.open}>
+            {t('settings.tokens.create')}
+          </Button>
+        </Group>
       }
     >
       {isPending ? (
@@ -520,12 +503,8 @@ function EnrollmentTokensSection() {
           </Group>
         </Stack>
       </Modal>
-      <SecretDialog
-        secret={secret?.value ?? null}
-        labels={secret?.labels}
-        kind="enrollment"
-        onClose={() => setSecret(null)}
-      />
+      <AddHostDialog opened={addHostOpen} onClose={addHost.close} />
+      <SecretDialog secret={secret} kind="enrollment" onClose={() => setSecret(null)} />
       <ConfirmDialog
         opened={toRevoke !== null}
         onClose={() => setToRevoke(null)}
