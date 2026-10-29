@@ -56,7 +56,13 @@ The chart renders without the namespace; it uses the namespace of the release.
 | Container mode | `containerMode.enabled` | not available (the volume of the binaries needs a claim per replica) |
 
 The configuration of the collector is not part of the chart: it comes from the Myriarch server (a fleet that matches `site.type`).
-Until it arrives, a fallback configuration with the `health_check` extension runs.
+The chart ships one local file (`healthCheck.enabled`, default on) with the `health_check` extension on `0.0.0.0:13133`, the port of
+the readiness probe. The supervisor merges it in every state, before the configuration from the server, so the pod is Ready
+without an assignment. With an assignment the server wins on conflicts: maps are merged with the server's values last, and
+`service.extensions` is concatenated, so a fleet cannot remove `health_check`, but it can move it. A fleet configuration that sets
+`extensions.health_check.endpoint` to `localhost` or another port makes the pod not Ready; keep it on the pod IP (`0.0.0.0:13133`).
+The fallback configuration is separate and applies only while the server is unreachable at startup; the local file applies always.
+With `healthCheck.enabled: false` the pod is Ready only if the fleet configuration has `health_check` on the pod IP.
 
 ## Pod Security
 
@@ -153,6 +159,7 @@ schema and `values.yaml`; edit `values.schema.source.yaml`, never the schema or 
 | `site.clusterName` | string | `""` | k8s.cluster.name. |
 | `extraEnv` | array | `[]` | Additional environment variables of the main container, in the format of a Kubernetes container. The collector inherits the environment of the supervisor. |
 | `extraEnvFrom` | array | `[]` | Additional environment sources (Secrets, ConfigMaps) of the main container, in the format of a Kubernetes container. |
+| `healthCheck.enabled` | boolean | `true` | Mount the local health configuration. Off means the pod is Ready only if the fleet configuration has health_check on the pod IP. |
 | `ports` | array | see `values.yaml` | The ports of the receivers of the collector configuration: declared on the container, offered by the Service of the StatefulSet and allowed by the NetworkPolicy. The health ports are always declared. |
 | `service.enabled` | boolean | `true` | Create the Service. |
 | `service.type` | enum | `"ClusterIP"` | Service type. |

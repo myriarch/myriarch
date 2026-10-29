@@ -40,6 +40,10 @@ data:
       automatic_config_rollback: true
       # The collector logs to stdout instead of <storage>/agent.log (container logging).
       passthrough_logs: true
+      {{- if .Values.healthCheck.enabled }}
+      # Merged in every state, before the configuration from the server (the opamp extension and the remote configuration follow).
+      config_files: [/etc/myriarch/health.yaml]
+      {{- end }}
       startup_fallback_configs: [/etc/myriarch/fallback.yaml]
       description:
         non_identifying_attributes:
@@ -61,11 +65,22 @@ data:
       endpoint: 0.0.0.0:13134
     telemetry:
       logs: {level: info}
+  {{- if .Values.healthCheck.enabled }}
+  # The health_check extension on the pod IP, so that the readiness probe works whatever the server sends. The supervisor merges
+  # the maps of the configuration from the server over it and concatenates service.extensions, so the server can change the
+  # endpoint of health_check but cannot take the extension away.
+  health.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:{{ include "myriarch-collector.healthPort" . }}
+    service:
+      extensions: [health_check]
+  {{- end }}
   # Active only if, at startup, neither a stored remote configuration nor the server is available.
   fallback.yaml: |
     extensions:
       health_check:
-        endpoint: 0.0.0.0:13133
+        endpoint: 0.0.0.0:{{ include "myriarch-collector.healthPort" . }}
     receivers:
       nop:
     exporters:
@@ -99,7 +114,7 @@ data:
     collector:
       installDir: /var/lib/myriarch/collector
       binaryName: otelcol-contrib
-      healthUrl: http://127.0.0.1:13133/
+      healthUrl: http://127.0.0.1:{{ include "myriarch-collector.healthPort" . }}/
       keepVersions: {{ .Values.containerMode.keepVersions }}
       activation: symlink
     update:
