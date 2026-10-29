@@ -9,7 +9,7 @@ overrides:
   '@vercel/python-analysis>minimatch@<10.2.3': 10.2.3
   js-yaml@>=4.0.0 <4.3.2: 4.3.2
   smol-toml@<1.9.0: 1.9.0
-  undici@<6.0.0: 6.28.1
+  undici@<6.0.0: 6.29.1
 
 importers:
 
@@ -2251,8 +2251,8 @@ packages:
   undici-types@5.26.5:
     resolution: {integrity: sha512-JlCMO+ehdEIKqlFxk6IfVoAUVmgz7cU7zD/h9XZ0qzeosSHmUJVOzSQvvYSYWXkFXC+IfLKSIffhv0sVZup6pA==}
 
-  undici@6.28.1:
-    resolution: {integrity: sha512-zWpdTVD54H48CIybL0rWQ3ukpb9d23wM7eH5RtfdmeP70cWHNjtfo7P4vZX+5CoDcO53J4Pu5uXp7lNfjc6DRA==}
+  undici@6.29.1:
+    resolution: {integrity: sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA==}
     engines: {node: '>=18.17'}
 
   undici@7.30.1:
@@ -2968,7 +2968,7 @@ snapshots:
       is-buffer: 2.0.5
       is-node-process: 1.2.0
       throttleit: 2.1.0
-      undici: 6.28.1
+      undici: 6.29.1
 
   '@vercel/build-utils@14.21.3':
     dependencies:
@@ -3206,7 +3206,7 @@ snapshots:
       ts-morph: 12.0.0
       tsx: 4.21.0
       typescript: 5.9.3
-      undici: 6.28.1
+      undici: 6.29.1
     transitivePeerDependencies:
       - '@emnapi/core'
       - '@emnapi/runtime'
@@ -4650,7 +4650,7 @@ snapshots:
 
   undici-types@5.26.5: {}
 
-  undici@6.28.1: {}
+  undici@6.29.1: {}
 
   undici@7.30.1: {}
 
@@ -4704,7 +4704,7 @@ snapshots:
       luxon: 3.7.2
       sandbox: 4.4.0
       smol-toml: 1.9.0
-      undici: 6.28.1
+      undici: 6.29.1
       uuid: 14.0.1
       zod: 4.1.11
     optionalDependencies:

@@ -28,7 +28,7 @@
       "@vercel/python-analysis>minimatch@<10.2.3": "10.2.3",
       "js-yaml@>=4.0.0 <4.3.2": "4.3.2",
       "smol-toml@<1.9.0": "1.9.0",
-      "undici@<6.0.0": "6.28.1"
+      "undici@<6.0.0": "6.29.1"
     }
   }
 }
