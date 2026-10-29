@@ -14,7 +14,7 @@
 #   2. otelcol-contrib (init) runs "/shared/myriarch-updater copy /otelcol-contrib /shared/": the collector image has no shell
 #      and no cp, so the updater copies the collector binary to the shared volume.
 #   3. opampsupervisor (main container) starts the collector from the shared volume. The configuration of the collector comes
-#      from the Myriarch server over OpAMP; until it arrives, a fallback configuration with the health check runs.
+#      from the Myriarch server over OpAMP; until it arrives, a configuration with the health check runs (see healthCheck).
 # With containerMode.enabled the updater is PID 1 of the main container instead and swaps the collector binary on a volume.
 
 # statefulset: a gateway with a stable identity per replica (PVC). daemonset: one collector per node.
@@ -129,6 +129,15 @@ extraEnv: []
 # Additional environment sources (Secrets, ConfigMaps) of the main container.
 extraEnvFrom: []
 
+# --- Health check -----------------------------------------------------------------------------------
+# Local configuration with the health_check extension on 0.0.0.0:13133 (the port of the readiness probe). The supervisor merges
+# it in every state except the startup fallback (its file has the same endpoint), before the configuration from the server: without an assignment the pod is Ready, and with one the maps of
+# the server win (a fleet can change the endpoint of health_check, but service.extensions is concatenated, so the extension stays).
+# A fleet that moves health_check to localhost makes the pod not Ready. Off: the readiness probe then depends on a configuration
+# from the server that has health_check on the pod IP (or the startup fallback); the fallback configuration applies only while the server is unreachable.
+healthCheck:
+  enabled: true
+
 # --- Ports and Service -----------------------------------------------------------------------------
 # Ports that the collector listens on (the receivers of the configuration from the server), declared on the container, offered by
 # the Service of the StatefulSet and allowed by the NetworkPolicy. The health ports 13133 (collector), 13134 (supervisor) and
@@ -207,21 +216,29 @@ containerMode:
   stopTimeout: 30s
 
 # --- Pod ---------------------------------------------------------------------------------------------
-# Resources of the main container. The supervisor, the collector and, during an update, a second collector for the validation share
-# the limit: set memory_limiter in the configuration of the collector to about 75 % of the memory limit.
+# Resources of the main container. The supervisor, the collector and, during an update or a configuration check, a second collector
+# process (the validation) share the limit. With 512Mi the container was OOM-killed in a test of this chart and did not become Ready;
+# the Quickstart, which runs the same chart with 768Mi, did. The default limit is 1Gi. The collector configuration of the blueprints
+# sets memory_limiter by percentage (limit_percentage, default 75), which the collector takes from the container limit, so a
+# different limit needs no change there.
 resources:
   requests:
     cpu: 100m
-    memory: 256Mi
-  limits:
     memory: 512Mi
-# Resources of the two init containers.
+  limits:
+    memory: 1Gi
+# Resources of the two init containers. The seed container (seed-collector) streams the collector binary (about 400 MB for the contrib
+# distribution) from the image to the "shared" volume. With 256Mi the container was OOM-killed (exit 137) on some pods of a test of this
+# chart. The copy streams the file, so the likely cause is the file cache: the written bytes are charged to the memory of the container
+# until they are written back. The limit therefore has to cover the whole binary, not only the copy process; it equals sharedSizeLimit,
+# which the binary cannot exceed. The request stays small: the init containers run one after the other and before the main container, so
+# only their request is counted for scheduling and it does not add to the pod.
 initResources:
   requests:
     cpu: 10m
     memory: 32Mi
   limits:
-    memory: 256Mi
+    memory: 1Gi
 
 # Seconds for a graceful stop. In container mode the pod gets at least 360, because a running installation may finish its critical
 # section first.

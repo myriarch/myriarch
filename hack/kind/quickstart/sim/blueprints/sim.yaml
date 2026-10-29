@@ -1,0 +1,25 @@
+# Blueprint of the simulated collectors (the simulator validates it against the component list, nothing runs).
+apiVersion: myriarch.dev/v1alpha1
+kind: Blueprint
+metadata:
+  name: sim
+  description: simulated collectors (OTLP, debug exporter)
+spec:
+  config:
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 127.0.0.1:4317
+    processors:
+      batch:
+        timeout: 5s
+    exporters:
+      debug:
+        verbosity: basic
+    service:
+      pipelines:
+        logs:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug]

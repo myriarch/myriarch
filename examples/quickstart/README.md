@@ -13,7 +13,7 @@ replace and a CI pipeline. This directory is tuned for the simulator profile `ex
 ```text
 blueprints/    base, linux-host, windows-host, k8s-gateway (collector configuration templates)
 fleets/        linux-hosts, windows-hosts, k8s-gateway (which agents get which blueprint and collector version)
-policies/      canary-then-all (version rollouts, with maintenance windows), config-canary (config rollouts)
+policies/      canary-then-all (version rollouts), config-canary (config rollouts): demo values
 inventory/     waves (canary wave assignment)
 samples/       sample agents for myrctl (not myriarchd objects)
 ```
@@ -44,21 +44,22 @@ bin/myrctl render --dir examples/quickstart --fleet windows-hosts --sample windo
 
 `make build` creates `bin/myrctl`; `make validate-examples` runs the validation above.
 
-## Rollouts, waves and maintenance windows
+## Rollouts, waves and demo values
 
 * **Waves.** Both policies start with the wave `canary` (hosts with the inventory label `wave=canary`, assigned in
   `inventory/waves.yaml`), then wait for approval in the UI before the `rest` wave follows.
-* **Config rollouts** use `config-canary`: no maintenance windows, so changes show up immediately; a failure rolls
-  the change back.
-* **Version rollouts** use `canary-then-all`: targets may only *start* inside a maintenance window, and a failure
-  pauses the rollout. The policy uses two time zones on purpose:
-  * Monday to Friday 22:00-05:00 in the **site-local time** of each host. The zone comes from the attribute
-    `site.timezone` (for example `Europe/Amsterdam`, which observes daylight saving time); hosts without it use
-    `defaultTimezone` (UTC). The window crosses midnight and belongs to the day it starts on.
-  * Saturday and Sunday around the clock in **UTC**.
-
-  Outside a window targets wait in `waiting_window`. To see version updates without waiting for the evening, point
-  the fleets at `config-canary` for `versionPolicy` in a scratch copy of this directory.
+* **Config rollouts** use `config-canary`, **version rollouts** use `canary-then-all`. A failed configuration rolls back
+  automatically; a failed version update pauses the rollout, because the updater already restored the host.
+* **Demo values.** Both policies are written for a demo, which has to show a rollout within about a minute after you approve
+  the last wave: `healthWait: 30s` (how long a target must stay healthy after it reported success), `maxConcurrent: 0`
+  (every target of a wave at the same time) and no maintenance windows. This repository is the Git source of the
+  [Docker Compose](../../docs/getting-started/docker-compose.md) Quickstart, and the
+  [Kubernetes on kind](../../docs/getting-started/kubernetes-kind.md) Quickstart copies these two policies into its own Git
+  repository, so there is one copy of the demo values. The pages name the duration.
+* **Production-like values** are in `gitops-template/config/policies/`: `healthWait` 2m for a configuration and 5m for a
+  version, `maxConcurrent: 5` and a commented maintenance window in the local time of the site, each with the reason. Do not copy the
+  demo values into a real fleet: a short wait lets a collector that crashes late pass, and no limit lets a bad change reach
+  every host at once. [Rollouts](../../docs/concepts/rollouts.md#health-wait) explains the health wait.
 
 ## From the quickstart to your own repository
 

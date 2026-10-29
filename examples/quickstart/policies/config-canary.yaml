@@ -2,13 +2,14 @@
 # then - after manual approval in the UI - all remaining hosts.
 # A broken config rolls back automatically (onFailure: rollback). A single failure triggers it.
 #
-# No maintenance windows, so configuration changes become visible immediately in the dev environment. For a
-# production variant with windows in local time and UTC see policies/canary-then-all.yaml.
+# DEMO VALUES, like policies/canary-then-all.yaml: healthWait 30s, maxConcurrent 0 (unlimited) and no maintenance windows, so
+# that a configuration change is visible within a minute in the Quickstarts. For production-like values (and the reasons for
+# them) see gitops-template/config/policies/.
 apiVersion: myriarch.dev/v1alpha1
 kind: RolloutPolicy
 metadata:
   name: config-canary
-  description: Config rollout canary -> approval -> rest, rollback on failure, no maintenance windows
+  description: Demo config rollout canary -> approval -> rest, health wait 30s, rollback on failure, no maintenance windows
 spec:
   waves:
     - name: canary
@@ -18,13 +19,11 @@ spec:
     - name: rest
       percent: 100
       requireApproval: true
-  maxConcurrent: 5
-  # How long a target must stay online and healthy after its collector has applied the new configuration. 2m covers the
-  # restart of the collector and the first export attempts with the configuration, and it is a value for real fleets on
-  # purpose, as the 5m of policies/canary-then-all.yaml is for versions. The rollout page shows the time that is left
-  # and names this policy as the source of the wait. A demo that has to finish quickly needs a copy of this policy with
-  # a shorter healthWait (for example 30s); maxConcurrent decides how many hosts wait at the same time.
-  healthWait: 2m
+  maxConcurrent: 0
+  # How long a target must stay online and healthy after its collector has applied the new configuration. The rollout page
+  # shows the time that is left and names this policy as the source of the wait. 30s covers the restart of the collector and
+  # the first export attempts with the configuration in a demo; real fleets use 2m or more (see gitops-template).
+  healthWait: 30s
   applyTimeout: 10m
   failureThreshold:
     maxFailed: 1

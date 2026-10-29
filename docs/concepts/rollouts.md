@@ -132,9 +132,13 @@ the rollout is still working on its current wave.
   policy that sets none, or `0`, waits 60 seconds. A rollout keeps the value of its policy snapshot, so an edit of the
   policy in Git changes neither a rollout that already runs nor its health waits. The wait is a trade-off: a longer wait
   gives a bad change more time to show itself before the rollout goes on, and it makes every round of `maxConcurrent`
-  targets last that much longer. The example policies in
-  [`examples/quickstart/policies/`](../../examples/quickstart/policies/) wait 5 minutes for a version and 2 minutes for a
-  configuration, and their comments say why.
+  targets last that much longer. The two Quickstarts ([Docker Compose](../getting-started/docker-compose.md) and
+  [Kubernetes on kind](../getting-started/kubernetes-kind.md)) use the demo policies in
+  [`examples/quickstart/policies/`](../../examples/quickstart/policies/) with `healthWait: 30s`, `maxConcurrent: 0`
+  (unlimited) and no maintenance windows, so that a rollout is `completed` about a minute after you approve the last wave.
+  Those are demo values. The policies of [`gitops-template/config/policies/`](../../gitops-template/config/policies/) are
+  production-like: `2m` for a configuration, `5m` for a version, and `maxConcurrent: 5`; their comments say why. When a
+  rollout "hangs" in the Quickstart, look at the health wait first: it is the time a target spends in `verifying`.
 - **When it ends.** The engine checks the rule on every tick (`rollouts.tickInterval`, 5 seconds by default, and sooner
   after agent events), so a target finishes up to one tick after its wait has ended. It can take longer when the agent has
   not yet reported the health of the new process: the old process that is stopping and the normal start-up of the new one

@@ -193,33 +193,48 @@ fresh_tree; edit "${HOST}" '        timeout-minutes: 60' '        timeout-minute
 expect_ok "host-e2e: a Windows step timeout exactly 5 minutes below that of the job is fine" run_check "${T}"
 
 fresh_tree; edit "${KIND}" '            .cache/kind/logs/**
-            .cache/kind/diag/**' '            .cache/kind/**'
+            .cache/kind/diag/**' '            .cache/kind/**' 3
 bites "e2e-kind: an upload of the whole work directory is found" 'matches \.cache/kind/values-tokens\.yaml'
 case "${OUT}" in *"helm/config/registry/config.json"*) ok "... together with the registry credentials of Helm" ;; *) fail "the Helm registry credentials are not named: ${OUT}" ;; esac
-fresh_tree; removed_line "${KIND}" '!.cache/kind/**/secrets/**'
+fresh_tree; removed_line "${KIND}" '!.cache/kind/**/secrets/**' 3
 bites "e2e-kind: without the exclusion of secrets/ a secrets directory in the diagnostics is found" 'matches \.cache/kind/diag/20261015T010101/secrets/x'
-fresh_tree; removed_line "${KIND}" '!.cache/kind/**/cookies*'
+# the two uploads are checked one by one: a change to the upload of the job "charts" alone is found as well
+fresh_tree; edit "${KIND}" '          name: e2e-kind-charts-${{ matrix.label }}
+          path: |
+' '          name: e2e-kind-charts-${{ matrix.label }}
+          path: |
+            .cache/kind/values-chart-test.yaml
+'
+bites "e2e-kind: the generated values in the upload of the charts job alone are found" 'matches \.cache/kind/values-chart-test\.yaml'
+fresh_tree; edit "${KIND}" '          name: e2e-kind-charts-${{ matrix.label }}
+          path: |
+' '          name: e2e-kind-charts-${{ matrix.label }}
+          path: |
+            .cache/kind/chart-v0.1.0/**
+'
+bites "e2e-kind: the checkout of the old chart in the upload of the charts job alone is found" 'matches \.cache/kind/chart-v0\.1\.0/deploy/helm/myriarch/values\.yaml'
+fresh_tree; removed_line "${KIND}" '!.cache/kind/**/cookies*' 3
 bites "e2e-kind: without the exclusion of cookie jars a jar in the diagnostics is found" 'matches \.cache/kind/diag/20261015T010101/cookies-main'
-fresh_tree; removed_line "${KIND}" '!.cache/kind/**/kubeconfig*'
+fresh_tree; removed_line "${KIND}" '!.cache/kind/**/kubeconfig*' 3
 bites "e2e-kind: without the exclusion of kubeconfig a kubeconfig in the diagnostics is found" 'matches \.cache/kind/diag/20261015T010101/kubeconfig'
-fresh_tree; removed_line "${KIND}" '!.cache/kind/logs/hygiene-dump/**'
+fresh_tree; removed_line "${KIND}" '!.cache/kind/logs/hygiene-dump/**' 3
 bites "e2e-kind: without the exclusion of the scan dump of the hygiene stage it is found" 'matches \.cache/kind/logs/hygiene-dump/'
 # an extra line counts after the exclusions that come before it: a path that names a secret directly, at the end of the list
 fresh_tree; edit "${KIND}" '            !.cache/kind/**/*.pem
 ' '            !.cache/kind/**/*.pem
             .cache/kind/kubeconfig
-'
+' 3
 bites "e2e-kind: an extra path to the kubeconfig after the exclusions is found" 'matches \.cache/kind/kubeconfig'
 fresh_tree; edit "${KIND}" '            .cache/kind/results.txt
-' ''
+' '' 3
 bites "e2e-kind: an allow-list that lacks the result list is found" 'does not match \.cache/kind/results\.txt'
-fresh_tree; edit "${KIND}" 'if: failure()' 'if: always()'
+fresh_tree; edit "${KIND}" 'if: failure()' 'if: always()' 4
 bites "e2e-kind: an upload for every run is found" 'must run only for a failed job'
-fresh_tree; edit "${KIND}" 'image-var: KIND_NODE_IMAGE' 'image-var: KIND_NODE_IMAGE_OLDEST'
+fresh_tree; edit "${KIND}" 'image-var: KIND_NODE_IMAGE' 'image-var: KIND_NODE_IMAGE_OLDEST' 3
 bites "e2e-kind: a matrix entry whose pin does not exist is found" 'is no pin of hack/kind/versions\.env'
-fresh_tree; edit "${KIND}" 'image-var: KIND_NODE_IMAGE' 'image-var: POSTGRES_IMAGE'
+fresh_tree; edit "${KIND}" 'image-var: KIND_NODE_IMAGE' 'image-var: POSTGRES_IMAGE' 3
 bites "e2e-kind: a pin that is not a node image is found" 'is not a node image pin'
-fresh_tree; edit "${KIND}" '          export KIND_NODE_IMAGE' '          export KIND_NODE_IMAGE=kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5'
+fresh_tree; edit "${KIND}" '          export KIND_NODE_IMAGE' '          export KIND_NODE_IMAGE=kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5' 3
 bites "e2e-kind: an image reference in the workflow is found" 'an image reference does not belong in the workflow'
 fresh_tree; edit "${KIND}" '          make kind-probe' '          docker login ghcr.io
           make kind-probe'
@@ -246,6 +261,24 @@ fresh_tree; edit "${KIND}" '        timeout-minutes: 65' '        timeout-minute
 expect_ok "e2e-kind: a probe timeout exactly 5 minutes below that of the job is fine" run_check "${T}"
 fresh_tree; removed_line "${KIND}" '    timeout-minutes: 75'
 bites "e2e-kind: a job without a timeout is found" 'the job must have one timeout-minutes'
+# the charts job: one timeout of its own, two Kubernetes versions
+fresh_tree; removed_line "${KIND}" 'timeout-minutes: 50'
+bites "e2e-kind: a chart test step without a timeout of its own is found" 'e2e-kind.yml: the step `Run the chart installation test` needs a timeout-minutes of its own'
+fresh_tree; edit "${KIND}" '        timeout-minutes: 50' '        timeout-minutes: 56'
+bites "e2e-kind: a chart test timeout less than 5 minutes below that of the job is found" 'steps that run the test \(56 minutes together\) must stay at least 5 minutes below that of the job \(60 minutes\)'
+fresh_tree; removed_line "${KIND}" 'image-var: KIND_NODE_IMAGE_PREVIOUS'
+bites "e2e-kind: a charts job on one Kubernetes version only is found" 'runs on two Kubernetes versions'
+fresh_tree; removed_line "${KIND}" 'ci/kind-chart-test.sh --fresh'
+bites "e2e-kind: a charts job that does not run the test is found" 'the charts job runs ci/kind-chart-test.sh'
+fresh_tree; removed_line "${KIND}" "      - 'ci/kind-chart-test.sh'"
+bites "e2e-kind: a path filter without the chart test is found" 'path filter of pull requests lacks `ci/kind-chart-test.sh`'
+# the quickstart job: one timeout of its own for the step that runs the script of the page, and the demo policies in the path filter
+fresh_tree; removed_line "${KIND}" 'timeout-minutes: 45'
+bites "e2e-kind: a quickstart step without a timeout of its own is found" 'e2e-kind.yml: the step `Run the Quickstart from the start to the end` needs a timeout-minutes of its own'
+fresh_tree; edit "${KIND}" 'make kind-quickstart-all' 'make kind-quickstart'
+bites "e2e-kind: a quickstart job that does not run the script of the page is found" 'the quickstart job runs make kind-quickstart-all'
+fresh_tree; removed_line "${KIND}" "      - 'examples/quickstart/**'"
+bites "e2e-kind: a path filter without the demo policies of the Quickstart is found" 'path filter of pull requests lacks `examples/quickstart/\*\*`'
 # the path filter of pull requests: a file that only the probe depends on must start it
 fresh_tree; removed_line "${KIND}" "      - 'ci/versions.env'"
 bites "e2e-kind: a path filter without the pins of ci/versions.env is found" 'path filter of pull requests lacks `ci/versions.env`'

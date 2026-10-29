@@ -1,0 +1,24 @@
+# Values of the server chart in the kind Quickstart (hack/kind/quickstart.sh), on top of the Secret myriarch-secrets (database-dsn, git-ssh-key,
+# git-known-hosts) and the image (the release image, or the image of the commit with QUICKSTART_SOURCE=commit). DEMO SETUP ONLY: the Git
+# server and PostgreSQL are the throw-away ones of hack/kind, and the bootstrap admin is the one the chart creates (a one-time token in a Secret).
+config:
+  gitops:
+    enabled: true
+    repoUrl: ssh://git@git.probe-infra.svc:2222/srv/git/fleet.git
+    # a change in Git reaches the server within 10 seconds (the default is 60)
+    pollInterval: 10s
+    auth:
+      sshKeyFile: /etc/myriarchd/secrets/git-ssh-key
+      knownHostsFile: /etc/myriarchd/secrets/git-known-hosts
+  outbound:
+    # the service range of hack/kind/cluster.yaml (the Git server is reached through its Service address)
+    allowedCidrs: [10.96.0.0/16]
+  artifacts:
+    # agents in the cluster download through the Service, not through the public URL
+    agentBaseUrls: ["http://myriarch:8080"]
+    allowInsecureAgentBaseUrls: true
+# One enrollment token per collector release (the chart generates the Secrets myriarch-enrollment-<name>, key "token").
+enrollmentTokens:
+  - {name: kind-gw, labels: {source: quickstart}}
+  - {name: kind-nodes, labels: {source: quickstart}}
+  - {name: kind-sim, labels: {source: quickstart}}

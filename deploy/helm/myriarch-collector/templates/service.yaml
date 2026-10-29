@@ -16,7 +16,7 @@ spec:
     {{- include "myriarch-collector.selectorLabels" . | nindent 4 }}
   ports:
     - name: health
-      port: 13133
+      port: {{ include "myriarch-collector.healthPort" . }}
       targetPort: health
 {{- if .Values.service.enabled }}
 ---

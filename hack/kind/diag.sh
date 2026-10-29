@@ -7,6 +7,7 @@
 #
 #   hack/kind/diag.sh            writes $PROBE_WORK/diag/<timestamp>/ and prints the directory
 #   DIAG_KIND_LOGS=1 ...         also runs `kind export logs` (large)
+#   DIAG_EXTRA_NS="a b" ...      also these namespaces (ci/kind-chart-test.sh)
 #
 # Secrets are never dumped (no `get secret -o`); the Helm values of the myriarch releases carry no secrets (they are passed
 # through Secrets), the values of the Dex demo release do and are left out.
@@ -15,6 +16,15 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 # shellcheck source=hack/kind/lib/api.sh
 . "${KIND_DIR}/lib/api.sh"
+
+# Filter of the per-container report. A container status has no "state" until the kubelet reports one (a pod that is not yet
+# scheduled), so every field is optional: one such pod must not end the report of the namespace.
+CONTAINERS_JQ='.items[] | .metadata.name as $p
+    | ((.status.initContainerStatuses // []) + (.status.containerStatuses // []))[] | .name as $c
+    | [$p, $c, "restarts=\(.restartCount // 0)", "ready=\(.ready // false)",
+       "last=\(.lastState.terminated // {} | "\(.reason // "-") exit=\(.exitCode // "-") at=\(.finishedAt // "-")")",
+       "now=\(.state // {} | keys[0] // "-")"]
+    | join("  ")'
 
 out="${PROBE_WORK}/diag/$(date +%Y%m%dT%H%M%S)"
 mkdir -p "${out}/logs"
@@ -29,15 +39,25 @@ if [ ! -f "${KUBECONFIG}" ] || ! kubectl --context "${KIND_CONTEXT}" get nodes >
 fi
 
 k get nodes,pods,svc,pvc,networkpolicies,deploy,sts,ds,pdb,events -A -o wide > "${out}/cluster.txt" 2>&1
-for ns in "${NS_APP}" "${NS_INFRA}" "${NS_DEX}" "${NS_DEXIDP}" "${NS_OUTSIDE}" kube-system; do
+# DIAG_EXTRA_NS: more namespaces (ci/kind-chart-test.sh), space separated
+# shellcheck disable=SC2086
+for ns in "${NS_APP}" "${NS_INFRA}" "${NS_DEX}" "${NS_DEXIDP}" "${NS_OUTSIDE}" ${DIAG_EXTRA_NS:-} kube-system; do
   k get ns "${ns}" >/dev/null 2>&1 || continue
   kn "${ns}" describe pods > "${out}/describe-${ns}.txt" 2>&1
   for pod in $(kn "${ns}" get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
     kn "${ns}" logs "${pod}" --all-containers --prefix --tail=2000 > "${out}/logs/${ns}-${pod}.log" 2>&1
-    kn "${ns}" logs "${pod}" --all-containers --prefix --previous --tail=500 > "${out}/logs/${ns}-${pod}.previous.log" 2>&1 || rm -f "${out}/logs/${ns}-${pod}.previous.log"
+    # one --previous log per container that restarted (with --all-containers kubectl stops at the first container without one)
+    for ctr in $(kn "${ns}" get pod "${pod}" -o json 2>/dev/null | jq -r '(.status.initContainerStatuses // []) + (.status.containerStatuses // []) | .[] | select(.restartCount > 0) | .name'); do
+      kn "${ns}" logs "${pod}" -c "${ctr}" --previous --tail=500 > "${out}/logs/${ns}-${pod}-${ctr}.previous.log" 2>&1
+    done
   done
+  # per container: restarts, the last termination (reason, exit code), the effective resources; the events of the namespace by time
+  kn "${ns}" get pods -o json 2>/dev/null | jq -r "${CONTAINERS_JQ}" > "${out}/containers-${ns}.txt" 2>&1
+  kn "${ns}" get pods -o json 2>/dev/null | jq -r '.items[] | .metadata.name as $p | (.spec.initContainers // []) + (.spec.containers // []) | .[] | "\($p)/\(.name) resources=\(.resources | tojson)"' > "${out}/resources-${ns}.txt" 2>&1
+  kn "${ns}" get events --sort-by=.lastTimestamp > "${out}/events-${ns}.txt" 2>&1
 done
-for ns in "${NS_APP}" "${NS_DEX}" "${NS_DEXIDP}"; do
+# shellcheck disable=SC2086
+for ns in "${NS_APP}" "${NS_DEX}" "${NS_DEXIDP}" ${DIAG_EXTRA_NS:-}; do
   h list -n "${ns}" > "${out}/helm-list-${ns}.txt" 2>&1
   for rel in $(h list -n "${ns}" -q 2>/dev/null); do
     # the values of the upstream Dex release carry the demo client secret inline: status only
@@ -59,7 +79,7 @@ if [ -f "${API_JAR}" ] && pf_ensure >/dev/null 2>&1 && [ "$(a /auth/me | jq -r '
   a /gitops/status | jq . > "${out}/api-gitops-status.json" 2>&1
   a '/rollouts?limit=50' | jq . > "${out}/api-rollouts.json" 2>&1
   for id in $(a '/rollouts?limit=10' | jq -r '.items[]?.id'); do a "/rollouts/${id}/targets" | jq . > "${out}/api-rollout-${id}-targets.json" 2>&1; done
-  a '/agents?limit=200' | jq '[.items[] | {id, kind, hostname, version, status: .connection.status, healthy: .health.healthy}]' > "${out}/api-agents.json" 2>&1
+  a '/agents?limit=200' | jq '[.items[] | {id, kind, hostname, version, status, healthy}]' > "${out}/api-agents.json" 2>&1
   a /stats/overview | jq . > "${out}/api-stats-overview.json" 2>&1
 else
   echo "no working API session" > "${out}/api-skipped.txt"

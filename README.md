@@ -115,10 +115,12 @@ bin/myrctl render --dir examples/quickstart --fleet windows-hosts --sample windo
 
 ### Kubernetes on your machine
 
-`make kind-probe` builds a local [kind](https://kind.sigs.k8s.io/) cluster from zero, installs the Helm chart and runs
-numbered checks of the whole flow, including a collector version update. It needs Docker. See
-[hack/kind/README.md](hack/kind/README.md). To install the Helm chart on your own cluster, follow
-[Install with Helm](docs/operations/install-helm.md).
+To see Myriarch with the Helm charts of the server and of the collector on a local [kind](https://kind.sigs.k8s.io/)
+cluster, follow [Kubernetes on kind](docs/getting-started/kubernetes-kind.md) (available from v0.2.0, about ten minutes, needs
+Docker): `make kind-quickstart` installs the server, a gateway and a node agent, and the page leads you through the sign-in, a
+first configuration rollout and a first version rollout. `make kind-probe` builds a similar cluster from zero and runs numbered
+checks of the whole flow, including a collector version update; see [hack/kind/README.md](hack/kind/README.md). To install the
+Helm chart on your own cluster, follow [Install with Helm](docs/operations/install-helm.md).
 
 With Docker Compose, [docs/getting-started/docker-compose.md](docs/getting-started/docker-compose.md) starts the server,
 PostgreSQL and 200 simulated collectors from the release images (published with every release candidate and release); the
@@ -194,7 +196,7 @@ parallel. Details: [docs/architecture.md](docs/architecture.md).
 ## Documentation
 
 - [Documentation home](docs/_index.md): map of all sections
-- [Getting started](docs/getting-started/_index.md): from source or with Docker Compose to a running system
+- [Getting started](docs/getting-started/_index.md): from source, with Docker Compose or on a kind cluster to a running system
 - [Concepts](docs/concepts/_index.md): GitOps, agents, blueprints, fleets, inventory, rollouts, executors
 - [Tasks](docs/tasks/_index.md): connect a host, roll out a change, simulate a fleet
 - [Operations](docs/operations/_index.md): installation with Helm, authentication, production checklist, troubleshooting

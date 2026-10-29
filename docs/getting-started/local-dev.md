@@ -105,9 +105,9 @@ bin/myriarchd dev --gitops-dir .dev/gitops-work --data-dir .dev
 call `POST /api/v1/gitops/actions/sync` (next section). The repository layout and the object kinds are explained in
 [GitOps](../concepts/gitops.md).
 
-The example policies contain night-time maintenance windows and long waiting times. In your working copy, shorten them or
-point the fleets at the policy `config-canary` (see the README of the example repository), so that rollouts finish while
-you watch.
+The example policies are demo policies: no maintenance windows, no limit on parallel targets and a health wait of 30
+seconds (`healthWait: 30s`), so that a rollout finishes while you watch. The production-like values are in
+`gitops-template/config/policies/` ([why they differ](../concepts/rollouts.md#health-wait)).
 
 ## Call the REST API
 

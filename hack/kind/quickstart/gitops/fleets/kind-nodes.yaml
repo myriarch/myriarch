@@ -1,0 +1,21 @@
+# The node agents of the kind Quickstart: the collector chart as a DaemonSet (site.type k8s-node is the default of the chart). The
+# version of the collector is the version of the image (executor none); myriarchd manages the configuration only.
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: kind-nodes
+  description: Node agents of the Quickstart (collector chart, DaemonSet), configuration only
+spec:
+  displayName: kind nodes
+  priority: 100
+  selector:
+    matchAttributes:
+      site.type: k8s-node
+  blueprint: kind-collector
+  collector:
+    distribution: otelcol-contrib
+    version: 0.162.0
+  update:
+    executor: none
+  rollout:
+    configPolicy: config-canary

@@ -31,6 +31,8 @@
 #   make tools        build/download the pinned CI tools into .cache/bin (ci/install-tools.sh; TOOLS="helm shellcheck" limits the set)
 #   make kind-up      kind cluster with a local registry (hack/kind/up.sh)
 #   make kind-down    delete the kind cluster (ALL=1 also removes the registry container and the work directory .cache/kind)
+#   make kind-quickstart   Kubernetes Quickstart on kind: cluster, server chart, collector chart (gateway and DaemonSet); QUICKSTART_SOURCE=commit uses the charts and images of this checkout (hack/kind/quickstart.sh, docs/getting-started/kubernetes-kind.md)
+#   make kind-quickstart-smoke / kind-quickstart-rollouts   check the Quickstart / run a first configuration and version rollout through the API
 #   make kind-probe   Kubernetes probe of the whole system on kind from zero: cluster, images, install, numbered checks (hack/kind/probe.sh --fresh; see hack/kind/README.md)
 #   make vulncheck    govulncheck over the release and the devpg build; fails on called vulnerabilities (ci/vulncheck.sh, allowlist ci/vulncheck-allowlist.txt; needs network access)
 #   make secrets-scan gitleaks over an export of HEAD (ci/secrets-scan.sh, configuration .gitleaks.toml; SECRETS_SCAN_WORKTREE=1 scans the work tree)
@@ -65,7 +67,7 @@ SIM_UPDATERS ?= true
 SIM_SERVER   ?= ws://localhost:8080/v1/opamp
 SIM_TOKEN    ?= myre_devtoken_insecure_do_not_use_in_prod
 
-.PHONY: all build test test-race lint fmt web-install web-build web-dev web-gen dev sim e2e docs-gen docs-check license-headers notices licenses-check validate-examples release release-snapshot release-rehearsal ci-test image-crane mirror-image-crane e2e-ui-updates website website-serve website-preview website-check tools kind-up kind-down kind-probe check-local vulncheck secrets-scan clean
+.PHONY: all build test test-race lint fmt web-install web-build web-dev web-gen dev sim e2e docs-gen docs-check license-headers notices licenses-check validate-examples release release-snapshot release-rehearsal ci-test image-crane mirror-image-crane e2e-ui-updates website website-serve website-preview website-check tools kind-up kind-down kind-quickstart kind-quickstart-smoke kind-quickstart-rollouts kind-quickstart-all kind-probe check-local vulncheck secrets-scan clean
 
 all: lint test build
 
@@ -148,6 +150,7 @@ validate-examples:
 	$(GO) run ./cmd/myrctl validate --strict --components examples/sim/components-otelcol-contrib-0.162.0.json examples/quickstart
 	$(GO) run ./cmd/myrctl validate --strict --components examples/sim/components-otelcol-contrib-0.162.0.json gitops-template/config
 	$(GO) run ./cmd/myrctl validate --strict --components examples/sim/components-otelcol-contrib-0.162.0.json hack/kind/gitops
+	hack/kind/quickstart.sh validate
 
 release:
 	@deploy/release/windows-signed.sh clean
@@ -223,6 +226,18 @@ kind-up:
 
 kind-down:
 	hack/kind/down.sh $(if $(ALL),--all,)
+
+kind-quickstart:
+	hack/kind/quickstart.sh up
+
+kind-quickstart-smoke:
+	hack/kind/quickstart.sh smoke
+
+kind-quickstart-rollouts:
+	hack/kind/quickstart.sh rollouts
+
+kind-quickstart-all:
+	hack/kind/quickstart.sh all
 
 kind-probe:
 	hack/kind/probe.sh --fresh

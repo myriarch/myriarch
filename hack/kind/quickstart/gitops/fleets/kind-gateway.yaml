@@ -1,0 +1,27 @@
+# The gateway of the kind Quickstart: the collector chart as a StatefulSet in container mode (site.type k8s-gateway is the default of
+# the chart). Git sets the frame, the UI chooses inside it: the version dialog offers 0.161.0 and 0.162.0, the Quickstart starts on 0.161.0.
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: kind-gateway
+  description: Gateway collectors of the Quickstart (collector chart, StatefulSet, container mode)
+spec:
+  displayName: kind gateway
+  priority: 100
+  selector:
+    matchAttributes:
+      site.type: k8s-gateway
+  blueprint: kind-collector
+  collector:
+    distribution: otelcol-contrib
+    version: 0.161.0
+  update:
+    executor: updater
+    selection:
+      enabled: true
+      versions: ["0.161.0", "0.162.0"]
+      allowDowngrade: false
+      requireReason: false
+  rollout:
+    configPolicy: config-canary
+    versionPolicy: canary-then-all

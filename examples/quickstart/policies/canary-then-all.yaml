@@ -1,13 +1,10 @@
 # Version rollouts: first the wave "canary" (hosts with the inventory label wave=canary, see inventory/waves.yaml),
 # then - after manual approval in the UI - all remaining hosts.
 #
-# Maintenance windows restrict when a target may START its update. Two zones are used on purpose:
-#   * Weekdays 22:00-05:00 in the LOCAL time of the host. The zone comes from the attribute site.timezone (the
-#     attribute named by timezoneAttribute); edge sites report Europe/Amsterdam, a zone with daylight saving time.
-#     The window crosses midnight (end <= start) and belongs to the day it starts on.
-#   * Saturday and Sunday around the clock (00:00-00:00) in UTC, independent of the host zone.
-# Hosts without a site.timezone fall back to defaultTimezone. Outside a window targets stay in "waiting_window",
-# so a version rollout started during the day only begins in the evening.
+# DEMO VALUES. The two Quickstarts (Compose and kind) start from this policy, and a demo has to show a version update within
+# about a minute after the last approval. That is why healthWait is 30s, maxConcurrent is 0 (every target of a wave at the same
+# time) and there are no maintenance windows. gitops-template/config/policies/ has the production-like variant (longer
+# healthWait, a limit on parallel targets and a commented window in local time) with the reasons for each value.
 #
 # onFailure: pause - the myriarch-updater rolls a host back to the previous version itself if the new one does not
 # become healthy. Whether the rest of the fleet is updated anyway is decided by a human afterwards (resume,
@@ -16,7 +13,7 @@ apiVersion: myriarch.dev/v1alpha1
 kind: RolloutPolicy
 metadata:
   name: canary-then-all
-  description: Version rollout canary -> approval -> rest, maintenance windows in local time and UTC, pause on failure
+  description: Demo version rollout canary -> approval -> rest, health wait 30s, no limit on parallel targets, pause on failure
 spec:
   waves:
     - name: canary
@@ -26,29 +23,14 @@ spec:
     - name: rest
       percent: 100
       requireApproval: true
-  maxConcurrent: 5
-  # How long a target must stay online and healthy after its collector has reported the new version. 5m is a value for
-  # real fleets on purpose, and this file is the example of such a policy: a collector that crashes, restarts in a loop
-  # or turns unhealthy within the wait fails its target while the rollout is still in the canary wave, instead of after
-  # the update has reached the rest of the hosts. The rollout page shows the time that is left and names this policy as
-  # the source of the wait. A demo that has to finish quickly needs a copy of this policy: a shorter healthWait (for
-  # example 30s) alone does not do it, because maxConcurrent and the maintenance windows decide how long the rollout
-  # takes as well.
-  healthWait: 5m
+  maxConcurrent: 0
+  # How long a target must stay online and healthy after its collector has reported the new version. The rollout page shows
+  # the time that is left and names this policy as the source of the wait. 30s is a demo value: the Quickstarts finish a
+  # version rollout about a minute after the approval of the last wave. Real fleets want minutes (the production-like policy
+  # uses 5m), so that a collector that crashes or turns unhealthy fails its target while the rollout is still in the canary wave.
+  healthWait: 30s
   applyTimeout: 30m
   offlineGracePeriod: 30m
   failureThreshold:
     maxFailed: 1
   onFailure: pause
-  timezoneAttribute: site.timezone
-  defaultTimezone: UTC
-  maintenanceWindows:
-    # Site-local time (agent zone, for example Europe/Amsterdam with daylight saving time)
-    - days: [Mon, Tue, Wed, Thu, Fri]
-      start: "22:00"
-      end: "05:00"
-    # Weekend: always open, evaluated in UTC
-    - days: [Sat, Sun]
-      start: "00:00"
-      end: "00:00"
-      timezone: UTC

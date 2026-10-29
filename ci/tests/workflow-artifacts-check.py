@@ -112,6 +112,7 @@ POLICY = {
             ".cache/kind/durations.txt",
             ".cache/kind/logs/up.log",
             ".cache/kind/logs/images.log",
+            ".cache/kind/logs/chart-test-steps.log",
             ".cache/kind/logs/pods/myriarch-myriarch-0.log",
             ".cache/kind/diag/20261015T010101/cluster.txt",
             ".cache/kind/diag/20261015T010101/logs/myriarch-myriarch-0.log",
@@ -136,6 +137,10 @@ POLICY = {
             ".cache/kind/trust/trusted_root.json",
             ".cache/kind/helm/config/registry/config.json",
             ".cache/kind/render/deployed-myriarch.myriarchd.yaml",
+            ".cache/kind/secrets/enroll-sts",
+            ".cache/kind/secrets/enroll-helm-test",
+            ".cache/kind/values-chart-test.yaml",
+            ".cache/kind/chart-v0.1.0/deploy/helm/myriarch/values.yaml",
             ".cache/kind/logs/hygiene-dump/helm-myriarch-myriarch.txt",
             ".cache/kind/logs/hygiene-dump/probe-own/probe.log",
             ".cache/kind/diag/20261015T010101/secrets/x",
@@ -164,6 +169,8 @@ KIND_PATHS = [
     "scripts/lib/image-common.sh",
     "scripts/lib/oci_image.py",
     "ci/image-labels.env",
+    "ci/kind-chart-test.sh",
+    "examples/quickstart/**",
     "ci/install-tools.sh",
     "ci/lib.sh",
     "ci/versions.env",
@@ -458,8 +465,20 @@ def check_kind(text, root, findings):
             findings.append("%s: image-var %s is no pin of hack/kind/versions.env, or it has no digest" % (name, v))
     if "make kind-probe" not in text:
         findings.append("%s: the probe runs through make kind-probe" % name)
-    probe_steps = [(number, lines) for number, lines in read_steps(text) if any("make kind-probe" in line for line in step_block(lines, "run"))]
-    check_timeouts(name, text, probe_steps, findings)
+    # each job that runs a test has one timeout of its own and its test steps keep the margin below it
+    jobs = split_jobs(text)
+    for job, command in (("kind", "make kind-probe"), ("charts", "ci/kind-chart-test.sh"), ("quickstart", "make kind-quickstart-all")):
+        if job not in jobs:
+            findings.append("%s: the job `%s` does not exist" % (name, job))
+            continue
+        job_steps = [(number, lines) for number, lines in read_steps(jobs[job]) if any(command in line for line in step_block(lines, "run"))]
+        if job == "charts" and not job_steps:
+            findings.append("%s: the charts job runs ci/kind-chart-test.sh" % name)
+        if job == "quickstart" and not job_steps:
+            findings.append("%s: the quickstart job runs make kind-quickstart-all (the script of the page)" % name)
+        check_timeouts(name, jobs[job], job_steps, findings)
+    if len(re.findall(r"^[ \t]+image-var: KIND_NODE_IMAGE_PREVIOUS$", text, re.M)) != 1 or len(variables) < 3:
+        findings.append("%s: the charts job runs on two Kubernetes versions: its matrix needs the entries KIND_NODE_IMAGE and KIND_NODE_IMAGE_PREVIOUS" % name)
     filter_entries = set(re.findall(r"^[ \t]+- '([^']+)'$", text, re.M))
     for entry in KIND_PATHS:
         if entry not in filter_entries:
@@ -468,6 +487,13 @@ def check_kind(text, root, findings):
         findings.append("%s: HOST_E2E belongs to the host test" % name)
     if "docker login" in text or "docker/login-action" in text:
         findings.append("%s: no registry login (the workflow has no secret)" % name)
+
+
+def split_jobs(text):
+    """The text of every job of the workflow by its name (a key at two spaces of indentation below `jobs:`)."""
+    body = text.split("\njobs:\n", 1)[-1]
+    parts = re.split(r"^  ([A-Za-z0-9_-]+):[ \t]*$", body, flags=re.M)
+    return {parts[i]: parts[i + 1] for i in range(1, len(parts) - 1, 2)}
 
 
 def code_lines(text):

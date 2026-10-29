@@ -127,6 +127,14 @@ true
 {{- default (printf "/var/lib/myriarch/%s" (include "myriarch-collector.fullname" .)) .Values.persistence.hostPath.path -}}
 {{- end -}}
 
+{{- /*
+Port of the health_check extension of the collector: the one source for the container port, the Service, the local health
+configuration, the fallback configuration and the health URL of the updater. The readiness probe uses the container port by name.
+*/ -}}
+{{- define "myriarch-collector.healthPort" -}}
+13133
+{{- end }}
+
 {{/* Path of the collector binary that the supervisor starts */}}
 {{- define "myriarch-collector.collectorExecutable" -}}
 {{- if include "myriarch-collector.containerMode" . -}}

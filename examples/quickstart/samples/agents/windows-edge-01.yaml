@@ -1,5 +1,5 @@
 # Sample agent for "myrctl validate/render" (not a myriarchd object): the first Windows host of edge site 1, with a
-# local time zone that observes daylight saving time (used by the maintenance windows of canary-then-all).
+# local time zone that observes daylight saving time (the production variant of canary-then-all uses it for its maintenance windows).
 name: windows-edge-01
 attributes:
   service.name: otelcol-contrib

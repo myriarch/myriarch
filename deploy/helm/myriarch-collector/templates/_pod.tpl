@@ -103,7 +103,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       ports:
-        - {name: health, containerPort: 13133, protocol: TCP}
+        - {name: health, containerPort: {{ include "myriarch-collector.healthPort" . }}, protocol: TCP}
         - {name: sup-health, containerPort: 13134, protocol: TCP}
         {{- if $container }}
         - {name: updater-health, containerPort: 13135, protocol: TCP}
@@ -129,7 +129,7 @@ spec:
         failureThreshold: 3
       {{- else }}
       # Liveness checks the supervisor (it restarts a crashed collector); readiness checks the collector (health_check extension of
-      # the configuration from the server or of the fallback configuration).
+      # the local health configuration, which is merged before the configuration from the server, or of the fallback configuration).
       livenessProbe:
         httpGet: {path: /health, port: sup-health}
         initialDelaySeconds: 20
@@ -147,6 +147,9 @@ spec:
       volumeMounts:
         - {name: config, mountPath: /etc/opampsupervisor/supervisor.yaml, subPath: supervisor.yaml, readOnly: true}
         - {name: config, mountPath: /etc/myriarch/fallback.yaml, subPath: fallback.yaml, readOnly: true}
+        {{- if .Values.healthCheck.enabled }}
+        - {name: config, mountPath: /etc/myriarch/health.yaml, subPath: health.yaml, readOnly: true}
+        {{- end }}
         {{- if $container }}
         - {name: config, mountPath: /etc/myriarch/updater.yaml, subPath: updater.yaml, readOnly: true}
         - {name: binaries, mountPath: /var/lib/myriarch}

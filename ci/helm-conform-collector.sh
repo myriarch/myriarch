@@ -110,6 +110,9 @@ check_images() {
   expect "${c}" "init container 2: the unchanged collector image runs the updater from the volume" \
     "docker.io/otel/opentelemetry-collector-contrib@${contrib_digest} /shared/myriarch-updater copy /otelcol-contrib /shared/" \
     "$(wl "${c}" '.spec.template.spec.initContainers[1] | [.image, .command[0], .args[0], .args[1], .args[2]] | join(" ")')"
+  # The seed container writes the whole collector binary (about 400 MB) to the shared volume; 256Mi was OOM-killed in a chart test.
+  expect "${c}" "init containers: the memory limit covers the collector binary that the seed container writes (1Gi)" "1Gi 1Gi" \
+    "$(wl "${c}" '.spec.template.spec.initContainers | map(.resources.limits.memory) | join(" ")')"
   expect "${c}" "main container: the unchanged supervisor image" "docker.io/otel/opentelemetry-collector-opampsupervisor@${supervisor_digest}" \
     "$(wl "${c}" '.spec.template.spec.containers[0].image')"
 }
@@ -159,6 +162,14 @@ if run_case default; then
   expect "${c}" "probes: supervisor liveness, collector readiness" "/health sup-health / health" \
     "$(wl ${c} '.spec.template.spec.containers[0] | [.livenessProbe.httpGet.path, .livenessProbe.httpGet.port, .readinessProbe.httpGet.path, .readinessProbe.httpGet.port] | join(" ")')"
   expect "${c}" "grace period" "45" "$(wl ${c} '.spec.template.spec.terminationGracePeriodSeconds')"
+  # The local health file is merged in every state: the endpoint is on the pod IP and on the port of the readiness probe (one source).
+  expect "${c}" "the supervisor merges the local health file first" "/etc/myriarch/health.yaml" \
+    "$(one ${c} ConfigMap '.data["supervisor.yaml"]' | yq '.agent.config_files | join(" ")')"
+  expect "${c}" "the local health file is mounted" "/etc/myriarch/health.yaml" \
+    "$(wl ${c} '.spec.template.spec.containers[0].volumeMounts[] | select(.subPath == "health.yaml") | .mountPath')"
+  expect "${c}" "health.yaml: health_check on the port of the readiness probe" "0.0.0.0:13133 health_check 13133" \
+    "$(one ${c} ConfigMap '.data["health.yaml"]' | yq '.extensions.health_check.endpoint') $(one ${c} ConfigMap '.data["health.yaml"]' | yq '.service.extensions | join(",")') $(wl ${c} '.spec.template.spec.containers[0].ports[] | select(.name == "health") | .containerPort')"
+  expect "${c}" "the fallback file uses the same endpoint" "0.0.0.0:13133" "$(one ${c} ConfigMap '.data["fallback.yaml"]' | yq '.extensions.health_check.endpoint')"
   expect "${c}" "fsGroup is the group of the supervisor image's user (a group, not a user)" "10001" "$(wl ${c} '.spec.template.spec.securityContext.fsGroup')"
   expect "${c}" "the shared volume is read-only for the main container" "true" \
     "$(wl ${c} '.spec.template.spec.containers[0].volumeMounts[] | select(.name == "shared") | .readOnly')"
@@ -193,6 +204,12 @@ if run_case daemonset-hostpath --set mode=daemonset --set persistence.hostPath.e
     "$(wl ${c} '.spec.template.spec.containers[0].volumeMounts[] | select(.name == "node-logs") | .readOnly')"
   expect "${c}" "toleration" "Exists" "$(wl ${c} '.spec.template.spec.tolerations[0].operator')"
   if grep -Eq 'privileged: true' "${out}/${c}.yaml"; then fail_case "${c}" "a privileged container"; fi
+fi
+
+if run_case no-health-file --set healthCheck.enabled=false; then
+  expect no-health-file "no local health file" "null false" \
+    "$(one no-health-file ConfigMap '.data["supervisor.yaml"]' | yq '.agent.config_files') $(one no-health-file ConfigMap '.data | has("health.yaml")')"
+  expect no-health-file "the health file is not mounted" "0" "$(wl no-health-file '[.spec.template.spec.containers[0].volumeMounts[] | select(.subPath == "health.yaml")] | length')"
 fi
 
 # ---------------------------------------------------------------------------------------------------------------------

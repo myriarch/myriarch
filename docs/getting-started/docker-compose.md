@@ -111,6 +111,11 @@ The UI shows what the simulator reports: the fleets, the agents with their confi
 how a change travels through the fleets, continue with [Your first fleet and rollout](first-fleet-and-rollout.md), which
 uses the same dev mode.
 
+A rollout in this setup is quick on purpose. The demo policies wait 30 seconds after a collector reports a change (the
+**health wait**, `healthWait: 30s`), start every target of a wave at once and have no maintenance windows, so a rollout
+is `completed` about 30 seconds after the last wave starts, plus the time that you take to approve the wave `rest`. A
+production-like policy waits minutes; [Rollouts](../concepts/rollouts.md#health-wait) explains the trade-off.
+
 ## Use your own GitOps directory
 
 The server reads the directory `/opt/myriarch/examples/quickstart` of the image. To work on your own copy, copy the example
@@ -138,11 +143,12 @@ QUICKSTART_GITOPS_DIR=/gitops docker compose -f quickstart.yaml -f gitops.yaml u
 The server re-reads the directory every 10 seconds, so an edit in `./gitops` reaches the system without a restart; a change
 of a blueprint or a fleet starts a configuration rollout (see [Roll out a configuration change](../tasks/roll-out-a-config-change.md)).
 The files must be readable by the non-root user of the container: keep them world-readable (mode `0644` for files, `0755`
-for directories). In the example repository all three fleets use the configuration policy `config-canary`, which has no
-maintenance windows: a configuration change rolls out at once, and the wave `rest` waits for your approval. Version
-rollouts use the policy `canary-then-all` with night-time windows; for a version rollout that you want to watch within
-seconds, point `versionPolicy` of your copy at `config-canary` as described in
-[`examples/quickstart/README.md`](../../examples/quickstart/README.md). `myrctl validate` checks the directory before the
+for directories). In the example repository all fleets use demo policies: `config-canary` for a configuration change and
+`canary-then-all` for a version. Both have no maintenance windows, no limit on parallel targets (`maxConcurrent: 0`) and a
+health wait of **30 seconds** (`healthWait: 30s`), the time a target must stay healthy after it reports success. A rollout
+therefore starts at once, the wave `rest` waits for your approval, and a target is `succeeded` about 30 seconds after its
+collector reports the change. These are demo values; production-like ones are in
+[`gitops-template`](../../gitops-template/config/policies/) and explained in [Rollouts](../concepts/rollouts.md#health-wait). `myrctl validate` checks the directory before the
 server does ([Validate a GitOps repository](../tasks/validate-a-gitops-repository.md)).
 
 ## Connect a real collector

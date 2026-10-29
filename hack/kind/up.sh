@@ -8,7 +8,7 @@
 #
 # What it does (idempotent: a second run changes nothing and exits 0):
 #   1. checks that Docker runs (warns below 6 GiB memory or 4 CPUs) and builds/downloads the pinned tools (kind, kubectl,
-#      helm, crane, yq) into .cache/bin;
+#      helm, crane, yq) into .cache/bin (or uses the ones on the PATH, KIND_SYSTEM_TOOLS=1);
 #   2. starts the registry container (default name myriarch-kind-registry, 127.0.0.1:5001) or reuses it; fails clearly if
 #      the port belongs to something else;
 #   3. creates the cluster (one control plane, two workers, fixed pod and service subnets) with its own kubeconfig
@@ -17,6 +17,8 @@
 #      attached to the docker network "kind", ConfigMap local-registry-hosting in kube-public).
 #
 # Environment: KIND_CLUSTER_NAME, KIND_REGISTRY_NAME, KIND_REGISTRY_PORT, KIND_NODE_IMAGE, PROBE_WORK (hack/kind/README.md).
+# KIND_SYSTEM_TOOLS=1 uses the kind, kubectl and helm on the PATH instead of building the pinned ones (the Quickstart of
+# docs/getting-started/kubernetes-kind.md; the pinned versions are the ones tested in CI).
 set -euo pipefail
 # shellcheck source=hack/kind/lib/common.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
@@ -33,7 +35,11 @@ fi
 if [ "${cpus:-0}" -lt 4 ] 2>/dev/null; then warn "Docker has ${cpus} CPUs; the probe wants at least 4"; fi
 
 prepare_work_dirs
-"${ROOT}/ci/install-tools.sh" kind kubectl helm crane yq >&2
+if [ "${KIND_SYSTEM_TOOLS:-0}" = 1 ]; then
+  need_cmd kind kubectl helm
+else
+  "${ROOT}/ci/install-tools.sh" kind kubectl helm crane yq >&2
+fi
 
 # ---- registry ----------------------------------------------------------------------------------------------------
 start_registry() {

@@ -1,0 +1,20 @@
+# Simulated data center collectors (myriarch-sim, group linux-datacenter of examples/sim/small.yaml): configuration only.
+apiVersion: myriarch.dev/v1alpha1
+kind: Fleet
+metadata:
+  name: sim-dc
+  description: simulated data center collectors, configuration only
+spec:
+  displayName: Simulated data center
+  priority: 100
+  selector:
+    matchAttributes:
+      site.type: datacenter
+  blueprint: sim
+  collector:
+    distribution: otelcol-contrib
+    version: 0.162.0
+  update:
+    executor: none
+  rollout:
+    configPolicy: config-canary

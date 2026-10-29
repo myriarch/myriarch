@@ -195,6 +195,17 @@ properties:
       type: object
       additionalProperties: true
 
+  healthCheck:
+    description: >-
+      The local configuration with the health_check extension on 0.0.0.0:13133 that the supervisor merges in every state except the startup fallback, before the
+      configuration from the server. Without it the readiness probe depends on a configuration from the server.
+    type: object
+    additionalProperties: false
+    properties:
+      enabled:
+        description: Mount the local health configuration. Off means the pod is Ready only if the fleet configuration has health_check on the pod IP.
+        type: boolean
+
   ports:
     description: >-
       The ports of the receivers of the collector configuration: declared on the container, offered by the Service of the StatefulSet

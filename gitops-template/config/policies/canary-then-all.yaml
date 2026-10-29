@@ -22,7 +22,15 @@ spec:
     - name: rest
       percent: 100
       requireApproval: true
+  # Production-like values. The Quickstarts (examples/quickstart) use healthWait 30s and maxConcurrent 0 so that a demo finishes
+  # in about a minute; do not copy those into a real fleet.
+  # maxConcurrent limits how many hosts change at the same time, so a bad change reaches 5 hosts at most before the first
+  # failure is seen (0 would mean every host of the wave at once).
   maxConcurrent: 5
+  # How long a target must stay online and healthy after it applied the change. 2m covers the restart of the collector and
+  # the first export attempts; a collector that crashes, restarts in a loop or turns unhealthy within the wait fails its
+  # target while the rollout is still in the canary wave. Every round of maxConcurrent waits this long, so the wait is also
+  # the main part of the duration of a rollout.
   healthWait: 2m
   applyTimeout: 10m
   failureThreshold:
