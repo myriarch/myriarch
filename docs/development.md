@@ -741,7 +741,7 @@ of them need a follow-up commit on the same branch:
 | Ecosystem and directory | Group | What else the update has to change |
 |---|---|---|
 | GitHub Actions: `/` and `/.github/actions/setup` | `github-actions` | Nothing: Dependabot rewrites the SHA and the version comment ([Update an action pin](#update-an-action-pin)) |
-| Go: `/`, the product | `go-modules` | `make notices`: `THIRD_PARTY_NOTICES` lists the version of every linked package, and the `licenses` gate fails on a drift |
+| Go: `/`, the product | `go-modules` | `make notices`: `THIRD_PARTY_NOTICES` lists the version of every linked package, and the `licenses` gate fails on a drift. `golang.org/x/crypto/x509roots/fallback` is a nested module without tags that Dependabot cannot resolve (`ignore` in `dependabot.yml`): raise it by hand with `go get golang.org/x/crypto/x509roots/fallback@latest`, `go mod tidy` and `make notices` |
 | pnpm: `/web` | `web-ui` | `make notices` for the bundled packages. TypeScript majors are held back (`ignore` in `dependabot.yml`) until openapi-typescript and typescript-eslint support TypeScript 7 |
 | pnpm: `/website` | `website` | `website/data/third_party.yaml` for a shipped package and the Mermaid version in `website/config/_default/params.yaml` (`website/scripts/check-notices.py` checks both) |
 | pip: `/assets/brand/source` | `brand-python` | Compare the output of the brand generator (below) |
