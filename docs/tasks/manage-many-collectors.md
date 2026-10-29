@@ -18,8 +18,8 @@ Myriarch is alpha; the [README](../../README.md#status) lists the support level 
 
 The server is one binary that needs PostgreSQL. To try it on your machine, follow [Local development](../getting-started/local-dev.md)
 or [Docker Compose](../getting-started/docker-compose.md); both run the server in development mode with well-known logins, which is
-not a production setup. For a real installation use [Install with Helm](../operations/install-helm.md) (the chart is experimental in
-v0.1.0) and go through the [production checklist](../operations/production-checklist.md).
+not a production setup. For a real installation use [Install with Helm](../operations/install-helm.md) (the chart is beta from
+v0.2.0) and go through the [production checklist](../operations/production-checklist.md).
 
 ## 2. Start a GitOps repository
 
@@ -83,10 +83,10 @@ shows `state: ok` when it has read your repository, and the fleets appear in the
 
 ## 6. Enroll the hosts
 
-Create an enrollment token in the UI (*Settings*, *Tokens*) and run the installation script on each host. The script sets up the
+Create an enrollment token in the UI (*Settings*, *Tokens*). The dialog *Add host* renders the install command for each platform; copy it to the host and run it (the installer runs with `--server` on Linux and `-Server` on Windows). The manual path, with the installation script and its own inputs, is the alternative. The script sets up the
 upstream supervisor, the collector and optionally `myriarch-updater`. The `site.*` options become attributes that your fleet
 selectors match on. [Connect a host](connect-a-host.md) has the inputs and the exact commands; Linux hosts with systemd are beta and
-Windows hosts are experimental in v0.1.0. Collectors in Kubernetes run as pods of the Helm chart `myriarch-collector` with
+Windows hosts are experimental ([levels and tested platforms](../operations/tested-platforms.md)). Collectors in Kubernetes run as pods of the Helm chart `myriarch-collector` with
 unchanged upstream images; see [Install the collector with Helm](../operations/install-collector-helm.md).
 
 ## 7. Change the fleet

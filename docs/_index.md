@@ -55,8 +55,9 @@ Kubernetes, [authentication](operations/authentication.md) (single sign-on, the 
 [production checklist](operations/production-checklist.md) with the security-relevant settings, and
 [troubleshooting](operations/troubleshooting.md).
 
-Guides for upgrades, backup and restore, high availability, monitoring, air-gapped installation and an artifact mirror are
-planned for v0.2.0.
+The operations section also has the [upgrade notes for v0.2.0](operations/upgrade-to-v0-2-0.md) and
+[Support levels and tested platforms](operations/tested-platforms.md). Guides for upgrades in general, backup and restore, monitoring, air-gapped installation and an artifact mirror are
+planned for v0.3.0.
 
 The [security section](security/_index.md) describes the controls of the system: trust boundaries, agent and user
 authentication, artifact verification, outbound connections and network policy. To report a vulnerability, read

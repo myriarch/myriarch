@@ -65,8 +65,8 @@ such as an approval or a version chosen in the UI, is audited with the user and 
 
 ## What are the support levels?
 
-Myriarch is alpha. In the first release, container mode and Linux hosts are beta, Windows hosts are experimental and the Helm
-chart is experimental. The levels and what they mean are in the [roadmap](/project/roadmap/) and in
+Myriarch is alpha. In v0.2.0, container mode, Linux hosts and the server Helm chart are beta; Windows hosts and the collector Helm
+chart are experimental. The levels and what they mean are in the [roadmap](/project/roadmap/) and in
 [ADR-0021](/docs/adr/0021-publication-gates-and-v0-1-0-scope/).
 
 ## Do I need Kubernetes?

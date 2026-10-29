@@ -2,7 +2,7 @@
 
 This roadmap lists what myriarch contains in its first release, what comes next, what is intended for later and what is deliberately not planned. It describes direction, not commitments: items move when contributors, users and upstream projects move. Decisions that shape the roadmap are recorded in the [decision records](docs/adr/README.md), and the current design is in [docs/architecture.md](docs/architecture.md).
 
-Support levels apply to every item. In v0.1.0, container mode and Linux hosts are **beta**, Windows hosts are **experimental**, and the Helm chart is **experimental** ([ADR-0021](docs/adr/0021-publication-gates-and-v0-1-0-scope.md)).
+Support levels apply to every item. In v0.1.0, container mode and Linux hosts are **beta**, Windows hosts are **experimental**, and the Helm chart is **experimental** ([ADR-0021](docs/adr/0021-publication-gates-and-v0-1-0-scope.md)). In v0.2.0, the server chart is **beta**, the collector chart is **experimental**, and the levels of hosts and container mode stay as they are; the table is in [Support levels and tested platforms](docs/operations/tested-platforms.md).
 
 ## Released: v0.1.0 (alpha)
 
@@ -33,12 +33,14 @@ The scope of the first release is fixed by [ADR-0021](docs/adr/0021-publication-
 
 ## Next
 
-**v0.2.0, "Kubernetes-ready"** ([ADR-0021](docs/adr/0021-publication-gates-and-v0-1-0-scope.md))
+**v0.2.0, "Kubernetes-ready"** ([ADR-0021](docs/adr/0021-publication-gates-and-v0-1-0-scope.md)). The upgrade from v0.1.0 is in the [upgrade notes](docs/operations/upgrade-to-v0-2-0.md).
 
-- Publication of the Helm chart as a signed OCI artifact.
-- A quickstart on kind.
-- A chart for the collector.
-- A production Docker Compose setup with TLS and a Git source (the Compose file of v0.1.0 is for evaluation only).
+- Hosts with one command: the server renders the installation command for Linux and Windows hosts, and the installers check the host first.
+- Publication of the server chart as a signed OCI artifact.
+- A chart for the collector, which runs the unchanged upstream images, signed as well.
+- A quickstart on kind, tested on two Kubernetes versions.
+- Protection of OpAMP Bridge agents and a compare-and-set for fleet assignments.
+- A bounded failover of the leader after a hard failure (`ha.leaderSessionTimeout`).
 
 **Version updates on Kubernetes** ([ADR-0026](docs/adr/0026-collector-version-updates-on-kubernetes.md))
 
@@ -53,9 +55,9 @@ The scope of the first release is fixed by [ADR-0021](docs/adr/0021-publication-
 
 - Product name, logo, favicon, primary color and an environment banner set through configuration, served by the server itself without loosening the content security policy. The feature gets its own control audit.
 
-### Documentation
+**v0.3.0** is planned to bring the operations manual:
 
-- Operations guides: upgrades, backup and restore, high availability, monitoring, air-gapped installation and an artifact mirror.
+- Operations guides: upgrades, backup and restore, monitoring, air-gapped installation and an artifact mirror. High availability is documented since v0.2.0.
 
 ## From alpha to beta
 
@@ -69,6 +71,8 @@ Myriarch as a whole stays **alpha** until all of the following hold. The change 
 
 ## Later
 
+- **A production Docker Compose setup with TLS and a Git source.** The Compose file of v0.1.0 is for evaluation only. This was planned for v0.2.0 and is not part of it.
+- **Authenticode signing of the Windows release files** ([ADR-0034](docs/adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Until then they carry the Sigstore signature of the release only.
 - **Pull and merge requests from the UI for other changes**, for example raising a fleet's Git target version (GitLab and GitHub APIs), beyond the Kubernetes image update.
 - **MCP, later stage:** an embedded `/mcp` endpoint with OAuth 2.1 and no token passthrough, and write tools after channel-independent controls exist: four-eyes approval for risky operations across UI, API, CLI and MCP, a distinct audit channel attribute, rate limits, a dry-run mode and a control audit. Wave approvals are never possible through MCP.
 - **Supervisor binary updates** through `myriarch-updater` (package name `opampsupervisor`), and a supervisor-native executor once the upstream supervisor supports packages ([opentelemetry-collector-contrib #47272](https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/47272)).

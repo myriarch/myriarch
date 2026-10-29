@@ -64,8 +64,8 @@ CNCF are trademarks of The Linux Foundation and are named only to describe compa
 
 ## Maturity and support levels
 
-Myriarch as a whole is alpha. In v0.1.0, container mode of `myriarch-updater` and Linux hosts (systemd) are beta, Windows hosts
-are experimental, and the Helm chart is experimental. What the levels mean, and what has to hold before the project calls itself
+Myriarch as a whole is alpha. In v0.2.0, container mode of `myriarch-updater`, Linux hosts (systemd) and the server Helm chart are beta;
+Windows hosts and the collector Helm chart are experimental. What the levels mean, and what has to hold before the project calls itself
 beta, is in the [roadmap](/project/roadmap/#from-alpha-to-beta). Every release is signed keyless and carries build provenance;
 [verify it](/docs/security/verify-releases/) before you run it.
 

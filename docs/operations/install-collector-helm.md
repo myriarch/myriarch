@@ -9,7 +9,8 @@ of your Myriarch server: remote configuration with rollback, health, effective c
 as on a host. The chart runs the **unchanged upstream images**: the OpAMP Supervisor image of the OpenTelemetry project as the
 main container, and the upstream collector (contrib) image to seed the collector binary. The project builds no collector image.
 
-> **Support level.** The collector chart is new in v0.2.0 and experimental, like the server chart. The Kustomize base of v0.1.0
+> **Support level.** The collector chart is new in v0.2.0 and experimental, while the server chart is beta
+> ([Support levels and tested platforms](tested-platforms.md)). The Kustomize base of v0.1.0
 > (`deploy/k8s/collector`) and the combined collector image are deprecated; see [Move from the Kustomize base](#move-from-the-kustomize-base).
 
 ## How the pod works
