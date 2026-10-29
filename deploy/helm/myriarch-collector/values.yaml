@@ -131,10 +131,10 @@ extraEnvFrom: []
 
 # --- Health check -----------------------------------------------------------------------------------
 # Local configuration with the health_check extension on 0.0.0.0:13133 (the port of the readiness probe). The supervisor merges
-# it in every state, before the configuration from the server: without an assignment the pod is Ready, and with one the maps of
+# it in every state except the startup fallback (its file has the same endpoint), before the configuration from the server: without an assignment the pod is Ready, and with one the maps of
 # the server win (a fleet can change the endpoint of health_check, but service.extensions is concatenated, so the extension stays).
 # A fleet that moves health_check to localhost makes the pod not Ready. Off: the readiness probe then depends on a configuration
-# from the server that has health_check on the pod IP; the fallback configuration applies only while the server is unreachable.
+# from the server that has health_check on the pod IP (or the startup fallback); the fallback configuration applies only while the server is unreachable.
 healthCheck:
   enabled: true
 

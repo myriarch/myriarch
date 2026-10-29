@@ -41,7 +41,7 @@ data:
       # The collector logs to stdout instead of <storage>/agent.log (container logging).
       passthrough_logs: true
       {{- if .Values.healthCheck.enabled }}
-      # Merged in every state, before the configuration from the server (the opamp extension and the remote configuration follow).
+      # Merged in every state except the startup fallback (fallback.yaml has the same endpoint), before the configuration from the server (the opamp extension and the remote configuration follow).
       config_files: [/etc/myriarch/health.yaml]
       {{- end }}
       startup_fallback_configs: [/etc/myriarch/fallback.yaml]

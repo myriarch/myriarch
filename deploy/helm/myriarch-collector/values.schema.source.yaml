@@ -197,7 +197,7 @@ properties:
 
   healthCheck:
     description: >-
-      The local configuration with the health_check extension on 0.0.0.0:13133 that the supervisor merges in every state, before the
+      The local configuration with the health_check extension on 0.0.0.0:13133 that the supervisor merges in every state except the startup fallback, before the
       configuration from the server. Without it the readiness probe depends on a configuration from the server.
     type: object
     additionalProperties: false

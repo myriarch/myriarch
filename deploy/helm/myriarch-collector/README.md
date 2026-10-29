@@ -57,12 +57,15 @@ The chart renders without the namespace; it uses the namespace of the release.
 
 The configuration of the collector is not part of the chart: it comes from the Myriarch server (a fleet that matches `site.type`).
 The chart ships one local file (`healthCheck.enabled`, default on) with the `health_check` extension on `0.0.0.0:13133`, the port of
-the readiness probe. The supervisor merges it in every state, before the configuration from the server, so the pod is Ready
-without an assignment. With an assignment the server wins on conflicts: maps are merged with the server's values last, and
+the readiness probe. The supervisor merges it in every state except the startup fallback (whose file carries the same endpoint), before the
+configuration from the server, so the pod is Ready without an assignment. With an assignment the server wins on conflicts: maps are merged with the server's values last, and
 `service.extensions` is concatenated, so a fleet cannot remove `health_check`, but it can move it. A fleet configuration that sets
 `extensions.health_check.endpoint` to `localhost` or another port makes the pod not Ready; keep it on the pod IP (`0.0.0.0:13133`).
-The fallback configuration is separate and applies only while the server is unreachable at startup; the local file applies always.
-With `healthCheck.enabled: false` the pod is Ready only if the fleet configuration has `health_check` on the pod IP.
+The fallback configuration is separate and applies only while the server is unreachable at startup. A fleet configuration must not
+put a second `health_check` instance (`health_check/<name>`) or another extension on port 13133: the collector then fails to start,
+`otelcol validate` does not catch it, and `automatic_config_rollback` reverts the configuration.
+With `healthCheck.enabled: false` the pod is Ready only if the fleet configuration has `health_check` on the pod IP, or while the
+startup fallback runs.
 
 ## Pod Security
 
