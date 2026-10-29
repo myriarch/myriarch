@@ -1,7 +1,7 @@
 ---
 title: "Kubernetes on kind"
 weight: 35
-description: "Start Myriarch on a local kind cluster with the Helm charts: the server, a gateway and a node agent from the collector chart, a first configuration rollout and a first version rollout."
+description: "Run Myriarch on a local kind cluster with Helm: server, gateway and node agent, then a first configuration and version rollout."
 ---
 
 This tutorial starts Myriarch on Kubernetes on your machine in about ten minutes (measured in CI, see
