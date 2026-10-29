@@ -16,7 +16,7 @@ The decisions that a release depends on exist, but nothing joins them yet.
   before the workflow does: build code never runs in a job that holds a write scope, `id-token`, `attestations` or an
   environment, and a `guard` job comes first.
 - [ADR-0034](0034-authenticode-signing-of-windows-release-artifacts.md) defines the Windows signing hook and its acceptance check
-  and allows `v0.1.0` to ship unsigned Windows files under a reviewed exception.
+  and allows `v0.1.0` and `v0.2.0` to ship unsigned Windows files, each under a reviewed exception for exactly that tag.
 - The release build (`deploy/release/goreleaser.yaml`) holds no key and publishes nothing. GoReleaser OSS cannot import prebuilt
   binaries, so the Windows files cannot be signed in the job that packages them without a second build.
 
@@ -104,7 +104,7 @@ Facts about the platform shape the design:
    `latest` tag while the major version is 0. A published tag is never moved: every attempt that needs a change is a new
    candidate, and a defect in a final release is fixed in the next patch release.
 7. **Windows signing slot.** `sign-windows` runs `ci/release/windows-sign-hook.sh` with the mode of
-   `deploy/release/windows-signing.env`; the contract, the acceptance check in the packaging job and the exception for `v0.1.0`
+   `deploy/release/windows-signing.env`; the contract, the acceptance check in the packaging job and the exceptions for `v0.1.0` and `v0.2.0`
    are those of [ADR-0034](0034-authenticode-signing-of-windows-release-artifacts.md). The release workflow holds no secret in
    v0.1.0. A provider adds a scope or a secret line to `ci/workflow-permissions.txt` or `ci/workflow-secrets.txt` for this one
    job; the job, its environment and its place in the graph do not change. A route that gives `sign-windows` `id-token: write` (for

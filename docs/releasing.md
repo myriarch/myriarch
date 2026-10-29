@@ -102,7 +102,7 @@ would sign with another identity (see [Never](#never)).
 `deploy/release/windows-signing.env` holds two settings that the guard reads as data:
 
 - `WINDOWS_SIGNING` is `off`, `signpath` or `kms`. Any other value fails closed.
-- `WINDOWS_UNSIGNED_FINAL_TAG` is empty or names one final tag, for example `v0.1.0`.
+- `WINDOWS_UNSIGNED_FINAL_TAG` is empty or names one final tag, for example `v0.2.0`.
 
 Release candidates may use `off`. A final tag with `WINDOWS_SIGNING=off` passes only when `WINDOWS_UNSIGNED_FINAL_TAG` is exactly
 that tag; an empty value, another tag or a pattern fails. A final tag with `signpath` or `kms` needs no exception. The exception
@@ -283,9 +283,10 @@ release.
      exist yet. Their digests are the ones you check again after the publication (step 8);
    - the summary names the identity `https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/vX.Y.Z-rc.N`
      and the commit you tagged.
-6. **First release only: make all four packages public.** After `push-images` and `push-chart` of the first candidate and before
-   gate 2, an organization owner opens each package (organization `myriarch`, Packages, `myriarch`, `myriarch-updater` and then
-   `charts/myriarch` and `charts/myriarch-collector`, the charts, which exist from v0.2.0-rc.1 on), then
+6. **First release of a package only: make it public.** After `push-images` and `push-chart` of the first release that publishes
+   a package and before gate 2, an organization owner opens each new package (organization `myriarch`, Packages: `myriarch` and
+   `myriarch-updater` since v0.1.0, and `charts/myriarch` and `charts/myriarch-collector`, the charts, which exist from v0.2.0 on;
+   v0.2.0 is therefore the release for which this step is needed, for the two charts), then
    Package settings, "Danger Zone", "Change visibility", Public. This **cannot be undone**. While you are there, check that the
    package is connected to the repository `myriarch/myriarch` and that the repository has Write access in "Manage Actions access".
    `finalize` fails with `ghcr_not_public` until all are public.
@@ -323,8 +324,10 @@ A final release is a normal release and is marked as the latest release when it 
 2. **Windows signing decides before the tag.** A final tag with `WINDOWS_SIGNING=off` and no exception is refused by the guard. Before
    the pull request of step 1 is merged, the maintainers either set `signpath` or `kms` (the signing then has to be set up and
    tested) or review the exception for that one tag, which puts an "unsigned" banner on the release notes. This page does not choose.
-   The state at the time of writing: `WINDOWS_SIGNING=off`, no exception, which is enough for release candidates only.
-3. Follow steps 2 to 11 of [Release a candidate](#release-a-candidate) with the tag `vX.Y.Z`. Step 6 is not needed any more. If the
+   The state at the time of writing: `WINDOWS_SIGNING=off` with the exception for `v0.2.0` (the reviewed pull request "Prepare
+   v0.2.0" sets it, [ADR-0034](adr/0034-authenticode-signing-of-windows-release-artifacts.md) records it). Without an exception,
+   `off` is enough for release candidates only.
+3. Follow steps 2 to 11 of [Release a candidate](#release-a-candidate) with the tag `vX.Y.Z`. Step 6 is not needed any more, except for a package that no release has published before (v0.2.0: the two chart packages). If the
    repository on Artifact Hub exists already, step 10 is skipped: the next scan lists the new version by itself, and the workflow
    runs again only when the metadata file has to change.
 4. A final tag can be used **once**. If a problem shows up after publication, fix it and release `vX.Y.(Z+1)`.

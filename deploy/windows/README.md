@@ -50,7 +50,7 @@ What the start does and what it avoids:
 - `-ExecutionPolicy RemoteSigned` on the command line applies to this one PowerShell process (scope *Process*) and is gone
   when it ends. A Windows client defaults to `Restricted`, which refuses every script, and Windows Server to `RemoteSigned`,
   which refuses a script that carries the Mark of the Web. `RemoteSigned` runs a script that is local and unblocked, and a file
-  that was not unblocked stays blocked. The Windows files of v0.1.0 are not Authenticode-signed.
+  that was not unblocked stays blocked. The Windows files of v0.1.0 and v0.2.0 are not Authenticode-signed.
 - `-NoProfile` keeps the profile scripts of the account out of the elevated process.
 - Do not use `-ExecutionPolicy Bypass`, which switches the check off, and no `Set-ExecutionPolicy` for the machine or the user,
   which stays after the installation and weakens the host for everyone.

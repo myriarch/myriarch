@@ -855,8 +855,8 @@ guidance after each item names what to do.
   second system, so that a leaked token or a compromised CI step cannot sign alone; the release workflow holds no long-lived
   signing secret ([ADR-0034](../adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Release builds accept no PFX
   file any more.
-- **Exception for v0.1.0: unsigned Windows files.** `v0.1.0` ships `myriarch-updater.exe`, `myrctl.exe` and the two PowerShell
-  scripts without Authenticode signatures, under a reviewed exception for exactly that tag; the release notes carry an
+- **Exceptions for v0.1.0 and v0.2.0: unsigned Windows files.** `v0.1.0` and `v0.2.0` ship `myriarch-updater.exe`, `myrctl.exe` and the two PowerShell
+  scripts without Authenticode signatures, each under a reviewed exception for exactly that tag; the release notes carry an
   "unsigned" banner. Release candidates (`vX.Y.Z-rc.N`) may ship the same files unsigned, with the same "unsigned" banner and
   the same verification advice. Residual risk: Windows itself does not tell an operator who built an unsigned file, so integrity rests on
   the Sigstore signature alone. Verify the Windows files with cosign before you run them, starting with `install-windows.ps1`
@@ -864,7 +864,7 @@ guidance after each item names what to do.
   binaries it downloads. Use `Unblock-File` only after that. Hosts with App Control allow the unsigned installer,
   `myriarch-updater.exe`, `myrctl.exe` and `Set-ServiceEnvironment.ps1` by their hashes, one set of rules per release and each
   only after its cosign verification, because there is no publisher to trust; a hash rule for a file that was not verified first trusts whatever the
-  file contains. Signing starts with a later release; a change of publisher resets SmartScreen reputation and breaks publisher
+  file contains. Signing starts with a later release (the exception covers no tag after `v0.2.0`); a change of publisher resets SmartScreen reputation and breaks publisher
   rules that operators wrote, so it is announced in the release notes.
 - **Website deployment uses a team-scoped Vercel token.** The token and the Vercel IDs exist only as secrets of the GitHub
   environments `website-preview` and `website-production`; the build job of `.github/workflows/website.yml`, which runs
