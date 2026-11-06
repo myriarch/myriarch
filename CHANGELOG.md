@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
-## [0.2.0] - 2026-10-30
+## [0.2.0] - 2026-11-07
 
 Upgrading from v0.1.0: read the upgrade notes below first, and [Upgrade from v0.1.0 to v0.2.0](docs/operations/upgrade-to-v0-2-0.md). Changes to security controls are in the section Security.
 
@@ -134,6 +134,10 @@ Upgrading from v0.1.0: read the upgrade notes below first, and [Upgrade from v0.
 - **Helm test and alerting rules.** [Install with Helm](docs/operations/install-helm.md#test-the-installation) and the README of the chart describe `helm test`, the opt-in token, the NetworkPolicy rule and the PrometheusRule, the [troubleshooting page](docs/operations/troubleshooting.md) lists the failures of the test, and the [security model](docs/security/model.md#health-check-and-helm-test) describes the controls.
 - **Installation from the server.** [Server behaviour](docs/design/opamp-server.md#installation-from-the-server) describes the plan, its version rule, its line format and its errors, and the artifact cache section the install grants and the preparation without waiting. [Version selection](docs/design/version-selection.md#where-the-effective-target-applies) names the plan as a consumer of the effective target. The [security model](docs/security/model.md#host-installation-from-the-server) has a new section with the controls and the residual risks, and the sections on token formats, agent authentication, artifact verification and the known limitations mention the grants and the routes. The [production checklist](docs/operations/production-checklist.md) lists the `install` settings. The configuration, environment variable, metrics and API references are generated.
 - **Installer bundles and install commands.** [Server behaviour](docs/design/opamp-server.md#installer-bundles) describes where a bundle comes from, what is verified first, where it is kept, when it is prepared and how it is delivered, and the [commands](docs/design/opamp-server.md#install-commands) with their inputs, the steps of the Linux and the Windows command and what they cannot hide. The [security model](docs/security/model.md#host-installation-from-the-server) has the new controls, the residual risks (trust on first use, the records of typed text, Group Policy and App Control) and a row of the outbound connections for the release source; the [production checklist](docs/operations/production-checklist.md) names `install.bundleSourceBaseUrl`, and the [development guide](docs/development.md) the fixtures and the tests that run the commands.
+
+### Known issues
+
+- **A nightly browser test of updates from the UI fails at one check.** The job `ui-updates` of the `e2e` workflow does not always see the short health-check phase of an update before the update ends. The other checks of the test pass. The job is not part of `ci-ok` or of the tag guard.
 
 ## [0.1.0] - 2026-10-13
 

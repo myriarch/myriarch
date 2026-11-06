@@ -21,7 +21,7 @@
 # FOR EVALUATION ONLY, NOT A PRODUCTION SETUP: myriarchd runs in "dev" mode (well-known logins, insecure cookies, a
 # well-known enrollment token), because "myriarchd serve" refuses an http publicUrl and a directory as GitOps source. The
 # port is published on 127.0.0.1 only. For a real installation use deploy/helm/myriarch with "myriarchd serve" (see
-# docs/operations/install-helm.md); a production Compose setup with TLS and Git is planned for v0.2.0.
+# docs/operations/install-helm.md); a production Compose setup with TLS and Git is planned for a later release.
 #
 # The data directory /var/lib/myriarchd (the artifact cache and the GitOps clone) is on the named volume myriarchd-data. The
 # image is built FROM scratch and runs as the user 65532; it contains the directory with that owner, so Docker initializes
