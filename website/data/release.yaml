@@ -8,5 +8,5 @@
 #
 # Only one of the two is set. Both empty: "No release has been published yet". scripts/check-landing.py checks the format and the chip,
 # scripts/check-seo.py the version in the structured data.
-final: "v0.1.0"
+final: "v0.2.0"
 candidate: ""

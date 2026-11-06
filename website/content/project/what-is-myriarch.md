@@ -7,7 +7,7 @@ description: "Myriarch is an open-source, GitOps-governed fleet manager for Open
 Myriarch is an open-source fleet manager for OpenTelemetry Collectors, built on OpAMP (the Open Agent Management Protocol). Git is
 the source of truth for blueprints, fleets, rollout policies and the allowed collector versions; the web UI and the REST API
 operate within that frame, and every operator action is audited. It is an independent project under the Apache-2.0 license,
-currently **alpha**, and the latest release is **v0.1.0**.
+currently **alpha**, and the latest release is **v0.2.0**.
 
 ## At a glance
 
@@ -18,7 +18,7 @@ currently **alpha**, and the latest release is **v0.1.0**.
 | Size | Designed for around 1,000 collectors, with headroom up to 5,000 (design targets, not measured limits) |
 | License | Apache-2.0 for the code, CC BY 4.0 for the documentation |
 | Maturity | Alpha. Interfaces, configuration and the GitOps format (`myriarch.dev/v1alpha1`) can still change |
-| Latest release | v0.1.0 |
+| Latest release | v0.2.0 |
 | Needs | PostgreSQL for state, events and leader election; no other stateful component |
 | Source | [github.com/myriarch/myriarch](https://github.com/myriarch/myriarch) |
 
