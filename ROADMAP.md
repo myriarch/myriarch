@@ -31,9 +31,9 @@ The scope of the first release is fixed by [ADR-0021](docs/adr/0021-publication-
 
 **Not in v0.1.0:** the signed OCI chart, the kind quickstart and the collector chart (see v0.2.0), a published collector image, a separate image of `myrctl` (the binary is in the release archives and in the server image), the `gitops-pr` executor, and the MCP server.
 
-## Next
+## Released: v0.2.0, "Kubernetes-ready"
 
-**v0.2.0, "Kubernetes-ready"** ([ADR-0021](docs/adr/0021-publication-gates-and-v0-1-0-scope.md)). The upgrade from v0.1.0 is in the [upgrade notes](docs/operations/upgrade-to-v0-2-0.md).
+[ADR-0021](docs/adr/0021-publication-gates-and-v0-1-0-scope.md) names the scope. The upgrade from v0.1.0 is in the [upgrade notes](docs/operations/upgrade-to-v0-2-0.md).
 
 - Hosts with one command: the server renders the installation command for Linux and Windows hosts, and the installers check the host first.
 - Publication of the server chart as a signed OCI artifact.
@@ -41,6 +41,8 @@ The scope of the first release is fixed by [ADR-0021](docs/adr/0021-publication-
 - A quickstart on kind, tested on two Kubernetes versions.
 - Protection of OpAMP Bridge agents and a compare-and-set for fleet assignments.
 - A bounded failover of the leader after a hard failure (`ha.leaderSessionTimeout`).
+
+## Next
 
 **Version updates on Kubernetes** ([ADR-0026](docs/adr/0026-collector-version-updates-on-kubernetes.md))
 
