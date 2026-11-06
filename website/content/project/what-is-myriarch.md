@@ -14,6 +14,7 @@ currently **alpha**, and the latest release is **v0.2.0**.
 | | |
 |---|---|
 | What it is | A server (`myriarchd`) that is an OpAMP server and control plane for OpenTelemetry Collectors, plus the tools `myrctl`, `myriarch-updater` and `myriarch-sim` |
+| Runs on | Linux and Windows hosts through the installers, and Kubernetes with the Helm charts `myriarch` and `myriarch-collector` (signed OCI charts) |
 | For | Operators who run many OpenTelemetry Collectors on Linux and Windows hosts, in containers and on Kubernetes, at edge sites, in data centers and in the cloud |
 | Size | Designed for around 1,000 collectors, with headroom up to 5,000 (design targets, not measured limits) |
 | License | Apache-2.0 for the code, CC BY 4.0 for the documentation |
@@ -65,8 +66,8 @@ CNCF are trademarks of The Linux Foundation and are named only to describe compa
 ## Maturity and support levels
 
 Myriarch as a whole is alpha. In v0.2.0, container mode of `myriarch-updater`, Linux hosts (systemd) and the server Helm chart are beta;
-Windows hosts and the collector Helm chart are experimental. What the levels mean, and what has to hold before the project calls itself
-beta, is in the [roadmap](/project/roadmap/#from-alpha-to-beta). Every release is signed keyless and carries build provenance;
+Windows hosts and the collector Helm chart are experimental. What the levels mean is in [Support levels and tested platforms](/docs/operations/tested-platforms/);
+what has to hold before the project calls itself beta is in the [roadmap](/project/roadmap/#from-alpha-to-beta). Every release is signed keyless and carries build provenance;
 [verify it](/docs/security/verify-releases/) before you run it.
 
 ## Where to go next

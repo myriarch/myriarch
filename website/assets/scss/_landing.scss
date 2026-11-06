@@ -122,6 +122,10 @@ $landing-blush: #fbf6f9;
 .landing-more {
   margin: 1.5rem 0 0;
   font-weight: 600;
+
+  & + & {
+    margin-top: 0.5rem;
+  }
 }
 
 .landing-note {

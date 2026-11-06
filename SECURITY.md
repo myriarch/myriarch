@@ -10,7 +10,7 @@ Please report suspected vulnerabilities **privately**. Do not open a public issu
 
 Please include:
 
-- the affected component (`myriarchd`, `myrctl`, `myriarch-updater`, `myriarch-sim`, the web UI, the Helm chart, the
+- the affected component (`myriarchd`, `myrctl`, `myriarch-updater`, `myriarch-sim`, the web UI, the Helm charts, the
   installers) and the version or commit;
 - a description of the problem and its impact (what an attacker needs and what they gain);
 - how to reproduce it, ideally with a minimal configuration and the smallest input that triggers it;
@@ -35,8 +35,8 @@ a fix needs a coordinated change in an upstream project.
 
 ## Supported versions
 
-myriarch is in alpha. Interfaces and configuration keys may still change. v0.1.0 is the first final release; release
-candidates (`vX.Y.Z-rc.N`) are GitHub pre-releases.
+myriarch is in alpha. Interfaces and configuration keys may still change. Release candidates (`vX.Y.Z-rc.N`) are GitHub
+pre-releases.
 
 | Version | Receives security fixes |
 |---|---|
@@ -46,14 +46,14 @@ candidates (`vX.Y.Z-rc.N`) are GitHub pre-releases.
 | Release candidates (`-rc.N`) | no; a published candidate is never patched (fixes go into the next candidate or release) |
 
 While the major version is 0, a minor release can contain breaking changes; the [changelog](CHANGELOG.md) lists them
-and how to upgrade. The binaries, container images, the Helm chart and the installers of a release share its version
+and how to upgrade. The binaries, container images, the Helm charts and the installers of a release share its version
 number and are fixed together. Vulnerabilities in the OpenTelemetry Collector or the OpAMP Supervisor are fixed
 upstream; the collector versions that hosts run are chosen in your GitOps repository.
 
 ## Scope
 
 In scope is the code in this repository and the artifacts built from it: the server, the CLI, the updater, the
-simulator, the web UI, the Helm chart, the installers and the example deployment files. The development mode
+simulator, the web UI, the Helm charts, the installers and the example deployment files. The development mode
 (`myriarchd dev`) has well-known logins and tokens by design and must not be exposed; reports about the dev credentials
 themselves are not vulnerabilities, but a way to start the dev mode in a production-like setup without noticing is.
 

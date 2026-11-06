@@ -103,7 +103,7 @@ the cluster; myriarch shows it in the inventory and leaves its configuration alo
     and the audit log records the attempt. Restart the workloads through Kubernetes.
   - *Version rollouts:* a Bridge is never a target, not even of a rollout that began before the agent was recognised.
     A Bridge that the fleet configures takes part in config rollouts like a collector. Change a version with `spec.image` of the collector resources in your
-    deployment repository, or with a `gitops-pr` executor in a fleet of collectors.
+    deployment repository. A `gitops-pr` executor for this is on the [roadmap](../../ROADMAP.md#next).
   - *Effective configuration:* the server keeps none for a Bridge, because it holds the complete collector resources.
   - Every action that is held back is an agent event of the type `bridge_locked` and an audit entry
     (`agent.bridge_held_back`) that name the action and the reason. The server writes them once per reason and

@@ -64,7 +64,7 @@ PY
 tree() {
   local d="$1" f
   mkdir -p "${d}/ci/release" "${d}/scripts" "${d}/deploy/release"
-  cp "${ROOT}/ci/check-versions.sh" "${ROOT}/ci/version-copies.py" "${d}/ci/"
+  cp "${ROOT}/ci/check-versions.sh" "${ROOT}/ci/version-copies.py" "${ROOT}/ci/check-stale-versions.py" "${d}/ci/"
   cp "${ROOT}/ci/release/guard.sh" "${d}/ci/release/"
   cp "${ROOT}/scripts/set-version.sh" "${d}/scripts/"
   cp "${ROOT}/deploy/release/windows-signing.env" "${d}/deploy/release/"
@@ -288,6 +288,12 @@ fresh; edit "${W}/api/openapi.yaml" 'version: 0.1.0-rc.1' 'version: 1.0.0-alpha.
 grefuse "a copy (OpenAPI info.version) differs from VERSION" "copy of the version differs" v0.1.0-rc.1 "${sha}"
 fresh; edit "${W}/web/package.json" '"version": "0.1.0-rc.1"' '"version": "0.1.0-rc.0"'; push_main "drifted web version"; sha="$(head_sha)"; tag_annotated v0.1.0-rc.1
 grefuse "a copy (web/package.json) differs from VERSION" "copy of the version differs" v0.1.0-rc.1 "${sha}"
+# a text that still promises the release (ci/check-stale-versions.py): refused for a final tag, passes for an rc of that version
+fresh; final_tree 0.1.0; mkdir -p "${W}/docs"; printf 'The guide is planned for v0.1.0.\n' > "${W}/docs/a.md"; signing off v0.1.0; push_main "stale promise"; sha="$(head_sha)"; tag_annotated v0.1.0
+grefuse "a final tag with a text that still promises the release" "text still promises a release" v0.1.0 "${sha}"
+grep -q 'docs/a.md:1: says "planned for v0.1.0"' <<< "${OUT}" && ok "  and names the file and the line" || fail "  the file and the line are not named"
+fresh; mkdir -p "${W}/docs"; printf 'The guide is planned for v0.1.0.\n' > "${W}/docs/a.md"; push_main "promise ahead"; sha="$(head_sha)"; tag_annotated v0.1.0-rc.1
+gpass "an rc tag passes with the same text: the release is still ahead" v0.1.0-rc.1 "${sha}"
 
 # --- CHANGELOG -----------------------------------------------------------------------------------------------------------------
 fresh; printf '# Changelog\n\n## Unreleased\n\n### Added\n\n## [0.0.1] - 2026-01-01\n\n- Old.\n' > "${W}/CHANGELOG.md"; push_main "empty Unreleased"; sha="$(head_sha)"; tag_annotated v0.1.0-rc.1

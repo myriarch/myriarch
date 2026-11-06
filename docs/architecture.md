@@ -74,7 +74,7 @@ flowchart LR
 | **myriarch-updater** | `cmd/myriarch-updater`, `internal/updater` | Host agent for collector binary updates (systemd, Windows service, container mode in a pod) |
 | **myriarch-sim** | `cmd/myriarch-sim`, `internal/sim` | Load simulator (1,000 or more supervisors and updaters in one process) |
 | Web UI | `web/`, `internal/webui` | React and TypeScript (Vite), embedded with `go:embed` (build tag `embedui`) |
-| Deployment | `deploy/` | Helm chart, Compose file, supervisor configurations, installation scripts, systemd units, Dockerfiles |
+| Deployment | `deploy/` | Helm charts (server and collector), Compose file, supervisor configurations, installation scripts, systemd units, Dockerfiles |
 
 ### Code organization and contracts
 
@@ -249,7 +249,7 @@ The semantics of policies, waves, windows and thresholds are in [Rollouts](conce
 - **N equal replicas** behind a load balancer or ingress with WebSocket support, without session affinity. Every replica serves UI, REST and OpAMP.
 - **State only in PostgreSQL.** Replicas keep connections and caches only.
 - **Fan-out** of pushes to agents goes over the event bus (`LISTEN`/`NOTIFY`, channel `myriarch_events`). The replica that holds the connection performs the push. Losses are tolerable because every agent message is reconciled anyway and the engine ticks periodically.
-- **Leader.** `pg_try_advisory_lock` with the key `ha.leaderLockKey` (default 7012024) on a dedicated session. Leader jobs: GitOps syncer, planner and rollout engine, release tracker, artifact prefetch, the sweeper for offline agents and dead replicas, and housekeeping. If the leader loses its database session, leadership ends at once and another replica takes over within a few seconds. Jobs are supervised and restarted individually with a backoff.
+- **Leader.** `pg_try_advisory_lock` with the key `ha.leaderLockKey` (default 7012024) on a dedicated session. Leader jobs: GitOps syncer, planner and rollout engine, release tracker, artifact prefetch, the sweeper for offline agents and dead replicas, and housekeeping. If the leader loses its database session, leadership ends at once and another replica takes over: within seconds after a clean end of the session, and within `ha.leaderSessionTimeout` (default 30 seconds) after a hard failure of the leader's node ([High availability](operations/high-availability.md)). Jobs are supervised and restarted individually with a backoff.
 - **Operator actions** (pause, approve, ...) go to any replica: conditional updates (`CompareAndSetStatus`) plus a bus event to the leader.
 - **Replica registry.** A heartbeat every 10 seconds (`ha.heartbeatInterval`, at most 10 seconds) into `replicas`; the leader removes replicas that are silent for more than 30 seconds.
 - **PostgreSQL** is external (for example a replicated or managed service), with a direct connection or a pooler in **session** mode. Transaction pooling breaks `LISTEN` and advisory locks ([ADR-0002](adr/0002-postgresql-for-state-event-bus-and-leader-election.md)).

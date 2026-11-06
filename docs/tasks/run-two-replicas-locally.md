@@ -63,7 +63,8 @@ pkill -9 -f 'replica-id replica-a'
 
 The embedded PostgreSQL keeps running after a `kill -9` (on a normal exit replica A would stop it). The database
 connection of replica A closes, PostgreSQL releases the advisory lock, and replica B becomes the leader after a few
-seconds. Check with `system/info` against port 8081. Running rollouts continue under the new leader, because the engine
+seconds. This is the clean case. After a hard failure of the leader's node the failover is bounded by
+`ha.leaderSessionTimeout`; see [High availability](../operations/high-availability.md). Check with `system/info` against port 8081. Running rollouts continue under the new leader, because the engine
 keeps no state between ticks and every step is repeatable.
 
 Then start replica A again as a client of the same database, like replica B:

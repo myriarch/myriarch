@@ -45,7 +45,7 @@ Myriarch closes that gap and keeps operators in control:
 
 ## Status
 
-Myriarch is **alpha**. v0.1.0 is the first final release. Release candidates (`vX.Y.Z-rc.N`) are published as GitHub
+Myriarch is **alpha**. Release candidates (`vX.Y.Z-rc.N`) are published as GitHub
 pre-releases; all releases are on the [releases page](https://github.com/myriarch/myriarch/releases). Interfaces,
 configuration and the GitOps format (`myriarch.dev/v1alpha1`) can still change. Every release, release candidates
 included, is signed keyless and carries build provenance; [verify it](docs/security/verify-releases.md) before you run it.
@@ -120,7 +120,8 @@ cluster, follow [Kubernetes on kind](docs/getting-started/kubernetes-kind.md) (a
 Docker): `make kind-quickstart` installs the server, a gateway and a node agent, and the page leads you through the sign-in, a
 first configuration rollout and a first version rollout. `make kind-probe` builds a similar cluster from zero and runs numbered
 checks of the whole flow, including a collector version update; see [hack/kind/README.md](hack/kind/README.md). To install the
-Helm chart on your own cluster, follow [Install with Helm](docs/operations/install-helm.md).
+Helm charts on your own cluster, follow [Install with Helm](docs/operations/install-helm.md) and
+[Install the collector with Helm](docs/operations/install-collector-helm.md).
 
 With Docker Compose, [docs/getting-started/docker-compose.md](docs/getting-started/docker-compose.md) starts the server,
 PostgreSQL and 200 simulated collectors from the release images (published with every release candidate and release); the
@@ -190,7 +191,7 @@ parallel. Details: [docs/architecture.md](docs/architecture.md).
 | `myrctl` | CLI for the CI pipelines of the GitOps repository (`validate`, `render`); a short alias `myr` is documented in [docs/reference/cli/myrctl.md](docs/reference/cli/myrctl.md) |
 | `myriarch-updater` | Host agent for collector binary updates (systemd, Windows service, container mode) |
 | `myriarch-sim` | Load simulator (1,000 and more simulated supervisors and updaters) |
-| Helm charts | [`deploy/helm/myriarch`](deploy/helm/myriarch/README.md) (the server) and `deploy/helm/myriarch-collector` (collectors on Kubernetes); from v0.2.0 both are also signed OCI charts |
+| Helm charts | [`deploy/helm/myriarch`](deploy/helm/myriarch/README.md) (the server, [installation](docs/operations/install-helm.md)) and [`deploy/helm/myriarch-collector`](deploy/helm/myriarch-collector/README.md) (collectors on Kubernetes, [installation](docs/operations/install-collector-helm.md)); from v0.2.0 both are also signed OCI charts ([verify them](docs/security/verify-releases.md#verify-the-helm-chart)) |
 | Container images | `ghcr.io/myriarch/myriarch` (the server, with `myrctl`, `myriarch-sim` and the example repositories) and `ghcr.io/myriarch/myriarch-updater`, for `linux/amd64` and `linux/arm64`; published with every release, release candidates included (tags `X.Y.Z` and `X.Y`, `X.Y.Z-rc.N` for a candidate, no `latest`). `myrctl` and the simulator are also in the release archives |
 
 ## Documentation
@@ -199,7 +200,7 @@ parallel. Details: [docs/architecture.md](docs/architecture.md).
 - [Getting started](docs/getting-started/_index.md): from source, with Docker Compose or on a kind cluster to a running system
 - [Concepts](docs/concepts/_index.md): GitOps, agents, blueprints, fleets, inventory, rollouts, executors
 - [Tasks](docs/tasks/_index.md): connect a host, roll out a change, simulate a fleet
-- [Operations](docs/operations/_index.md): installation with Helm, authentication, production checklist, troubleshooting
+- [Operations](docs/operations/_index.md): installation with Helm (server and collector), authentication, high availability, upgrade notes, support levels, production checklist, troubleshooting
 - [Reference](docs/reference/_index.md): GitOps schema, command-line reference, [REST API](api/openapi.yaml)
 - [Security model](docs/security/_index.md)
 - [Architecture](docs/architecture.md), [design contracts](docs/design/README.md) and [decision records](docs/adr/README.md)

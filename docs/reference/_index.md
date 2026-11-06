@@ -14,6 +14,7 @@ instruct. For explanations see the [concepts](../concepts/_index.md), for instru
 | [Command line reference](cli/_index.md) | One page per command of `myriarchd`, `myrctl`, `myriarch-updater` and `myriarch-sim`, generated from the commands themselves. |
 | [REST API](api/_index.md) | The management API under `/api/v1`, generated from the OpenAPI 3.1 contract `api/openapi.yaml`: authentication, roles, error format, one page per tag with every operation and its permission, and the data types. |
 | [Helm chart and values](../../deploy/helm/myriarch/README.md) | Installation, profiles, network policy, storage and the configuration values of the chart `myriarch`. |
+| [Collector chart and values](../../deploy/helm/myriarch-collector/README.md) | Modes, Pod Security, OpenShift, container mode and the values of the chart `myriarch-collector`. |
 | [Server configuration](configuration.md) | Every key of the `myriarchd` configuration file with its type, default and effect, generated from the configuration struct and its doc comments. |
 | [Environment variables](environment-variables.md) | The `MYRIARCH_*` overrides of the configuration keys, the other variables the programs read and the variables of the deployment templates. |
 | [Metrics](metrics.md) | The Prometheus metrics of `myriarchd` and `myriarch-sim` with type, labels and help text, and how to reach the endpoint. |
@@ -40,7 +41,8 @@ drift:
 - The values of the Helm chart are checked against a strict schema, `deploy/helm/myriarch/values.schema.json`, which `make docs-gen`
   assembles from a hand-written source and the configuration struct. A test and the `docs` gate fail on drift, and the tests of the
   chart fail when `values.yaml` or a template uses a value that the schema lacks.
-- The Helm chart page is the README of the chart. Generated reference tables for its values are planned.
+- The Helm chart page is the README of the chart. Its table of the values is generated with `make docs-gen` from
+  `values.schema.json` and `values.yaml`.
 
 `myriarchd config print` shows the effective configuration of a file with all defaults, and `myriarchd config validate` checks
 it, see [`myriarchd config validate`](cli/myriarchd_config_validate.md).

@@ -61,8 +61,8 @@ The pins are the source of truth; the list changes when they change.
 
 ## What the results confirm
 
-These lists describe the tests as they are configured. The runs in CI on the release candidate `v0.2.0-rc.1` confirm them
-before the release; the release notes of a version state the levels that apply to it. A test result is a statement about the
+These lists describe the tests as they are configured. The workflows `e2e-kind.yml` and `host-e2e.yml` passed on the tagged
+commit of v0.2.0 before the release; the release notes of a version state the levels that apply to it. A test result is a statement about the
 tested platform, not a promise for others: for example, a Kubernetes version between the two, or another Linux distribution,
 is expected to work but is not covered.
 
@@ -71,4 +71,4 @@ is expected to work but is not covered.
 - [Connect a host](../tasks/connect-a-host.md): the installers and the platforms they support.
 - [Install with Helm](install-helm.md) and [Install the collector with Helm](install-collector-helm.md).
 - [Upgrade from v0.1.0 to v0.2.0](upgrade-to-v0-2-0.md).
-- [Roadmap](../../ROADMAP.md): what comes next and what moves a component to beta.
+- [Roadmap](../../ROADMAP.md): what comes next and what has to hold before the project as a whole is beta.

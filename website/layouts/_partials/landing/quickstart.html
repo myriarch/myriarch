@@ -3,7 +3,8 @@ Copyright The Myriarch Authors
 SPDX-License-Identifier: Apache-2.0
 */ -}}
 {{- /*
-  Quickstart (README.md, "Quickstart"). It will be replaced by the kind or Docker Compose quickstart when those exist.
+  Quickstart (README.md, "Quickstart"), the development mode. The Docker Compose and the kind quickstart are linked below it
+  (data/landing.yaml, key quickstart.also); every link names a page of the site, a missing page fails the build.
   The command block uses Hugo's highlighter, so that the theme's copy button works.
 */ -}}
 {{ $q := hugo.Data.landing.quickstart -}}
@@ -17,6 +18,11 @@ SPDX-License-Identifier: Apache-2.0
       <p>{{ $q.after }}</p>
       <p class="landing-warning"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <span>{{ $q.warning }}</span></p>
       <p class="landing-more"><a href="{{ $more.RelPermalink }}">{{ $q.link_label }} <span aria-hidden="true">&rarr;</span></a></p>
+      {{ range $q.also -}}
+        {{ $page := site.GetPage (path.Clean (strings.TrimSuffix ".md" .link)) -}}
+        {{ if not $page }}{{ errorf "landing: the link %q of the quickstart names no page of the site" .link }}{{ end -}}
+        <p class="landing-more"><a href="{{ $page.RelPermalink }}">{{ .label }} <span aria-hidden="true">&rarr;</span></a></p>
+      {{ end -}}
     </div>
     <div class="landing-code">
       {{ transform.Highlight (strings.TrimSpace $q.commands) "bash" "" }}

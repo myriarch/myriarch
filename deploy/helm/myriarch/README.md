@@ -4,6 +4,7 @@ Runs myriarchd (the myriarch server) with high availability: `replicas: 2` (all 
 singleton jobs run on the leader elected through a PostgreSQL advisory lock), a Service (8080 HTTP/UI/REST/OpAMP, 9090
 metrics), a PodDisruptionBudget, a NetworkPolicy, a ConfigMap with `myriarchd.yaml`, and secrets mounted as files.
 Access from outside the cluster is optional: Gateway API `HTTPRoute` (recommended), `Ingress`, or an OpenShift `Route`.
+Failover and shutdown timing are in [High availability](../../../docs/operations/high-availability.md).
 
 The chart installs with its defaults, never starts the dev mode and has a login without an enterprise identity provider
 (the bootstrap admin). Single sign-on with any OpenID Connect provider is a configuration change:

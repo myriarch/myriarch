@@ -155,4 +155,4 @@ if you like it: `alias myr=myrctl` in POSIX shells, `Set-Alias myr myrctl` in Po
 - [Connect a real supervisor](../tasks/connect-a-real-supervisor.md): a real OpAMP Supervisor and `otelcol-contrib` on your machine.
 - [Development guide](../development.md): tests, the end-to-end suite and the other checks that run before a commit.
 - [Troubleshooting](../operations/troubleshooting.md) when something does not behave as described.
-- Kubernetes: the kind probe in [hack/kind/README.md](../../hack/kind/README.md) installs the Helm chart into a local cluster.
+- Kubernetes: [Kubernetes on kind](kubernetes-kind.md) installs both Helm charts into a local cluster.

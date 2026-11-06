@@ -1,7 +1,7 @@
 ---
 title: "Connect a host"
 weight: 10
-description: "Enroll a Linux or Windows host with the installation scripts: the inputs they need, the exact commands and what to do when the installer stops."
+description: "Enroll a Linux or Windows host, with one command from the server or with the installation scripts: the inputs, the commands, what to do when it stops."
 ---
 
 A managed host runs three pieces: the upstream **OpAMP Supervisor** (the service `otelcol-supervisor`), the **collector**
@@ -69,7 +69,7 @@ The dialog explains what it cannot do:
 
 ## One command: install a Linux host from the server
 
-*Available from v0.2.0 (Linux, amd64 and arm64). The Windows command follows.* A fresh Linux host gets the collector, the
+*Available from v0.2.0 (Linux, amd64 and arm64). For Windows see [below](#one-command-install-a-windows-host-from-the-server).* A fresh Linux host gets the collector, the
 supervisor and, when the fleet uses the updater, the `myriarch-updater` with one command. The server knows what the fleet
 targets, so you name neither a version nor an endpoint.
 
@@ -251,8 +251,8 @@ use the command; the installer there also takes `-Server` when you run it from a
 The steps below are the manual path. They stay supported for sites that cannot accept the trust on first use of the pinned hash, and
 for hosts that the dialog cannot serve.
 
-The manual path describes the installers of the release v0.1.0; what the installers of v0.2.0 do differently is marked *from
-v0.2.0* (they check the host before they change anything, see [When the installer stops](#when-the-installer-stops), and on Linux
+The manual path describes the installers of the latest release; what they do differently from the installers of v0.1.0 is
+marked *from v0.2.0* (they check the host before they change anything, see [When the installer stops](#when-the-installer-stops), and on Linux
 the collector version has a default; on Windows the collector version stays required without the server). Steps 1 to 3 are the same on both systems: [create an enrollment token](#1-create-an-enrollment-token), [download and verify the
 installer](#2-download-and-verify-the-installer) and
 [choose how the host verifies downloads](#3-choose-how-the-host-verifies-downloads). Step 4 [installs on
@@ -267,7 +267,7 @@ result](#6-check-the-result).
 | Enrollment token | `--token-file` | `-TokenFile` | [Step 1](#1-create-an-enrollment-token). `--token` and `-Token` exist too, but an argument shows up in the process list |
 | Site type and ID | `--site-type`, `--site-id` | `-SiteType`, `-SiteId` | You choose them; the selectors of your fleets match on them (below) |
 | **Collector version** | `--collector-version` | `-CollectorVersion` | Without `v`: the version of `otelcol-contrib` to install, for example `0.162.0` (below). **Required** on Windows; `install-linux.sh` of v0.2.0 installs the version its release was tested with when you leave it out, and `latest` asks GitHub for the newest |
-| Installer release | none | none | The myriarch release whose archive you unpack, for example `0.1.0` ([step 2](#2-download-and-verify-the-installer)) |
+| Installer release | none | none | The myriarch release whose archive you unpack, for example `0.2.0` ([step 2](#2-download-and-verify-the-installer)) |
 | Sigstore verifier | `--verifier` (or `--with-updater` with `--updater-sha256`) | `-Verifier` (or `-WithUpdater` with `-UpdaterSha256`) | [Step 3](#3-choose-how-the-host-verifies-downloads) |
 | Updater (optional) | `--with-updater`, `--updater-url` and a hash source | `-WithUpdater`, `-UpdaterUrl` and a hash source | [Step 3](#3-choose-how-the-host-verifies-downloads) and the commands of step 4 or 5 |
 | Sigstore trusted root (optional) | `--trusted-root` | `-TrustedRoot` | Only for a host that cannot reach the Sigstore TUF repository (below): a `trusted_root.json` that you fetched on a connected machine |
@@ -361,7 +361,7 @@ On a host that cannot reach the Sigstore TUF repository, add `--trusted-root tru
 `/usr/local/bin/cosign`; a `cosign` in a home directory is not:
 
 ```bash
-VERSION=0.1.0                  # the myriarch release, without the "v"
+VERSION=0.2.0                  # the myriarch release, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
 ARCH=amd64                     # or arm64 (uname -m: x86_64 or aarch64)
 BASE="https://github.com/myriarch/myriarch/releases/download/v${VERSION}"
 SETUP=/root/myriarch-setup
@@ -390,7 +390,7 @@ the first failure too: a `throw` ends the whole block, so a failed check is neve
 that runs a pasted text line by line:
 
 ```powershell
-$Version = '0.1.0'       # the myriarch release, without the "v"
+$Version = '0.2.0'       # the myriarch release, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
 $Arch    = 'amd64'
 $Base    = "https://github.com/myriarch/myriarch/releases/download/v$Version"
 $Zip     = "myriarch-updater_${Version}_windows_${Arch}.zip"

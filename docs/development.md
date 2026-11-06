@@ -273,7 +273,7 @@ make docs-check                                   # when you touched documentati
 
 | Gate | What it runs |
 |---|---|
-| `go` | `go build ./...` with and without the `devpg` tag, vet for Windows and macOS, `ci/lint-go.sh` (go mod verify, vet, gofmt), the version check (`ci/check-versions.sh`: `VERSION` and its copies agree, see [Releasing](releasing.md#one-version-source)), the release dependency check and the license check |
+| `go` | `go build ./...` with and without the `devpg` tag, vet for Windows and macOS, `ci/lint-go.sh` (go mod verify, vet, gofmt), the version check (`ci/check-versions.sh`: `VERSION` and its copies agree, and no text promises a version that `VERSION` has reached, see [Releasing](releasing.md#one-version-source)), the release dependency check and the license check |
 | `go-test` | `go test -race -count=1 ./...`, the tagged tests of `internal/devpg` and the render budget test of `internal/blueprint` in a run of its own without `-race` (`GO_TEST_RACE=0` drops `-race`, `GO_TEST_DEVPG=0` leaves out the `devpg` tests, `GO_TEST_PERF=0` leaves out the budget test) |
 | `web` | `pnpm install --frozen-lockfile`, a check that `web/src/api/schema.d.ts` matches `pnpm gen:api`, typecheck, lint, the formatting check (`pnpm format:check`; `pnpm format` fixes it), tests and the production build |
 | `build` | `make build` |
@@ -641,7 +641,7 @@ each with its SHA-256 (`checksum_mismatch`); only then it reads the one member t
 regular file of at most 512 MiB, and nothing else (`archive_invalid`), and scans it with `govulncheck -mode binary -scan module`. The
 programs are not run. Every download has a size limit (`curl --max-filesize`: 1 MiB for `checksums.txt` and its bundle, 200 MiB for an
 archive; a file above it is `download_failed` and not retried), and the signed list may name 64 archives at most (`no_archives`). Run it
-yourself with the pinned tools (it needs network access and downloads the 16 archives of v0.1.0, 120 MB):
+yourself with the pinned tools (it needs network access and downloads the 16 archives of the release, about 120 MB):
 
 ```bash
 ci/install-tools.sh cosign govulncheck
@@ -1585,11 +1585,11 @@ params:
   placeholder:
     tracking: "operations-manual"
     replaces: "docs/operations/upgrade.md"
-    planned: "v0.2.0"
+    planned: "v0.3.0"
 ---
 ```
 
-The body is a single call of the `placeholder` shortcode (copy an existing placeholder page), which renders the notice and links to the closest existing pages. The file is `website/content/docs/operations/upgrade.md`. The tracking value is never rendered; it is a lowercase topic slug (`operations-manual`) or a GitHub issue reference, which must be quoted (`"#123"`; an unquoted `#` starts a YAML comment). An optional `planned: "v0.2.0"` under `placeholder` makes the notice say
+The body is a single call of the `placeholder` shortcode (copy an existing placeholder page), which renders the notice and links to the closest existing pages. The file is `website/content/docs/operations/upgrade.md`. The tracking value is never rendered; it is a lowercase topic slug (`operations-manual`) or a GitHub issue reference, which must be quoted (`"#123"`; an unquoted `#` starts a YAML comment). An optional `planned: "v0.3.0"` under `placeholder` makes the notice say
 that the page is planned for that release; without it the notice makes no promise. When the real page is
 added to `docs/`, the placeholder must be deleted in the same change: `website/scripts/check-placeholders.py` fails otherwise,
 so two pages for one URL cannot exist.

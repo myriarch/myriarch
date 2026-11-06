@@ -15,7 +15,7 @@ where it is going, how it is run, how to take part and how it is built. The prod
 {{< /cardpane >}}
 
 {{< cardpane >}}
-{{< card title="[Roadmap](/project/roadmap/)" >}}What the first release contains, what comes next and what is not planned.{{< /card >}}
+{{< card title="[Roadmap](/project/roadmap/)" >}}What the released versions contain, what comes next and what is not planned.{{< /card >}}
 {{< card title="[Release notes](/project/changelog/)" >}}Notable changes of every release.{{< /card >}}
 {{< card title="[Upstream notes](/docs/design/upstream-notes/)" >}}Verified facts about the software Myriarch builds on, with sources and dates.{{< /card >}}
 {{< /cardpane >}}

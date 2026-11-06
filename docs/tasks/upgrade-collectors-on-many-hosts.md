@@ -31,7 +31,8 @@ many versions and hand-made update procedures.
 
 The executor is `spec.update.executor` of the fleet. On Kubernetes, where the version is part of the image, a pipeline changes it
 through the `webhook` executor, or container mode lets the updater swap the binary in the pod (container mode is beta). A
-`gitops-pr` executor that opens a merge request for the image bump is planned and not part of v0.1.0 ([roadmap](../../ROADMAP.md)).
+`gitops-pr` executor that opens a merge request for the image bump is planned and not part of a release yet
+([roadmap](../../ROADMAP.md#next)).
 See [Executors](../concepts/executors.md).
 
 ## 2. Set the target version
