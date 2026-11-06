@@ -44,22 +44,34 @@ The scope of the first release is fixed by [ADR-0021](docs/adr/0021-publication-
 
 ## Next
 
-**Version updates on Kubernetes** ([ADR-0026](docs/adr/0026-collector-version-updates-on-kubernetes.md))
+The order of the next four versions is recorded in [ADR-0048](docs/adr/0048-release-scope-of-v0-3-0-to-v0-6-0.md). It names no dates: what is not finished when a version is cut moves to the next one.
 
-- The `gitops-pr` executor: an update opens a pull or merge request in the deployment repository that bumps the collector image. Completion is still decided by the version the agent reports.
-- Container mode stays an explicit opt-in for air-gapped and edge clusters.
+### v0.3.0, "Operations and updates on Kubernetes"
 
-**MCP access, stage 1** ([ADR-0027](docs/adr/0027-mcp-principles.md))
+- **A tested upgrade path.** The upgrade from the previous minor version to the release candidate is tested automatically, on kind and on a Linux host. Windows is not part of it.
+- **The operations manual:** upgrades, backup and restore, monitoring, air-gapped installation and an artifact mirror. High availability is documented since v0.2.0.
+- **Version updates on Kubernetes** ([ADR-0026](docs/adr/0026-collector-version-updates-on-kubernetes.md)). The `gitops-pr` executor: an update opens a pull or merge request in the deployment repository that bumps the collector image. Completion is still decided by the version the agent reports. Container mode stays an explicit opt-in for air-gapped and edge clusters.
+- The Windows files of v0.3.0 are planned to ship without an Authenticode signature, under a new, reviewed exception for this tag ([ADR-0034](docs/adr/0034-authenticode-signing-of-windows-release-artifacts.md), [ADR-0048](docs/adr/0048-release-scope-of-v0-3-0-to-v0-6-0.md)); see Authenticode signing under "Later".
 
-- A separate binary `myriarch-mcp` over stdio, read-only, authenticated with a personal API token that has a dedicated `mcp` purpose and acting strictly as the token owner. A design record with the tool catalog comes with the implementation.
+### v0.4.0, "Easy to start"
 
-**Runtime branding** ([ADR-0022](docs/adr/0022-white-label-and-neutral-examples.md))
+- **First-time setup in the web UI:** a guided path from the first sign-in to the first connected host, empty pages with help, and error messages that name the next step.
+- **Installation for production:** Docker Compose with TLS, PostgreSQL and a Git source, tested in CI; a Helm profile for production that CI installs; a hardening guide; and a start page "first host in 15 minutes" whose commands run in CI.
+- **The documentation split** into a user manual and an administrator manual.
 
-- Product name, logo, favicon, primary color and an environment banner set through configuration, served by the server itself without loosening the content security policy. The feature gets its own control audit.
+### v0.5.0, "Run it in your organization"
 
-**v0.3.0** is planned to bring the operations manual:
+- A role for fleet operators.
+- Denied accesses in the audit log, and an export of audit data to a SIEM.
+- Published support and deprecation rules, and a security overview.
 
-- Operations guides: upgrades, backup and restore, monitoring, air-gapped installation and an artifact mirror. High availability is documented since v0.2.0.
+### v0.6.0, "Preparing beta"
+
+- **The GitOps format `myriarch.dev/v1beta1`** with a documented migration from `v1alpha1`.
+- **Runtime branding** ([ADR-0022](docs/adr/0022-white-label-and-neutral-examples.md)): product name, logo, favicon, primary color and an environment banner set through configuration, served by the server itself without loosening the content security policy. The feature gets its own control audit.
+- **An "Enterprise readiness" page** and a check of the conditions in "From alpha to beta".
+
+MCP access, stage 1 follows v0.6.0 (see "Later"). The change to beta is not promised by this order: the conditions below stay as they are, and two of them, real hosts and feedback from users, depend on no version.
 
 ## From alpha to beta
 
@@ -73,7 +85,7 @@ Myriarch as a whole stays **alpha** until all of the following hold. The change 
 
 ## Later
 
-- **A production Docker Compose setup with TLS and a Git source.** The Compose file is for evaluation only. A production setup was moved out of v0.2.0 and has no release yet.
+- **MCP access, stage 1, after v0.6.0** ([ADR-0027](docs/adr/0027-mcp-principles.md)). A separate binary `myriarch-mcp` over stdio, read-only, authenticated with a personal API token that has a dedicated `mcp` purpose and acting strictly as the token owner. A design record with the tool catalog comes with the implementation.
 - **Authenticode signing of the Windows release files** ([ADR-0034](docs/adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Until then they carry the Sigstore signature of the release only.
 - **Pull and merge requests from the UI for other changes**, for example raising a fleet's Git target version (GitLab and GitHub APIs), beyond the Kubernetes image update.
 - **MCP, later stage:** an embedded `/mcp` endpoint with OAuth 2.1 and no token passthrough, and write tools after channel-independent controls exist: four-eyes approval for risky operations across UI, API, CLI and MCP, a distinct audit channel attribute, rate limits, a dry-run mode and a control audit. Wave approvals are never possible through MCP.
