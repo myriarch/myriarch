@@ -99,9 +99,10 @@ the [third-party notices](/legal/third-party/) of this website.
 
 ## How can I contribute?
 
-Read [Contributing](/project/contributing/). Every commit carries a `Signed-off-by:` line that certifies the Developer
+Read [Contributing](/project/contributing/). Every commit of a contributor carries a `Signed-off-by:` line that certifies the Developer
 Certificate of Origin; the project uses the DCO and no contributor license agreement
-([ADR-0019](/docs/adr/0019-developer-certificate-of-origin/)). The [contributor ladder](/project/contributor-ladder/) describes
+([ADR-0019](/docs/adr/0019-developer-certificate-of-origin/)). The one exception is the project's machine account
+([ADR-0049](/docs/adr/0049-sign-off-for-the-project-machine-account/)). The [contributor ladder](/project/contributor-ladder/) describes
 the roles, and the [development guide](/docs/development/) the toolchain and the checks.
 
 ## How do I report a vulnerability?

@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `ci/check-commit-provenance.sh`, the CI job `provenance` and a step of the release tag guard: every commit needs a `Signed-off-by:` line that matches its author, or must be part of a pull request of the project's machine account (SSH-signed, verified, approved by a person other than the account, squash-merged) or of a Dependabot pull request ([ADR-0049](docs/adr/0049-sign-off-for-the-project-machine-account.md), proposed). The release guard checks the history since the last published release and reads releases and pull requests; its job now also has `pull-requests: read`. `ci/provenance-exceptions.txt` records a commit on `main` that is accepted although it meets no rule.
+- `.github/dco.yml`: commits that GitHub shows as verified and whose author is a member of the organization no longer need a sign-off for the DCO check, and the button "Set DCO to pass" is off. The per-commit check above is what decides who may use this.
 - `ci/check-stale-versions.py`, run by `ci/check-versions.sh`: a text that says "planned for" or "until" a release that exists, and a placeholder page planned for such a release, fail the check of the pull request that prepares the release.
 
 ### Changed

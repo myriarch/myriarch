@@ -1,0 +1,6 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Commits that ci/check-commit-provenance.sh --range accepts although they meet none of its rules (ADR-0049). A commit that is already
+# on the default branch cannot be rewritten, so without an entry here it would block every later release. One line per commit:
+# the full SHA, a space, and the reason. An entry is a decision of the maintainer and changes only in a reviewed pull request.

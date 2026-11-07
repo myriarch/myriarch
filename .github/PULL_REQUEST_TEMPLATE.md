@@ -12,7 +12,7 @@
 
 ## Checklist
 
-- [ ] Every commit is signed off (`git commit -s`) by me with my real name (Developer Certificate of Origin, see CONTRIBUTING.md).
+- [ ] Every commit is signed off (`git commit -s`) by me with my real name (Developer Certificate of Origin, see CONTRIBUTING.md). The one exception is a pull request of the project's machine account, whose commits carry no line ([ADR-0049](https://github.com/myriarch/myriarch/blob/main/docs/adr/0049-sign-off-for-the-project-machine-account.md)).
 - [ ] `make check-local` passes (or I explain below which gates I could not run).
 - [ ] Tests cover the new or changed behavior.
 - [ ] Documentation is updated (`docs/`, including `docs/reference/gitops-schema.md` for GitOps format changes), and `CHANGELOG.md` has an entry for user-visible changes.

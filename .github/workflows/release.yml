@@ -68,6 +68,7 @@ jobs:
     permissions:
       contents: read # check out the repository and read the files of the tagged commit
       checks: read # the tag guard reads the check run ci-ok of the tagged commit
+      pull-requests: read # the provenance check reads the pull request behind a squash-merged commit of the machine account (ADR-0049)
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}

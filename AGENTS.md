@@ -122,6 +122,14 @@ Some tests and scripts use fixed ports, a shared local cluster or the machine it
   human who submits the change adds the `Signed-off-by:` line (`git commit -s`) and is responsible for the whole change.
   **An agent never adds or forges a `Signed-off-by:` line.** Disclose substantial AI assistance in the pull request
   description; an optional `Assisted-by: <tool>` trailer is welcome.
+- One exception to who signs, not to that rule: the commits of the project's machine account (`myriarch-bot`) have no
+  `Signed-off-by:` line, because the maintainer made a declaration for them in
+  [ADR-0049](docs/adr/0049-sign-off-for-the-project-machine-account.md). They count only when the account is author and
+  committer, the commit is SSH-signed and verified by GitHub, and the pull request was opened by the account from a branch of
+  this repository, holds only commits of the account and was approved by a person other than the account; that person is the
+  reviewer who understands every line. If you work for a contributor, you are not that account: the human who submits the
+  change signs it off. Do not rewrite a commit of someone else; a commit that you take over keeps its `Signed-off-by:` line.
+  `ci/check-commit-provenance.sh` checks the conditions on the commits and the pull request above.
 - Reviewers and the submitter must understand every line. Do not submit output that has not been verified by running the
   gates above.
 

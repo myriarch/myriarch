@@ -1,0 +1,14 @@
+# Copyright The Myriarch Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Configuration of the DCO check (DCO-2, https://github.com/cncf/dco2). The check reads this file from the default branch.
+#
+# members: false: a commit that GitHub shows as verified and whose author is a public member of the organization needs no
+# Signed-off-by line for this check. That is wider than the project's rule (the check looks only at the author), so the rule is
+# decided per commit by ci/check-commit-provenance.sh (CI job "provenance", release tag guard). See ADR-0049.
+#
+# allowOverrideAction: false: no "Set DCO to pass" button. This is not a security boundary: whoever can write to the repository
+# can change this file.
+require:
+  members: false
+allowOverrideAction: false
