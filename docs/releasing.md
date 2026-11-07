@@ -18,9 +18,9 @@ release candidate. Numbers have no leading zeros, and the rc number starts at 1.
 
 ### One version source
 
-The file `VERSION` at the repository root holds the **next tag** without the leading `v`, for example `0.1.0-rc.1`. It names the
-release that the next tag will publish, not the last one. Each release candidate bumps it in the pull request that carries the
-fixes for the previous candidate, and the pull request that prepares a final release sets it to `X.Y.Z`.
+The file `VERSION` at the repository root holds the version without the leading `v`, for example `0.1.0-rc.1`. Between releases it
+names the last release; the pull request that prepares the next one sets it to the next tag. Each release candidate bumps it in the
+pull request that carries the fixes for the previous candidate, and the pull request that prepares a final release sets it to `X.Y.Z`.
 
 Every other place that states the product version is a copy of `VERSION`:
 
@@ -28,6 +28,7 @@ Every other place that states the product version is a copy of `VERSION`:
 |---|---|
 | `deploy/helm/myriarch/Chart.yaml`, `version` | Version of the Helm chart in the repository. The release workflow packages the chart with `--version` and `--app-version` set to the tag without `v`, so the published OCI chart always has the version of the release. |
 | `deploy/helm/myriarch/Chart.yaml`, `appVersion` | Default image tag of the chart (`image.tag` is empty by default). |
+| `deploy/helm/myriarch-collector/Chart.yaml`, `version` and `appVersion` | Version of the collector chart and default tag of the updater image. |
 | `api/openapi.yaml`, `info.version` | Contract version of the REST API. It equals the release version. |
 | `web/package.json`, `version` | Version of the web UI package. |
 | `deploy/examples/production/myriarch-values.yaml`, `image.tag` | Image tag in the production example. |
@@ -49,6 +50,13 @@ Go, Node.js and pnpm with the dependencies of `web/` installed.
 `ci/check-versions.sh` fails when `VERSION` is not a valid version or a copy differs from it. It is part of `ci/check.sh`, so
 every pull request runs it, and the tag guard runs it again on the tagged commit. A failure names the file and tells you to run
 `scripts/set-version.sh`.
+
+The same script runs `ci/check-stale-versions.py`, which fails when a text still promises a release that exists: "planned for" or
+"until" a version up to `VERSION` (for a release candidate, below its `X.Y.Z`, because that release is still ahead). It is part of
+the same pull request check, so the pull request "Prepare vX.Y.Z" cannot be merged while such a sentence is left (see [Review the
+texts before every tag](#review-the-texts-before-every-tag), step 6). `scripts/set-version.sh` runs the check last: when it reports
+a sentence, the script ends with exit status 1 although `VERSION` and all copies are written. Reword the sentences and run
+`ci/check-versions.sh` again. `ci/tests/stale-versions-test.sh` tests the check.
 
 ### Release candidates and the final release
 
@@ -149,7 +157,7 @@ the release the way a user does.
 | `build-tools` | Builds goreleaser, syft, yq, go-winres and osslsigncode once from `ci/tools`; no cache. Only jobs with `contents: read` execute them. | |
 | `ui` | Builds the web UI (the only job with Node.js) and runs the release dependency and license gates. | |
 | `build-windows` | `goreleaser build` of the Windows targets in stage `collect`. | |
-| `sign-windows` | Runs the Windows signing hook (mode `off` in v0.1.0). | **Gate 1** |
+| `sign-windows` | Runs the Windows signing hook (mode `off` in v0.1.0 and v0.2.0). | **Gate 1** |
 | `package` | `goreleaser release --skip=publish` in stage `apply`, then stages the 40 release files. | |
 | `images` | Builds the OCI layouts of both images from the release archives and their SBOMs. | |
 | `sign-blobs` | Signs `checksums.txt` keyless and attests the build provenance of its 39 files. | |
@@ -178,7 +186,7 @@ Rules that hold for all of it:
   with that environment is `publish` of `.github/workflows/artifacthub.yml` ([Artifact Hub](#artifact-hub)). Each of the two asks for its own approval.
   A gate is passed once per run, not once per attempt (see [Re-runs](#rc-numbering-and-re-runs)), and only `finalize` is stopped
   by gate 2: the job `draft` holds `contents: write` without the environment and runs before it.
-- **No secrets** exist in v0.1.0. The jobs use `GITHUB_TOKEN` and the OIDC token of the run.
+- **The release workflow uses no secrets.** The jobs use `GITHUB_TOKEN` and the OIDC token of the run.
 
 ## Before the first release
 
@@ -189,8 +197,7 @@ These settings are made by a maintainer in GitHub, once. The workflow cannot che
    enable it**, and the job token cannot read the setting, so `finalize` detects a missing setting only after it published
    (`release_not_immutable`).
 2. **Environment `release`.** You are the required reviewer. Switch "Prevent self-review" off while you are the only reviewer.
-   Administrators cannot bypass the protection rules. Deployment tags: `v*` only. No wait timer. The environment holds no secret
-   in v0.1.0.
+   Administrators cannot bypass the protection rules. Deployment tags: `v*` only. No wait timer. The environment holds no secret.
 3. **Tag ruleset and Actions policy.** Only you create `v*` tags; they cannot be updated or deleted. `GITHUB_TOKEN` is read-only
    by default, actions must be pinned to a full SHA, the allowed actions are the GitHub-owned ones plus `ossf/scorecard-action@*`,
    and Actions cannot create or approve pull requests.
@@ -352,6 +359,8 @@ read as part of the release as well.
 1. **Compare, do not trust.** Read `README.md`, the pages of `docs/` and the website against the changelog and the commits since
    the last tag: commands, flags, defaults, version numbers, platforms, support levels and what is signed. A sentence that claims
    more than the release delivers (a signed Windows file, a signed macOS binary, an OCI chart) is wrong, whatever the plan says.
+   Read the pages as they are deployed on <https://myriarch.dev/> as well, not only their sources: the landing page, `/docs/` and
+   `/project/what-is-myriarch/` are what a reader finds first, and a source that is right can still be deployed from an old build.
 2. **Files in the archives describe the process.** Every sentence must be true when the archive is created and still true after
    publication, until the next version. Write "release candidates are published as GitHub pre-releases", not "no release has
    been published yet", "available from v0.1.0" or "will be published". Search the files of the table:
@@ -370,6 +379,11 @@ read as part of the release as well.
    of tested platforms (`docs/operations/tested-platforms.md`) say the same, and what they say about migrations, settings and
    platforms is what the tests of this release cover. The notes of the release repeat the list of tested platforms.
 5. **Run the gates for the texts:** `make docs-check` and `make website-check`.
+6. **Stale promises.** `ci/check-versions.sh` fails when a text outside `docs/adr/`, `CHANGELOG.md` and `changelog.d/` says
+   "planned for" or "until" a version up to `VERSION`, or when a placeholder page has `planned` up to `VERSION`. Write the page
+   or change the sentence in the pull request that prepares the release. The gate knows only these two phrases (with or without
+   "the", "release", "version" or "of" and Markdown or HTML around the version, but not "v0.2", "v0.2.x" or a range): step 1 still applies. It reports the file and the line; a false alarm is solved by rewording ("before v1.2.3
+   ..." for the past), not by an exception list.
 
 ## After every publication
 
@@ -383,9 +397,22 @@ the archives, so they can follow the release:
    `website/scripts/check-seo.py` compares with the file. A candidate of a later version does not replace a final release in the chip. The release workflow
    never writes this file (it has no write access to the repository), and `README.md` and `docs/` cannot read it: they are plain
    Markdown, which is why they describe the process.
-2. **The pages that say whether images exist or name a release:** `docs/getting-started/_index.md`,
-   `docs/getting-started/docker-compose.md`, `docs/operations/install-helm.md` and `docs/security/verify-releases.md`. Check that every tag they name exists and that
-   their sentences about the images are true.
+2. **The pages that say whether images exist, name a release or state what the release contains:** `docs/_index.md`,
+   `docs/getting-started/_index.md`, `docs/getting-started/docker-compose.md`, `docs/getting-started/kubernetes-kind.md`,
+   `docs/tasks/connect-a-host.md`, `docs/operations/install-helm.md`, `docs/operations/install-collector-helm.md`,
+   `docs/operations/tested-platforms.md`,
+   `docs/security/verify-releases.md`, `website/data/landing.yaml`, `website/data/llms.yaml`,
+   `website/content/project/faq.md`, `website/content/project/comparison.md` and
+   `website/content/project/what-is-myriarch.md`. Check that every tag they name exists, that the commands that name a version
+   use the new one, that their sentences about the images are true, and that the landing page and `llms.txt` name the core of the
+   release. Then search the previous version and the wording that the release has ended, and read every hit (the ADRs are left out):
+
+   ```bash
+   PREV=0.1.0; NEW=0.2.0
+   grep -rnE "planned for v?${NEW}|[Bb]efore v${NEW}|not part of v${PREV}|VERSION=${PREV}|--version ${PREV}|first release|v${NEW}-rc\." \
+     docs deploy/helm website/content website/data ROADMAP.md SECURITY.md --exclude-dir=adr
+   ```
+
 3. **The deferred observations:** after the first candidate, write the results of the three observations of
    [First candidate](#first-candidate-what-to-observe) in this pull request, the one on re-run approvals also in
    `docs/security/model.md`, and remove the wording that defers them. The kind result is known from before the tag and the
@@ -472,7 +499,7 @@ candidate the post says that it is a release candidate.
 |---|---|---|
 | `guard` | A guard check or `workflow_ref_mismatch` | The message names the cause. Fix it in a pull request and tag the next candidate, or wait for `ci-ok` and re-run. |
 | `signing-tools`, `build-tools`, `ui`, `build-windows`, `package`, `images` | A build, a gate (dependencies, licenses, notices) or an artifact check failed | Fix it in a pull request and tag the next candidate. |
-| `sign-windows` | The signing provider failed (v0.1.0: only the copy of the files) | Re-run. A provider issue is handled in the provider's change. |
+| `sign-windows` | The signing provider failed (in mode `off`: only the copy of the files) | Re-run. A provider issue is handled in the provider's change. |
 | `sign-blobs`, `push-images` | Sigstore or ghcr.io unavailable, a token problem | Re-run failed jobs. |
 | `push-chart` | Sigstore or ghcr.io unavailable, a token problem | Re-run failed jobs. The charts are pushed by digest and have no tag yet, so pushing the same digest again changes nothing and no manual deletion is needed. |
 | `draft` | `release_exists` or `draft_foreign` | A published release of the tag exists, or someone else made a draft of it: tag the next candidate (the next patch version for a final tag), or delete the foreign draft by hand and re-run. |

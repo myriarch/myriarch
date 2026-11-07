@@ -19,7 +19,7 @@ These pages are for the people who run a Myriarch installation. They are written
 | [Troubleshooting](troubleshooting.md) | Symptoms, causes and fixes, and the endpoints that help. |
 
 Guides for upgrades in general, backup and restore, monitoring, air-gapped installation and an artifact mirror are
-planned for v0.3.0. Until then, the [architecture](../architecture.md) describes high availability, the data model and its
+planned for v0.3.0. Until then, the [architecture](../architecture.md) describes the data model and its
 retention, the artifact cache and the metrics and health endpoints of the server.
 
 Related: the [security model](../security/model.md) explains the controls behind these settings, the

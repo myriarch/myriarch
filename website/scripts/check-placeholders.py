@@ -13,7 +13,7 @@ which repository file it replaces and under which topic or issue the page is tra
       placeholder:
         tracking: "operations-manual"
         replaces: "docs/operations/upgrade.md"
-        planned: "v0.2.0"
+        planned: "v0.3.0"
 
 The author of the real page adds the file named in `replaces`; the placeholder must go in the same change, because two pages for one
 URL path would duplicate the content. The check fails when
@@ -21,7 +21,7 @@ URL path would duplicate the content. The check fails when
   - the file named in `replaces` already exists in the repository (delete the placeholder),
   - `replaces` is not a repository path below docs/ ending in .md, or `tracking` is missing or neither a lowercase
     topic slug (operations-manual) nor a GitHub issue reference (#123),
-  - the optional `planned` is not a release (v0.2.0); the notice then says that the page is planned for that release,
+  - the optional `planned` is not a release (v1.2.3); the notice then says that the page is planned for that release,
   - the placeholder does not live at the website path that the replaced file would get (docs/x/y.md -> website/content/docs/x/y.md),
   - the body does not use the placeholder shortcode (the shortcode renders the notice; the tracking value is never printed).
 

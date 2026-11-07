@@ -15,8 +15,9 @@ start with the tutorials, then read the concepts.
 with an embedded PostgreSQL, the example GitOps repository, the simulator and the REST API. The central page is
 [Local development](getting-started/local-dev.md); [Your first fleet and rollout](getting-started/first-fleet-and-rollout.md)
 writes a fleet and a rollout policy and rolls out a change in waves, and [Docker Compose](getting-started/docker-compose.md)
-starts the whole system from the release images. The tutorial for Kubernetes on a local kind cluster is planned for v0.2.0.
-Until then, the kind probe is described in [hack/kind/README.md](../hack/kind/README.md).
+starts the whole system from the release images. [Kubernetes on kind](getting-started/kubernetes-kind.md) installs both Helm
+charts on a local cluster and rolls out a configuration and a collector version. The kind probe is described in
+[hack/kind/README.md](../hack/kind/README.md).
 
 ## How-to guides: solve a problem
 
@@ -45,17 +46,20 @@ the components, the data flows and the rollout engine, and the [security model](
 field, template function and issue code, the generated [command-line reference](reference/cli/_index.md), the generated
 references for the [server configuration](reference/configuration.md), the
 [environment variables](reference/environment-variables.md) and the [metrics](reference/metrics.md), the REST contract in
-[api/openapi.yaml](../api/openapi.yaml), and the values of the [Helm chart](../deploy/helm/myriarch/README.md). The design
+[api/openapi.yaml](../api/openapi.yaml), and the values of the [server chart](../deploy/helm/myriarch/README.md) and of the
+[collector chart](../deploy/helm/myriarch-collector/README.md). The design
 contracts in [design/](design/README.md) pin down protocols and behavior that code and tests follow.
 
 ## Operations and security: run it
 
-[Operations](operations/_index.md) is for people who run myriarch: [Install with Helm](operations/install-helm.md) for
-Kubernetes, [authentication](operations/authentication.md) (single sign-on, the bootstrap administrator, API tokens), the
+[Operations](operations/_index.md) is for people who run myriarch: [Install with Helm](operations/install-helm.md) for the
+server and [Install the collector with Helm](operations/install-collector-helm.md) for collectors on Kubernetes,
+[authentication](operations/authentication.md) (single sign-on, the bootstrap administrator, API tokens), the
 [production checklist](operations/production-checklist.md) with the security-relevant settings, and
 [troubleshooting](operations/troubleshooting.md).
 
-The operations section also has the [upgrade notes for v0.2.0](operations/upgrade-to-v0-2-0.md) and
+The operations section also has [High availability](operations/high-availability.md), the
+[upgrade notes for v0.2.0](operations/upgrade-to-v0-2-0.md) and
 [Support levels and tested platforms](operations/tested-platforms.md). Guides for upgrades in general, backup and restore, monitoring, air-gapped installation and an artifact mirror are
 planned for v0.3.0.
 

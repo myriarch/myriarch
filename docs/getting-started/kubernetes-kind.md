@@ -17,8 +17,8 @@ and roll out a configuration change and a new collector version.
 > [production checklist](../operations/production-checklist.md).
 
 **Available from v0.2.0.** The tutorial installs the published OCI charts `oci://ghcr.io/myriarch/charts/myriarch` and
-`oci://ghcr.io/myriarch/charts/myriarch-collector` and the release images. Before v0.2.0 is released, build both from the
-checkout instead: add `QUICKSTART_SOURCE=commit` to the commands ([below](#start-from-a-checkout)).
+`oci://ghcr.io/myriarch/charts/myriarch-collector` and the release images. To build both from the
+checkout instead, add `QUICKSTART_SOURCE=commit` to the commands ([below](#start-from-a-checkout)).
 
 ## What you get
 
@@ -62,8 +62,8 @@ cd myriarch
 KIND_SYSTEM_TOOLS=1 make kind-quickstart
 ```
 
-If the tag does not exist yet (before the release), `git clone` fails: [start from a checkout](#start-from-a-checkout) instead,
-which builds the images and installs the charts of the sources.
+To run an unreleased commit, [start from a checkout](#start-from-a-checkout), which builds the images and installs the charts
+of the sources.
 
 `make kind-quickstart` is `hack/kind/quickstart.sh up`. It creates the cluster, installs PostgreSQL and the Git server, pushes
 the demo repository, installs the server chart, then the collector chart twice, and waits until every pod is ready. It is
@@ -133,8 +133,8 @@ rollout and the version rollout, approves the waves and measures the durations.
 
 The CI job `quickstart` in `.github/workflows/e2e-kind.yml` runs `hack/kind/quickstart.sh all` (the steps of this page) on
 every change of the charts, the updater or the script, and writes the duration of each step into the summary of the run. The
-numbers on this page are *measured in CI* once there is a run of a release; a laptop needs more for the first run, because it
-downloads the images and the node image. The documented targets are under ten minutes for the installation and about a minute
+numbers on this page come from these runs, which build the images from the commit: the job took about nine minutes on the
+commit of v0.2.0. A laptop needs more for the first run, because it downloads the images and the node image. The documented targets are under ten minutes for the installation and about a minute
 from the approval of the last wave to the completed version rollout (the script fails above four minutes).
 
 ## Start from a checkout

@@ -66,8 +66,9 @@ such as an approval or a version chosen in the UI, is audited with the user and 
 ## What are the support levels?
 
 Myriarch is alpha. In v0.2.0, container mode, Linux hosts and the server Helm chart are beta; Windows hosts and the collector Helm
-chart are experimental. The levels and what they mean are in the [roadmap](/project/roadmap/) and in
-[ADR-0021](/docs/adr/0021-publication-gates-and-v0-1-0-scope/).
+chart are experimental. The levels and what they mean are in
+[Support levels and tested platforms](/docs/operations/tested-platforms/); what has to hold before the project calls itself beta is
+in the [roadmap](/project/roadmap/#from-alpha-to-beta).
 
 ## Do I need Kubernetes?
 
@@ -75,7 +76,9 @@ No. The server is one binary that needs PostgreSQL. It runs on a host, in a cont
 [Helm chart](/docs/reference/helm-chart/). Collectors can run on Linux and Windows hosts at edge sites and in data centers, or
 in Kubernetes pods. A development setup needs no container runtime at all: see
 [Local development](/docs/getting-started/local-dev/). To try it with containers on one machine, use
-[Docker Compose](/docs/getting-started/docker-compose/), and for Kubernetes see [Install with Helm](/docs/operations/install-helm/).
+[Docker Compose](/docs/getting-started/docker-compose/). To try it on Kubernetes, use
+[Kubernetes on kind](/docs/getting-started/kubernetes-kind/); for a real installation see
+[Install with Helm](/docs/operations/install-helm/) and [Install the collector with Helm](/docs/operations/install-collector-helm/).
 
 ## How many collectors does it handle?
 

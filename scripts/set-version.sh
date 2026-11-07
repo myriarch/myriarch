@@ -9,8 +9,9 @@
 #
 #   scripts/set-version.sh 0.1.0-rc.2
 #
-# The version is X.Y.Z or X.Y.Z-rc.N without a leading v and without leading zeros. VERSION names the NEXT tag
-# (docs/releasing.md#versioning). Needs bash, python3, make, Go and pnpm with the dependencies of web/ installed.
+# The version is X.Y.Z or X.Y.Z-rc.N without a leading v and without leading zeros. VERSION is the version of the last release
+# between releases and the next tag in the pull request that prepares it (docs/releasing.md#one-version-source). Needs bash,
+# python3, make, Go and pnpm with the dependencies of web/ installed.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 err() { printf '[set-version] ERROR: %s\n' "$*" >&2; exit 1; }

@@ -1,7 +1,7 @@
 ---
 title: "Verify releases"
 weight: 20
-description: "Check a myriarch release before you run it: checksums, the Sigstore bundle, build provenance, container images and macOS binaries."
+description: "Check a myriarch release before you run it: checksums, the Sigstore bundle, build provenance, container images, Helm charts and macOS binaries."
 ---
 
 Every release of myriarch is built and signed by one GitHub Actions workflow, `release.yml` of the repository
@@ -11,7 +11,7 @@ long-lived signing key to steal or to distribute. A signature is bound to a shor
 that workflow run, and the certificate names the workflow and the tag.
 
 This guide has two parts. Part 1 covers the **files of a release** and how the installers check them. Part 2 covers the
-**build provenance**, the **immutable release**, the **container images** and the **macOS binaries**. Every command below uses
+**build provenance**, the **immutable release**, the **container images**, the **Helm charts** and the **macOS binaries**. Every command below uses
 the identity of the workflow at the tag of the version you verify. The release notes of every release show the same commands
 with the tag, the commit and the image digests filled in.
 
@@ -44,7 +44,7 @@ verification flaws and the installers refuse them). Download `checksums.txt` and
 you want from the release page of the tag, then:
 
 ```bash
-VERSION=0.1.0        # the release you verify, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
+VERSION=0.2.0        # the release you verify, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
 
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
@@ -53,7 +53,7 @@ cosign verify-blob \
   checksums.txt
 ```
 
-`Verified OK` means that GitHub Actions ran `release.yml` of `myriarch/myriarch` for the tag `v0.1.0` and signed exactly this
+`Verified OK` means that GitHub Actions ran `release.yml` of `myriarch/myriarch` for the tag `v${VERSION}` and signed exactly this
 `checksums.txt`. Then check the files you downloaded against it:
 
 ```bash
@@ -65,7 +65,7 @@ Every file you downloaded must say `OK`. `--ignore-missing` skips the lines of f
 `checksums.txt` at all is not part of the release. On Windows compare one file at a time:
 
 ```powershell
-$file  = 'myriarch-updater_0.1.0_windows_amd64.exe'
+$file  = 'myriarch-updater_0.2.0_windows_amd64.exe'
 $lines = @(Get-Content checksums.txt | Where-Object { $_.EndsWith("  $file", [StringComparison]::Ordinal) })
 if ($lines.Count -ne 1) { throw "expected exactly one line for $file in checksums.txt" }
 $want = $lines[0].Split(' ')[0]
@@ -103,7 +103,7 @@ blocks for both systems: they create the folder and end at the first failed chec
 On Linux, in a root shell on the host, in a directory that only root can write, such as one below `/root`:
 
 ```bash
-VERSION=0.1.0                  # the release, without the "v"
+VERSION=0.2.0                  # the release, without the "v"
 BASE="https://github.com/myriarch/myriarch/releases/download/v${VERSION}"
 
 install -d -m 0700 /root/myriarch-setup && cd /root/myriarch-setup &&
@@ -131,7 +131,7 @@ folder:
 $Setup = 'C:\Program Files\myriarch-setup'
 Set-Location $Setup -ErrorAction Stop
 # download checksums.txt, checksums.txt.sigstore.json and the zip here and check them here, as shown above, then:
-Expand-Archive "$Setup\myriarch-updater_0.1.0_windows_amd64.zip" -DestinationPath "$Setup\package"
+Expand-Archive "$Setup\myriarch-updater_0.2.0_windows_amd64.zip" -DestinationPath "$Setup\package"
 Unblock-File "$Setup\package\deploy\scripts\install-windows.ps1"
 ```
 
@@ -183,7 +183,7 @@ images, [crane](https://github.com/google/go-containerregistry/blob/main/cmd/cra
 tag once:
 
 ```bash
-VERSION=0.1.0        # the release you verify, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
+VERSION=0.2.0        # the release you verify, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
 TAG="v${VERSION}"
 ```
 

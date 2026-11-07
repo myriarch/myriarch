@@ -70,7 +70,7 @@ const (
 	BridgeRestartRefused = "restart commands are not sent to OpAMP Bridge agents; restart the workloads through Kubernetes"
 	// BridgeVersionRefused is the reason that a Bridge is not a target of a
 	// version rollout.
-	BridgeVersionRefused = "OpAMP Bridge agents are not part of version rollouts; change the version through spec.image of the collector resources or a gitops-pr"
+	BridgeVersionRefused = "OpAMP Bridge agents are not part of version rollouts; change the version through spec.image of the collector resources"
 )
 
 // BridgeModeOfAgent returns the mode that the agent reports as a Bridge.

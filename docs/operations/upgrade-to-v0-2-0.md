@@ -9,8 +9,8 @@ order of work: what to do before the update, what the update changes, and how to
 changes is the [changelog](../../CHANGELOG.md); the guide for upgrades in general (backup and restore, rolling updates in
 detail) is planned for v0.3.0.
 
-> **Available from v0.2.0.** The release candidates `v0.2.0-rc.N` behave as described here. Read the release notes of the
-> version you install: they link the changelog section of that version.
+> **Available from v0.2.0.** Read the release notes of the version you install: they list the changes and link the
+> changelog.
 
 ## At a glance
 

@@ -90,7 +90,7 @@ markdown_globs() {
   printf '%s\n' 'docs/**/*.md' 'website/content/**/*.md' website/README.md \
     ROADMAP.md CHANGELOG.md CONTRIBUTING.md GOVERNANCE.md SECURITY.md CODE_OF_CONDUCT.md MAINTAINERS.md ADOPTERS.md CONTRIBUTOR_LADDER.md
   local extra
-  for extra in deploy/helm/myriarch/README.md gitops-template/README.md assets/brand/README.md; do
+  for extra in deploy/helm/myriarch/README.md deploy/helm/myriarch-collector/README.md gitops-template/README.md assets/brand/README.md; do
     if grep -Fq "${extra}" website/data/repo_pages.yaml 2>/dev/null; then printf '%s\n' "${extra}"; fi
   done
 }

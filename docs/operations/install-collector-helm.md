@@ -85,7 +85,7 @@ The DaemonSet runs one collector per node with `site.type=k8s-node`. Without `pe
 The examples [`gateway.yaml`](../../deploy/helm/myriarch-collector/examples/gateway.yaml),
 [`node-agent.yaml`](../../deploy/helm/myriarch-collector/examples/node-agent.yaml),
 [`container-mode.yaml`](../../deploy/helm/myriarch-collector/examples/container-mode.yaml) and
-[`openshift.yaml`](../../deploy/helm/myriarch-collector/examples/openshift.yaml) are rendered and validated in CI.
+[`openshift.yaml`](../../deploy/helm/myriarch-collector/examples/openshift.yaml) are rendered and validated in CI. The values of the chart are in the [README of the chart](../../deploy/helm/myriarch-collector/README.md).
 
 ## The connection to the server
 

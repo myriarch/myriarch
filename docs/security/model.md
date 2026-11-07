@@ -316,7 +316,7 @@ The Helm chart ships a NetworkPolicy, enabled by default (`networkPolicy.enabled
 - The deprecated `contrib/legacy-kubernetes-collector/kustomize` contains policies for collector gateways and node agents.
 - The collector chart (`deploy/helm/myriarch-collector`, from v0.2.0) runs the unchanged upstream images with these controls. The standard profile sets `runAsUser`, `runAsGroup` and `fsGroup` to the overridable default 10001 (the supervisor image runs under a named user, which `runAsNonRoot` cannot check without a numeric ID; the OpenShift profile renders none of them and leaves them to the SCC), add no capability, never run privileged, allow no privilege escalation, use a read-only root file system and `seccompProfile: RuntimeDefault`, and mount no Kubernetes API token; the StatefulSet therefore runs under the Pod Security level `restricted`, which `ci/helm-conform-collector.sh` asserts for every rendering. The chart creates no Role and no root init container (the Kustomize base changed the owner of the node directory as root). The one exception is a `hostPath` volume in the DaemonSet, only on request: the node logs, mounted read-only (`nodeLogs.enabled`), and the directory for the identity of a node agent (`persistence.hostPath.enabled`, writable); the levels `baseline` and `restricted` refuse such a volume, so a namespace with a node agent needs the level `privileged` or an exception of the admission policy, which is why both are off by default and the rest of the pod keeps the settings above. The NetworkPolicy of the chart limits the ingress to the receiver ports (the release namespace and the listed sources) and the health ports (the release namespace); the egress stays open. The enrollment token is read from a Secret and is never a value (the schema has no key for it, and `server.endpoint` must be `wss://` unless `server.allowInsecureTransport` is set on purpose, because the token travels with the connection). Container mode adds a second writable volume for the collector binaries and the state of the updater, and the updater verifies the Sigstore bundle of every collector it installs with a trusted root from a ConfigMap, offline; rendering fails when the trusted root is missing unless `containerMode.update.requireSignature=false` is set.
 
-`server.trustedProxies` and `opamp.clientCertHeader` are safe only together with this policy or an equivalent one. The chart is experimental in the first release ([ADR-0021](../adr/0021-publication-gates-and-v0-1-0-scope.md)).
+`server.trustedProxies` and `opamp.clientCertHeader` are safe only together with this policy or an equivalent one. The server chart is beta and the collector chart is experimental ([Support levels and tested platforms](../operations/tested-platforms.md)).
 
 ## Helm chart values
 
@@ -879,9 +879,8 @@ guidance after each item names what to do.
   request cannot end up on the production domain unnoticed. The Vercel firewall runs Bot Protection and the rule for AI bots in
   log mode only, so visitors get no challenge and no cookie; blocking measures are for incidents
   ([Firewall incidents](../../website/README.md#firewall-incidents)).
-- **Experimental platforms.** The Windows installer and service setup, the systemd units and the Helm chart are tested
-  in staging mode and with simulated service managers; they are experimental in the first release
-  ([ADR-0021](../adr/0021-publication-gates-and-v0-1-0-scope.md)).
+- **Experimental components.** Windows hosts and the collector Helm chart are experimental; the levels and the tests are
+  in [Support levels and tested platforms](../operations/tested-platforms.md).
 
 For the export-control assessment of the published software see [Export control](export-control.md).
 

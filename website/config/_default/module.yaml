@@ -81,6 +81,8 @@ module:
       target: assets/repo/CONTRIBUTOR_LADDER.md
     - source: ../deploy/helm/myriarch/README.md
       target: assets/repo/deploy/helm/myriarch/README.md
+    - source: ../deploy/helm/myriarch-collector/README.md
+      target: assets/repo/deploy/helm/myriarch-collector/README.md
     - source: ../gitops-template/README.md
       target: assets/repo/gitops-template/README.md
     - source: ../assets/brand/README.md

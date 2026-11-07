@@ -46,13 +46,15 @@ sections:
   - title: Start here
     links:
       - page: /docs/getting-started/
-        note: "Tutorials that start a complete system on your own machine, from source or with Docker Compose; both run the server in development mode, which is not a production setup."
+        note: "Tutorials that start a complete system on your own machine, from source, with Docker Compose or on a local kind cluster; the first two run the server in development mode, and none of them is a production setup."
       - page: /docs/getting-started/local-dev/
         note: "Build from source and run the server in development mode with an embedded database, the example GitOps repository and simulated collectors."
       - page: /docs/getting-started/first-fleet-and-rollout/
         note: "Write a fleet and a rollout policy, enroll simulated collectors and roll out a change in waves, from source on a server in development mode."
       - page: /docs/getting-started/docker-compose/
         note: "Evaluate the system on one machine from the release images, with the server in development mode (well-known logins, no TLS), PostgreSQL and simulated collectors; not a production setup."
+      - page: /docs/getting-started/kubernetes-kind/
+        note: "Run the server and collectors from the Helm charts on a local kind cluster, with a throw-away database and Git server; a demo setup, not a production setup."
 
   - title: Facts and comparison
     links:
@@ -89,7 +91,7 @@ sections:
       - page: /docs/tasks/upgrade-collectors-on-many-hosts/
         note: "Set the target collector version in Git and roll it out with an executor, because the OpAMP Supervisor cannot replace the collector binary."
       - page: /docs/tasks/connect-a-host/
-        note: "Enroll a Linux or Windows host with the installation scripts."
+        note: "Enroll a Linux or Windows host with one command from the server, or with the installation scripts."
       - page: /docs/tasks/roll-out-a-collector-version/
         note: "Update the collector version of a fleet and choose the version in the web UI within the frame that Git sets."
       - page: /docs/tasks/roll-out-a-config-change/
@@ -112,6 +114,14 @@ sections:
     links:
       - page: /docs/operations/install-helm/
         note: "Install the server on Kubernetes with the Helm chart."
+      - page: /docs/operations/install-collector-helm/
+        note: "Run collectors that myriarch manages on Kubernetes with the collector Helm chart and unchanged upstream images."
+      - page: /docs/operations/high-availability/
+        note: "How long a failover of the leader takes and the setting that bounds it."
+      - page: /docs/operations/tested-platforms/
+        note: "The support level of every component and the platforms of the automated tests."
+      - page: /docs/operations/upgrade-to-v0-2-0/
+        note: "What to do before and after the upgrade from v0.1.0 to v0.2.0."
       - page: /docs/operations/production-checklist/
         note: "The settings that matter for security and what the server refuses at startup."
       - page: /docs/operations/authentication/
@@ -124,7 +134,7 @@ sections:
   - title: Optional
     links:
       - page: /project/roadmap/
-        note: "What the first release contains, what comes next, what is intended for later and what is deliberately not planned."
+        note: "What the released versions contain, what comes next, what is intended for later and what is deliberately not planned."
       - page: /project/changelog/
         note: "Notable changes of every release."
       - page: /docs/adr/

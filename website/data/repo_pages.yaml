@@ -7,7 +7,7 @@ project:
     slug: roadmap
     title: Roadmap
     weight: 10
-    description: What myriarch contains in its first release, what comes next and what is deliberately not planned.
+    description: What the released versions of myriarch contain, what comes next and what is deliberately not planned.
   - source: CHANGELOG.md
     slug: changelog
     title: Release notes
@@ -61,6 +61,11 @@ reference:
     title: Helm chart and values
     weight: 40
     description: Installation, profiles, network policy, storage and the configuration values of the myriarch Helm chart.
+  - source: deploy/helm/myriarch-collector/README.md
+    slug: helm-chart-collector
+    title: Collector Helm chart and values
+    weight: 45
+    description: Modes, Pod Security, OpenShift, container mode and the configuration values of the myriarch-collector Helm chart.
 
 # Pages below /docs/tasks/ (website/content/docs/tasks/_content.gotmpl).
 tasks:

@@ -1,7 +1,7 @@
 ---
 title: "Agents"
 weight: 20
-description: "Collectors and updaters as the server sees them: how agents are identified, the attribute view, server labels and configuration sync states."
+description: "Collectors, updaters and Bridge agents as the server sees them: how agents are identified, the attribute view, server labels and configuration sync states."
 ---
 
 An **agent** is anything that connects to `myriarchd` over OpAMP. The server keeps its description, health, reported
@@ -14,9 +14,11 @@ directly. They work on the **attribute view** of an agent, described below.
 |---|---|---|
 | `collector` | An OpenTelemetry Collector run by the upstream OpAMP Supervisor. It accepts remote configuration. | It is not an updater and it announces the OpAMP capability "accepts remote config". |
 | `updater` | The `myriarch-updater` host agent. It installs new collector binaries, because the upstream supervisor cannot do that. | Its identifying attribute `service.name` is `myriarch-updater`. |
+| `bridge` | The OpAMP Bridge of the OpenTelemetry Operator (*from v0.2.0*). It connects as one agent for many collectors, and the server holds back what could change their resources ([Bridge agents](fleets.md#bridge-agents)). | Its `service.name` is `io.opentelemetry.operator-opamp-bridge`, or it reports the attribute `opentelemetry.io/opamp.bridge.mode`. |
 | `unknown` | Any other OpAMP agent. It is listed, but never assigned to a fleet. | Everything else. |
 
-Only collectors are assigned to fleets. An updater follows its collector: the two belong together when they present the
+Collectors and OpAMP Bridge agents are assigned to fleets; a Bridge receives no configuration without an opt-in
+([Bridge agents](fleets.md#bridge-agents)). An updater follows its collector: the two belong together when they present the
 same credential (the same enrollment token, or the same client certificate when no token is used) and, if both report
 one, the same host name. The updater links to its collector through the non-identifying attribute
 `dev.myriarch.collector.instance_uid`, whose value is the instance UID of the supervisor. If more than one online updater

@@ -17,7 +17,7 @@
 #   2. the tag is lightweight (the tag object is fetched from origin again: a checkout may have turned it into a lightweight one)
 #   3. the tag points at another commit than RELEASE_COMMIT, or the checkout is not at RELEASE_COMMIT or has changes
 #   4. the commit is not on origin/main
-#   5. VERSION differs from the tag, or a copy of the version differs from VERSION (ci/check-versions.sh)
+#   5. VERSION differs from the tag, a copy of the version differs from VERSION, or a text still promises a version that this tag has reached (ci/check-versions.sh)
 #   6. a final tag has no "## [X.Y.Z] - YYYY-MM-DD" heading in CHANGELOG.md (a heading in a code block does not count), the
 #      section under it has no list item, or the "Unreleased" section still has list items
 #   7. an rc tag finds no list item in the "Unreleased" section of CHANGELOG.md (prose and comments are no entries)
@@ -94,7 +94,7 @@ pass "commit ${sha:0:12} is on origin/main"
   || refuse "VERSION holds '$(head -c 64 VERSION | tr -d '\r\n')' but the tag ${tag} needs ${version}: run scripts/set-version.sh ${version} in a pull request"
 if ! drift="$(ci/check-versions.sh 2>&1)"; then
   printf '%s\n' "${drift}" | sed 's/^/guard:   /' >&2
-  refuse "a copy of the version differs from VERSION (${version}): run scripts/set-version.sh ${version}"
+  refuse "a copy of the version differs from VERSION (${version}): run scripts/set-version.sh ${version}; or a text still promises a release that exists (see above)"
 fi
 pass "VERSION and all copies state ${version}"
 

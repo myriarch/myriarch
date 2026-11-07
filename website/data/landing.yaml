@@ -1,5 +1,5 @@
 # Text of the landing page (layouts/home.html and layouts/_partials/landing/*). Sources: README.md, ROADMAP.md and the decision records;
-# nothing here claims more than the README status (alpha; v0.1.0 is the first final release). The release status in the
+# nothing here claims more than the README status (alpha). The release status in the
 # chip of the hero comes from data/release.yaml, not from this file. Links that start with "/" must name a page of the site
 # (with or without the .md suffix); the build fails when a page does not exist.
 hero:
@@ -40,6 +40,11 @@ features:
       text: The host agent myriarch-updater replaces the collector binary, or a webhook or AWX call hands the update to your own tooling. Linux hosts and container mode are beta, Windows hosts are experimental.
       link: /docs/tasks/roll-out-a-collector-version.md
       link_label: Roll out a collector version
+    - icon: fa-solid fa-cubes
+      title: Kubernetes and one-command hosts
+      text: Signed OCI Helm charts run the server and, with the unchanged upstream images, the collectors. The server renders one installation command for Linux and Windows hosts. The server chart is beta, the collector chart is experimental.
+      link: /docs/getting-started/kubernetes-kind.md
+      link_label: Kubernetes on kind
     - icon: fa-solid fa-bell
       title: Release tracking and notifications
       text: New upstream releases are detected, breaking changes are extracted from the changelogs, outdated collectors are flagged, and notifications go to Teams, Slack or a webhook.
@@ -53,8 +58,8 @@ features:
     - icon: fa-solid fa-layer-group
       title: High availability on PostgreSQL
       text: Run several replicas of the server on one PostgreSQL database. State, events and the leader election for singleton jobs live there.
-      link: /docs/tasks/run-two-replicas-locally.md
-      link_label: Run two replicas locally
+      link: /docs/operations/high-availability.md
+      link_label: High availability
 
 architecture:
   title: How it fits together
@@ -103,6 +108,11 @@ quickstart:
   warning: Development mode uses well-known logins and tokens. It is never a production setup.
   link: /docs/getting-started/local-dev.md
   link_label: Local development walkthrough
+  also:
+    - link: /docs/getting-started/docker-compose.md
+      label: Docker Compose from the release images
+    - link: /docs/getting-started/kubernetes-kind.md
+      label: Kubernetes on kind
 
 community:
   title: Project and community

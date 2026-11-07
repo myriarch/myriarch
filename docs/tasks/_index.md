@@ -11,7 +11,7 @@ every option. To learn the system from the start, use the [tutorials](../getting
 | Guide | What it covers |
 |---|---|
 | [Manage many collectors with OpAMP and Git](manage-many-collectors.md) | Set up the server, a GitOps repository, the hosts and the first rollout. |
-| [Connect a host](connect-a-host.md) | Enroll a Linux or Windows host with the installation scripts. |
+| [Connect a host](connect-a-host.md) | Enroll a Linux or Windows host with one command from the server (dialog *Add host*), or with the installation scripts on the manual path. |
 | [Validate a GitOps repository](validate-a-gitops-repository.md) | Check and render configuration with `myrctl`, locally and in CI. |
 | [Roll out a configuration change](roll-out-a-config-change.md) | Waves, approval, failure handling and rollback for a blueprint change. |
 | [Roll out a collector version](roll-out-a-collector-version.md) | Version updates with the updater, webhook or AWX executor, and the choice in the UI within the Git frame. |

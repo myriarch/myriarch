@@ -26,4 +26,5 @@ To try the whole system on Kubernetes, with the Helm charts, real server pods an
 [Kubernetes on kind](kubernetes-kind.md). The kind probe in [hack/kind/README.md](../../hack/kind/README.md) builds the same kind
 of cluster from zero and runs numbered checks against it. All three tutorials use demo policies with a health wait of 30
 seconds, so a rollout takes about a minute after you approve its last wave; the pages say so. For a real installation read
-[Install with Helm](../operations/install-helm.md) and the [production checklist](../operations/production-checklist.md).
+[Install with Helm](../operations/install-helm.md), [Install the collector with Helm](../operations/install-collector-helm.md)
+and the [production checklist](../operations/production-checklist.md).

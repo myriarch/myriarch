@@ -13,9 +13,9 @@ the [GitOps schema reference](../reference/gitops-schema.md). For step-by-step i
 | Page | What it explains |
 |---|---|
 | [Git as the source of truth](gitops.md) | The repository layout, the object envelope, how `myriarchd` reads and applies a revision, and the rule "Git sets the frame, the UI operates within it". |
-| [Agents](agents.md) | Collectors and updaters, how an agent is identified, the attributes that fleets and templates work on, server labels and the config sync states. |
+| [Agents](agents.md) | Collectors, updaters and OpAMP Bridge agents, how an agent is identified, the attributes that fleets and templates work on, server labels and the config sync states. |
 | [Blueprints](blueprints.md) | Layered collector configurations: parameters, fragments, removal, the rendering algorithm, templates, the canonical form and the hash. |
-| [Fleets](fleets.md) | Selectors, assignment and priority, bootstrap versus rollout, and choosing the target collector version in the UI within a frame set in Git. |
+| [Fleets](fleets.md) | Selectors, assignment and priority, bootstrap versus rollout, choosing the target collector version in the UI within a frame set in Git, and how OpAMP Bridge agents are protected. |
 | [Inventory](inventory.md) | Server-side labels and parameter overrides for agents that match exact attribute values. |
 | [Rollouts](rollouts.md) | Rollout policies, waves, targets and success, maintenance windows, failure handling, the planner and the live progress of an update. |
 | [Executors](executors.md) | How collector version updates are started: `none`, `updater`, `webhook`, `awx` and `manual`, with payloads, signatures and secrets. |
