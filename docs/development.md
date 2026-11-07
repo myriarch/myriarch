@@ -420,6 +420,7 @@ is a collapsible log group; a failed job uploads `.cache/check-local/` (the gate
 | `website` | `website` (build and checks, never a deployment) | ubuntu-24.04 |
 | `compliance` | `licenses`, `vulncheck`, `secrets`; on pull requests also the commits of the pull request (`SECRETS_SCAN_RANGE=<base>..<head> ci/secrets-scan.sh`), because a secret that one commit adds and a later one removes stays in the history | ubuntu-24.04 |
 | `dependency-review` | on pull requests and merge groups, `actions/dependency-review-action`: the licenses and known vulnerabilities of the dependencies that the change adds or updates ([Dependency review](#dependency-review)); on every other event a step that says there is nothing to compare, and the job succeeds | ubuntu-24.04 |
+| `provenance` | on pull requests, `ci/check-commit-provenance.sh --pr <number>`: every commit has a sign-off that matches its author, or is a verified SSH-signed commit of the project's machine account or a Dependabot commit that GitHub confirms ([ADR-0049](adr/0049-sign-off-for-the-project-machine-account.md)); on every other event a step that says there is nothing to check, and the job succeeds | ubuntu-24.04 |
 | `scripts` | `make ci-test` (the script tests under `ci/` and `contrib/`; not a `check-local` gate) | ubuntu-24.04 |
 | `e2e` | `e2e` gate: `scripts/e2e.sh` with the real supervisor and the UI smoke test (`e2e.yml`, mode `smoke`) | ubuntu-24.04 |
 | `ci-ok` | succeeds only when every job above succeeded | ubuntu-24.04 |
@@ -753,12 +754,12 @@ fails when it adds or updates a package with a license outside `ci/license-allow
 (`ci/tools`, `web/` and `website/` development dependencies, the brand generator). Add an exception with its reason to
 `.github/dependency-review-config.yml` as a follow-up commit, or decide against the update.
 
-**Sign-off.** DCO is a required check next to `ci-ok`. The DCO app (DCO-2) passes the commits that a bot authored without a
+**Sign-off.** DCO is a required check next to `ci-ok`, and `provenance` is part of `ci-ok` ([ADR-0049](adr/0049-sign-off-for-the-project-machine-account.md)). The DCO app (DCO-2) passes the commits that a bot authored without a
 sign-off, so a Dependabot pull request is green as Dependabot made it. Leave its commits alone: `git rebase --signoff` and a force
 push would replace the commits that GitHub signed for Dependabot with local ones, and Dependabot could no longer rebase or update
 the pull request. A commit that you add to the branch, such as a follow-up of the table, is yours and carries your sign-off
 (`git commit -s`, section "Sign-off" of [CONTRIBUTING.md](../CONTRIBUTING.md)). Dependabot stops rebasing a pull request once
-someone has pushed to its branch, so push the follow-ups last. Merge by squash or rebase, and read the release notes before you
+someone has pushed to its branch, so push the follow-ups last. Merge by squash, not by rebase: a rebase replaces the commit that GitHub signed with an unsigned one, and the release guard then refuses it. Read the release notes before you
 merge a major version.
 
 **Security updates** need the repository setting "Dependabot security updates". They do not wait for Monday, and they ignore the

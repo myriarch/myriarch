@@ -9,7 +9,7 @@
 #   RELEASE_COMMIT       full SHA (40 hex characters) the workflow was started for; it is also the checked-out commit
 #   GITHUB_REPOSITORY    owner/name
 #   GITHUB_API_URL       base URL of the REST API, https only (https://api.github.com)
-#   GITHUB_TOKEN         token with `checks: read` on the repository (the guard job needs nothing else)
+#   GITHUB_TOKEN         token with `checks: read` and `pull-requests: read` on the repository (the guard job needs nothing else)
 #
 # It runs in the checkout of the tag, with `origin` as the remote that has the tag and `main`. It refuses (exit 1, one
 # "guard: REFUSED" message) when:
@@ -25,7 +25,13 @@
 #      fails closed); a final tag with mode off passes only when WINDOWS_UNSIGNED_FINAL_TAG is exactly that tag; rc tags
 #      may use off
 #   9. the check run "ci-ok" of GitHub Actions is missing on the commit or not completed with success, or the API call fails
-# Order: the checks that need no network first, the API call last.
+#  10. a commit since the previous published release (all of the history for the first one) fails the per-commit provenance check
+#      (ci/check-commit-provenance.sh, ADR-0049): no sign-off that matches the author, and not a squash merge that GitHub
+#      confirms (of a pull request of the project's machine account, of Dependabot, or of a pull request whose commits all
+#      carry a matching sign-off), and not named in ci/provenance-exceptions.txt. A tag
+#      without a published GitHub release (one this guard refused, for example) does not move the start of the range. It needs
+#      no secret and uses the same token, which needs `pull-requests: read` besides `checks: read`.
+# Order: the checks that need no network first, the API calls last.
 set -euo pipefail
 set +x
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -262,4 +268,37 @@ if latest.get('status') != 'completed' or latest.get('conclusion') != 'success':
     sys.exit(1)
 PY
 pass "ci-ok succeeded on ${sha:0:12}"
+
+# --- 10. the provenance of every commit since the previous published release --------------------------------------------------
+# The range starts at the newest v* tag that is an ancestor of the parent of the tagged commit and has a published GitHub release
+# (rc tags count, so a final tag checks what the last rc did not see). A tag that has no release, for example one that this guard
+# refused, is skipped: tags cannot be deleted, and a refused tag must not hide the commit that caused the refusal. Without such a
+# tag the whole history is checked. A release that a draft has not yet published is not found (404) and counts as unpublished.
+start="${sha}^"
+prev=""
+for _ in $(seq 1 50); do
+  cand="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${start}" 2>/dev/null || true)"
+  [ -n "${cand}" ] || break
+  if ! [[ "${cand}" =~ ${tag_re} ]]; then start="${cand}^"; continue; fi   # not a release tag name: it cannot be a release
+  rcode="$(printf 'header = "Authorization: Bearer %s"\n' "${token}" | curl --config - --silent --show-error --proto '=https' --tlsv1.2 \
+    --max-time 30 --retry 2 --output /dev/null --write-out '%{http_code}' \
+    --header 'Accept: application/vnd.github+json' --header 'X-GitHub-Api-Version: 2022-11-28' --header 'User-Agent: myriarch-release-guard' \
+    "${api%/}/repos/${repo}/releases/tags/${cand}" 2>"${curl_err}")" || {
+    sed 's/^/guard:   curl: /' "${curl_err}" >&2
+    refuse "the GitHub API call for the release of ${cand} failed (network or TLS error)"
+  }
+  case "${rcode}" in
+    200) prev="${cand}"; break ;;
+    404) start="${cand}^" ;;
+    *) refuse "the GitHub API answered HTTP ${rcode} for the release of ${cand}" ;;
+  esac
+done
+range="${sha}"
+[ -z "${prev}" ] || range="${prev}..${sha}"
+# the token goes in through the environment of a subshell (export is a builtin), not through the arguments of another process
+if ! prov="$(export GITHUB_REPOSITORY="${repo}" GITHUB_API_URL="${api}" GITHUB_TOKEN="${token}"; ci/check-commit-provenance.sh --range "${range}" 2>&1)"; then
+  printf '%s\n' "${prov}" | grep -v '^ok ' | sed 's/^/guard:   /' >&2
+  refuse "a commit in ${range} has no valid provenance (ADR-0049): a sign-off that matches the author, or a verified commit of the machine account; fix it with a reviewed change and tag the next candidate (a commit that cannot be fixed is recorded in ci/provenance-exceptions.txt in a reviewed pull request)"
+fi
+pass "every commit in ${range} has a valid provenance"
 printf 'guard: tag %s may be released\n' "${tag}" >&2

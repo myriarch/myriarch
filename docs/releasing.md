@@ -96,10 +96,17 @@ release with one clear message per cause. It checks, in this order:
    left. An rc tag needs at least one list item in the "Unreleased" section; prose and comments are no entries.
 7. The Windows signing rule holds (below).
 8. The check run `ci-ok` of GitHub Actions exists for the commit and has finished with `success`. The guard asks the GitHub REST
-   API with `curl`; the token needs only `checks: read`. Any API error, an unexpected answer or a check run from another app
+   API with `curl`; the token needs only `checks: read` for this call. Any API error, an unexpected answer or a check run from another app
    refuses the release (fail closed).
+9. Every commit since the previous published release (all of the history before the first one) passes `ci/check-commit-provenance.sh`:
+   a `Signed-off-by:` line that matches the author (or the squash merge of a pull request whose commits all have one), or the squash merge of a pull request of the project's machine account, or a
+   Dependabot commit that GitHub confirms, or a commit recorded in `ci/provenance-exceptions.txt`
+   ([ADR-0049](adr/0049-sign-off-for-the-project-machine-account.md)). The check needs no secret and uses the token of the run;
+   without a token the role of a reviewer with a non-public membership cannot be determined and the check fails closed. A tag without a GitHub release, such as one the guard refused,
+   does not move the start of the range; the guard asks the API for the release of each tag it meets. The token of the guard job has `contents: read`, `checks: read` and `pull-requests: read`. A commit that fails is named, and
+   the release is refused.
 
-The checks that need no network run first, and the API call comes last. After the guard, `ci/release/meta.sh` derives the outputs
+The checks that need no network run first, and the API calls come last. After the guard, `ci/release/meta.sh` derives the outputs
 that every later job uses (version, kind, pre-release flag, `latest` flag, image tags, the previous tag for the generated notes
 and the Windows signing settings), and refuses a run whose `GITHUB_WORKFLOW_REF` is not
 `myriarch/myriarch/.github/workflows/release.yml@refs/tags/<tag>`: a renamed workflow file or a call through a reusable workflow
