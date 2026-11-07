@@ -3,7 +3,8 @@
 
 # Continuous integration (ADR-0032). The jobs run the gates of ci/check-local.sh (one source of commands, local and in CI),
 # plus what only a runner can prove: the platform matrix of the Go tests, the release rehearsal, the commit range scan, the
-# dependency review (ADR-0038) and the end-to-end test. "ci-ok" is the only required check of the branch ruleset.
+# dependency review (ADR-0038) and the end-to-end test. Besides the DCO check, "ci-ok" is the only required check of the branch
+# ruleset.
 #
 # Policy (enforced by ci/check-workflows.py): only GitHub-owned actions pinned to a commit SHA, a read-only token, no
 # pull_request_target or workflow_run, no persisted checkout credentials, a timeout on every job, no secrets (only the deployment
@@ -449,6 +450,37 @@ jobs:
         if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: echo "The dependency review compares a pull request or a merge group with its base; there is nothing to compare for the event ${GITHUB_EVENT_NAME}."
 
+  # ---- provenance: every commit of a pull request has a sign-off that matches its author, or is a verified commit of the machine account (ADR-0049) ----
+  # The DCO check alone lets through every verified commit of an organization member (.github/dco.yml), so this job decides the
+  # question per commit. It reads the commits of the pull request from the API with the read-only token of the run and needs no
+  # secret. For a pull request of the machine account it also asks for the approval of a person other than the account, which can
+  # come after the first run (re-run this job then). A pull request that changes this job or the script is judged by its own version,
+  # so it can drop the approval condition for itself; nothing here stops that, only the maintainer's control of the account (ADR-0049).
+  # The same check runs again before every release tag (ci/release/guard.sh), with the version of the tagged commit. Any other event (a push to main, a merge
+  # group, the nightly run) has no pull request to look at, and a skipped job would fail ci-ok, so the job succeeds there with a note.
+  provenance:
+    name: provenance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read # the pull request behind a squash-merged commit of the machine account
+    steps:
+      - name: Check out the repository
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the provenance of every commit
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: ci/check-commit-provenance.sh --pr "${PR_NUMBER}"
+      - name: Nothing to check
+        if: github.event_name != 'pull_request'
+        run: echo "The provenance check looks at the commits of a pull request; there is none for the event ${GITHUB_EVENT_NAME}."
+
   # ---- the workflows themselves: actionlint, zizmor and the policy check ----------------------------------------------------------------
   workflows:
     name: workflows
@@ -503,11 +535,11 @@ jobs:
     with:
       mode: smoke
 
-  # ---- the only required check: every job above must have succeeded ------------------------------------------------------------------------
+  # ---- the required check of CI: every job above must have succeeded -----------------------------------------------------------------------
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [go, go-test-linux, go-test-native, db-matrix, web, build, shell-helm, docs, website, compliance, dependency-review, workflows, scripts, e2e]
+    needs: [go, go-test-linux, go-test-native, db-matrix, web, build, shell-helm, docs, website, compliance, dependency-review, provenance, workflows, scripts, e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

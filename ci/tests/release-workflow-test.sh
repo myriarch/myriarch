@@ -80,7 +80,7 @@ CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 U, UA, W = "ubuntu-24.04", "${{ matrix.os }}", "windows-2025"
 CR = {"contents": "read"}
 JOBS = {
-    "guard": ([], {"contents": "read", "checks": "read"}, None, 10, U),
+    "guard": ([], {"contents": "read", "checks": "read", "pull-requests": "read"}, None, 10, U),
     "signing-tools": (["guard"], CR, None, 30, U),
     "build-tools": (["guard"], CR, None, 30, U),
     "ui": (["guard"], CR, None, 30, U),

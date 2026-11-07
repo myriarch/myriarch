@@ -60,9 +60,9 @@ Please also make sure that:
 3. Open a pull request against `main`. Fill in the template: what changes and why, the linked issue, and the checklist.
 4. A maintainer reviews it. Reviews are about correctness, security, maintainability and fit; expect questions and
    requests for changes. Push follow-up commits to the same branch.
-5. The required checks must pass: the DCO check and `ci-ok`, the aggregate of all CI jobs. CI runs automatically for
+5. The required checks must pass: the DCO check and `ci-ok`, the aggregate of all CI jobs (it includes `provenance`, see Sign-off below). CI runs automatically for
    maintainers; the first workflow run of a pull request from a new contributor starts after a maintainer approves it.
-6. A maintainer merges, by squash or rebase. [CODEOWNERS](.github/CODEOWNERS) lists who is requested for review.
+6. A maintainer merges, by squash or rebase; a pull request of the project's machine account and a Dependabot pull request are merged by squash only, because a rebase merge puts commits on `main` that GitHub does not show as verified, and the release guard refuses them. [CODEOWNERS](.github/CODEOWNERS) lists who is requested for review.
 
 ## Commit messages
 
@@ -96,7 +96,19 @@ git rebase --signoff main                    # every commit of the branch (rebas
 git push --force-with-lease                  # update your pull request
 ```
 
-The DCO check is a required status check; a pull request with an unsigned commit cannot be merged.
+The DCO check is a required status check; a pull request with an unsigned commit cannot be merged. The check `provenance`
+(`ci/check-commit-provenance.sh`, part of `ci-ok`) tests every commit of a pull request one by one, and it also fails a merge commit,
+which the DCO check skips. Do not merge `main` into your branch; rebase onto it.
+
+**The project's machine account.** The commits of the project's own machine account, `myriarch-bot`, carry no `Signed-off-by:` line. It is
+controlled by the maintainer, who made a one-time declaration for exactly those commits in
+[ADR-0049](docs/adr/0049-sign-off-for-the-project-machine-account.md): the account is author and committer, the commits are signed with
+the SSH key of the account and verified by GitHub, and the change lands on `main` as the squash merge of a pull request that the account
+opened, after the required checks and the approval of a person other than the account. The check `provenance` tests the signature, the
+author, the pull request and the approval for every commit of such a pull request (the approval can come after the first run; re-run the
+job then). A person does not push commits to a pull request of the account, because the declaration covers only commits of the account;
+the account makes the follow-up. The check does not cover anyone else: your commits, and those of the maintainers, always need your own
+sign-off, and a `Signed-off-by:` line in the name of the machine account is refused.
 
 ## AI-assisted contributions
 
@@ -105,7 +117,8 @@ You may use AI coding tools. The rules are the same as for every contribution, a
 - You review and understand every line you submit, and you can explain and defend it in review.
 - You are responsible for the result: correctness, security, license compatibility and tests.
 - You sign the DCO personally. An AI tool never adds a `Signed-off-by:` line, and nobody forges one on behalf of another
-  person.
+  person. The machine account of the project (see above) is no exception to that rule: it adds no line, and the maintainer
+  made a declaration for its commits in ADR-0049.
 - Disclose substantial AI assistance in the pull request description (which tool, for what). Optionally add a trailer to
   the commit message, for example `Assisted-by: <tool name>`.
 - Do not submit generated text or code that you have not verified, and do not paste confidential material into
