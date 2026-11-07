@@ -15,7 +15,7 @@ Go or Node.js toolchain when you use the release images.
 > these settings, so a single-machine setup without TLS and without a Git server can only use dev mode. For a real
 > installation, follow [Install with Helm](../operations/install-helm.md) and the
 > [production checklist](../operations/production-checklist.md). A production Compose setup with TLS and a Git source
-> is planned for a later release (see the [roadmap](../../ROADMAP.md#later)).
+> is planned for v0.4.0 (see the [roadmap](../../ROADMAP.md#next)).
 
 ## What you get
 
