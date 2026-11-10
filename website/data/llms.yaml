@@ -5,6 +5,7 @@
 #   details     paragraphs of background: what it does, who it is for, license, independence
 #   terms       key terms with a definition (term, text); the list that follows the paragraph "Key terms:" before the first section
 #               (llmstxt.org allows free-form lists only there; a list below a heading holds links)
+#               The shortcode key-terms (layouts/_shortcodes/key-terms.html) shows the same list as plain text on /project/what-is-myriarch/.
 #   sections    groups of links (title, links); a section titled "Optional" holds what a reader may skip
 #                 page   the path of a page of the site (/docs/concepts/gitops/); the build fails when it does not exist. The title of the
 #                        link is the title of the page unless `title` is set

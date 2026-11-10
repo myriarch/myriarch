@@ -27,6 +27,8 @@ problem:
       label: OpAMP server options compared
     - link: /docs/concepts/opamp.md
       label: OpAMP, the Supervisor and the Collector
+    - link: /docs/concepts/gitops.md
+      label: GitOps for collector configuration
 
 features:
   title: Fleet management for OpenTelemetry Collectors

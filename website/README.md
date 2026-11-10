@@ -64,8 +64,9 @@ layouts, assets, data, i18n, archetypes) are listed first.
   `content/project/_content.gotmpl` from the list in `data/repo_pages.yaml`. To add a root file, mount it in `module.yaml` and add
   an entry to the list.
 - `../assets/brand` is `static/brand`; the favicons, the touch icon, the manifest icons and the Open Graph image are mounted at
-  the places that `layouts/_partials/favicons.html` and `params.images` expect. `og-image.png` is also mounted as the asset `images/og-image.png`,
-  which `seo/social.html` reads only for its type and size.
+  the places that `layouts/_partials/favicons.html` and `params.images` expect. `og-image.png` is also mounted as the asset `seo/og-image.png`,
+  which `seo/social.html` reads only for its type and size. It is not mounted at the path of `params.images` on purpose: Hugo's embedded
+  `schema.html` also looks the images of `params.images` up among the assets and would publish a match over the static copy.
 - `node_modules` provides Bootstrap and Font Awesome (the theme mounts them relative to its own module directory, where they do not
   exist), lunr and Mermaid. `../api/openapi.yaml` is `assets/api/openapi.yaml`: the REST API reference (`docs/reference/api`,
   generated from the contract by `make docs-gen` and mounted with the rest of `docs/`) offers exactly that file for download, so no copy can drift.
@@ -154,7 +155,7 @@ is part of the build and uses no third party. `scripts/check-seo.py` fails the w
 |---|---|---|
 | Canonical link | `layouts/_partials/seo/canonical-*.html`, `params.seo.canonicalBase` | One absolute `<link rel="canonical">` per page, always below the production origin. The origin is fixed: a preview is built with `WEBSITE_BASEURL=/` and still names the production page as the original. `canonicalBase` is an origin (`https://host[:port]/`, no path: the site is served at the root of its host) and must equal `baseURL` of `hugo.yaml`. The 404 page has none |
 | Title of the home page | `params.seo.homeTitle` | The `<title>` of `/`; every other page is titled `<page title> \| myriarch`. The Open Graph and Twitter titles of the home page are the home title as well |
-| Open Graph and Twitter cards | `layouts/_partials/seo/social.html`, `params.images` | It writes `og:url` (the canonical URL), `og:site_name`, `og:title` and `twitter:title` (the title of the page without the suffix, see [Titles, descriptions and dates](#titles-descriptions-and-dates)) and `og:description` and `twitter:description` (the description). It also writes `og:type`, `article:modified_time` (the Git date of a page), `og:image` and `twitter:image` with `og:image:type`, `og:image:width` and `og:image:height` read from the file, and `twitter:card` `summary_large_image`. It writes no publication date and no `og:locale`. The 404 page has none of these tags |
+| Open Graph and Twitter cards | `layouts/_partials/seo/social.html`, `params.images` | It writes `og:url` (the canonical URL), `og:site_name`, `og:title` and `twitter:title` (the title of the page without the suffix, see [Titles, descriptions and dates](#titles-descriptions-and-dates)) and `og:description` and `twitter:description` (the description). It also writes `og:type` (`article` for a content page, `website` for the home page and the section pages), `article:modified_time` on content pages (their Git date), `og:image` and `twitter:image` with `og:image:type`, `og:image:width` and `og:image:height` read from the file, and `twitter:card` `summary_large_image`. It writes no publication date and no `og:locale`. The 404 page has none of these tags |
 | Placeholder pages | `layouts/_partials/head.html`, `layouts/sitemap.xml` | `noindex, follow` in production and no sitemap entry: the notice is no content, and its links to the closest pages stay followable. The real page that replaces a placeholder is indexed and listed with its Git date |
 | Structured data | `layouts/_partials/seo/` | JSON-LD for schema.org, see [Structured data](#structured-data) |
 | `llms.txt` | `data/llms.yaml`, `layouts/home.llms.txt` | `/llms.txt`, announced by a `<link rel="describedby">` in the head and by a visually hidden line at the start of the body of every page (`llms-directive.html` of Docsy), see [llms.txt](#llmstxt) |
@@ -199,7 +200,9 @@ free-form content (paragraphs of background, then the key terms as a list after 
 section "Optional" holds what a reader may skip. The format allows free-form content, lists included but no headings, only before the
 first level-2 heading and keeps the sections below a heading for lists of links, so the key terms are not a section of their own. It is
 curated, not generated from the pages: `data/llms.yaml` holds the summary, what the project does, for whom, its license and its
-independence, the key terms and the links, and explains its keys. A link names a page by its path, and the build fails when the page does
+independence, the key terms and the links, and explains its keys. The shortcode `key-terms` (`layouts/_shortcodes/key-terms.html`) renders
+the same terms as a definition list on `/project/what-is-myriarch/`, so that the definitions also stand on an indexable page and cannot drift
+apart from `llms.txt`; the page shows them as plain text (no Markdown), and the build fails when the list is empty. A link names a page by its path, and the build fails when the page does
 not exist. The URL written is the canonical one, so the file is the same in a preview. Docsy's own template (`all.llms.txt`, a listing of
 the main menu and the sections of the documentation) is replaced for the home page by `layouts/home.llms.txt`; `outputs.home` in
 `hugo.yaml` switches the output format `LLMS` on.
@@ -393,7 +396,9 @@ A new check is a file `scripts/check-<name>.py` that takes the built site as its
   dots shrink from the full mark, the ring does not grow again); `aria-pressed` must follow; the focus ring (contrast 3:1) must show
   for keyboard focus and not after a mouse click; nothing may run while the hero is out of view or the document is hidden; with reduced
   motion nothing may animate and the mark must have no role and no `tabindex`; without JavaScript the rollout must play once and the
-  mark must be a plain image.
+  mark must be a plain image. It also loads `/` and `/project/faq/` at 360, 375 and 768 px and fails when an item of the main menu that is
+  shown, the light/dark switch included, ends outside the viewport while the menu is not scrolled (`assets/scss/_styles_project.scss` hides
+  what does not fit).
 - `python3 -I website/scripts/lighthouse-scores.py --min 90 <report.json>` evaluates Lighthouse reports (see the development guide). The
   preview server (`scripts/preview-server.py`) compresses text files like a host does, so its scores match what visitors get.
 
@@ -462,8 +467,9 @@ renders, the two mounted README files, the build scripts and the workflow itself
   recorded for the deployment (read back through the API) is not the requested one.
 - **`404.html` and trailing slashes:** the Build Output API serves neither `404.html` nor the redirect from `/docs` to `/docs/` by
   itself. The deploy job writes `.vercel/output/config.json` with four routes. The first is a `308` redirect of every path on the host
-  `myriarch.vercel.app`, the alias that Vercel gives the production deployment, to the same path on `https://myriarch.dev/`. It is an
-  exact host match, so previews and deployment URLs stay as they are and the site has no second indexable host. The others are a
+  `myriarch.vercel.app`, the alias that Vercel gives the production deployment, to the same path on `https://myriarch.dev/`. It
+  matches the host name of the alias, so previews and deployment URLs stay as they are and the alias is no second indexable host; the other
+  production domains of the project are checked after the deployment (see [Acceptance](#acceptance-after-the-first-deployments)). The others are a
   `308` redirect for every path without a final slash and without a dot (the route that `vercel build` generates for `trailingSlash`),
   `{"handle":"filesystem"}`, and a catch-all that answers `404` with `404.html`. The job tests the alias route and the redirect
   pattern against sample paths, and `ci/tests/website-test.sh` runs the same test locally. The file lives only in the job
@@ -529,10 +535,14 @@ model lists the control ([Security model](../docs/security/model.md#build-and-re
   body of `404.html`, `robots.txt` says `Disallow: /`, the pages carry `noindex`, and no request goes to `vercel.live`.
 - Production (`curl -sI https://myriarch.dev/`): `strict-transport-security` is present, `www` redirects with 308 to the apex,
   `curl -sI https://myriarch.vercel.app/docs/` answers `308` with `location: https://myriarch.dev/docs/`,
+  every other `*.vercel.app` domain that the Vercel dashboard lists for the production deployment (for example `myriarch-<team>.vercel.app`)
+  answers `401` or a `308` to `https://myriarch.dev/` (one that answers `200` is a second indexable host: add an exact-host route for it to
+  the generated `config.json` and to the route tests of `website.yml` and `ci/tests/website-test.sh`),
   `robots.txt` names `https://myriarch.dev/sitemap.xml`, `/sitemap.xml` returns 200, a Mermaid `.mjs` file is served as
   `text/javascript`, and `site.webmanifest` has a JSON or manifest media type.
   `curl -s -o /dev/null -w '%{http_code} %{size_download}\n' -A GPTBot https://myriarch.dev/docs/` prints the same status and size as the same
-  request without `-A`, and so do `ClaudeBot` and `PerplexityBot`: the firewall serves AI crawlers like browsers (Setup, step 6).
+  request without `-A`, and so do `OAI-SearchBot`, `ChatGPT-User`, `ClaudeBot`, `Claude-SearchBot`, `Claude-User`, `PerplexityBot` and `Perplexity-User`: the firewall answers
+  the crawlers and the user-triggered fetchers of AI assistants like any other client (Setup, step 6).
 - If `vercel deploy --prebuilt` refuses to run without a linked project, add `vercel pull --yes --environment=<preview|production>`
   before the deploy step (it writes the git-ignored `.vercel/project.json`).
 
@@ -550,7 +560,7 @@ The commands take the same `--project myriarch --scope <team>` as in the setup; 
 - **An attack:** `vercel firewall attack-mode enable --duration 1h --yes` challenges every request for an hour. It sets a short-lived
   security cookie and blocks link previews and scripts, so switch it off with `vercel firewall attack-mode disable --yes` as soon as
   the attack is over.
-- Revert every incident measure when the incident is over, and keep the setup of step 6 as the normal state: when the incident is over, Bot Protection and the AI-bot rule go back to log mode, as in step 6.
+- Revert every incident measure when the incident is over: Bot Protection and the AI-bot rule go back to log mode, and the setup of step 6 stays the normal state.
 
 ### Follow-ups
 

@@ -39,12 +39,20 @@
   background-image: url('/brand/myriarch-horizontal-dark.svg');
 }
 
-// ---- navbar at phone width -----------------------------------------------------------------------------
-// Docsy keeps the main menu on one scrolling row below md, so the light/dark switch sat behind the external entries (Releases, GitHub)
-// and was out of sight. Those two entries open another site and are repeated in the footer, so below md they are hidden, which leaves
-// the pages of the site and the switch in view. Docs pages show the search box in the sidebar at this width; the 404 page offers it too.
+// ---- navbar at phone and tablet width ----------------------------------------------------------------------
+// Docsy keeps the main menu on one row that scrolls when it is too wide, and the light/dark switch, its last item, then sits out of sight.
+// Releases and GitHub open another site and are repeated in the footer, so below md they are hidden. Below lg the entry API reference is
+// hidden as well: the documentation index and its sidebar link the API reference. This keeps the other pages of the site and the switch in
+// view from 360 px on (scripts/check-requests.mjs checks 360, 375 and 768 px). Docs pages show the search box in the sidebar at this width;
+// the 404 page offers it too.
 @include media-breakpoint-down(md) {
   .td-navbar .navbar-nav .nav-item:has(> .nav-link[target='_blank']) {
+    display: none;
+  }
+}
+
+@include media-breakpoint-down(lg) {
+  .td-navbar .navbar-nav .nav-item:has(> .nav-link[href$='/docs/reference/api/']) {
     display: none;
   }
 }

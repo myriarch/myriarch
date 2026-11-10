@@ -124,7 +124,7 @@ def docs_index(canonical=ORIGIN + "/docs/"):
 
 
 def png(width=1200, height=630):
-    """A valid PNG file (signature, IHDR, one blank pixel row per line is not needed: the checks read the header only)."""
+    """A PNG header for an image of the given size: signature, IHDR, a token IDAT and IEND. It is not a decodable image; the checks read the header only."""
     def chunk(kind, data):
         body = kind + data
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
@@ -152,8 +152,9 @@ def social_tags(title, canonical, description, **changes):
         for each in value if isinstance(value, list) else [value]:
             if each is not GONE:
                 out += SOCIAL % ("property" if key.startswith("og:") else "name", key, each)
+    known = {k.replace(":", "_") for k, _ in tags}
     for key, value in changes.items():  # a tag that the page does not have by default
-        if key.replace("_", ":", 1) not in dict(tags) and value is not GONE:
+        if key not in known and value is not GONE:
             out += SOCIAL % ("property", key.replace("_", ":", 1), value)
     return out
 

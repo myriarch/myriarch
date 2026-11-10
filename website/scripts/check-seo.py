@@ -271,7 +271,6 @@ class PageParser(HTMLParser):
         self.metas = []  # (property or name, content) of every meta whose property or name starts with og:, twitter: or article:
         self.itemprops = []  # (itemprop, content) of every meta with an itemprop (Hugo's schema.html writes dateModified and others)
         self.times = []  # the datetime values of the <time> elements
-        self.placeholder = False  # the page has an element with the class td-placeholder
         self.images = []
         self.h1 = 0
         self.crumbs = None  # [(text, href or "")] of the visible breadcrumb navigation, None when the page has none
@@ -329,8 +328,6 @@ class PageParser(HTMLParser):
             self._item = {"text": [], "href": ""}
         elif self._item is not None and tag == "a":
             self._item["href"] = a.get("href", "")
-        if "td-placeholder" in classes:
-            self.placeholder = True
         if tag == "div":
             if self._div:
                 self._div += 1

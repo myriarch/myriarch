@@ -27,8 +27,8 @@ done
 
 # website.yml: the routes of the deploy job. The JSON and the Python heredoc of the step "Assemble and guard the output" are cut out of
 # the workflow as text and run before any deployment; broken copies prove that the check bites.
-RT="$(mktemp -d)"
-trap 'rm -rf "${RT}"' EXIT
+RT="${TEST_TMP}/routes"  # below TEST_TMP, which the EXIT trap of lib-test.sh removes
+mkdir -p "${RT}"
 extract_heredoc() { # delimiter file: the lines between <<'DELIM' and DELIM, without their YAML indentation
   awk -v d="$1" '
     index($0, "<<\047" d "\047") { on = 1; match($0, /^ */); n = RLENGTH; next }

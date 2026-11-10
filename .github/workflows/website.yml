@@ -203,7 +203,7 @@ jobs:
               || { echo "::error::robots.txt of production does not name https://myriarch.dev/sitemap.xml"; exit 1; }
           fi
           # The production alias that Vercel gives the project serves the whole site. The first route redirects it to the site with
-          # an exact host match, so previews and deployment URLs are untouched and the site has no second indexable host.
+          # a match on its host name, so previews and deployment URLs are untouched and the alias is no second indexable host.
           # The second route is the trailing-slash redirect that "vercel build" would emit for trailingSlash: /docs -> /docs/. It
           # matches paths without a final slash and without a dot, so files (robots.txt, sitemap.xml) and "/" are left alone.
           cat > "${out}/config.json" <<'JSON'
