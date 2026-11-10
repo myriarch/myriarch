@@ -453,7 +453,8 @@ The file has exactly one key, `repositoryID`. It has no `owners`; an owners entr
 the board has to ask for it explicitly, in a change of its own.
 
 Artifact Hub lists every version tag of the repository, release candidates included. A repository that is added after a candidate therefore
-shows the candidate (as a pre-release) until the final version is published.
+shows the candidate until the final version is published. Artifact Hub documents the chart annotation `artifacthub.io/prerelease` for
+marking a version as a pre-release; the release flow does not set it yet, so check how the listing shows a candidate after its scan.
 
 ## Release post
 

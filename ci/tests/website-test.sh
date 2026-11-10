@@ -4,8 +4,8 @@
 
 # Tests of the website tooling that need neither Hugo nor a browser: the unit tests of the check scripts in website/scripts
 # (static scan of the built site, local paths, override pins, placeholders, notices, Lighthouse scores), the argument handling of
-# ci/website.sh, and the pure functions of the Node scripts. The build itself and the browser check run in the website gate
-# (make website-check).
+# ci/website.sh, the pure functions of the Node scripts and the generated routes of the website deploy job (website.yml, read as
+# text). The build itself and the browser check run in the website gate (make website-check).
 #
 #   ci/tests/website-test.sh
 #
@@ -24,6 +24,41 @@ if [ "${rc}" = 0 ]; then ok "unit tests of website/scripts ($(printf '%s\n' "${O
 for f in website/scripts/check-*.py website/scripts/lighthouse-scores.py; do
   expect_fail "${f}: an unknown option is a usage error" 'usage' python3 -I "${f}" --bogus
 done
+
+# website.yml: the routes of the deploy job. The JSON and the Python heredoc of the step "Assemble and guard the output" are cut out of
+# the workflow as text and run before any deployment; broken copies prove that the check bites.
+RT="$(mktemp -d)"
+trap 'rm -rf "${RT}"' EXIT
+extract_heredoc() { # delimiter file: the lines between <<'DELIM' and DELIM, without their YAML indentation
+  awk -v d="$1" '
+    index($0, "<<\047" d "\047") { on = 1; match($0, /^ */); n = RLENGTH; next }
+    on && $0 ~ "^[ ]*" d "$" { exit }
+    on { print substr($0, n + 1) }' "$2"
+}
+WF=.github/workflows/website.yml
+extract_heredoc JSON "${WF}" > "${RT}/config.json"
+extract_heredoc PY "${WF}" > "${RT}/check.py"
+if [ -s "${RT}/config.json" ] && [ -s "${RT}/check.py" ]; then
+  expect_ok "website.yml: the routes of the deploy job pass their own test" python3 -I "${RT}/check.py" "${RT}/config.json"
+  sed 's/myriarch\.vercel\.app/myriarch-x.vercel.app/' "${RT}/config.json" > "${RT}/other-host.json"
+  expect_fail "website.yml: the routes test fails for another alias host" 'vercel.app alias' python3 -I "${RT}/check.py" "${RT}/other-host.json"
+  python3 -I -c 'import json, sys; c = json.load(open(sys.argv[1])); c["routes"].pop(0); json.dump(c, open(sys.argv[2], "w"))' "${RT}/config.json" "${RT}/no-alias.json"
+  expect_fail "website.yml: the routes test fails without the alias route" '::error::' python3 -I "${RT}/check.py" "${RT}/no-alias.json"
+  cat > "${RT}/direct.py" <<'RTPY'
+import json, sys
+routes = json.load(open(sys.argv[1]))["routes"]
+alias = {"src": "^/(.*)$", "has": [{"type": "host", "value": "myriarch.vercel.app"}], "status": 308, "headers": {"Location": "https://myriarch.dev/$1"}}
+assert routes[0] == alias, "the alias route is not the exact route"
+assert [r for r in routes if "has" in r] == [alias], "another route matches on a host"
+assert all("*" not in h["value"] for r in routes for h in r.get("has", [])), "a host value has a wildcard"
+assert routes[-2] == {"handle": "filesystem"}, "the second last route is not the filesystem handle"
+assert routes[-1] == {"src": "/.*", "status": 404, "dest": "/404.html"}, "the last route is not the 404 route"
+RTPY
+  RTOUT="$(python3 -I "${RT}/direct.py" "${RT}/config.json" 2>&1)"; rc=$?
+  if [ "${rc}" = 0 ]; then ok "website.yml: alias route, single host match, no wildcard, handle and 404 last"; else fail "website.yml: the generated routes"; printf '%s\n' "${RTOUT}" | sed 's/^/        /' >&2; fi
+else
+  fail "website.yml: the JSON or Python heredoc of the route step was not found"
+fi
 
 # ci/website.sh: arguments and reserved ports are refused before anything is installed
 expect_fail "website.sh: no subcommand" 'usage: ci/website.sh' ci/website.sh
