@@ -26,8 +26,8 @@ MARK = Mark(D=12, P=15, S=13, ro=6.5, ri=2.75, apex_step=13.5)
 UNIT = 2 * MARK.ro            # clear-space unit: outer diameter of the open ring
 TRACKING = -0.02              # em, wordmark
 WORD = "myriarch"
-TAGLINE = ("Command ten thousand OpenTelemetry Collectors",
-           "from one GitOps-governed control plane.")
+TAGLINE = ("A GitOps-governed fleet manager for",
+           "OpenTelemetry Collectors, built on OpAMP.")
 SOCIAL_BG = "#FBF6F9"
 TAGLINE_INK = "#5C4656"
 

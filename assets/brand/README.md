@@ -28,6 +28,8 @@ reach every collector. The colour is Tyrian purple, the costly dye that marked r
 | `social-preview.svg`, `og-image.svg` | Vector sources of the two social images. |
 | `source/` | The generator that produces every file above (see [Production](#production)). |
 
+Both social images carry the tagline of [ADR-0050](../../docs/adr/0050-tagline-backed-by-the-documentation.md): "A GitOps-governed fleet manager for OpenTelemetry Collectors, built on OpAMP." The name means "commander of ten thousand" (see above); the cards state no number of collectors.
+
 All SVGs are plain filled paths: no `<text>`, no embedded raster images, no scripts and no external references.
 Each has a tight `viewBox` and explicit `width` and `height`, plus `role="img"`, `aria-label` and `<title>`.
 
