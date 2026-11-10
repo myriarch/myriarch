@@ -27,6 +27,13 @@ Fails when
     the latest release of data/release.yaml, without the leading v); a page with a visible breadcrumb has exactly one BreadcrumbList that
     equals it: the home page, then the items of the visible breadcrumb with the same names and URLs (a breadcrumb that Docsy hides with the
     class td-breadcrumbs--single, a trail of one item, is not visible: such a page has no list); every other page has no JSON-LD,
+  - the Open Graph and Twitter tags of a page (every page but the 404 page and redirect stubs) are not the ones of the page: exactly one og:title
+    that equals the title without the suffix " | <site title>" (the whole title on the home page), one twitter:title that equals it, og:description
+    and twitter:description that equal the meta description, og:url that equals the canonical URL, og:site_name that is the site title, og:type
+    website or article, exactly one og:image that is absolute, below the production origin and names a PNG file of the built site whose size is
+    og:image:width by og:image:height with og:image:type image/png, twitter:card summary_large_image and a twitter:image that equals og:image,
+  - a page carries itemprop=datePublished or article:published_time without showing that date in a <time datetime> element (a page states a
+    publication date only when it shows it; the value is reported),
   - two pages have the same title (the 404 page is no page here), or a page outside docs/reference/ and docs/adr/ has a description of fewer
     than 70 or more than 160 characters (the generated references and the decision records are exempt: their descriptions come from the
     generators),
@@ -39,11 +46,12 @@ Fails when
     only before the first level-2 heading), is larger than 64 KiB, links to a page that does not exist, to a placeholder page, to another
     host than the production origin and the repository, repeats a link, or spells the name against ADR-0015 ("Myriarch" at the start of a
     sentence, "myriarch" elsewhere; names of programs and paths are identifiers and always lower case),
-  - the 404 page is missing, can be indexed (no robots meta with noindex), has a canonical link or structured data, has not exactly one h1
+  - the 404 page is missing, can be indexed (no robots meta with noindex), has a canonical link, structured data or an og: or twitter: meta, has not exactly one h1
     or offers no link back to the home page, the documentation or the project in its content,
   - production only: robots.txt blocks a crawler (a Disallow rule with a path: the policy is that every crawler may read the site), or
-    the sitemap and the pages differ (every URL of the sitemap is the URL of a page, and every page has its entry; a build with a relative
-    base URL has no absolute sitemap and is not compared).
+    the sitemap and the pages differ (every URL of the sitemap is the URL of a page, and every page but a placeholder page has its entry; a
+    placeholder page, one with an element of the class td-placeholder, is no content: check-indexing.py requires "noindex, follow" on it and
+    the sitemap must not list it; a build with a relative base URL has no absolute sitemap and is not compared).
 
 The output names the file and the problem and quotes the offending value (a title, a link, a property of the structured data, a setting of
 the configuration): the site is public, and the value makes the finding actionable. Exit status 0 = clean, 1 = findings, 2 = usage or
@@ -260,6 +268,10 @@ class PageParser(HTMLParser):
         self.canonicals = []
         self.describedby = []
         self.ld = []
+        self.metas = []  # (property or name, content) of every meta whose property or name starts with og:, twitter: or article:
+        self.itemprops = []  # (itemprop, content) of every meta with an itemprop (Hugo's schema.html writes dateModified and others)
+        self.times = []  # the datetime values of the <time> elements
+        self.placeholder = False  # the page has an element with the class td-placeholder
         self.images = []
         self.h1 = 0
         self.crumbs = None  # [(text, href or "")] of the visible breadcrumb navigation, None when the page has none
@@ -287,6 +299,13 @@ class PageParser(HTMLParser):
                 self.descriptions.append(a.get("content", ""))
             elif name == "robots":
                 self.robots.append(a.get("content", ""))
+            key = (a.get("property") or a.get("name") or "").strip().lower()
+            if key.startswith(("og:", "twitter:", "article:")):
+                self.metas.append((key, a.get("content", "")))
+            if a.get("itemprop"):
+                self.itemprops.append((a["itemprop"].strip(), a.get("content", "")))
+        elif tag == "time" and "datetime" in a:
+            self.times.append(a["datetime"].strip())
         elif tag == "link":
             rels = a.get("rel", "").lower().split()
             if "canonical" in rels:
@@ -310,6 +329,8 @@ class PageParser(HTMLParser):
             self._item = {"text": [], "href": ""}
         elif self._item is not None and tag == "a":
             self._item["href"] = a.get("href", "")
+        if "td-placeholder" in classes:
+            self.placeholder = True
         if tag == "div":
             if self._div:
                 self._div += 1
@@ -582,7 +603,7 @@ def check_json_ld(rel, parsed, cfg, canonical, is_home):
 # ---- the checks ----------------------------------------------------------------------------------------------------------------------
 
 
-def check_page(rel, parsed, cfg, base):
+def check_page(rel, parsed, cfg, base, root):
     """Findings for one page that search engines may index (no 404 page, no redirect stub). Returns (findings, canonical URL or "")."""
     out = []
     path = page_path(rel)
@@ -609,7 +630,85 @@ def check_page(rel, parsed, cfg, base):
     if is_home:
         out.extend(check_home_title(rel, parsed, cfg))
     out.extend(check_json_ld(rel, parsed, cfg, canonical, is_home))
+    out.extend(check_social(rel, parsed, cfg, canonical, root))
+    out.extend(check_dates(rel, parsed))
     return out, canonical
+
+
+def metas(parsed, key):
+    return [value for k, value in parsed.metas if k == key]
+
+
+def check_social(rel, parsed, cfg, canonical, root):
+    """The Open Graph and Twitter tags are the title, the description, the canonical URL and the card file of the page (seo/social.html)."""
+    out = []
+    title = " ".join(parsed.titles[0].split()) if len(parsed.titles) == 1 else None
+    suffix = " | " + cfg.title
+    want_title = title[: -len(suffix)] if title is not None and title.endswith(suffix) else title
+    description = " ".join(parsed.descriptions[0].split()) if len(parsed.descriptions) == 1 else None
+
+    def one(key):
+        values = metas(parsed, key)
+        if len(values) != 1:
+            out.append("%s: has %d %s tags, expected exactly one" % (rel, len(values), key))
+            return None
+        return values[0]
+
+    def same(key, want, label):
+        value = one(key)
+        if value is not None and want is not None and " ".join(value.split()) != want:
+            out.append("%s: %s is %r, expected %r (%s)" % (rel, key, value, want, label))
+        return value
+
+    og_title = same("og:title", want_title, "the title without the site suffix")
+    if og_title is not None:
+        same("twitter:title", " ".join(og_title.split()), "og:title")
+    same("og:description", description, "the meta description")
+    same("twitter:description", description, "the meta description")
+    same("og:url", canonical or None, "the canonical URL")
+    same("og:site_name", cfg.title, "the site title")
+    og_type = one("og:type")
+    if og_type is not None and og_type not in ("website", "article"):
+        out.append("%s: og:type is %r, expected website or article" % (rel, og_type))
+    same("twitter:card", "summary_large_image", "the card type")
+    image = one("og:image")
+    if image is not None:
+        out.extend(check_card_image(rel, parsed, cfg, image, root))
+        same("twitter:image", image, "og:image")
+    return out
+
+
+def check_card_image(rel, parsed, cfg, image, root):
+    """og:image names a PNG file of the built site below the production origin, and its type and size tags say what the file is."""
+    if not image.startswith(cfg.origin + "/"):
+        return ["%s: og:image is %r, expected an absolute URL below %s" % (rel, image, cfg.origin)]
+    out = []
+    path = resolve_site_file(root, urlsplit(image).path)
+    size = None
+    if path is None or not os.path.isfile(path):
+        out.append("%s: og:image %s names no file of the built site" % (rel, image))
+    else:
+        size = load_sibling("check-landing").png_size(path)
+        if size is None:
+            out.append("%s: og:image %s is not a PNG file" % (rel, image))
+    kinds = metas(parsed, "og:image:type")
+    if kinds != ["image/png"]:
+        out.append("%s: og:image:type is %r, expected exactly one image/png" % (rel, kinds))
+    if size is not None:
+        for key, want in (("og:image:width", size[0]), ("og:image:height", size[1])):
+            values = metas(parsed, key)
+            if values != [str(want)]:
+                out.append("%s: %s is %r, expected exactly %d (the size of %s)" % (rel, key, values, want, image))
+    return out
+
+
+def check_dates(rel, parsed):
+    """A page states a publication date (itemprop datePublished, article:published_time) only when it shows that date in a <time datetime>."""
+    stated = [("itemprop=datePublished", v) for k, v in parsed.itemprops if k == "datePublished"]
+    stated += [("article:published_time", v) for k, v in parsed.metas if k == "article:published_time"]
+    shown = {t[:10] for t in parsed.times}
+    return ["%s: %s is %r, but the page shows no <time datetime> with that date" % (rel, name, value)
+            for name, value in stated if value.strip()[:10] not in shown or not value.strip()]
 
 
 def check_description_length(rel, parsed):
@@ -678,8 +777,8 @@ def sitemap_urls(root):
     return [u.strip().replace("&amp;", "&") for u in re.findall(r"<loc>([^<]*)</loc>", text)]
 
 
-def check_sitemap(root, paths, base):
-    """The sitemap lists the URL of every page below the base URL of the build, and nothing else (the 404 page is no page)."""
+def check_sitemap(root, paths, base, placeholders=()):
+    """The sitemap lists the URL of every page below the base URL of the build except the placeholder pages, and nothing else (the 404 page is no page)."""
     urls = sitemap_urls(root)
     if urls is None:
         return ["sitemap.xml: missing or unreadable"]
@@ -688,7 +787,10 @@ def check_sitemap(root, paths, base):
     want = {base + path for path in paths}
     if len(listed) != len(urls):
         out.append("sitemap.xml: lists a URL more than once")
-    for url in sorted(listed - want):
+    notice = {base + path for path in placeholders}
+    for url in sorted(listed & notice):
+        out.append("sitemap.xml: lists the placeholder page %s; a placeholder is no content" % url)
+    for url in sorted(listed - want - notice):
         out.append("sitemap.xml: lists %s, which is the URL of no page" % url)
     for url in sorted(want - listed):
         out.append("sitemap.xml: does not list %s" % url)
@@ -829,6 +931,9 @@ def check_404(root, cfg):
         out.append("404.html: has a canonical link; an error page has no original")
     if parsed.ld:
         out.append("404.html: has structured data")
+    for key, value in parsed.metas:
+        if key.startswith(("og:", "twitter:")):
+            out.append("404.html: has the tag %s (%r); an error page is not shared as a card" % (key, value))
     if parsed.h1 != 1:
         out.append("404.html: has %d h1 headings, expected exactly one" % parsed.h1)
     links = set(parsed.content_links)
@@ -844,6 +949,7 @@ def check_site(root, cfg, mode):
     indexing = load_sibling("check-indexing")
     base = build_base(cfg)
     paths = set()
+    placeholders = set()
     titles = {}
     scanned = 0
     for rel in list_pages(root):
@@ -852,12 +958,14 @@ def check_site(root, cfg, mode):
         if rel == "404.html" or indexing.is_redirect_stub(text):
             continue
         parsed = parse_page(text)
-        page_findings, canonical = check_page(rel, parsed, cfg, base)
+        page_findings, canonical = check_page(rel, parsed, cfg, base, root)
         findings.extend(page_findings)
         if len(parsed.titles) == 1 and parsed.titles[0].strip():
             titles.setdefault(" ".join(parsed.titles[0].split()), []).append(rel)
-        if canonical:
+        if canonical and not indexing.is_placeholder(text):
             paths.add(page_path(rel))
+        elif canonical:
+            placeholders.add(page_path(rel))
     if not os.path.isfile(os.path.join(root, "index.html")):
         findings.append("index.html: missing")
     findings.extend(check_unique_titles(titles))
@@ -866,7 +974,7 @@ def check_site(root, cfg, mode):
     findings.extend(check_404(root, cfg))
     findings.extend(check_robots(root, mode))
     if mode == "production" and base:
-        findings.extend(check_sitemap(root, paths, base))
+        findings.extend(check_sitemap(root, paths, base, placeholders))
     return scanned, findings
 
 

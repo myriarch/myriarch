@@ -17,7 +17,9 @@ import io
 import json
 import os
 import shutil
+import struct
 import tempfile
+import zlib
 import unittest
 from unittest import mock
 
@@ -121,14 +123,51 @@ def docs_index(canonical=ORIGIN + "/docs/"):
     return page("Documentation | myriarch", canonical, body=nav(("Documentation", ""), single=True))
 
 
+def png(width=1200, height=630):
+    """A valid PNG file (signature, IHDR, one blank pixel row per line is not needed: the checks read the header only)."""
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+    header = struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(b"\x00")) + chunk(b"IEND", b"")
+
+
+CARD = ORIGIN + "/images/og-image.png"
+SOCIAL = "<meta %s=%s content=\"%s\">"
+
+
+def social_tags(title, canonical, description, **changes):
+    """The Open Graph and Twitter tags that seo/social.html writes for a page. A change replaces the value of a tag by its key with the colon
+    written as an underscore (og_title); GONE drops the tag; a list repeats it."""
+    suffix = " | myriarch"
+    shown = title[: -len(suffix)] if title.endswith(suffix) else title
+    tags = [("og:url", canonical), ("og:site_name", "myriarch"), ("og:title", shown), ("twitter:title", shown)]
+    if description is not None:
+        tags += [("og:description", description), ("twitter:description", description)]
+    tags += [("og:type", "article"), ("og:image", CARD), ("og:image:type", "image/png"), ("og:image:width", "1200"),
+             ("og:image:height", "630"), ("twitter:image", CARD), ("twitter:card", "summary_large_image")]
+    out = ""
+    for key, value in tags:
+        value = changes.get(key.replace(":", "_"), value)
+        for each in value if isinstance(value, list) else [value]:
+            if each is not GONE:
+                out += SOCIAL % ("property" if key.startswith("og:") else "name", key, each)
+    for key, value in changes.items():  # a tag that the page does not have by default
+        if key.replace("_", ":", 1) not in dict(tags) and value is not GONE:
+            out += SOCIAL % ("property", key.replace("_", ":", 1), value)
+    return out
+
+
 def page(title="A page | myriarch", canonical=None, ld=(), body="", description=PAGE_DESCRIPTION, robots="index, follow", describedby="/llms.txt",
-         lang="en", extra_head=""):
+         lang="en", extra_head="", **social):
     head = '<meta charset=utf-8><meta name=robots content="%s">' % robots
     head += "<title>%s</title>" % title if title is not None else ""
     if description is not None:
         head += '<meta name=description content="%s">' % description
     if canonical is not None:
         head += '<link rel=canonical href="%s">' % canonical
+    if canonical is not None and title is not None:
+        head += social_tags(title, canonical, description, **social)
     if describedby is not None:
         head += '<link rel=describedby href="%s">' % describedby
     for node in ld:
@@ -180,6 +219,7 @@ class SeoCase(unittest.TestCase):
         self.release = os.path.join(self.tmp, "release.yaml")
         self.files = {}  # path below public -> text
         self.hugo, self.params, self.release_text = HUGO, PARAMS, RELEASE
+        self.card = png()  # images/og-image.png of the built site, None for a site without it
         self.reset_site()
 
     def reset_site(self):
@@ -210,6 +250,10 @@ class SeoCase(unittest.TestCase):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(text)
+        if self.card is not None:
+            os.makedirs(os.path.join(self.public, "images"), exist_ok=True)
+            with open(os.path.join(self.public, "images", "og-image.png"), "wb") as fh:
+                fh.write(self.card)
         os.makedirs(self.config, exist_ok=True)
         for name, text in (("hugo.yaml", self.hugo), ("params.yaml", self.params)):
             with open(os.path.join(self.config, name), "w", encoding="utf-8") as fh:
@@ -662,6 +706,11 @@ class NotFoundPageTest(SeoCase):
         self.files["404.html"] = page("404 | myriarch", ORIGIN + "/404.html", [website()], robots="noindex, nofollow", body=NOT_FOUND_BODY)
         self.assert_finding("404.html: has a canonical link; an error page has no original", "404.html: has structured data")
 
+    def test_the_404_page_has_no_open_graph_or_twitter_tags(self):
+        self.files["404.html"] = page("404 | myriarch", None, robots="noindex, nofollow", body=NOT_FOUND_BODY,
+                                      extra_head='<meta property="og:title" content="404"><meta name="twitter:card" content="summary">')
+        self.assert_finding("404.html: has the tag og:title ('404')", "404.html: has the tag twitter:card ('summary')")
+
     def test_the_404_page_has_one_heading_and_ways_back_in_its_content(self):
         self.files["404.html"] = page("404 | myriarch", None, robots="noindex", body=NOT_FOUND_BODY.replace("<h1>Page not found</h1>", ""))
         self.assert_finding("404.html: has 0 h1 headings, expected exactly one")
@@ -891,6 +940,156 @@ class ConfigurationTest(SeoCase):
         self.assertTrue(cfg.home_title.startswith("Myriarch"), cfg.home_title)
         self.assertLessEqual(len(cfg.home_title), self.mod.HOME_TITLE_MAX)
         self.assertEqual(self.mod.spelling_problems(cfg.home_title, "home title"), [])
+
+
+class SocialCardTest(SeoCase):
+    PATH = "legal/third-party/index.html"
+    TITLE = "Third-party | myriarch"
+    URL = ORIGIN + "/legal/third-party/"
+
+    def third_party(self, **social):
+        self.files[self.PATH] = page(self.TITLE, self.URL, body="<img src=/a.png alt='The logo of the project'>", **social)
+
+    def test_the_tags_of_a_page_match_the_page(self):
+        self.third_party()
+        self.assert_clean()
+
+    def test_an_og_title_that_differs_from_the_title_fails(self):
+        self.third_party(og_title="Another title")
+        self.assert_finding("legal/third-party/index.html: og:title is 'Another title', expected 'Third-party'")
+
+    def test_an_og_title_with_the_site_suffix_fails(self):
+        self.third_party(og_title="Third-party | myriarch", twitter_title="Third-party | myriarch")
+        self.assert_finding("og:title is 'Third-party | myriarch', expected 'Third-party'")
+
+    def test_a_missing_or_repeated_og_title_fails(self):
+        self.third_party(og_title=GONE)
+        self.assert_finding("has 0 og:title tags, expected exactly one")
+        self.third_party(og_title=["Third-party", "Third-party"])
+        self.assert_finding("has 2 og:title tags, expected exactly one")
+
+    def test_a_twitter_title_that_differs_from_the_og_title_fails(self):
+        self.third_party(twitter_title="Another title")
+        self.assert_finding("twitter:title is 'Another title', expected 'Third-party' (og:title)")
+
+    def test_an_og_url_that_differs_from_the_canonical_link_fails(self):
+        self.third_party(og_url=ORIGIN + "/legal/")
+        self.assert_finding("og:url is 'https://example.test/legal/', expected 'https://example.test/legal/third-party/'")
+
+    def test_descriptions_that_differ_from_the_meta_description_fail(self):
+        self.third_party(og_description="Another description of the page.")
+        self.assert_finding("og:description is 'Another description of the page.'")
+        self.third_party(twitter_description="Another description of the page.")
+        self.assert_finding("twitter:description is 'Another description of the page.'")
+
+    def test_the_site_name_the_type_and_the_card_are_checked(self):
+        self.third_party(og_site_name="other")
+        self.assert_finding("og:site_name is 'other', expected 'myriarch'")
+        self.third_party(og_type="product")
+        self.assert_finding("og:type is 'product', expected website or article")
+        self.third_party(twitter_card="summary")
+        self.assert_finding("twitter:card is 'summary', expected 'summary_large_image'")
+
+    def test_a_missing_og_image_file_fails(self):
+        self.card = None
+        self.assert_finding("og:image https://example.test/images/og-image.png names no file of the built site")
+
+    def test_an_og_image_that_is_no_png_fails(self):
+        self.card = b"GIF89a not a png file at all......"
+        self.assert_finding("og:image https://example.test/images/og-image.png is not a PNG file")
+
+    def test_an_og_image_below_another_origin_fails(self):
+        self.third_party(og_image="https://other.test/images/og-image.png", twitter_image="https://other.test/images/og-image.png")
+        self.assert_finding("og:image is 'https://other.test/images/og-image.png', expected an absolute URL below https://example.test")
+
+    def test_an_og_image_size_that_differs_from_the_file_fails(self):
+        self.third_party(og_image_width="1000")
+        self.assert_finding("og:image:width is ['1000'], expected exactly 1200")
+        self.third_party(og_image_height="600")
+        self.assert_finding("og:image:height is ['600'], expected exactly 630")
+        self.card = png(1000, 500)
+        self.assert_finding("og:image:width is ['1200'], expected exactly 1000", "og:image:height is ['630'], expected exactly 500")
+
+    def test_a_wrong_image_type_or_a_twitter_image_that_differs_fails(self):
+        self.third_party(og_image_type="image/jpeg")
+        self.assert_finding("og:image:type is ['image/jpeg'], expected exactly one image/png")
+        self.third_party(twitter_image=ORIGIN + "/images/other.png")
+        self.assert_finding("twitter:image is 'https://example.test/images/other.png'")
+
+    def test_the_home_page_title_is_not_shortened(self):
+        self.assert_clean()
+        self.files["index.html"] = self.files["index.html"].replace('property=og:title content="%s"' % HOME_TITLE, 'property=og:title content="Myriarch"')
+        self.assert_finding("index.html: og:title is 'Myriarch', expected %r" % HOME_TITLE)
+
+    def test_a_redirect_stub_needs_no_tags(self):
+        self.files["old/index.html"] = (
+            '<!doctype html><html><head><title>/docs/</title><link rel=canonical href="%s/docs/"><meta name=robots content="noindex">'
+            '<meta http-equiv=refresh content="0; url=%s/docs/"></head></html>' % (ORIGIN, ORIGIN))
+        self.assert_clean()
+
+    def test_the_tags_are_checked_in_a_preview_too(self):
+        os.environ["WEBSITE_ENV"] = "preview"
+        self.files["sitemap.xml"] = "<urlset></urlset>"
+        self.third_party(og_title="Another title")
+        rc, out, _ = self.run_check()
+        self.assertEqual(rc, 1)
+        self.assertIn("og:title is 'Another title'", out)
+
+
+class PublicationDateTest(SeoCase):
+    PATH = "legal/third-party/index.html"
+    URL = ORIGIN + "/legal/third-party/"
+
+    def with_date(self, head, body=""):
+        self.files[self.PATH] = page("Third-party | myriarch", self.URL, body=body, extra_head=head)
+
+    def test_a_page_without_a_publication_date_passes(self):
+        self.with_date('<meta itemprop=dateModified content="2026-10-15T22:28:28+02:00">')
+        self.assert_clean()
+
+    def test_a_date_published_without_a_time_element_fails(self):
+        self.with_date('<meta itemprop=datePublished content="2026-10-15T22:28:28+02:00">')
+        self.assert_finding("itemprop=datePublished is '2026-10-15T22:28:28+02:00', but the page shows no <time datetime> with that date")
+
+    def test_a_date_published_with_a_time_of_the_same_date_passes(self):
+        self.with_date('<meta itemprop=datePublished content="2026-10-15T22:28:28+02:00">', '<time datetime="2026-10-15">15 October 2026</time>')
+        self.assert_clean()
+
+    def test_a_date_published_with_a_time_of_another_date_fails(self):
+        self.with_date('<meta itemprop=datePublished content="2026-10-15T22:28:28+02:00">', '<time datetime="2026-10-16">16 October 2026</time>')
+        self.assert_finding("itemprop=datePublished is '2026-10-15T22:28:28+02:00'")
+
+    def test_an_article_published_time_without_a_time_element_fails(self):
+        self.with_date('<meta property="article:published_time" content="2026-10-15T22:28:28+02:00">')
+        self.assert_finding("article:published_time is '2026-10-15T22:28:28+02:00', but the page shows no <time datetime> with that date")
+
+    def test_an_article_published_time_with_a_time_of_the_same_date_passes(self):
+        self.with_date('<meta property="article:published_time" content="2026-10-15T22:28:28+02:00">', '<time datetime="2026-10-15">15 October 2026</time>')
+        self.assert_clean()
+
+    def test_an_article_published_time_with_a_time_of_another_date_fails(self):
+        self.with_date('<meta property="article:published_time" content="2026-10-15T22:28:28+02:00">', '<time datetime="2026-10-14">14 October 2026</time>')
+        self.assert_finding("article:published_time is '2026-10-15T22:28:28+02:00'")
+
+
+class PlaceholderSitemapTest(SeoCase):
+    NOTICE = '<div class="alert td-placeholder" role="note">This page is being written.</div>'
+
+    def placeholder(self):
+        self.files["docs/later/index.html"] = page("Later | myriarch", ORIGIN + "/docs/later/", robots="noindex, follow", body=self.NOTICE)
+
+    def test_a_placeholder_missing_from_the_sitemap_passes(self):
+        self.placeholder()
+        self.assert_clean()
+
+    def test_a_placeholder_listed_in_the_sitemap_fails(self):
+        self.placeholder()
+        self.files["sitemap.xml"] = self.sitemap(["/", "/docs/", "/docs/concepts/gitops/", "/legal/third-party/", "/docs/later/"])
+        self.assert_finding("sitemap.xml: lists the placeholder page https://example.test/docs/later/")
+
+    def test_a_page_that_is_no_placeholder_still_needs_its_entry(self):
+        self.files["sitemap.xml"] = self.sitemap(["/", "/docs/", "/docs/concepts/gitops/"])
+        self.assert_finding("sitemap.xml: does not list https://example.test/legal/third-party/")
 
 
 class ParsingTest(unittest.TestCase):

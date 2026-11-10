@@ -107,6 +107,9 @@ module:
       target: static/icon-512.png
     - source: ../assets/brand/og-image.png
       target: static/images/og-image.png
+    # seo/social.html reads this asset only for its type and size and never publishes it; the page names the static copy above.
+    - source: ../assets/brand/og-image.png
+      target: assets/images/og-image.png
 
     # ---- vendored assets from node_modules (pinned in package.json and pnpm-lock.yaml) -------------------
     # Docsy mounts these relative to its own module directory, where they do not exist, so the project mounts them.

@@ -16,7 +16,10 @@ direction is a defect: a preview that can be indexed, or a production site that 
                      (the base URL is WEBSITE_BASEURL or the baseURL of website/config/_default/hugo.yaml), or an HTML page
                      carries a robots meta tag with noindex (redirect stubs for aliases, which carry a meta refresh and a
                      canonical link, and the 404 page are exempt: an error page is no content, and check-seo.py requires
-                     noindex on it).
+                     noindex on it), or a placeholder page (an element with the class td-placeholder, the notice of the
+                     placeholder shortcode) does not carry a robots meta tag with noindex and without nofollow: the notice is
+                     no content, so it stays out of the index, but its links to the closest pages stay followable
+                     ("noindex, follow").
 
 Only meta tags are evaluated; the word noindex in the text of a page is no finding. The output names the file and the problem,
 never page content. Exit status 0 = clean, 1 = findings, 2 = usage or environment error. Python 3.9 compatible, standard
@@ -54,6 +57,19 @@ class RobotsMeta(HTMLParser):
             self.refresh = True
 
 
+class PlaceholderMarker(HTMLParser):
+    """Finds an element with the class td-placeholder."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.found = False
+
+    def handle_starttag(self, tag, attrs):
+        for k, v in attrs:
+            if k.lower() == "class" and "td-placeholder" in (v or "").split():
+                self.found = True
+
+
 def has_noindex(html):
     """Returns (number of robots meta tags, whether one of them contains the directive noindex)."""
     parser = RobotsMeta()
@@ -72,6 +88,22 @@ def is_redirect_stub(html):
     parser.feed(html)
     parser.close()
     return parser.refresh and parser.canonical
+
+
+def is_placeholder(html):
+    """Whether the page is a placeholder page: an element has the class td-placeholder, the notice of the placeholder shortcode."""
+    parser = PlaceholderMarker()
+    parser.feed(html)
+    parser.close()
+    return parser.found
+
+
+def has_nofollow(html):
+    """Whether a robots meta tag of the page contains the directive nofollow."""
+    parser = RobotsMeta()
+    parser.feed(html)
+    parser.close()
+    return any("nofollow" in [d.strip().lower() for d in c.split(",")] for c in parser.contents)
 
 
 def configured_base_url():
@@ -133,8 +165,12 @@ def check_pages(root, mode):
             _, noindex = has_noindex(html)
             if mode == "preview" and not noindex:
                 findings.append("%s: the preview page has no robots meta tag with noindex" % rel)
-            if mode == "production" and noindex and not is_redirect_stub(html) and rel != ERROR_PAGE:
-                findings.append("%s: the production page carries a robots meta tag with noindex" % rel)
+            if mode == "production" and rel != ERROR_PAGE and not is_redirect_stub(html):
+                if is_placeholder(html):
+                    if not noindex or has_nofollow(html):
+                        findings.append("%s: the placeholder page must carry the robots meta noindex, follow" % rel)
+                elif noindex:
+                    findings.append("%s: the production page carries a robots meta tag with noindex" % rel)
     return scanned, findings
 
 

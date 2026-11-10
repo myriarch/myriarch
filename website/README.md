@@ -64,7 +64,8 @@ layouts, assets, data, i18n, archetypes) are listed first.
   `content/project/_content.gotmpl` from the list in `data/repo_pages.yaml`. To add a root file, mount it in `module.yaml` and add
   an entry to the list.
 - `../assets/brand` is `static/brand`; the favicons, the touch icon, the manifest icons and the Open Graph image are mounted at
-  the places that `layouts/_partials/favicons.html` and `params.images` expect.
+  the places that `layouts/_partials/favicons.html` and `params.images` expect. `og-image.png` is also mounted as the asset `images/og-image.png`,
+  which `seo/social.html` reads only for its type and size.
 - `node_modules` provides Bootstrap and Font Awesome (the theme mounts them relative to its own module directory, where they do not
   exist), lunr and Mermaid. `../api/openapi.yaml` is `assets/api/openapi.yaml`: the REST API reference (`docs/reference/api`,
   generated from the contract by `make docs-gen` and mounted with the rest of `docs/`) offers exactly that file for download, so no copy can drift.
@@ -108,7 +109,7 @@ Hugo takes it for a shortcode.
       planned: "v0.3.0"
   ```
 
-  and the `placeholder` shortcode as its body. The tracking value is never rendered; it is a lowercase topic slug (`operations-manual`) or a GitHub issue reference, which must be quoted (`"#123"`; an unquoted `#` starts a YAML comment). An optional `planned: "v0.3.0"` under `placeholder` makes the notice say
+  and the `placeholder` shortcode as its body. In production a placeholder carries `noindex, follow` and is left out of the sitemap; `check-indexing.py` and `check-seo.py` check both. The tracking value is never rendered; it is a lowercase topic slug (`operations-manual`) or a GitHub issue reference, which must be quoted (`"#123"`; an unquoted `#` starts a YAML comment). An optional `planned: "v0.3.0"` under `placeholder` makes the notice say
   that the page is planned for that release. When `docs/operations/upgrade.md`
   exists, the placeholder has to go in the same change (`scripts/check-placeholders.py`).
 
@@ -152,13 +153,15 @@ is part of the build and uses no third party. `scripts/check-seo.py` fails the w
 | What | Where it comes from | What the build writes |
 |---|---|---|
 | Canonical link | `layouts/_partials/seo/canonical-*.html`, `params.seo.canonicalBase` | One absolute `<link rel="canonical">` per page, always below the production origin. The origin is fixed: a preview is built with `WEBSITE_BASEURL=/` and still names the production page as the original. `canonicalBase` is an origin (`https://host[:port]/`, no path: the site is served at the root of its host) and must equal `baseURL` of `hugo.yaml`. The 404 page has none |
-| Title of the home page | `params.seo.homeTitle` | The `<title>` of `/`; every other page is titled `<page title> \| myriarch`. The Open Graph and Twitter titles of the home page stay `myriarch`, which the description completes |
+| Title of the home page | `params.seo.homeTitle` | The `<title>` of `/`; every other page is titled `<page title> \| myriarch`. The Open Graph and Twitter titles of the home page are the home title as well |
+| Open Graph and Twitter cards | `layouts/_partials/seo/social.html`, `params.images` | It writes `og:url` (the canonical URL), `og:site_name`, `og:title` and `twitter:title` (the title of the page without the suffix, see [Titles, descriptions and dates](#titles-descriptions-and-dates)) and `og:description` and `twitter:description` (the description). It also writes `og:type`, `article:modified_time` (the Git date of a page), `og:image` and `twitter:image` with `og:image:type`, `og:image:width` and `og:image:height` read from the file, and `twitter:card` `summary_large_image`. It writes no publication date and no `og:locale`. The 404 page has none of these tags |
+| Placeholder pages | `layouts/_partials/head.html`, `layouts/sitemap.xml` | `noindex, follow` in production and no sitemap entry: the notice is no content, and its links to the closest pages stay followable. The real page that replaces a placeholder is indexed and listed with its Git date |
 | Structured data | `layouts/_partials/seo/` | JSON-LD for schema.org, see [Structured data](#structured-data) |
 | `llms.txt` | `data/llms.yaml`, `layouts/home.llms.txt` | `/llms.txt`, announced by a `<link rel="describedby">` in the head and by a visually hidden line at the start of the body of every page (`llms-directive.html` of Docsy), see [llms.txt](#llmstxt) |
 | `robots.txt` | `layouts/robots.txt` | Production allows every crawler and names the sitemap; a preview disallows everything |
-| 404 page | `layouts/404.html`, `layouts/_partials/head.html` | `noindex`, no canonical link and no structured data, see [The 404 page](#the-404-page) |
+| 404 page | `layouts/404.html`, `layouts/_partials/head.html` | `noindex`, no canonical link, no JSON-LD and no Open Graph or Twitter tags, see [The 404 page](#the-404-page) |
 
-`layouts/_partials/seo/head.html` is the one partial that `head.html` calls; it writes the canonical link and chooses the structured data.
+`head.html` calls `seo/title.html` for the title, `seo/head.html` for the canonical link and the structured data, and `seo/social.html` for the Open Graph and Twitter tags.
 
 **Spelling.** [ADR-0015](../docs/adr/0015-project-name-and-naming-scheme.md) decides it: `myriarch` in identifiers and in the middle of a
 sentence, `Myriarch` at the start of a sentence or a title. The home title and the text of `data/llms.yaml` follow it, and `check-seo.py`
@@ -179,7 +182,10 @@ and paths (`myriarchd`, `myriarch-updater`, `myriarch.dev`) are identifiers and 
   equals it: the home page, which Docsy's trail leaves out, then the items of the visible breadcrumb with their absolute URLs, the current
   page included. Docsy hides a trail of one item (the class `td-breadcrumbs--single`), as on `/docs/`, `/project/` and `/legal/` themselves;
   such a page shows no breadcrumb and has no `BreadcrumbList`, and `check-seo.py` expects none for a navigation with that class.
-- **Every other page** has no structured data.
+- **Every other page** has no JSON-LD. The theme adds microdata to every page: `itemscope itemtype=http://schema.org/WebPage` on `<html>` (Docsy's
+  `baseof.html`) and the `itemprop`s of Hugo's `schema.html` partial (`name`, `description`, `dateModified`, `wordCount`, `image`). `frontmatter.date` in
+  `hugo.yaml` keeps a page without a date of its own from inheriting its Git date as publication date. `check-seo.py` accepts a `datePublished` or
+  `article:published_time` only when the page shows the same date in a `<time datetime>` element.
 
 The facts are in `config/_default/params.yaml` (the block `seo`: license, languages, keywords; and `description`, `repo.url`, `copyright`)
 and in `data/release.yaml`; no template repeats them. `jsonify` writes `<`, `>` and `&` as escapes, so no value can end the script element.
@@ -215,6 +221,8 @@ description of fewer than 70 or more than 160 characters, and when a URL of `sit
   the suffix "| myriarch". The H1 and the navigation keep the title of the page, so a short name such as "Agents" can get a title that says more in a
   list of results. A listed title has at most 49 characters, so that the whole title stays within 60; the gate does not enforce this, and the
   titles of the decision records are longer. `docs/` pages cannot carry another front matter key, which is why the map is a data file.
+  The Open Graph and Twitter titles are the same title without the suffix (`seo/page-title.html`), so a shared link shows the title of the
+  search result.
 - **Description.** The `description` of the front matter (`repo_pages.yaml` for the root files). The generated references and the decision
   records are exempt, because their generators write the text.
 - **Sitemap and dates.** `layouts/sitemap.xml` writes `<lastmod>` and nothing else per URL; Google ignores `changefreq` and `priority`. The date is
@@ -239,7 +247,7 @@ would need a decision record first.
 
 The host answers a path without a file with status 404 and the content of `404.html`. The file also exists under its own address, which a
 static host may answer with status 200, so the page carries `noindex` in production too (`check-indexing.py` exempts it for that reason). It
-has no canonical link and no structured data, and its content links back to the home page, the documentation and the project.
+has no canonical link, no JSON-LD and no Open Graph or Twitter tags, and its content links back to the home page, the documentation and the project.
 `check-seo.py` checks all of it.
 
 ### Runbook
@@ -260,15 +268,18 @@ The steps of the maintainer. None of them needs a file in the repository.
 4. **The live site.** `curl -sI https://myriarch.dev/llms.txt` answers 200 with `text/plain`; `curl -s https://myriarch.dev/robots.txt`
    shows an empty `Disallow:` and the sitemap line; `curl -sI https://myriarch.dev/no-such-page/` answers 404, and the body is the page of
    `404.html`.
-5. **The GitHub repository,** before the announcement: the description "GitOps-governed fleet manager for OpenTelemetry Collectors, built
-   on OpAMP", and the topics `opentelemetry`, `opamp`, `fleet-management`, `gitops` and `observability`.
+5. **The GitHub repository,** before the announcement. Set the description "GitOps-governed fleet manager for OpenTelemetry Collectors, built
+   on OpAMP. Git sets the frame, the UI operates, every action is audited." and the website `https://myriarch.dev`. Use topics that
+   describe the project, at least `opentelemetry`, `opentelemetry-collector`, `opamp`, `fleet-management`, `gitops`, `kubernetes` and
+   `observability`, and never the abbreviation `otel` ([ADR-0016](../docs/adr/0016-trademark-usage-and-name-protection.md)). Upload
+   `assets/brand/social-preview.png` as the social preview (Settings, General).
 6. **Lighthouse** on the production build, as in the [development guide](../docs/development.md#website).
 
 ## Overrides of Docsy files
 
 Files in `layouts/` and `assets/` with the same path as a file of the theme replace it. They are few and each starts with a comment that
-names the upstream file: `head.html` (self-hosted lunr, brand colors, the CSP first, the home title, `noindex` on the 404 page, and the canonical link and
-structured data through the partial `seo/head.html`; see [SEO and GEO](#seo-and-geo)), `favicons.html`, `page-meta-links.html` (edit links
+names the upstream file: `head.html` (self-hosted lunr, brand colors, the CSP first, the home title, `noindex` on the 404 page, the canonical link and
+structured data through the partial `seo/head.html`, the Open Graph and Twitter tags through `seo/social.html`, `noindex` on placeholders; see [SEO and GEO](#seo-and-geo)), `favicons.html`, `page-meta-links.html` (edit links
 from the repository path), `scripts/plugins/mermaid.html` (self-hosted Mermaid), `footer/copyright.html`, `404.html` and
 `assets/js/offline-search.js` (the search index loads on first use, see [Search](#search); the changed parts are marked "Changed from
 upstream"). `overrides.txt` pins the SHA-256 of the upstream file of each. `REUSE.toml` (annotation n) adds "Copyright The Docsy Authors"
@@ -359,12 +370,12 @@ paragraph as the reason.
 | `check-local-paths.py` | the repository root, `/Users/...` or `/home/...` in the built site |
 | `check-repo-links.py` | a link into the GitHub repository (blob, tree, edit) whose path does not exist in the working tree |
 | `check-overrides.py` | a changed upstream file, a missing or an unlisted override (a file of `layouts/` or `assets/` that shadows a theme file) |
-| `check-indexing.py` | a preview that can be indexed (no `Disallow: /`, a sitemap line, a page without `noindex`) or a production site that hides itself; the mode comes from `WEBSITE_ENV` |
+| `check-indexing.py` | a preview that can be indexed (no `Disallow: /`, a sitemap line, a page without `noindex`) or a production site that hides itself; placeholders must carry `noindex, follow` and are exempt from the production `noindex` rule; the mode comes from `WEBSITE_ENV` |
 | `check-placeholders.py` | a placeholder whose page now exists, or a malformed placeholder |
 | `check-api-spec.py` | a missing API reference page, a download that is not exactly one fingerprinted copy of `api/openapi.yaml`, a page that loads a script of an API viewer, or a number of operation sections that differs from the contract |
 | `check-landing.py` | a missing or malformed screenshot, a section or the mark of the landing page that is broken, an image without size or alt text, or a status chip that differs from `data/release.yaml` (or a malformed `release.yaml`) |
 | `check-notices.py` | a shipped dependency without a notice, with another version in `data/third_party.yaml`, or without a published license text |
-| `check-seo.py` | metadata for search engines and AI crawlers that differs from the configuration or breaks a rule of [SEO and GEO](#seo-and-geo): a page without exactly one canonical link to its own production URL, JSON-LD that is invalid, has a property its type does not define, names another version than `data/release.yaml` or a breadcrumb that differs from the visible one, a home title that is the bare site title, an image without alt text, an `llms.txt` that is missing, malformed, misspelled or links outside the site and the repository, a 404 page that can be indexed, a production `robots.txt` that blocks a crawler, a sitemap that differs from the canonical links; the mode comes from `WEBSITE_ENV` |
+| `check-seo.py` | metadata for search engines and AI crawlers that differs from the configuration or breaks a rule of [SEO and GEO](#seo-and-geo): a page without exactly one canonical link to its own production URL, JSON-LD that is invalid, has a property its type does not define, names another version than `data/release.yaml` or a breadcrumb that differs from the visible one, a home title that is the bare site title, an image without alt text, an `llms.txt` that is missing, malformed, misspelled or links outside the site and the repository, a 404 page that can be indexed, a production `robots.txt` that blocks a crawler, a sitemap that differs from the canonical links or lists a placeholder, Open Graph and Twitter tags that differ from the title, the description, the canonical URL or the card file, a publication date that the page does not show; the mode comes from `WEBSITE_ENV` |
 
 A new check is a file `scripts/check-<name>.py` that takes the built site as its argument; the runner finds it. Outside the gate:
 
@@ -515,6 +526,8 @@ model lists the control ([Security model](../docs/security/model.md#build-and-re
 - Production (`curl -sI https://myriarch.dev/`): `strict-transport-security` is present, `www` redirects with 308 to the apex,
   `robots.txt` names `https://myriarch.dev/sitemap.xml`, `/sitemap.xml` returns 200, a Mermaid `.mjs` file is served as
   `text/javascript`, and `site.webmanifest` has a JSON or manifest media type.
+  `curl -s -o /dev/null -w '%{http_code} %{size_download}\n' -A GPTBot https://myriarch.dev/docs/` prints the same status and size as the same
+  request without `-A`, and so do `ClaudeBot` and `PerplexityBot`: the firewall serves AI crawlers like browsers (Setup, step 6).
 - If `vercel deploy --prebuilt` refuses to run without a linked project, add `vercel pull --yes --environment=<preview|production>`
   before the deploy step (it writes the git-ignored `.vercel/project.json`).
 
@@ -532,7 +545,7 @@ The commands take the same `--project myriarch --scope <team>` as in the setup; 
 - **An attack:** `vercel firewall attack-mode enable --duration 1h --yes` challenges every request for an hour. It sets a short-lived
   security cookie and blocks link previews and scripts, so switch it off with `vercel firewall attack-mode disable --yes` as soon as
   the attack is over.
-- Revert every incident measure when the incident is over, and keep the setup of step 6 as the normal state.
+- Revert every incident measure when the incident is over, and keep the setup of step 6 as the normal state: when the incident is over, Bot Protection and the AI-bot rule go back to log mode, as in step 6.
 
 ### Follow-ups
 
