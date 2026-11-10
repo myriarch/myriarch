@@ -4,7 +4,7 @@ weight: 20
 description: "Collectors, updaters and Bridge agents as the server sees them: how agents are identified, the attribute view, server labels and configuration sync states."
 ---
 
-An **agent** is anything that connects to `myriarchd` over OpAMP. The server keeps its description, health, reported
+An **agent** is anything that connects to `myriarchd` over [OpAMP](opamp.md). The server keeps its description, health, reported
 configuration and the assignment that Git produces for it. Fleets, rollout waves and templates do not look at agents
 directly. They work on the **attribute view** of an agent, described below.
 

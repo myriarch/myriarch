@@ -16,11 +16,11 @@
 # middle of a sentence, "Myriarch" at the start of a sentence. Write only what the documentation backs; the support levels and the release
 # status change, so name neither. A note carries the caveat of its page: a tutorial that runs the server in development mode says so,
 # because a reader of llms.txt does not open the page.
-summary: "Myriarch is an open-source fleet manager for OpenTelemetry Collectors, built on OpAMP. Git is the source of truth for blueprints, fleets, rollout policies and the allowed collector versions; the web UI and the REST API operate within that frame, and every operator action is audited."
+summary: "Myriarch is an open-source OpAMP server and fleet manager for OpenTelemetry Collectors. Git is the source of truth for blueprints, fleets, rollout policies and the allowed collector versions; the web UI and the REST API operate within that frame, and every operator action is audited."
 
 details:
   - "What it does: collectors keep running under the upstream OpAMP Supervisor. The server myriarchd renders one configuration per collector from layered blueprints, offers it over OpAMP, rolls changes out in waves with approvals, health gates and rollback, and starts collector version updates through exchangeable executors, because the Supervisor cannot replace the collector binary."
-  - "Who it is for: operators who run many OpenTelemetry Collectors on Linux and Windows hosts, in containers and on Kubernetes, at edge sites, in data centers and in the cloud. It is designed for around 1,000 collectors, with headroom up to 5,000."
+  - "Who it is for: operators who run many OpenTelemetry Collectors on Linux and Windows hosts, in containers and on Kubernetes, at edge sites, in data centers and in the cloud. It is designed for around 1,000 collectors, with headroom up to 5,000 (design targets, not measured limits)."
   - "License: the code is licensed under Apache-2.0 and the documentation under CC BY 4.0."
   - "Independence: myriarch is an independent project. OpenTelemetry, Kubernetes and CNCF are trademarks of The Linux Foundation, and myriarch is not affiliated with or endorsed by The Linux Foundation or the OpenTelemetry project. The names are used only to describe compatibility."
 
@@ -65,14 +65,18 @@ sections:
         title: Supervisor, own server or myriarch compared
         note: "The OpAMP Supervisor alone, a server of your own on opamp-go and myriarch, with sources and dates, and when myriarch is not the right choice."
       - page: /project/faq/
-        note: "Short answers about managing many collectors, version updates, rollouts, the relation to OpenTelemetry and the license."
+        note: "Short answers about OpAMP and the Supervisor, managing many collectors, version updates, updates without internet access, rollback, the OpenTelemetry Operator and the license."
 
   - title: Concepts
     links:
+      - page: /docs/concepts/opamp/
+        note: "What OpAMP is, the parts of an OpAMP setup, how remote configuration reaches a collector and what the Supervisor cannot do, with dated sources."
       - page: /docs/concepts/gitops/
         note: "How a Git repository describes blueprints, fleets, policies and executors, and how the server applies it."
       - page: /docs/concepts/agents/
         note: "Collectors and updaters as the server sees them, and how an agent is identified."
+      - page: /docs/concepts/inventory/
+        note: "Server-side labels and parameter overrides for agents that match exact attribute values."
       - page: /docs/concepts/blueprints/
         note: "Layered collector configurations and how the server renders them."
       - page: /docs/concepts/fleets/
@@ -98,6 +102,10 @@ sections:
         note: "Change a blueprint in Git and watch the rollout engine apply it in waves."
       - page: /docs/tasks/validate-a-gitops-repository/
         note: "Check a GitOps repository and render collector configurations with myrctl, locally and in CI."
+      - page: /docs/tasks/track-releases-and-notify/
+        note: "Follow upstream collector releases, review breaking changes before raising a target version, and route events to Teams, Slack or a webhook."
+      - page: /docs/tasks/connect-a-real-supervisor/
+        note: "Run the upstream OpAMP Supervisor and otelcol-contrib against a local server in development mode and watch the whole chain work."
 
   - title: Reference
     links:
@@ -109,6 +117,12 @@ sections:
         note: "The command-line tools myriarchd, myrctl, myriarch-updater and myriarch-sim."
       - page: /docs/reference/configuration/
         note: "Every key of the server configuration file, with type, default and effect."
+      - page: /docs/reference/metrics/
+        note: "The Prometheus metrics of the server and the simulator, with type, labels and help text."
+      - page: /docs/reference/helm-chart/
+        note: "Installation, profiles, network policy, storage and the configuration values of the server Helm chart."
+      - page: /docs/reference/helm-chart-collector/
+        note: "Modes, Pod Security, OpenShift, container mode and the configuration values of the collector Helm chart."
 
   - title: Operations and security
     links:
@@ -124,6 +138,8 @@ sections:
         note: "What to do before and after the upgrade from v0.1.0 to v0.2.0."
       - page: /docs/operations/production-checklist/
         note: "The settings that matter for security and what the server refuses at startup."
+      - page: /docs/operations/troubleshooting/
+        note: "Symptoms, causes and fixes for the local system and for installations, and the endpoints that help to diagnose them."
       - page: /docs/operations/authentication/
         note: "How people and agents authenticate: OpenID Connect, the bootstrap admin and enrollment tokens."
       - page: /docs/security/model/
@@ -139,6 +155,8 @@ sections:
         note: "Notable changes of every release."
       - page: /docs/adr/
         note: "The decision records: why the system is built the way it is."
+      - page: /docs/design/upstream-notes/
+        note: "Verified facts about the OpAMP Supervisor, the OpenTelemetry Operator and its OpAMP Bridge and other upstream software, each with a source and a date."
       - page: /project/contributing/
         note: "Report a problem, propose a change, send a contribution."
       - title: Source code

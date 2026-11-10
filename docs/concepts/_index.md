@@ -1,17 +1,18 @@
 ---
 title: "Concepts"
 weight: 30
-description: "The ideas behind myriarch: Git as the source of truth, agents, blueprints, fleets, inventory, rollouts and executors."
+description: "The ideas behind myriarch: OpAMP and the Supervisor, Git as the source of truth, agents, blueprints, fleets, inventory, rollouts and executors."
 ---
 
 These pages explain what the objects of a myriarch installation are and why they behave the way they do. They are
 written to be read in order, but each page stands on its own. For the exact field lists, defaults and error codes see
 the [GitOps schema reference](../reference/gitops-schema.md). For step-by-step instructions see the
 [how-to guides](../tasks/_index.md). The [architecture](../architecture.md) shows how the components fit together, and the
-[security model](../security/model.md) describes the controls behind them.
+[security model](../security/model.md) describes the controls behind them. [OpAMP, the Supervisor and the Collector](opamp.md) comes first if OpAMP is new to you; for the whole path from an empty repository to the first rollout, follow [Manage many OpenTelemetry Collectors with OpAMP and Git](../tasks/manage-many-collectors.md).
 
 | Page | What it explains |
 |---|---|
+| [OpAMP, the Supervisor and the Collector](opamp.md) | What OpAMP is, the parts of an OpAMP setup, how remote configuration reaches a collector, and what the Supervisor cannot do. |
 | [Git as the source of truth](gitops.md) | The repository layout, the object envelope, how `myriarchd` reads and applies a revision, and the rule "Git sets the frame, the UI operates within it". |
 | [Agents](agents.md) | Collectors, updaters and OpAMP Bridge agents, how an agent is identified, the attributes that fleets and templates work on, server labels and the config sync states. |
 | [Blueprints](blueprints.md) | Layered collector configurations: parameters, fragments, removal, the rendering algorithm, templates, the canonical form and the hash. |

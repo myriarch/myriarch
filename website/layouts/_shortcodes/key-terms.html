@@ -1,0 +1,16 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  Key terms of the project as a definition list. It renders the key terms of data/llms.yaml (terms), so that the definitions of /llms.txt
+  also stand on an indexable page; one source renders both outputs, so the page and llms.txt cannot drift apart. It takes no arguments,
+  and the build fails when the list is empty.
+*/ -}}
+{{- $terms := hugo.Data.llms.terms -}}
+{{- if not $terms }}{{ errorf "key-terms: data/llms.yaml has no terms" }}{{ end -}}
+<dl class="key-terms">
+  {{- range $terms }}
+  <dt>{{ .term }}</dt><dd>{{ .text }}</dd>
+  {{- end }}
+</dl>

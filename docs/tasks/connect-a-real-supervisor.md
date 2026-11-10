@@ -7,7 +7,7 @@ description: "Run the upstream OpAMP Supervisor and otelcol-contrib on your mach
 The simulator proves the server side. This page proves the real chain on one machine: the OpAMP handshake with an
 enrollment header, assignment to a fleet, a `remote_config` offer, the effective configuration, the list of available
 components, health, a restart command and an invalid configuration. `E2E_REAL=1 scripts/e2e.sh` automates the same steps;
-here you do them by hand.
+here you do them by hand. [OpAMP, the Supervisor and the Collector](../concepts/opamp.md) explains the parts of this chain.
 
 You need a running server ([Local development](../getting-started/local-dev.md)) on a working copy of the example
 repository, `.dev/gitops-work`, and the `api` function from that page.

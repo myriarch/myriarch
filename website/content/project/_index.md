@@ -4,7 +4,7 @@ weight: 30
 description: "The roadmap, release notes, governance, security policy, brand rules and design records of the myriarch project, and how to take part."
 ---
 
-Myriarch is an open-source fleet manager for OpenTelemetry Collectors, built on OpAMP. This section is about the project itself:
+Myriarch is an open-source OpAMP server and fleet manager for OpenTelemetry Collectors. This section is about the project itself:
 where it is going, how it is run, how to take part and how it is built. The product documentation is under
 [Documentation](/docs/).
 
