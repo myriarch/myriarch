@@ -4,7 +4,7 @@ weight: 5
 description: "What OpAMP is, what the OpAMP Supervisor does and cannot do, how remote configuration reaches a collector, and where myriarch fits, with dated sources."
 ---
 
-OpAMP, the Open Agent Management Protocol of the OpenTelemetry project, is a network protocol with which a server manages a fleet
+OpAMP, the [Open Agent Management Protocol](https://github.com/open-telemetry/opamp-spec/blob/main/specification.md) of the OpenTelemetry project, is a network protocol with which a server manages a fleet
 of telemetry agents: the agents report their status, and the server sends remote configuration and offers packages. Myriarch is an
 OpAMP server for OpenTelemetry Collectors. This page explains the parts of an OpAMP setup, how a configuration reaches a collector
 and what the upstream OpAMP Supervisor cannot do. The statements about upstream software come from the [upstream
@@ -14,14 +14,14 @@ Myriarch is an independent project. OpenTelemetry and Kubernetes are trademarks 
 affiliated with or endorsed by The Linux Foundation or the OpenTelemetry project; the names are used only to describe
 compatibility ([ADR-0028](../adr/0028-relationship-to-opentelemetry-and-foundation-path.md)).
 
-## The parts
+## The parts of an OpAMP setup
 
 | Part | What it does | In a myriarch installation |
 |---|---|---|
 | OpAMP server | Decides what every agent runs and talks to the agents over OpAMP. | `myriarchd`, together with the GitOps syncer, the rollout engine, the web UI and the REST API ([architecture](../architecture.md)). |
 | OpAMP Supervisor | The upstream process that starts and monitors a collector and speaks OpAMP for it. It applies remote configuration, reports health and the effective configuration, and restarts the collector. | Runs next to every collector: as a service on a host, or in the same pod as the collector. Myriarch does not replace it. |
 | OpenTelemetry Collector | Receives, processes and exports telemetry. The Supervisor adds the OpAMP extension to the configuration it starts the collector with. | OpenTelemetry Collector Contrib (`otelcol-contrib`), the only distribution that a fleet accepts ([schema reference](../reference/gitops-schema.md#fleet)). |
-| OpAMP Bridge | Part of the OpenTelemetry Operator on Kubernetes. In its default operator mode it connects as one OpAMP agent for many collector resources. | Recognised as an agent kind of its own and held back from changes ([Bridge agents](fleets.md#bridge-agents)). |
+| OpAMP Bridge | Part of the OpenTelemetry Operator on Kubernetes. In its default operator mode it connects as one OpAMP agent for many collector resources. | Recognised as an agent kind of its own: never restarted and never the target of a version rollout, and configured only in standalone mode with `spec.bridge.manage: true` ([Bridge agents](fleets.md#bridge-agents)). |
 | `myriarch-updater` | The host agent of myriarch that installs collector binaries, which the Supervisor cannot do. | Optional: next to the Supervisor on a host, or in container mode in a pod ([Executors](executors.md)). |
 
 ## How a configuration reaches a collector
@@ -43,8 +43,8 @@ compatibility ([ADR-0028](../adr/0028-relationship-to-opentelemetry-and-foundati
    the text.
 
 Rollback exists on two levels. On its own host, the Supervisor can go back to the last working remote configuration when
-`automatic_config_rollback` is set. It is off by default upstream; the supervisor configurations that the myriarch installers and
-the collector chart write turn it on ([Server behaviour](../design/opamp-server.md#supervisor-configuration)). For a whole
+`automatic_config_rollback` is set. It is off by default upstream ([upstream notes](../design/upstream-notes.md#configuration-keys-that-matter)); the Supervisor
+configurations that the myriarch installers and the collector chart write turn it on ([Server behaviour](../design/opamp-server.md#supervisor-configuration)). For a whole
 rollout, the rollout policy decides whether a failed wave rolls back or pauses the rollout ([Failure threshold, pause and
 rollback](rollouts.md#failure-threshold-pause-and-rollback)).
 
@@ -72,8 +72,9 @@ again in the sources of 0.160.0 and 0.161.0 on 2026-10-15 ([Kubernetes options](
 - **Supervisor and collector in one pod.** Every pod is one OpAMP agent with the full set of capabilities. The Helm chart
   `myriarch-collector` runs this setup with the unchanged upstream images ([Install the collector with
   Helm](../operations/install-collector-helm.md), [ADR-0008](../adr/0008-kubernetes-supervisor-and-collector-in-one-pod.md)). A
-  new collector version is normally a new image reference in the deployment repository, set through the `webhook` or the `manual`
-  executor, which restarts the pod. Container mode of `myriarch-updater`, an explicit opt-in intended for air-gapped and edge
+  new collector version is normally a new image reference in the deployment repository, and applying it replaces the pod. The
+  `webhook` executor can start that change, for example through a pipeline that bumps the image tag; with the `manual` executor,
+  myriarch makes no call and only follows a change made outside it. Container mode of `myriarch-updater`, an explicit opt-in intended for air-gapped and edge
   clusters, swaps the binary inside the pod instead ([Container mode](../design/container-mode.md),
   [ADR-0026](../adr/0026-collector-version-updates-on-kubernetes.md)).
 - **The Operator with its OpAMP Bridge.** In operator mode the Bridge is one OpAMP agent for the collector resources it manages. A
@@ -83,7 +84,7 @@ again in the sources of 0.160.0 and 0.161.0 on 2026-10-15 ([Kubernetes options](
   only with `spec.bridge.manage: true` ([Bridge agents](fleets.md#bridge-agents),
   [ADR-0037](../adr/0037-opamp-bridge-agents-until-the-operator-integration.md)).
 
-## Try it
+## Try it with a real Supervisor
 
 [Connect a real supervisor](../tasks/connect-a-real-supervisor.md) runs the upstream Supervisor and `otelcol-contrib` on your
 machine against a local server in development mode and shows each step of the chain: the handshake, the assignment to a fleet, the

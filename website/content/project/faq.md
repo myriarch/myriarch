@@ -21,15 +21,15 @@ myriarch works with. See [ADR-0028](/docs/adr/0028-relationship-to-opentelemetry
 
 ## What is OpAMP?
 
-OpAMP, the Open Agent Management Protocol of the OpenTelemetry project, is a network protocol with which a server manages a fleet of telemetry agents: the agents report their status, and the server sends remote configuration and offers packages. Myriarch is an OpAMP server; the protocol, the supervisor and the collector stay upstream. [OpAMP, the Supervisor and the Collector](/docs/concepts/opamp/) explains the parts and how a configuration reaches a collector.
+OpAMP, the [Open Agent Management Protocol](https://github.com/open-telemetry/opamp-spec/blob/main/specification.md) of the OpenTelemetry project, is a network protocol with which a server manages a fleet of telemetry agents: the agents report their status, and the server sends remote configuration and offers packages. Myriarch is an OpAMP server; the protocol, the supervisor and the collector stay upstream. [OpAMP, the Supervisor and the Collector](/docs/concepts/opamp/) explains the parts and how a configuration reaches a collector.
 
-## What can the OpAMP Supervisor do, and what not?
+## What can the OpAMP Supervisor do, and what can it not do?
 
 The OpAMP Supervisor is the upstream process that starts and monitors a collector and speaks OpAMP for it. It applies remote configuration, reports health and the effective configuration, and restarts the collector. It cannot replace the collector binary: in version 0.162.0 its package manager answers "unsupported" at run time. Myriarch therefore updates collector versions through executors. The sources and their dates are in the [upstream notes](/docs/design/upstream-notes/#no-binary-updates).
 
 ## What is the difference between the OpAMP extension and the OpAMP Supervisor?
 
-The OpAMP extension is a component inside the collector; the OpAMP Supervisor is a separate process. The Supervisor starts the collector, adds the extension to the configuration it starts it with and learns the description and the available components of the collector through it, and it speaks OpAMP to the server for the collector: it applies remote configuration, reports health and the effective configuration, and restarts the collector. Myriarch documents collectors that run under the Supervisor; the core distribution of the collector lacks the extension. See the [upstream notes](/docs/design/upstream-notes/#identity-and-reported-attributes).
+The OpAMP extension is a component inside the collector; the OpAMP Supervisor is a separate process. The supervisor starts the collector with the extension in its configuration and learns the description and the components of the collector through the extension. It speaks OpAMP to the server for the collector: it applies remote configuration, reports health and the effective configuration, and restarts the collector. Myriarch documents collectors that run under the supervisor; the core distribution of the collector lacks the extension. See the upstream notes on [identity and reported attributes](/docs/design/upstream-notes/#identity-and-reported-attributes) and on [the Operator with the OpAMP Bridge](/docs/design/upstream-notes/#option-b-operator-with-the-opamp-bridge).
 
 ## Why is there an updater next to the supervisor?
 
@@ -78,7 +78,7 @@ the failure threshold and whether a failure rolls back or pauses. See
 
 ## How do I roll back a bad collector configuration?
 
-The rollout policy decides what happens when a wave reaches its failure threshold: `onFailure: rollback` returns every started target to its previous configuration, and `onFailure: pause` stops the rollout until an operator resumes it, retries the failed targets, aborts it or rolls it back. A rollback contradicts Git, so revert the change in Git as well. On a single host, the upstream supervisor can also return to its last working remote configuration when `automatic_config_rollback` is set; it is off by default upstream, and the supervisor configurations that the myriarch installers and the collector chart write turn it on ([server behaviour](/docs/design/opamp-server/#supervisor-configuration)). See [Failure threshold, pause and rollback](/docs/concepts/rollouts/#failure-threshold-pause-and-rollback).
+The rollout policy decides what happens when a wave reaches its failure threshold: `onFailure: rollback` returns every started target to its previous configuration, and `onFailure: pause` stops the rollout until an operator resumes it, retries the failed targets, aborts it or rolls it back. A rollback contradicts Git, so revert the change in Git as well. On a single host, the upstream supervisor can also return to its last working remote configuration when `automatic_config_rollback` is set; it is off by default upstream ([upstream notes](/docs/design/upstream-notes/#configuration-keys-that-matter)), and the supervisor configurations that the myriarch installers and the collector chart write turn it on ([server behaviour](/docs/design/opamp-server/#supervisor-configuration)). See [Failure threshold, pause and rollback](/docs/concepts/rollouts/#failure-threshold-pause-and-rollback).
 
 ## How do I check a collector configuration in CI?
 
