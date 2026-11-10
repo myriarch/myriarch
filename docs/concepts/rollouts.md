@@ -42,6 +42,8 @@ spec:
 This is the policy from [`examples/quickstart/policies/`](../../examples/quickstart/policies/). All fields and their
 defaults are in the [schema reference](../reference/gitops-schema.md#rolloutpolicy).
 
+The how-to guides [Roll out a configuration change](../tasks/roll-out-a-config-change.md), [Roll out a collector version](../tasks/roll-out-a-collector-version.md) and [Upgrade the OpenTelemetry Collector on many hosts](../tasks/upgrade-collectors-on-many-hosts.md) show these rules at work.
+
 ## States
 
 A rollout has one of these statuses: `pending`, `running`, `waiting_approval`, `paused`, `completed`, `failed`,

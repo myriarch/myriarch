@@ -9,6 +9,8 @@ binaries, so an exchangeable **executor** does the installation. The rollout eng
 (waves, approval, maintenance windows) and the collector itself proves the result: a target is complete only when the
 collector reports the new `service.version`. The answer of an executor does not count.
 
+For the whole path on many hosts, from the choice of the executor to the rollout in waves, see [Upgrade the OpenTelemetry Collector on many hosts](upgrade-collectors-on-many-hosts.md).
+
 | Executor | What installs the new version |
 |---|---|
 | `updater` | The host agent `myriarch-updater` on Linux and Windows hosts, or in container mode in a Kubernetes pod. |

@@ -1,7 +1,7 @@
 ---
 title: "Getting started"
 weight: 10
-description: "Tutorials: start a complete Myriarch system on your own machine, from source, with Docker Compose or on a local kind cluster."
+description: "Tutorials: run myriarch, an open-source OpAMP server for OpenTelemetry Collectors, on your own machine from source, with Docker Compose or on kind."
 ---
 
 These pages are the tutorials of the documentation. They teach by doing: you follow the steps in order and end with a
@@ -17,6 +17,8 @@ script starts a kind cluster with the Helm charts of the server and of the colle
 | [Your first fleet and rollout](first-fleet-and-rollout.md) | A guided first session from source: write a fleet and a rollout policy, enroll ten simulated collectors with an enrollment token and roll out a change in two waves with an approval. |
 | [Docker Compose](docker-compose.md) | The server, PostgreSQL and 200 simulated collectors on one machine from the release images, for an evaluation; your own GitOps directory, reset. |
 | [Kubernetes on kind](kubernetes-kind.md) | Available from v0.2.0. A kind cluster with the server chart and the collector chart (a gateway and a node agent), the sign-in to the UI, a first configuration rollout and a first version rollout, in about ten minutes (measured in CI). |
+
+If you want to know first what myriarch is and when it fits, read [What is Myriarch?](../../website/content/project/what-is-myriarch.md) and the [comparison](../../website/content/project/comparison.md). [Manage many OpenTelemetry Collectors with OpAMP and Git](../tasks/manage-many-collectors.md) leads from the tutorials to a fleet of real hosts.
 
 The pages in [How-to guides](../tasks/_index.md) build on this setup. Start with [Simulate a fleet](../tasks/simulate-a-fleet.md)
 to fill the system with agents, then roll out a [configuration change](../tasks/roll-out-a-config-change.md) or a

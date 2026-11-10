@@ -29,6 +29,8 @@ There are three ways to install a host:
   options. It stays supported, for sites that cannot accept the trust of the first command (see below), for hosts without access
   to the server and for the installers of v0.1.0. The rest of this page describes it.
 
+Enrolling the hosts is step 6 of [Manage many OpenTelemetry Collectors with OpAMP and Git](manage-many-collectors.md), the path from an empty repository to the first rollout.
+
 ## The quick way: the dialog "Add host"
 
 *Available from v0.2.0.* If your server runs a release of myriarch, the web UI gives you one ready command for each platform, and you do
