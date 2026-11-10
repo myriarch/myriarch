@@ -25,6 +25,8 @@ problem:
       label: Upgrade the collector on many hosts
     - link: /project/comparison/
       label: OpAMP server options compared
+    - link: /docs/concepts/opamp.md
+      label: OpAMP, the Supervisor and the Collector
 
 features:
   title: Fleet management for OpenTelemetry Collectors
