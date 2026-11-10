@@ -1,6 +1,6 @@
 # Site parameters (Docsy 0.18). Privacy rules (ADR-0031): no analytics, no search service, no comments, no CDN features.
 copyright: The Myriarch Authors
-description: Fleet manager for OpenTelemetry Collectors, built on OpAMP. Git is the source of truth; every operator action is audited.
+description: Myriarch is an open-source OpAMP server and fleet manager for OpenTelemetry Collectors. Git sets the frame, rollouts run in waves, every action is audited.
 images: [images/og-image.png]
 
 repo:

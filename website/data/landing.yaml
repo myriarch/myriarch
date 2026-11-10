@@ -2,10 +2,11 @@
 # nothing here claims more than the README status (alpha). The release status in the
 # chip of the hero comes from data/release.yaml, not from this file. Links that start with "/" must name a page of the site
 # (with or without the .md suffix); the build fails when a page does not exist.
+# Key problem: the paragraph below the hero (layouts/_partials/landing/problem.html) with a title, a text and links to pages of the site.
 hero:
   status: Alpha
   title: A GitOps-governed fleet manager for OpenTelemetry Collectors, built on OpAMP
-  subline: Git sets the frame, the UI operates within it, every action is audited.
+  subline: Myriarch is an open-source OpAMP server that rolls out collector configurations and versions in waves, on hosts, in containers and on Kubernetes. Git sets the frame, the UI operates within it, and every action is audited.
   ctas:
     - label: Get started
       link: /docs/getting-started/
@@ -16,20 +17,24 @@ hero:
       link: https://github.com/myriarch/myriarch
       icon: fa-solid fa-code-branch
 
+problem:
+  title: What the OpAMP Supervisor leaves open
+  text: Collectors run under the upstream OpAMP Supervisor. The Supervisor manages configuration, health and restarts, but it cannot replace the collector binary, so fleets end up with many collector versions and hand-made update procedures. Myriarch is an OpAMP server for such a fleet. It renders one configuration per collector from Git, rolls configurations and versions out in waves with approvals and rollback, and starts version updates through an executor of your choice, such as the host agent myriarch-updater, a webhook or an AWX job.
+  links:
+    - link: /docs/tasks/upgrade-collectors-on-many-hosts.md
+      label: Upgrade the collector on many hosts
+    - link: /project/comparison/
+      label: OpAMP server options compared
+
 features:
-  title: What it does
-  lead: Designed for around 1,000 collectors, with headroom up to 5,000, spread over edge sites, data centers, cloud and Kubernetes.
+  title: Fleet management for OpenTelemetry Collectors
+  lead: Built for operators who run many OpenTelemetry Collectors at edge sites, in data centers, in the cloud and on Kubernetes. It is designed for around 1,000 collectors, with headroom up to 5,000 (design targets, not measured limits), and is open source under the Apache-2.0 license.
   items:
-    - icon: fa-solid fa-server
-      title: Inventory and health
-      text: Every collector with its version, health, effective configuration, components and host attributes, updated live.
-      link: /docs/concepts/inventory.md
-      link_label: Inventory
     - icon: fa-solid fa-code-branch
       title: A GitOps frame, operated from the UI
       text: Blueprints, fleets, rollout policies and the allowed collector versions live in Git. The UI chooses within that frame, and every action is audited.
-      link: /docs/concepts/gitops.md
-      link_label: Git as the source of truth
+      link: /docs/tasks/manage-many-collectors.md
+      link_label: Manage many collectors with Git
     - icon: fa-solid fa-rocket
       title: Wave rollouts with approvals and rollback
       text: Canary groups, percentage steps, approvals, health gates, failure thresholds, pause, abort, rollback and maintenance windows in the local time zone of each site.
@@ -40,6 +45,11 @@ features:
       text: The host agent myriarch-updater replaces the collector binary, or a webhook or AWX call hands the update to your own tooling. Linux hosts and container mode are beta, Windows hosts are experimental.
       link: /docs/tasks/roll-out-a-collector-version.md
       link_label: Roll out a collector version
+    - icon: fa-solid fa-server
+      title: Inventory and health
+      text: Every collector with its version, health, effective configuration, components and host attributes, updated live.
+      link: /docs/concepts/agents.md
+      link_label: Agents
     - icon: fa-solid fa-cubes
       title: Kubernetes and one-command hosts
       text: Signed OCI Helm charts run the server and, with the unchanged upstream images, the collectors. The server renders one installation command for Linux and Windows hosts. The server chart is beta, the collector chart is experimental.
@@ -62,7 +72,7 @@ features:
       link_label: High availability
 
 architecture:
-  title: How it fits together
+  title: How it works with the Supervisor and the Collector
   lead: Collectors keep running under the upstream OpAMP Supervisor. myriarchd manages their configuration over OpAMP, and an exchangeable executor changes the collector binary, which the Supervisor cannot do.
   caption: Git feeds the GitOps syncer of myriarchd. Operators work in the web UI and the REST API. The OpAMP endpoint talks to the Supervisor and Collector at every site. The rollout engine starts binary updates through the executors updater, webhook or AWX. myrctl checks the Git repository in CI, and several replicas share one PostgreSQL database.
   more_link: /docs/architecture.md
@@ -133,6 +143,12 @@ community:
     - label: FAQ
       link: /project/faq/
       icon: fa-solid fa-circle-question
+    - label: Decision records
+      link: /docs/adr/
+      icon: fa-solid fa-book
+    - label: Release notes
+      link: /project/changelog/
+      icon: fa-solid fa-clock-rotate-left
     - label: Roadmap
       link: /project/roadmap/
       icon: fa-solid fa-route
@@ -142,6 +158,9 @@ community:
     - label: Governance
       link: /project/governance/
       icon: fa-solid fa-scale-balanced
+    - label: Maintainers
+      link: /project/maintainers/
+      icon: fa-solid fa-users
     - label: Code of conduct
       link: /project/code-of-conduct/
       icon: fa-solid fa-handshake

@@ -87,6 +87,7 @@ GOOD_PAGE = """<!doctype html><html><head><title>t</title><link rel="stylesheet"
 <h1>Title</h1>
 <p class="landing-chip"><span class="landing-chip__level">Alpha</span><span class="landing-chip__note">No release has been published yet</span></p>
 @MARK@
+<section id="problem"></section>
 <section id="features"></section>
 <section id="architecture"><svg role="img" aria-labelledby="arch-title arch-desc" viewBox="0 0 1 1"><title id="arch-title">a</title></svg></section>
 <section id="screenshots">
@@ -207,6 +208,12 @@ class LandingTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("the section #community is missing", out)
         self.assertIn("2 h1 elements, expected exactly 1", out)
+
+    def test_missing_problem_section(self):
+        self.page(GOOD_PAGE.replace('<section id="problem"></section>', ""))
+        rc, out, _ = self.run_check()
+        self.assertEqual(rc, 1)
+        self.assertIn("the section #problem is missing", out)
 
     def test_interim_home_class_is_reported(self):
         self.page(GOOD_PAGE.replace('class="td-home"', 'class="td-home interim-home"'))
