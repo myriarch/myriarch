@@ -25,6 +25,7 @@ myriarch-updater
 myriarch-sim
 **/CLAUDE.local.md
 .claude
+.ace
 **/__pycache__
 **/*.pyc
 web/dist-mock

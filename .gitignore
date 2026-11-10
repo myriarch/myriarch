@@ -38,9 +38,10 @@ coverage.*
 /myriarch-updater
 /myriarch-sim
 
-# Claude Code: private session rules and local state (never committed)
+# Claude Code and its plugins: private session rules and local state (never committed)
 CLAUDE.local.md
 /.claude/
+/.ace/
 
 # Python bytecode of the helper scripts
 __pycache__/
