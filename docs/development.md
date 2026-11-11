@@ -946,8 +946,9 @@ collector chart as a StatefulSet in a `restricted` namespace and as a DaemonSet 
 the `hostPath` volume), every agent registered, online and healthy at the server (REST API), a clean uninstall, and a `helm upgrade` from
 the chart of the tag `v0.1.0` (from Git, with the image of that release pinned by digest as `UPGRADE_FROM_SERVER_IMAGE`) to the chart and the image of the commit. It reuses `hack/kind`
 (cluster, registry, `images.sh` with the server image and the updater of the commit, `diag.sh`), so it shares the cluster with
-`make kind-probe`: run one of the two at a time. It needs Docker and is not part of `make check-local`; the gate only holds its shell
-syntax (`ci/lint-shell.sh`) and the shape of its workflow job (`ci/tests/workflow-artifacts-test.sh`). Stages and environment:
+`make kind-probe`: run one of the two at a time. It needs Docker and is not part of `make check-local`; the gates hold its shell
+syntax (`ci/lint-shell.sh`), the shape of its workflow job (`ci/tests/workflow-artifacts-test.sh`) and, with fakes for `helm` and
+`kubectl`, the content comparison of check 7.3 and the wait of the uninstall steps (`ci/tests/kind-scripts-test.sh`). Stages and environment:
 [`hack/kind/README.md`](../hack/kind/README.md#chart-installation-test).
 
 **In CI.** The job `charts` of `.github/workflows/e2e-kind.yml` runs it on two Kubernetes versions, one entry of the matrix each: the pins

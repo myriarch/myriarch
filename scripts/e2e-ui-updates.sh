@@ -36,6 +36,8 @@ set -uo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT" || exit 1
 FIX="$ROOT/scripts/e2e/ui-updates"
+# shellcheck source=scripts/e2e/ui-updates/ui-phases.sh
+. "$FIX/ui-phases.sh"
 
 E2E_DIR=${E2E_DIR:-$ROOT/.e2e/ui-updates}
 PORT_MYRIARCHD=${E2E_PORT_MYRIARCHD:-18090}
@@ -450,8 +452,12 @@ if [ "$UI" = 1 ]; then
   check_contains "UI: fleet page button" "Auf Version $V_NEW aktualisieren" "$(echo "$UIJ" | jq -r .buttonText)"  # check-language: ignore (UI text of the German locale, web/src/i18n/de.json)
   check_contains "UI: dialog offers $V_NEW and the Git frame summary" "$V_NEW" "$(echo "$UIJ" | jq -r .dialogText)"
   UI_PHASES=$(echo "$UIJ" | jq -r '.phases|join(" > ")')
-  log "UI phases seen by the browser: $UI_PHASES"
-  check_contains "UI showed a live phase before the end (health check)" "Health" "$UI_PHASES"
+  log "UI phases seen by the browser: $UI_PHASES (keys: $(echo "$UIJ" | jq -r '.phaseKeys|join(" > ")'))"
+  # No particular short phase is required: the host's health_check phase lasts only until the collector reports the new version
+  # (docs/design/version-selection.md, Target progress), and the page refreshes at most every 2 s. The checks below rest on states
+  # that last longer than a refresh: a live phase before the end, and the host's health check as a running step before it failed.
+  check_eq "UI showed a live phase before the end" yes "$(ui_live_before_end "$UIJ")"
+  check_eq "UI showed the host health check running (live) before it failed" yes "$(ui_step_running_before_failed "$UIJ" health_check)"
   check_contains "UI showed the step rolling_back running (live) while the updater rolled back" "rolling_back:running" "$(echo "$UIJ" | jq -r '.stepSnapshots|join(" ")')"
   check_contains "UI showed the step health_check failed" "health_check:failed" "$(echo "$UIJ" | jq -r '.stepSnapshots|join(" ")')"
   check_contains "UI ended on the rolled back phase" "zurückgerollt" "$UI_PHASES"  # check-language: ignore (UI text of the German locale, web/src/i18n/de.json)
@@ -521,18 +527,8 @@ if [ "$UI" = 1 ]; then
   log "UI phases of the retry: $(echo "$UIJ2" | jq -r '.phases|join(" > ")')"
   FINAL2=$(a "/rollouts/$R2" | jq -r .status)
   : > "$E2E_DIR/phases-$R2.txt"
-  # phase labels of the German UI locale -> engine step names
-  phase_map=(
-    -e 's/^Health-Check (Host)$/health_check/'   # check-language: ignore
-    -e 's/^Bewährung (myriarchd)$/health_wait/'     # check-language: ignore
-    -e 's/^erfolgreich$/succeeded/'              # check-language: ignore
-    -e 's/^Download$/downloading/'
-    -e 's/^Prüfung$/verifying/'                  # check-language: ignore
-    -e 's/^Installation$/installing/'
-    -e 's/^Neustart$/restarting/'                # check-language: ignore
-    -e 's/^angeboten$/offered/'                  # check-language: ignore
-  )
-  echo "$UIJ2" | jq -r '.phases[]' | sed "${phase_map[@]}" > "$E2E_DIR/phases-$R2.txt"
+  # the language-independent phase keys (data-phase) are the engine's phase names
+  echo "$UIJ2" | jq -r '.phaseKeys[]' > "$E2E_DIR/phases-$R2.txt"
 else
   ap "/rollouts/$R1/actions/retry-failed" '{"reason":"e2e retry"}' >/dev/null
   FINAL2=$(watch_rollout "$R2" 420)

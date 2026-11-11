@@ -47,16 +47,20 @@ describe('UpdateStepsBar', () => {
   it('shows the phase as text, with the percentage while downloading', () => {
     const { unmount } = renderWithProviders(<UpdateStepsBar progress={progress()} />);
     expect(screen.getByTestId('update-phase').textContent).toBe('downloading · 42 %');
+    expect(screen.getByTestId('update-phase').getAttribute('data-phase')).toBe('downloading');
     unmount();
     renderWithProviders(
       <UpdateStepsBar progress={progress({ phase: 'rolled_back', downloadPercent: undefined })} />,
     );
     expect(screen.getByTestId('update-phase').textContent).toBe('rolled back');
+    expect(screen.getByTestId('update-phase').getAttribute('data-phase')).toBe('rolled_back');
   });
 
   it('is localized', () => {
     renderWithProviders(<UpdateStepsBar progress={progress()} />, { lang: 'de' });
     expect(screen.getByTestId('update-phase').textContent).toBe('Download · 42 %');
+    // the key does not depend on the language
+    expect(screen.getByTestId('update-phase').getAttribute('data-phase')).toBe('downloading');
     expect(screen.getByRole('listitem', { name: 'Download: läuft, 42 %' })).toBeTruthy(); // check-language: ignore
     expect(
       screen.getByRole('listitem', { name: 'Health-Check (Host): fehlgeschlagen' }),
