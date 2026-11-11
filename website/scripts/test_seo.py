@@ -44,6 +44,7 @@ seo:
   license: https://www.apache.org/licenses/LICENSE-2.0   # the license of the code
   programmingLanguage: [Go, TypeScript]
   keywords: [OpenTelemetry Collector, OpAMP, fleet management]
+  imageAlt: "myriarch: A tagline for the card."
 search:
   other: ignored
 """
@@ -133,6 +134,8 @@ def png(width=1200, height=630):
 
 
 CARD = ORIGIN + "/images/og-image.png"
+CARD_ALT = "myriarch: A tagline for the card."
+CARD_SVG = '<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 1200 630"><title>%s</title><path d="M0 0"/></svg>'
 SOCIAL = "<meta %s=%s content=\"%s\">"
 
 
@@ -145,7 +148,7 @@ def social_tags(title, canonical, description, **changes):
     if description is not None:
         tags += [("og:description", description), ("twitter:description", description)]
     tags += [("og:type", "article"), ("og:image", CARD), ("og:image:type", "image/png"), ("og:image:width", "1200"),
-             ("og:image:height", "630"), ("twitter:image", CARD), ("twitter:card", "summary_large_image")]
+             ("og:image:height", "630"), ("og:image:alt", CARD_ALT), ("twitter:image:alt", CARD_ALT), ("twitter:image", CARD), ("twitter:card", "summary_large_image")]
     out = ""
     for key, value in tags:
         value = changes.get(key.replace(":", "_"), value)
@@ -221,6 +224,7 @@ class SeoCase(unittest.TestCase):
         self.files = {}  # path below public -> text
         self.hugo, self.params, self.release_text = HUGO, PARAMS, RELEASE
         self.card = png()  # images/og-image.png of the built site, None for a site without it
+        self.card_svg = CARD_SVG % CARD_ALT  # brand/og-image.svg of the built site, None for a site without it
         self.reset_site()
 
     def reset_site(self):
@@ -255,6 +259,10 @@ class SeoCase(unittest.TestCase):
             os.makedirs(os.path.join(self.public, "images"), exist_ok=True)
             with open(os.path.join(self.public, "images", "og-image.png"), "wb") as fh:
                 fh.write(self.card)
+        if self.card_svg is not None:
+            os.makedirs(os.path.join(self.public, "brand"), exist_ok=True)
+            with open(os.path.join(self.public, "brand", "og-image.svg"), "w", encoding="utf-8") as fh:
+                fh.write(self.card_svg)
         os.makedirs(self.config, exist_ok=True)
         for name, text in (("hugo.yaml", self.hugo), ("params.yaml", self.params)):
             with open(os.path.join(self.config, name), "w", encoding="utf-8") as fh:
@@ -990,6 +998,38 @@ class SocialCardTest(SeoCase):
         self.assert_finding("og:type is 'product', expected website or article")
         self.third_party(twitter_card="summary")
         self.assert_finding("twitter:card is 'summary', expected 'summary_large_image'")
+
+    def test_a_page_without_an_image_alt_fails(self):
+        self.third_party(og_image_alt=GONE)
+        self.assert_finding("legal/third-party/index.html: has 0 og:image:alt tags, expected exactly one")
+        self.third_party(twitter_image_alt=GONE)
+        self.assert_finding("has 0 twitter:image:alt tags, expected exactly one")
+        self.third_party(og_image_alt="")
+        self.assert_finding("og:image:alt is empty")
+
+    def test_image_alts_that_differ_fail(self):
+        self.third_party(twitter_image_alt="Another text alternative.")
+        self.assert_finding("twitter:image:alt is 'Another text alternative.', expected %r (og:image:alt)" % CARD_ALT)
+        self.third_party(og_image_alt="Another text alternative.", twitter_image_alt="Another text alternative.")
+        self.assert_finding("og:image:alt is 'Another text alternative.', expected %r (seo.imageAlt)" % CARD_ALT)
+
+    def test_an_image_alt_that_differs_from_the_svg_title_fails(self):
+        self.card_svg = CARD_SVG % "myriarch: An older tagline."
+        self.assert_finding("params.yaml: seo.imageAlt is %r, expected 'myriarch: An older tagline.' (the <title> of the SVG source of the card)" % CARD_ALT)
+
+    def test_the_svg_source_of_the_card_is_read_from_the_repository_without_a_copy_in_the_site(self):
+        self.card_svg = None
+        repo = os.path.join(self.tmp, "og-image.svg")
+        with open(repo, "w", encoding="utf-8") as fh:
+            fh.write(CARD_SVG % CARD_ALT)
+        with mock.patch.object(self.mod, "CARD_SVG_REPO", repo):
+            self.assert_clean()
+        with mock.patch.object(self.mod, "CARD_SVG_REPO", os.path.join(self.tmp, "none.svg")):
+            self.assert_finding("the SVG source of the card (brand/og-image.svg) cannot be read")
+
+    def test_a_missing_image_alt_in_the_configuration_fails(self):
+        self.params = "\n".join(line for line in PARAMS.splitlines() if not line.strip().startswith("imageAlt:")) + "\n"
+        self.assert_finding("params.yaml: seo.imageAlt is missing")
 
     def test_a_missing_og_image_file_fails(self):
         self.card = None

@@ -21,6 +21,9 @@ seo:
   license: https://www.apache.org/licenses/LICENSE-2.0
   programmingLanguage: [Go, TypeScript]
   keywords: [OpenTelemetry Collector, OpAMP, fleet management, GitOps, rollouts]
+  # The text alternative of the social card (og:image:alt and twitter:image:alt, seo/social.html). It must equal the <title> of
+  # assets/brand/og-image.svg, which the brand generator writes from TAGLINE in assets/brand/source/build.py; check-seo.py compares them.
+  imageAlt: "myriarch: A GitOps-governed fleet manager for OpenTelemetry Collectors, built on OpAMP."
 
 # Search runs in the browser (lunr, self-hosted); the index is a file of the site.
 offlineSearch: true

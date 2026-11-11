@@ -228,7 +228,9 @@ the columns has to repeat in every cycle) and `website/assets/js/landing-mark.js
 The files are generated from the construction above, not drawn by hand: outlines come from Inter via fontTools
 and HarfBuzz, the SVGs are optimized with svgo (keeping `<title>`, `viewBox`, size and ARIA attributes), and the
 PNGs are rendered with resvg. To change the logo, change the construction in `source/build.py` and
-`source/brandlib.py` and regenerate. Do not edit the paths by hand.
+`source/brandlib.py` and regenerate. Do not edit the paths by hand. A change of `TAGLINE` in `source/build.py` also needs
+`params.seo.imageAlt` in `website/config/_default/params.yaml` set to the new `<title>` of `og-image.svg`, because
+`website/scripts/check-seo.py` fails until both agree.
 
 ```sh
 assets/brand/source/make_assets.sh

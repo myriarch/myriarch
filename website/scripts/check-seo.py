@@ -32,6 +32,9 @@ Fails when
     and twitter:description that equal the meta description, og:url that equals the canonical URL, og:site_name that is the site title, og:type
     website or article, exactly one og:image that is absolute, below the production origin and names a PNG file of the built site whose size is
     og:image:width by og:image:height with og:image:type image/png, twitter:card summary_large_image and a twitter:image that equals og:image,
+    exactly one non-empty og:image:alt and one twitter:image:alt that equal each other and seo.imageAlt of params.yaml, and an seo.imageAlt that
+    differs from the <title> of the SVG source of the card (brand/og-image.svg of the built site, else assets/brand/og-image.svg of the
+    repository),
   - a page carries itemprop=datePublished or article:published_time without showing that date in a <time datetime> element (a page states a
     publication date only when it shows it; the value is reported),
   - two pages have the same title (the 404 page is no page here), or a page outside docs/reference/ and docs/adr/ has a description of fewer
@@ -59,6 +62,7 @@ environment error. Python 3.9 compatible, standard library only.
 """
 
 import importlib.util
+import html
 import json
 import os
 import re
@@ -70,6 +74,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 WEBSITE = os.path.dirname(HERE)
 DEFAULT_CONFIG_DIR = os.path.join(WEBSITE, "config", "_default")
 DEFAULT_RELEASE = os.path.join(WEBSITE, "data", "release.yaml")
+# The SVG source of the social card: the build publishes assets/brand as brand/ (config/_default/module.yaml); the repository copy is the
+# fallback for a site without it.
+CARD_SVG_SITE = ("brand", "og-image.svg")
+CARD_SVG_REPO = os.path.join(os.path.dirname(WEBSITE), "assets", "brand", "og-image.svg")
 
 MODES = ("production", "preview")
 SCHEMA_CONTEXT = "https://schema.org"
@@ -204,6 +212,7 @@ class Config:
         self.license = seo.get("license", "")
         self.languages = seo.get("programmingLanguage", [])
         self.keywords = seo.get("keywords", [])
+        self.image_alt = seo.get("imageAlt", "")
         self.origin = self.canonical_base.rstrip("/")
         self.version = self._release(release_path)
         self._validate()
@@ -238,7 +247,7 @@ class Config:
             problems.append("hugo.yaml: baseURL is missing")
         for key, value in (("title", self.title), ("locale", self.locale), ("description", self.description),
                            ("copyright", self.copyright), ("repo.url", self.repo_url), ("seo.homeTitle", self.home_title),
-                           ("seo.license", self.license)):
+                           ("seo.license", self.license), ("seo.imageAlt", self.image_alt)):
             if not value:
                 problems.append("%s: %s is missing" % ("hugo.yaml" if key in ("title", "locale") else "params.yaml", key))
         if self.home_title and (self.home_title == self.title or len(self.home_title) > HOME_TITLE_MAX):
@@ -668,11 +677,44 @@ def check_social(rel, parsed, cfg, canonical, root):
     if og_type is not None and og_type not in ("website", "article"):
         out.append("%s: og:type is %r, expected website or article" % (rel, og_type))
     same("twitter:card", "summary_large_image", "the card type")
+    alt = one("og:image:alt")
+    if alt is not None and not alt.strip():
+        out.append("%s: og:image:alt is empty" % rel)
+    elif alt is not None and cfg.image_alt and " ".join(alt.split()) != cfg.image_alt:
+        out.append("%s: og:image:alt is %r, expected %r (seo.imageAlt)" % (rel, alt, cfg.image_alt))
+    same("twitter:image:alt", " ".join(alt.split()) if alt is not None else None, "og:image:alt")
     image = one("og:image")
     if image is not None:
         out.extend(check_card_image(rel, parsed, cfg, image, root))
         same("twitter:image", image, "og:image")
     return out
+
+
+def card_svg_title(root):
+    """The <title> of the SVG source of the social card, or a problem text: the copy in the built site, else the one in the repository."""
+    path = resolve_site_file(root, "/" + "/".join(CARD_SVG_SITE))
+    if path is None or not os.path.isfile(path):
+        path = CARD_SVG_REPO
+    try:
+        text = read_text(path)
+    except OSError:
+        return None, "the SVG source of the card (%s) cannot be read" % "/".join(CARD_SVG_SITE)
+    found = re.findall(r"<title[^>]*>(.*?)</title>", text, re.S)
+    if len(found) != 1:
+        return None, "the SVG source of the card (%s) has %d <title> elements, expected exactly one" % ("/".join(CARD_SVG_SITE), len(found))
+    return " ".join(html.unescape(found[0]).split()), None
+
+
+def check_image_alt_source(root, cfg):
+    """seo.imageAlt is the <title> of the SVG source of the card: the two are written from one tagline and must not drift apart."""
+    if not cfg.image_alt:
+        return []
+    title, problem = card_svg_title(root)
+    if problem:
+        return ["params.yaml: seo.imageAlt cannot be compared: " + problem]
+    if title != cfg.image_alt:
+        return ["params.yaml: seo.imageAlt is %r, expected %r (the <title> of the SVG source of the card)" % (cfg.image_alt, title)]
+    return []
 
 
 def check_card_image(rel, parsed, cfg, image, root):
@@ -967,6 +1009,7 @@ def check_site(root, cfg, mode):
         findings.append("index.html: missing")
     findings.extend(check_unique_titles(titles))
     findings.extend(check_lastmod(root))
+    findings.extend(check_image_alt_source(root, cfg))
     findings.extend(check_llms(root, cfg))
     findings.extend(check_404(root, cfg))
     findings.extend(check_robots(root, mode))
