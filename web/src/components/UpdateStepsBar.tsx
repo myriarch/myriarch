@@ -104,7 +104,7 @@ export function UpdateStepsBar({ progress }: { progress: TargetProgress }) {
           );
         })}
       </Group>
-      <Text fz="xs" c={phaseColor} fw={600} data-testid="update-phase">
+      <Text fz="xs" c={phaseColor} fw={600} data-testid="update-phase" data-phase={progress.phase}>
         {t(`enum.updatePhase.${progress.phase}`)}
         {percent !== undefined ? ` · ${percent} %` : ''}
       </Text>
