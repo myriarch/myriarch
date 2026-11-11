@@ -540,8 +540,8 @@ model lists the control ([Security model](../docs/security/model.md#build-and-re
   the generated `config.json` and to the route tests of `website.yml` and `ci/tests/website-test.sh`),
   `robots.txt` names `https://myriarch.dev/sitemap.xml`, `/sitemap.xml` returns 200, a Mermaid `.mjs` file (for example
   `/vendor/mermaid/mermaid.esm.min.mjs`) is served with a JavaScript media type, `text/javascript` or `application/javascript` (Vercel sends
-  `application/javascript; charset=utf-8`; browsers run a module script under every JavaScript MIME type of the HTML standard, and RFC 9239 only
-  makes `text/javascript` the preferred name; `text/plain` or `application/octet-stream` would break the module scripts), and `site.webmanifest` has a JSON or manifest media type.
+  `application/javascript; charset=utf-8`; browsers run a module script under every JavaScript MIME type of the HTML standard, and RFC 9239
+  makes `text/javascript` the common type and marks `application/javascript` obsolete, which browsers still accept; `text/plain` or `application/octet-stream` would break the module scripts), and `site.webmanifest` has a JSON or manifest media type.
   `curl -s -o /dev/null -w '%{http_code} %{size_download}\n' -A GPTBot https://myriarch.dev/docs/` prints the same status and size as the same
   request without `-A`, and so do `OAI-SearchBot`, `ChatGPT-User`, `ClaudeBot`, `Claude-SearchBot`, `Claude-User`, `PerplexityBot` and `Perplexity-User`: the firewall answers
   the crawlers and the user-triggered fetchers of AI assistants like any other client (Setup, step 6).
