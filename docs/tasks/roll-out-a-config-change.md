@@ -8,6 +8,8 @@ A change to a blueprint, to the parameters of a fleet or to the inventory create
 affected fleet. The rollout policy of the fleet decides the waves, whether a wave waits for approval, when a failure stops
 the rollout and what happens then. This page walks through the happy path and the failure path on the local system.
 
+It is step 7 of [Manage many OpenTelemetry Collectors with OpAMP and Git](manage-many-collectors.md), the path from an empty repository to the first rollout, here on the local system.
+
 You need the running system of [Local development](../getting-started/local-dev.md) with simulated collectors
 ([Simulate a fleet](simulate-a-fleet.md)), started on a working copy of the example repository:
 

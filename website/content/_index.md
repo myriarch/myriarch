@@ -1,6 +1,6 @@
 ---
 title: "myriarch"
-description: "Fleet manager for OpenTelemetry Collectors, built on OpAMP. Git is the source of truth; every operator action is audited."
+description: "Myriarch is an open-source OpAMP server and fleet manager for OpenTelemetry Collectors. Git sets the frame, rollouts run in waves, every action is audited."
 ---
 
 Myriarch manages fleets of OpenTelemetry Collectors over OpAMP. Git holds blueprints, fleets, rollout policies and the allowed

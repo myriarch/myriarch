@@ -28,6 +28,8 @@ reach every collector. The colour is Tyrian purple, the costly dye that marked r
 | `social-preview.svg`, `og-image.svg` | Vector sources of the two social images. |
 | `source/` | The generator that produces every file above (see [Production](#production)). |
 
+Both social images carry the tagline of [ADR-0050](../../docs/adr/0050-tagline-backed-by-the-documentation.md): "A GitOps-governed fleet manager for OpenTelemetry Collectors, built on OpAMP." The name means "commander of ten thousand" (see above); the cards state no number of collectors.
+
 All SVGs are plain filled paths: no `<text>`, no embedded raster images, no scripts and no external references.
 Each has a tight `viewBox` and explicit `width` and `height`, plus `role="img"`, `aria-label` and `<title>`.
 
@@ -226,7 +228,9 @@ the columns has to repeat in every cycle) and `website/assets/js/landing-mark.js
 The files are generated from the construction above, not drawn by hand: outlines come from Inter via fontTools
 and HarfBuzz, the SVGs are optimized with svgo (keeping `<title>`, `viewBox`, size and ARIA attributes), and the
 PNGs are rendered with resvg. To change the logo, change the construction in `source/build.py` and
-`source/brandlib.py` and regenerate. Do not edit the paths by hand.
+`source/brandlib.py` and regenerate. Do not edit the paths by hand. A change of `TAGLINE` in `source/build.py` also needs
+`params.seo.imageAlt` in `website/config/_default/params.yaml` set to the new `<title>` of `og-image.svg`, because
+`website/scripts/check-seo.py` fails until both agree.
 
 ```sh
 assets/brand/source/make_assets.sh

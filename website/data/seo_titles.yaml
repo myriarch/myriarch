@@ -4,6 +4,9 @@
 # The <title> of pages whose own title (the H1 and the label in the navigation) says too little in a list of search results.
 # Key: the URL path of the page. Value: the title without the site title, which the template appends (" | myriarch"). Keep it to
 # 49 characters, so that the whole title stays within 60, and spell the name as ADR-0015 says ("Myriarch" starts a title).
+# Pair OpAMP with OpenTelemetry or Collector in a title: in search results the bare word also stands for operational amplifiers.
+# Do not use the abbreviation otel; the project avoids it (ADR-0016).
+# Myriarch appears only as the first word of a title; elsewhere the name is lower case (ADR-0015).
 # website/layouts/_partials/seo/title.html explains the order of the rules; check-seo.py fails on a title that two pages share.
 "/docs/": "Documentation: OpAMP fleet manager for Collectors"
 "/docs/architecture/": "Architecture of the myriarch fleet manager"
@@ -13,12 +16,12 @@
 "/docs/concepts/executors/": "Executors: how Collector updates are started"
 "/docs/concepts/fleets/": "Fleets: which agents get which configuration"
 "/docs/concepts/inventory/": "Inventory: server-side labels for agents"
-"/docs/concepts/rollouts/": "Rollouts: waves, policies and failure handling"
+"/docs/concepts/rollouts/": "Rollouts: canary waves, approvals and rollback"
 "/docs/design/": "Design contracts of the myriarch project"
 "/docs/design/container-mode/": "Container mode of the myriarch-updater"
 "/docs/design/opamp-server/": "Server behaviour: the myriarchd contract"
 "/docs/design/updater-protocol/": "Updater protocol: myriarchd and the updater"
-"/docs/design/upstream-notes/": "Upstream notes: verified third-party facts"
+"/docs/design/upstream-notes/": "OpAMP Supervisor and Collector: upstream facts"
 "/docs/design/version-selection/": "Version selection: choose the Collector version"
 "/docs/development/": "Development guide: build and test myriarch"
 "/docs/getting-started/": "Getting started with myriarch: tutorials"
@@ -51,5 +54,23 @@
 "/project/security/": "Security policy: report a vulnerability"
 "/docs/tasks/manage-many-collectors/": "Manage many OpenTelemetry Collectors with OpAMP"
 "/docs/tasks/upgrade-collectors-on-many-hosts/": "Upgrade the OpenTelemetry Collector on many hosts"
-"/project/what-is-myriarch/": "What is Myriarch? An OpAMP fleet manager"
-"/project/comparison/": "OpAMP server options: Supervisor, DIY, Myriarch"
+"/project/what-is-myriarch/": "Myriarch: open-source OpAMP server for Collectors"
+"/project/comparison/": "OpAMP server options for Collectors compared"
+"/docs/operations/install-helm/": "Install the OpAMP server for Collectors with Helm"
+"/docs/operations/install-collector-helm/": "Run OpenTelemetry Collectors with Helm and OpAMP"
+"/docs/concepts/gitops/": "GitOps for OpenTelemetry Collector configuration"
+"/docs/getting-started/first-fleet-and-rollout/": "Tutorial: your first Collector fleet and rollout"
+"/docs/tasks/connect-a-real-supervisor/": "Connect a real OpAMP Supervisor and Collector"
+"/docs/tasks/validate-a-gitops-repository/": "Validate OpenTelemetry Collector configs in CI"
+"/docs/tasks/track-releases-and-notify/": "Track Collector releases and breaking changes"
+"/docs/tasks/simulate-a-fleet/": "Simulate a Collector fleet for OpAMP load tests"
+"/docs/tasks/gitops-repository-template/": "Set up a GitOps repository for Collector fleets"
+"/docs/operations/production-checklist/": "Production checklist for the myriarch server"
+"/docs/reference/": "Reference: GitOps schema, CLI, REST API, config"
+"/docs/reference/gitops-schema/": "GitOps schema: kinds, fields, template functions"
+"/docs/reference/metrics/": "Prometheus metrics of the server and simulator"
+"/docs/reference/helm-chart/": "Helm chart values of the myriarch server"
+"/docs/reference/helm-chart-collector/": "Helm chart values for OpenTelemetry Collectors"
+"/docs/reference/configuration/": "Configuration reference of the myriarchd server"
+"/docs/reference/api/": "REST API reference of the myriarch server"
+"/docs/concepts/opamp/": "OpAMP explained: server, Supervisor, Collector"

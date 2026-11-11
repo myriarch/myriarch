@@ -16,6 +16,10 @@ enableRobotsTXT: true
 # "Last modified" is not shown on the page. The pages of the content adapters have no source file for Hugo; they get their date from
 # the adapters (website/README.md, "Sitemap and dates").
 enableGitInfo: true
+# A page takes its publication date only from a date that its front matter states. Hugo's default chain would fall back to lastmod and turn
+# the last change of an adapter page into a datePublished that no fact backs.
+frontmatter:
+  date: [date, publishdate, pubdate, published]
 enableEmoji: false
 pluralizeListTitles: false
 canonifyURLs: false

@@ -9,6 +9,8 @@ breaking changes and deprecations. It never changes a fleet by itself: it tells 
 check before you raise the target version in Git (or choose it in the UI, see
 [Roll out a collector version](roll-out-a-collector-version.md)).
 
+To roll a new version out to a whole fleet on many hosts, follow [Upgrade the OpenTelemetry Collector on many hosts](upgrade-collectors-on-many-hosts.md).
+
 ## What the tracker does
 
 - It polls `open-telemetry/opentelemetry-collector-releases` through the GitHub API (`releases.releasesRepo`, once an hour

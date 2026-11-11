@@ -10,7 +10,7 @@
 #                      header tool scripts/license-headers.py), third-party-notices-test.sh (THIRD_PARTY_NOTICES generator),
 #                      license-allowlist-test.sh (ci/license-allowlist.txt as the source of the release allowlist and of the dependency
 #                      review: parity with its configuration, the dependency-review job, ci/check-release-licenses.sh with a go-licenses double),
-#                      website-test.sh (unit tests of the website checks in website/scripts, ci/website.sh arguments),
+#                      website-test.sh (unit tests of the website checks in website/scripts, ci/website.sh arguments, and the generated routes of the website deploy job),
 #                      check-workflows-test.sh (workflow policy check ci/check-workflows.py), lint-workflows-test.sh (the zizmor
 #                      step of ci/lint-workflows.sh, with the real zizmor),
 #                      versions-test.sh (VERSION, scripts/set-version.sh, ci/check-versions.sh and the release tag guard

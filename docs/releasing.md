@@ -452,8 +452,10 @@ own, `.github/workflows/artifacthub.yml`, does it after the release, started by 
 The file has exactly one key, `repositoryID`. It has no `owners`; an owners entry would put an e-mail address into a public file, and
 the board has to ask for it explicitly, in a change of its own.
 
-Artifact Hub lists every version tag of the repository, release candidates included. A repository that is added after a candidate therefore
-shows the candidate (as a pre-release) until the final version is published.
+Artifact Hub lists every version tag of the repository, release candidates included. A repository that is added after a candidate
+therefore shows the candidate until the final version is published. Artifact Hub documents the chart annotation
+[`artifacthub.io/prerelease`](https://artifacthub.io/docs/topics/annotations/helm/) for marking a version as a pre-release; the
+release flow does not set it yet, so check how the listing shows a candidate after its scan.
 
 ## Release post
 

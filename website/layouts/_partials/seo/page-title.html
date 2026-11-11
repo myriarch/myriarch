@@ -1,0 +1,29 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  The title of a page without the site suffix (called by seo/title.html for <title> and by seo/social.html for og:title and twitter:title,
+  so a shared link shows the title of the search result). The first source that applies wins:
+    1. The home page: params.seo.homeTitle, else the site title.
+    2. A path listed in data/seo_titles.yaml: that title. The key is the URL path of the page.
+    3. A page of the REST API reference (below /docs/reference/api/, except the index): "<title> API". Its title is the tag of the
+       OpenAPI contract ("Agents", "Authentication") and would equal the title of a concept or an operations page otherwise.
+    4. Any other page: its own title.
+  The site title stands in when the result is empty. Hugo allows one return statement in a partial, at its end.
+  Call: partial "seo/page-title.html" .
+*/ -}}
+{{- $result := "" -}}
+{{- if .IsHome -}}
+  {{- $result = .Site.Params.seo.homeTitle | default .Site.Title -}}
+{{- else -}}
+  {{- $result = .Title -}}
+  {{- with index (default dict hugo.Data.seo_titles) .RelPermalink -}}
+    {{- $result = . -}}
+  {{- else -}}
+    {{- if and (hasPrefix .RelPermalink "/docs/reference/api/") (ne .RelPermalink "/docs/reference/api/") $result -}}
+      {{- $result = printf "%s API" $result -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- return ($result | default .Site.Title) -}}

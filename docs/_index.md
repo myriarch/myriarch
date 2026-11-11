@@ -1,13 +1,16 @@
 ---
 title: "Documentation"
 weight: 1
-description: "A map of the myriarch documentation in six groups: tutorials, how-to guides, concepts, reference, operations and security, and the project."
+description: "Documentation of myriarch, an open-source OpAMP server and fleet manager for OpenTelemetry Collectors: tutorials, how-to guides, concepts and reference."
 ---
 
 Myriarch manages fleets of OpenTelemetry Collectors over OpAMP. Git holds the declared state, the web UI and the REST API
 operate within it, and every action is audited. The documentation is organized by what you want to do with it, following the
 [Diátaxis](https://diataxis.fr/) framework: learn by doing, solve a problem, understand, look something up. If you are new,
-start with the tutorials, then read the concepts.
+start with the tutorials, then read the concepts. To decide first whether myriarch fits, read
+[What is Myriarch?](../website/content/project/what-is-myriarch.md) for the facts in one place, the
+[comparison](../website/content/project/comparison.md) of the OpAMP server options and the
+[FAQ](../website/content/project/faq.md).
 
 ## Tutorials: learn by doing
 
@@ -34,7 +37,7 @@ described in [gitops-template/README.md](../gitops-template/README.md).
 
 ## Concepts: understand how it works
 
-[Concepts](concepts/_index.md) explains how the system works: [GitOps](concepts/gitops.md) as the source of truth,
+[Concepts](concepts/_index.md) explains how the system works: [OpAMP, the Supervisor and the Collector](concepts/opamp.md), [GitOps](concepts/gitops.md) as the source of truth,
 [agents](concepts/agents.md) and their identity, [blueprints](concepts/blueprints.md) and how they are rendered,
 [fleets](concepts/fleets.md) and the target version, the [inventory](concepts/inventory.md), [rollouts](concepts/rollouts.md)
 in waves and the [executors](concepts/executors.md) that apply version updates. The [architecture](architecture.md) describes

@@ -1,10 +1,10 @@
 ---
 title: "What is Myriarch?"
 weight: 12
-description: "Myriarch is an open-source, GitOps-governed fleet manager for OpenTelemetry Collectors, built on OpAMP. Facts on scope, license, maturity and version."
+description: "Myriarch is an open-source OpAMP server and fleet manager for OpenTelemetry Collectors. Facts on scope, license, maturity and version."
 ---
 
-Myriarch is an open-source fleet manager for OpenTelemetry Collectors, built on OpAMP (the Open Agent Management Protocol). Git is
+Myriarch is an open-source OpAMP server and fleet manager for OpenTelemetry Collectors. OpAMP is the Open Agent Management Protocol of the OpenTelemetry project. Git is
 the source of truth for blueprints, fleets, rollout policies and the allowed collector versions; the web UI and the REST API
 operate within that frame, and every operator action is audited. It is an independent project under the Apache-2.0 license,
 currently **alpha**, and the latest release is **v0.2.0**.
@@ -21,6 +21,7 @@ currently **alpha**, and the latest release is **v0.2.0**.
 | Maturity | Alpha. Interfaces, configuration and the GitOps format (`myriarch.dev/v1alpha1`) can still change |
 | Latest release | v0.2.0 |
 | Needs | PostgreSQL for state, events and leader election; no other stateful component |
+| Hosting | Self-hosted: you run the server and PostgreSQL; the documentation describes no hosted service |
 | Source | [github.com/myriarch/myriarch](https://github.com/myriarch/myriarch) |
 
 ## What it does
@@ -57,7 +58,8 @@ restarts, but it cannot replace the collector binary. Myriarch is the server sid
 rollouts in waves, version updates through executors and an audit trail, and it leaves the protocol, the supervisor and the
 collector upstream. The facts about the upstream software, each with a public source and a date, are in the
 [upstream notes](/docs/design/upstream-notes/). A side-by-side view with the alternatives is on the
-[comparison page](/project/comparison/).
+[comparison page](/project/comparison/). The parts of an OpAMP setup, and how a configuration reaches a collector, are explained in
+[OpAMP, the Supervisor and the Collector](/docs/concepts/opamp/).
 
 Myriarch is not affiliated with or endorsed by The Linux Foundation or the OpenTelemetry project; OpenTelemetry, Kubernetes and
 CNCF are trademarks of The Linux Foundation and are named only to describe compatibility
@@ -70,8 +72,15 @@ Windows hosts and the collector Helm chart are experimental. What the levels mea
 what has to hold before the project calls itself beta is in the [roadmap](/project/roadmap/#from-alpha-to-beta). Every release is signed keyless and carries build provenance;
 [verify it](/docs/security/verify-releases/) before you run it.
 
+## Key terms
+
+The terms that the documentation uses, in short:
+
+{{< key-terms >}}
+
 ## Where to go next
 
+- Understand the protocol: [OpAMP, the Supervisor and the Collector](/docs/concepts/opamp/).
 - Learn the ideas: [concepts](/docs/concepts/) and [architecture](/docs/architecture/).
 - Try it on your machine: [getting started](/docs/getting-started/).
 - Solve a problem: [manage many OpenTelemetry Collectors with OpAMP and Git](/docs/tasks/manage-many-collectors/) and

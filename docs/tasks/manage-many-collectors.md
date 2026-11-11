@@ -12,7 +12,9 @@ repository to the first rollout. It is designed for around 1,000 collectors, wit
 [architecture](../architecture.md#scaling)).
 
 Myriarch is alpha; the [README](../../README.md#status) lists the support level of each component. Read
-[Concepts](../concepts/_index.md) first if the terms blueprint, fleet and rollout are new to you.
+[OpAMP, the Supervisor and the Collector](../concepts/opamp.md) and the [concepts](../concepts/_index.md) first if OpAMP or the
+terms blueprint, fleet and rollout are new to you. The [comparison](../../website/content/project/comparison.md) shows when another
+option fits better.
 
 ## 1. Run the server
 

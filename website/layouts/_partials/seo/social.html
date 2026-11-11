@@ -1,0 +1,56 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  The Open Graph and Twitter card tags of a page (called by head.html). Written from scratch; it replaces Hugo's embedded opengraph.html
+  and twitter_cards.html. On every page except the 404 page it writes
+    - og:url: the canonical URL (seo/canonical-url.html),
+    - og:site_name: the site title,
+    - og:title and twitter:title: the title of the page without the site suffix (seo/page-title.html), so a shared link shows the title
+      of the search result,
+    - og:description and twitter:description: the description of the page (the same call as the meta description),
+    - og:type: article for a content page, website for every other kind,
+    - article:modified_time: the Git date of a content page (never a publication date: the site states none, see frontmatter.date in
+      config/_default/hugo.yaml),
+    - og:image and twitter:image: the first of params.images below the production origin (in a preview too), with og:image:type,
+      og:image:width and og:image:height read from the file, og:image:alt and twitter:image:alt (params.seo.imageAlt, the text alternative
+      of the card, which must equal the <title> of assets/brand/og-image.svg; the build fails when it is empty), and twitter:card
+      summary_large_image.
+  There is no og:locale (en is not of the form language_TERRITORY, and en_US is the default). The size is read from
+  the asset seo/<file name of params.images>, a mount of config/_default/module.yaml; the asset is never published: no template takes
+  its permalink, and its path is not the one of params.images, which Hugo's embedded schema.html also looks up among the assets. The
+  tags name the static copy. The build fails when the file is missing. scripts/check-seo.py compares every tag with the page.
+*/ -}}
+{{- if ne .Kind "404" -}}
+<meta property="og:url" content="{{ partial "seo/canonical-url.html" . }}">
+<meta property="og:site_name" content="{{ site.Title }}">
+{{- $title := partial "seo/page-title.html" . }}
+<meta property="og:title" content="{{ $title }}">
+<meta name="twitter:title" content="{{ $title }}">
+{{- $description := partial "page-description.html" . }}
+<meta property="og:description" content="{{ $description }}">
+<meta name="twitter:description" content="{{ $description }}">
+<meta property="og:type" content="{{ if eq .Kind "page" }}article{{ else }}website{{ end }}">
+{{- if and (eq .Kind "page") (not .Lastmod.IsZero) }}
+<meta property="article:modified_time" content="{{ .Lastmod.Format "2006-01-02T15:04:05-07:00" }}">
+{{- end }}
+{{- $image := strings.TrimPrefix "/" (index site.Params.images 0) }}
+{{- $url := printf "%s/%s" (partial "seo/canonical-base.html" .) $image }}
+{{- with resources.Get (path.Join "seo" (path.Base $image)) }}
+<meta property="og:image" content="{{ $url }}">
+<meta property="og:image:type" content="{{ .MediaType.Type }}">
+<meta property="og:image:width" content="{{ .Width }}">
+<meta property="og:image:height" content="{{ .Height }}">
+{{- $alt := site.Params.seo.imageAlt }}
+{{- if not $alt }}
+  {{- errorf "seo/social.html: params.seo.imageAlt is empty (config/_default/params.yaml); it is the text alternative of the card" }}
+{{- end }}
+<meta property="og:image:alt" content="{{ $alt }}">
+<meta name="twitter:image:alt" content="{{ $alt }}">
+<meta name="twitter:image" content="{{ $url }}">
+{{- else }}
+  {{- errorf "seo/social.html: the asset seo/%s is missing (config/_default/module.yaml mounts it from assets/brand)" (path.Base $image) }}
+{{- end }}
+<meta name="twitter:card" content="summary_large_image">
+{{- end -}}

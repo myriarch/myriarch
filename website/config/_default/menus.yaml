@@ -1,5 +1,9 @@
 # Main menu. pageRef entries resolve at build time (a missing page fails the build).
 main:
+  # Overview links the facts page from the navbar of every page.
+  - name: Overview
+    pageRef: /project/what-is-myriarch
+    weight: 5
   - name: Documentation
     pageRef: /docs
     weight: 10

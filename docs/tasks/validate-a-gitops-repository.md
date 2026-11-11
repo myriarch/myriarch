@@ -9,6 +9,8 @@ validation as `myriarchd` runs before it applies a revision, so a merge request 
 by the server. `myriarchd` accepts a state only if it is completely valid: an invalid state is never applied, the previous
 one stays active, and the notification event `gitops.sync_failed` is sent.
 
+In [Manage many OpenTelemetry Collectors with OpAMP and Git](manage-many-collectors.md) this check runs on every merge request of the fleet repository (step 4).
+
 ## Get myrctl
 
 - From a release: the archive `myrctl_<version>_<os>_<arch>` contains the binary.
