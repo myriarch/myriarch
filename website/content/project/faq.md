@@ -93,7 +93,7 @@ such as an approval or a version chosen in the UI, is audited with the user and 
 
 ## What are the support levels?
 
-Myriarch is alpha. In v0.2.0, container mode, Linux hosts and the server Helm chart are beta; Windows hosts and the collector Helm
+Myriarch is alpha. In v0.2.1, container mode, Linux hosts and the server Helm chart are beta; Windows hosts and the collector Helm
 chart are experimental. The levels and what they mean are in
 [Support levels and tested platforms](/docs/operations/tested-platforms/); what has to hold before the project calls itself beta is
 in the [roadmap](/project/roadmap/#from-alpha-to-beta).
