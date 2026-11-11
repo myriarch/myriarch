@@ -1146,7 +1146,7 @@ Used by: myriarchd, myriarch-updater
 License text: [T1]
 
 --------------------------------------------------------------------------------
-Component: golang.org/x/net v0.61.0
+Component: golang.org/x/net v0.62.0
 License: BSD-3-Clause
 Used by: myriarchd, myrctl, myriarch-updater
 
