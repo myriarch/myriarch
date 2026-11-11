@@ -856,7 +856,7 @@ guidance after each item names what to do.
   second system, so that a leaked token or a compromised CI step cannot sign alone; the release workflow holds no long-lived
   signing secret ([ADR-0034](../adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Release builds accept no PFX
   file any more.
-- **Exceptions for v0.1.0 and v0.2.0: unsigned Windows files.** `v0.1.0` and `v0.2.0` ship `myriarch-updater.exe`, `myrctl.exe` and the two PowerShell
+- **Exceptions for v0.1.0, v0.2.0 and v0.2.1: unsigned Windows files.** `v0.1.0`, `v0.2.0` and `v0.2.1` ship `myriarch-updater.exe`, `myrctl.exe` and the two PowerShell
   scripts without Authenticode signatures, each under a reviewed exception for exactly that tag; the release notes carry an
   "unsigned" banner. Release candidates (`vX.Y.Z-rc.N`) may ship the same files unsigned, with the same "unsigned" banner and
   the same verification advice. Residual risk: Windows itself does not tell an operator who built an unsigned file, so integrity rests on

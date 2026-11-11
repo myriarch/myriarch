@@ -1,4 +1,4 @@
-# 0034. Authenticode signing of Windows release artifacts by the SignPath Foundation, with a defined fallback and exceptions for v0.1.0 and v0.2.0
+# 0034. Authenticode signing of Windows release artifacts by the SignPath Foundation, with a defined fallback and exceptions for v0.1.0, v0.2.0 and v0.2.1
 
 - Status: Accepted
 - Date: 2026-10-10
@@ -105,6 +105,14 @@ Windows is experimental in the first release ([ADR-0021](0021-publication-gates-
    covers no other tag, the release notes of `v0.2.0` carry the "unsigned" banner, and operators verify the Windows files with
    cosign before they run them. The first pull request after the release empties the setting again; a later final tag needs
    signing or a new, reviewed exception.
+
+   **Exception for v0.2.1.** The SignPath signing is still not set up, so the patch release `v0.2.1` ships unsigned Windows
+   files as well. The maintainer has reviewed the exception for exactly that tag: the pull request "Prepare v0.2.1" sets
+   `WINDOWS_UNSIGNED_FINAL_TAG=v0.2.1` in `deploy/release/windows-signing.env` and keeps `WINDOWS_SIGNING=off`. The rules of
+   this point apply unchanged: the guard compares the value with the pushed tag character by character, so the exception
+   covers no other tag, the release notes of `v0.2.1` carry the "unsigned" banner, and operators verify the Windows files with
+   cosign before they run them. The first pull request after the release empties the setting again; a later final tag needs
+   signing or a new, reviewed exception.
 9. **A change of publisher is announced.** The publisher shown by Windows is part of the identity that SmartScreen
    reputation and App Control rules refer to. Every change (unsigned to SignPath, IV certificate to SignPath, later to a
    foundation) resets reputation and breaks publisher rules that operators wrote, and is announced in the release notes of the
@@ -139,7 +147,7 @@ before it. Its privacy statement depends on the privacy notice of the website.
 
 ### Negative
 
-- `v0.1.0` and `v0.2.0` have unsigned Windows files. Hosts with App Control need a hash rule per release until signing starts, and Smart App
+- `v0.1.0`, `v0.2.0` and `v0.2.1` have unsigned Windows files. Hosts with App Control need a hash rule per release until signing starts, and Smart App
   Control may block the files. Residual risk and the compensating check are in [the security model](../security/model.md).
 - Dependence on one vendor: SignPath may pause or end the service, or revoke the certificate effective immediately or
   retroactively, and it needs a manual approval for every release, so a release waits for a person in a second system.
@@ -177,7 +185,7 @@ before it. Its privacy statement depends on the privacy notice of the website.
   failure. Rejected.
 - **An EV certificate**: only for organizations, at least about US$400 a year, and without a SmartScreen advantage since 2024.
 - **No Authenticode signature at all**: leaves the App Control and script cases of the context unsolved. Kept only for the
-  exceptions of `v0.1.0` and `v0.2.0`.
+  exceptions of `v0.1.0`, `v0.2.0` and `v0.2.1`.
 
 ## Sources
 

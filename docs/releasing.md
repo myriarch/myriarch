@@ -157,7 +157,7 @@ the release the way a user does.
 | `build-tools` | Builds goreleaser, syft, yq, go-winres and osslsigncode once from `ci/tools`; no cache. Only jobs with `contents: read` execute them. | |
 | `ui` | Builds the web UI (the only job with Node.js) and runs the release dependency and license gates. | |
 | `build-windows` | `goreleaser build` of the Windows targets in stage `collect`. | |
-| `sign-windows` | Runs the Windows signing hook (mode `off` in v0.1.0 and v0.2.0). | **Gate 1** |
+| `sign-windows` | Runs the Windows signing hook (mode `off` in v0.1.0, v0.2.0 and v0.2.1). | **Gate 1** |
 | `package` | `goreleaser release --skip=publish` in stage `apply`, then stages the 40 release files. | |
 | `images` | Builds the OCI layouts of both images from the release archives and their SBOMs. | |
 | `sign-blobs` | Signs `checksums.txt` keyless and attests the build provenance of its 39 files. | |
@@ -331,9 +331,9 @@ A final release is a normal release and is marked as the latest release when it 
 2. **Windows signing decides before the tag.** A final tag with `WINDOWS_SIGNING=off` and no exception is refused by the guard. Before
    the pull request of step 1 is merged, the maintainers either set `signpath` or `kms` (the signing then has to be set up and
    tested) or review the exception for that one tag, which puts an "unsigned" banner on the release notes. This page does not choose.
-   The state at the time of writing: `WINDOWS_SIGNING=off` without an exception. `v0.2.0` was released under an exception, which
-   [ADR-0034](adr/0034-authenticode-signing-of-windows-release-artifacts.md) records. Without an exception, `off` is enough for
-   release candidates only.
+   The state at the time of writing: `WINDOWS_SIGNING=off` with the exception for `v0.2.1` (the reviewed pull request "Prepare
+   v0.2.1" sets it, [ADR-0034](adr/0034-authenticode-signing-of-windows-release-artifacts.md) records it, as it records the
+   exception of `v0.2.0`). Without an exception, `off` is enough for release candidates only.
 3. Follow steps 2 to 11 of [Release a candidate](#release-a-candidate) with the tag `vX.Y.Z`. Step 6 is not needed any more, except for a package that no release has published before (v0.2.0: the two chart packages). If the
    repository on Artifact Hub exists already, step 10 is skipped: the next scan lists the new version by itself, and the workflow
    runs again only when the metadata file has to change.
