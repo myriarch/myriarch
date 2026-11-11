@@ -42,6 +42,8 @@ The scope of the first release is fixed by [ADR-0021](docs/adr/0021-publication-
 - Protection of OpAMP Bridge agents and a compare-and-set for fleet assignments.
 - A bounded failover of the leader after a hard failure (`ha.leaderSessionTimeout`).
 
+**v0.2.1** is a patch release: Go 1.27.4 for GO-2026-6859 and links in the packaged chart READMEs that resolve on Artifact Hub. It needs no migration, adds no setting and keeps the support levels of v0.2.0; the upgrade notes are in the [changelog](CHANGELOG.md).
+
 ## Next
 
 **Version updates on Kubernetes** ([ADR-0026](docs/adr/0026-collector-version-updates-on-kubernetes.md))

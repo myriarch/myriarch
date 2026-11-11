@@ -33,7 +33,7 @@ The chart is part of the repository. Take the tag of the release you want to ins
 `ghcr.io/myriarch/myriarch:<appVersion of the tag>`:
 
 ```bash
-TAG=v0.2.0           # the release you install; the newest one is on https://github.com/myriarch/myriarch/releases
+TAG=v0.2.1           # the release you install; the newest one is on https://github.com/myriarch/myriarch/releases
 git clone --depth 1 --branch "${TAG}" https://github.com/myriarch/myriarch.git
 ```
 
@@ -46,7 +46,7 @@ the image by digest in production (`image.digest`, see below).
 > **Available from v0.2.0.** The chart of v0.1.0 is not published as an OCI artifact; install it from the checkout above.
 
 From v0.2.0 on, every release publishes the chart as an OCI artifact at `oci://ghcr.io/myriarch/charts/myriarch`. Its version
-is the version of the release without the `v` (`0.2.0`, `0.2.0-rc.1`), and so is its `appVersion`. The release workflow writes
+is the version of the release without the `v` (`0.2.1`, or `X.Y.Z-rc.N` for a release candidate), and so is its `appVersion`. The release workflow writes
 the digest of the signed server image into the chart before it packages it, so the chart references the server image **by digest**
 and the signature of the chart covers the image that your cluster pulls. `image.tag` has no effect on this chart; to run another
 image, set `image.digest` (or `image.registry`, `image.repository` and `image.digest` for a mirror).
@@ -55,7 +55,7 @@ Verify the chart before you install it (the identity is the one of the release f
 [Verify a release](../security/verify-releases.md#verify-the-helm-chart)):
 
 ```bash
-VERSION=0.2.0                     # the release you install
+VERSION=0.2.1                     # the release you install
 CHART_DIGEST="$(crane digest "ghcr.io/myriarch/charts/myriarch:${VERSION}")"
 cosign verify "ghcr.io/myriarch/charts/myriarch@${CHART_DIGEST}" \
   --certificate-identity "https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/v${VERSION}" \

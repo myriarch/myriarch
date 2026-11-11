@@ -56,7 +56,7 @@ production-like policy waits minutes; see [Rollouts](../concepts/rollouts.md#hea
 Take the sources of the release, which carry the script, the demo Git repository and the version of the charts, and start:
 
 ```bash
-TAG=v0.2.0           # the release you start; the newest one is on https://github.com/myriarch/myriarch/releases
+TAG=v0.2.1           # the release you start; the newest one is on https://github.com/myriarch/myriarch/releases
 git clone --depth 1 --branch "${TAG}" https://github.com/myriarch/myriarch.git
 cd myriarch
 KIND_SYSTEM_TOOLS=1 make kind-quickstart

@@ -7,7 +7,7 @@ description: "Myriarch is an open-source OpAMP server and fleet manager for Open
 Myriarch is an open-source OpAMP server and fleet manager for OpenTelemetry Collectors. OpAMP is the Open Agent Management Protocol of the OpenTelemetry project. Git is
 the source of truth for blueprints, fleets, rollout policies and the allowed collector versions; the web UI and the REST API
 operate within that frame, and every operator action is audited. It is an independent project under the Apache-2.0 license,
-currently **alpha**, and the latest release is **v0.2.0**.
+currently **alpha**, and the latest release is **v0.2.1**.
 
 ## At a glance
 
@@ -19,7 +19,7 @@ currently **alpha**, and the latest release is **v0.2.0**.
 | Size | Designed for around 1,000 collectors, with headroom up to 5,000 (design targets, not measured limits) |
 | License | Apache-2.0 for the code, CC BY 4.0 for the documentation |
 | Maturity | Alpha. Interfaces, configuration and the GitOps format (`myriarch.dev/v1alpha1`) can still change |
-| Latest release | v0.2.0 |
+| Latest release | v0.2.1 |
 | Needs | PostgreSQL for state, events and leader election; no other stateful component |
 | Hosting | Self-hosted: you run the server and PostgreSQL; the documentation describes no hosted service |
 | Source | [github.com/myriarch/myriarch](https://github.com/myriarch/myriarch) |
@@ -67,7 +67,7 @@ CNCF are trademarks of The Linux Foundation and are named only to describe compa
 
 ## Maturity and support levels
 
-Myriarch as a whole is alpha. In v0.2.0, container mode of `myriarch-updater`, Linux hosts (systemd) and the server Helm chart are beta;
+Myriarch as a whole is alpha. In v0.2.1, container mode of `myriarch-updater`, Linux hosts (systemd) and the server Helm chart are beta;
 Windows hosts and the collector Helm chart are experimental. What the levels mean is in [Support levels and tested platforms](/docs/operations/tested-platforms/);
 what has to hold before the project calls itself beta is in the [roadmap](/project/roadmap/#from-alpha-to-beta). Every release is signed keyless and carries build provenance;
 [verify it](/docs/security/verify-releases/) before you run it.

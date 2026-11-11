@@ -1,10 +1,10 @@
 ---
 title: "Support levels and tested platforms"
 weight: 27
-description: "The support level of every component in v0.2.0 and the platforms of the automated tests: Linux and Windows hosts, and two Kubernetes versions on kind."
+description: "The support level of every component in v0.2.1 and the platforms of the automated tests: Linux and Windows hosts, and two Kubernetes versions on kind."
 ---
 
-This page says what the project supports in v0.2.0 and on which platforms its automated tests run. A platform that is not
+This page says what the project supports in v0.2.1 and on which platforms its automated tests run. A platform that is not
 listed may work; the project has not tested it.
 
 ## Support levels
@@ -44,7 +44,7 @@ updater.
 | Windows Server 2025 | amd64 | `install-windows.ps1` as administrator, in PowerShell 7 | Experimental |
 
 Windows on ARM64 is not tested; the installer stops with `unsupported_platform` unless you pass the architecture `amd64`
-explicitly. The Windows files of v0.2.0 are not Authenticode-signed ([Verify releases](../security/verify-releases.md)).
+explicitly. The Windows files of v0.1.0, v0.2.0 and v0.2.1 are not Authenticode-signed ([Verify releases](../security/verify-releases.md)).
 
 ### Kubernetes
 
@@ -62,7 +62,7 @@ The pins are the source of truth; the list changes when they change.
 ## What the results confirm
 
 These lists describe the tests as they are configured. The workflows `e2e-kind.yml` and `host-e2e.yml` passed on the tagged
-commit of v0.2.0 before the release; the release notes of a version state the levels that apply to it. A test result is a statement about the
+commit of v0.2.1 before the release; the release notes of a version state the levels that apply to it. A test result is a statement about the
 tested platform, not a promise for others: for example, a Kubernetes version between the two, or another Linux distribution,
 is expected to work but is not covered.
 

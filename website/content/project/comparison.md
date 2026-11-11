@@ -95,7 +95,7 @@ supervisor cannot do, and want every operator action audited.
 - **You need stable interfaces today.** Myriarch is alpha: interfaces, configuration and the GitOps format
   (`myriarch.dev/v1alpha1`) can still change. See the [roadmap](/project/roadmap/#from-alpha-to-beta) for what has to hold before
   the project calls itself beta.
-- **Your hosts are mostly Windows and you need more than experimental support.** In v0.2.0, Windows hosts are experimental; Linux
+- **Your hosts are mostly Windows and you need more than experimental support.** In v0.2.1, Windows hosts are experimental; Linux
   hosts, container mode and the server Helm chart are beta, and the collector Helm chart is experimental.
 - **You manage only a few collectors.** A server, a database and a Git workflow are more than a handful of hosts need.
 - **You need multi-tenancy.** It is on the [roadmap](/project/roadmap/#later) as a later item and not part of any release yet.
