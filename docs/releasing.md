@@ -310,8 +310,8 @@ release.
    and installs from the published installer bundle of the release, on Ubuntu 24.04 (amd64 and arm64) and on Windows Server 2025 in
    both PowerShell versions. A green run is the acceptance of the candidate on real runners; a red one is fixed forward in the next
    candidate. The run proves the bundle of the release, which the run of step 2 (a bundle built from the commit) cannot.
-10. **Publish the chart's metadata on Artifact Hub** when the board wants the repository listed or verified: follow
-    [Artifact Hub](#artifact-hub). It needs the published chart and runs on the tag.
+10. **Publish the metadata of each chart on Artifact Hub** when the board wants the repository listed or verified: follow
+    [Artifact Hub](#artifact-hub), once per chart (`myriarch`, `myriarch-collector`). It needs the published chart and runs on the tag.
 11. **Update the status** in a pull request after the publication, see [After every publication](#after-every-publication), and
     decide about the [release post](#release-post).
 
@@ -335,8 +335,8 @@ A final release is a normal release and is marked as the latest release when it 
    an exception for exactly that tag, and [ADR-0034](adr/0034-authenticode-signing-of-windows-release-artifacts.md) records both.
    Without an exception, `off` is enough for release candidates only.
 3. Follow steps 2 to 11 of [Release a candidate](#release-a-candidate) with the tag `vX.Y.Z`. Step 6 is not needed any more, except for a package that no release has published before (v0.2.0: the two chart packages). If the
-   repository on Artifact Hub exists already, step 10 is skipped: the next scan lists the new version by itself, and the workflow
-   runs again only when the metadata file has to change.
+   repository on Artifact Hub carries its metadata already, step 10 is skipped for that chart: the next scan lists the new version by itself,
+   and the workflow runs again only when the metadata file has to change. On the first tag after `v0.2.1` it runs once for `myriarch-collector`.
 4. A final tag can be used **once**. If a problem shows up after publication, fix it and release `vX.Y.(Z+1)`.
 
 ## Review the texts before every tag
@@ -427,27 +427,35 @@ Other files of the repository, such as `deploy/README.md`, are not in an archive
 
 ## Artifact Hub
 
-Artifact Hub lists the server chart (`oci://ghcr.io/myriarch/charts/myriarch`) and shows it as "Verified publisher" when the chart
-repository holds a metadata file under the tag `artifacthub.io`. The file carries the repository ID, which exists only after the board has
+Artifact Hub lists each chart as a repository of its own: `myriarch` with the server chart (`oci://ghcr.io/myriarch/charts/myriarch`) and
+`myriarch-collector` with the collector chart (`oci://ghcr.io/myriarch/charts/myriarch-collector`). Each shows "Verified publisher" when its
+chart repository holds, under the tag `artifacthub.io`, a metadata file with its own repository ID. At the time of writing, `myriarch` is
+verified (the workflow ran on `v0.2.0`) and `myriarch-collector` is listed but not verified, because the workflow of the tags `v0.2.0` and
+`v0.2.1` writes only the server chart. The file carries the repository ID, which exists only after the board has
 added the repository on Artifact Hub, and that needs a published chart. So the upload is not a job of the release workflow: a workflow of its
-own, `.github/workflows/artifacthub.yml`, does it after the release, started by hand. Do the steps in this order:
+own, `.github/workflows/artifacthub.yml`, does it after the release, started by hand. Do the steps in this order (once per chart):
 
 1. **Publish the chart.** The release of a candidate or of a final version has finished (`finalize` is green), so the chart repository has a
    version tag. The workflow refuses to run without one (`chart_not_published`).
-2. **Create the repository on Artifact Hub** (the board, once). Sign in at <https://artifacthub.io>, accept the terms of use and open the control
-   panel. Add a repository of the kind "Helm charts" with the name `myriarch`, the display name `Myriarch` and the URL
-   `oci://ghcr.io/myriarch/charts/myriarch`.
-3. **Copy the repository ID** from the card of the repository in the control panel. It is a UUID in lower case.
+2. **Create the repository on Artifact Hub** (the board, once per chart). Sign in at <https://artifacthub.io>, accept the terms of use and open the
+   control panel. Add a repository of the kind "Helm charts": for the server chart with the name `myriarch` and the URL
+   `oci://ghcr.io/myriarch/charts/myriarch`, for the collector chart with the name `myriarch-collector` and the URL
+   `oci://ghcr.io/myriarch/charts/myriarch-collector`.
+3. **Copy the repository ID** from the card of that repository in the control panel. It is a UUID in lower case. Each repository has its own ID.
 4. **Run the workflow on the release tag.** On GitHub open Actions, "artifacthub", Run workflow, choose the release tag (for example `v0.2.0`)
-   under "Use workflow from", and enter the ID. A branch, `main` included, and any other tag are refused: the environment `release` admits only
+   under "Use workflow from", choose the chart (`myriarch` or `myriarch-collector`) and enter the ID of that chart's repository. A branch, `main` included, and any other tag are refused: the environment `release` admits only
    tags `v*`, and the script checks the tag shape again. The workflow file has to be on `main` and in the tag; a fix to it takes effect with the
    next tag, because a tag is never moved. The job `tools` builds the pinned `crane`; the job `publish` waits for the approval in the
    environment `release` (three jobs use that environment: `sign-windows` and `finalize` of the release workflow and `publish` of this one) and
    shows the digest of the uploaded artifact in its job summary. The ID becomes part of a public file, so enter nothing else.
-   The workflow writes the tag `artifacthub.io` of `ghcr.io/myriarch/charts/myriarch` and nothing else. It can run again (it overwrites only that
-   tag) and works the same whether the repository was added after a candidate or after the final version.
-5. **Check the result.** After the next scan of the repository, Artifact Hub shows "Verified publisher" on the repository card (the control
-   panel shows the time of the last scan and its errors).
+   The workflow writes the tag `artifacthub.io` of the chosen chart repository and nothing else, and it refuses an ID that the other chart
+   repository already carries (`id_in_use`: the two repositories have different IDs, so the same ID in both is a mix-up). It can run again (it
+   overwrites only that tag) and works the same whether the repository was added after a candidate or after the final version.
+   The input `chart` exists only in the workflow of the tags after `v0.2.1`: the workflow runs from the tag and a tag is never moved, so the
+   collector chart gets its metadata with the first run on the next tag (step 10 of that release, with `myriarch-collector`). The tags
+   `v0.2.0` and `v0.2.1` keep the workflow with one input, which writes the server chart only.
+5. **Check the result.** After the next scan of the repository, Artifact Hub shows "Verified publisher" on the card of that repository (the
+   control panel shows the time of the last scan and its errors).
 
 The file has exactly one key, `repositoryID`. It has no `owners`; an owners entry would put an e-mail address into a public file, and
 the board has to ask for it explicitly, in a change of its own.

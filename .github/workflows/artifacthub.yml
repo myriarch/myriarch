@@ -1,30 +1,40 @@
 # Copyright The Myriarch Authors
 # SPDX-License-Identifier: Apache-2.0
 
-# Uploads the Artifact Hub repository metadata file (artifacthub-repo.yml, one key: repositoryID) of the server chart to
-# ghcr.io/myriarch/charts/myriarch under the tag artifacthub.io, so that Artifact Hub shows the chart as "Verified publisher".
+# Uploads the Artifact Hub repository metadata file (artifacthub-repo.yml, one key: repositoryID) of one chart to its repository under the
+# tag artifacthub.io, so that Artifact Hub shows the chart as "Verified publisher". There are two charts, each with its own Artifact Hub
+# repository and ID: myriarch (ghcr.io/myriarch/charts/myriarch, the server chart) and myriarch-collector
+# (ghcr.io/myriarch/charts/myriarch-collector, the collector chart). The input `chart` picks one of these two fixed repositories.
 #
 # It is not part of release.yml: the repositoryID exists only after the board has added the chart repository on Artifact Hub, and that
 # is possible only after the chart is published. The board starts this workflow by hand (Actions, "artifacthub", Run workflow)
-# with the ID from the repository card of the Artifact Hub control panel and approves the job `publish` in the environment `release`.
+# with the chart and the ID from the repository card of the Artifact Hub control panel and approves the job `publish` in the environment `release`.
 # It must run on a release tag (Run workflow, "Use workflow from": the tag, e.g. v0.2.0): the environment `release` admits only tags v*,
 # and a branch (main included) is refused. The workflow file therefore has to be on main and in that tag; a fix to it takes effect with
-# the next tag, because a tag is never moved.
+# the next tag, because a tag is never moved (the input `chart` exists from the first tag after v0.2.1 on).
 # The steps are in docs/releasing.md, "Artifact Hub".
 #
 #   - Same tool rule as release.yml (ADR-0035): the job `tools` (contents: read) builds crane from the pinned module in ci/tools; the
 #     job `publish`, which holds packages: write, only unpacks that tool set (SHA-256 checked) and runs ci/release/push-artifacthub.sh.
 #     It sets up neither Go nor Node and downloads no binary.
-#   - The input reaches the script only through env: and is checked there (a UUID in lower case). The script writes the fixed
-#     repository and the fixed tag; neither is an input. The only secret is the job token (github.token).
-#   - The input is public (it ends up in the file). Do not enter anything but the repository ID.
+#   - The inputs reach the script only through env: and are checked there (the chart is one of two names, the ID a UUID in lower case).
+#     The script writes one of two fixed repositories and the fixed tag; the tag is no input. It also refuses an ID that the other chart
+#     repository carries already (id_in_use). The only secret is the job token (github.token).
+#   - The ID is public (it ends up in the file). Do not enter anything but the repository ID of the chosen chart.
 name: artifacthub
 
 on:
   workflow_dispatch:
     inputs:
+      chart:
+        description: 'The chart whose Artifact Hub repository the ID belongs to: myriarch (server chart) or myriarch-collector (collector chart)'
+        required: true
+        type: choice
+        options:
+          - myriarch
+          - myriarch-collector
       repository_id:
-        description: 'repositoryID from the repository card in the Artifact Hub control panel (a UUID, lower case)'
+        description: 'repositoryID from the card of that repository in the Artifact Hub control panel (a UUID, lower case)'
         required: true
         type: string
 
@@ -83,7 +93,7 @@ jobs:
           if-no-files-found: error
           overwrite: false
 
-  # Waits for the approval of the board (environment release), then writes the tag artifacthub.io of the chart repository.
+  # Waits for the approval of the board (environment release), then writes the tag artifacthub.io of the chosen chart repository.
   publish:
     name: publish
     needs: [tools]
@@ -124,8 +134,9 @@ jobs:
       - name: Upload the metadata file
         env:
           TOOLS_BIN: ${{ runner.temp }}/tools/linux-amd64
+          CHART: ${{ inputs.chart }}
           REPOSITORY_ID: ${{ inputs.repository_id }}
-        run: ci/release/push-artifacthub.sh --repository-id "${REPOSITORY_ID}"
+        run: ci/release/push-artifacthub.sh --chart-name "${CHART}" --repository-id "${REPOSITORY_ID}"
       - name: Log out of ghcr.io
         if: always()
         run: ci/release/registry-login.sh logout
