@@ -31,7 +31,7 @@ COPY api/openapi.yaml /src/api/openapi.yaml
 RUN mkdir -p /src/internal/webui && pnpm build
 
 # ---- 2. Go binary (-tags embedui) -------------------------------------------------------
-FROM golang:1.27-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 AS build
+FROM golang:1.27-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea AS build
 # Package that receives the build metadata (-X); must equal the module path of go.mod plus /internal/version.
 ARG VERSION_PKG=github.com/myriarch/myriarch/internal/version
 ARG VERSION=0.0.0-dev

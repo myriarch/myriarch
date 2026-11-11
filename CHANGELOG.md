@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - The message of the server for an OpAMP Bridge that is held back from a version rollout no longer names an executor that does not exist.
 
+### Security
+
+- **Go 1.27.4.** The Go toolchain of the main module and the Go build images (`myriarchd`, `myriarch-sim`, the deprecated combined collector image) move from 1.27.3 to 1.27.4, which fixes GO-2026-6859 in `net/http` reported by `govulncheck`.
+
 ## [0.2.0] - 2026-11-06
 
 Upgrading from v0.1.0: read the upgrade notes below first, and [Upgrade from v0.1.0 to v0.2.0](docs/operations/upgrade-to-v0-2-0.md). Changes to security controls are in the section Security.
