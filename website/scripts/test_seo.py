@@ -1025,7 +1025,18 @@ class SocialCardTest(SeoCase):
         with mock.patch.object(self.mod, "CARD_SVG_REPO", repo):
             self.assert_clean()
         with mock.patch.object(self.mod, "CARD_SVG_REPO", os.path.join(self.tmp, "none.svg")):
-            self.assert_finding("the SVG source of the card (brand/og-image.svg) cannot be read")
+            self.assert_finding("the SVG source of the card (assets/brand/og-image.svg of the repository) cannot be read")
+
+    def test_an_svg_source_without_exactly_one_title_fails(self):
+        self.card_svg = '<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 1200 630"><path d="M0 0"/></svg>'
+        self.assert_finding("params.yaml: seo.imageAlt cannot be compared: the SVG source of the card (brand/og-image.svg) has 0 <title> elements, expected exactly one")
+        self.card_svg = (CARD_SVG % CARD_ALT).replace("</svg>", "<g><title>A part</title></g></svg>")
+        self.assert_finding("has 2 <title> elements, expected exactly one")
+
+    def test_the_svg_title_is_compared_unescaped(self):
+        self.card_svg = CARD_SVG % "myriarch: Git &amp; OpAMP."
+        self.write_site()
+        self.assertEqual(self.mod.card_svg_title(self.public), ("myriarch: Git & OpAMP.", None))
 
     def test_a_missing_image_alt_in_the_configuration_fails(self):
         self.params = "\n".join(line for line in PARAMS.splitlines() if not line.strip().startswith("imageAlt:")) + "\n"

@@ -16,8 +16,8 @@ production origin.
 Fails when
 
   - the configuration: params.seo.canonicalBase is not an origin (https://host[:port]/, no path: the site is served at the root of its host)
-    or differs from baseURL of hugo.yaml, or a fact of the structured data (license, languages, keywords, repository, description) is
-    missing,
+    or differs from baseURL of hugo.yaml, or a fact of the structured data (license, languages, keywords, repository, description) or the
+    text alternative of the card (seo.imageAlt) is missing,
   - a page (every HTML file but the 404 page and redirect stubs): has not exactly one canonical link, or its href is not the absolute URL of
     the page below the production origin; has not exactly one non-empty title and description; has no link rel="describedby" to /llms.txt;
     has an image without alt text; carries JSON-LD that is not valid JSON, has a raw < or > (a value that was not escaped could end the
@@ -32,9 +32,9 @@ Fails when
     and twitter:description that equal the meta description, og:url that equals the canonical URL, og:site_name that is the site title, og:type
     website or article, exactly one og:image that is absolute, below the production origin and names a PNG file of the built site whose size is
     og:image:width by og:image:height with og:image:type image/png, twitter:card summary_large_image and a twitter:image that equals og:image,
-    exactly one non-empty og:image:alt and one twitter:image:alt that equal each other and seo.imageAlt of params.yaml, and an seo.imageAlt that
-    differs from the <title> of the SVG source of the card (brand/og-image.svg of the built site, else assets/brand/og-image.svg of the
-    repository),
+    exactly one non-empty og:image:alt and one twitter:image:alt that equal each other and seo.imageAlt of params.yaml,
+  - params.seo.imageAlt differs from the <title> of the SVG source of the card (brand/og-image.svg of the built site, else
+    assets/brand/og-image.svg of the repository), or that file cannot be read or has not exactly one <title>,
   - a page carries itemprop=datePublished or article:published_time without showing that date in a <time datetime> element (a page states a
     publication date only when it shows it; the value is reported),
   - two pages have the same title (the 404 page is no page here), or a page outside docs/reference/ and docs/adr/ has a description of fewer
@@ -692,16 +692,18 @@ def check_social(rel, parsed, cfg, canonical, root):
 
 def card_svg_title(root):
     """The <title> of the SVG source of the social card, or a problem text: the copy in the built site, else the one in the repository."""
-    path = resolve_site_file(root, "/" + "/".join(CARD_SVG_SITE))
+    label = "/".join(CARD_SVG_SITE)
+    path = resolve_site_file(root, "/" + label)
     if path is None or not os.path.isfile(path):
         path = CARD_SVG_REPO
+        label = "assets/brand/og-image.svg of the repository"
     try:
         text = read_text(path)
     except OSError:
-        return None, "the SVG source of the card (%s) cannot be read" % "/".join(CARD_SVG_SITE)
+        return None, "the SVG source of the card (%s) cannot be read" % label
     found = re.findall(r"<title[^>]*>(.*?)</title>", text, re.S)
     if len(found) != 1:
-        return None, "the SVG source of the card (%s) has %d <title> elements, expected exactly one" % ("/".join(CARD_SVG_SITE), len(found))
+        return None, "the SVG source of the card (%s) has %d <title> elements, expected exactly one" % (label, len(found))
     return " ".join(html.unescape(found[0]).split()), None
 
 
