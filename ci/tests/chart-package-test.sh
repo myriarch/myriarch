@@ -12,6 +12,11 @@
 #     when CI=true.
 #  2. push-chart.sh and verify-chart.sh run with stand-ins for crane push, cosign and gh (the layout of part 1 is real, the pinned helm
 #     does the rendering).
+#     The relative links of README.md (which Artifact Hub shows and cannot resolve) point to the repository at the tag in the package:
+#     a file (/blob/), a directory (/tree/), the anchor, a reference definition and link text that wraps are rewritten; links with a
+#     scheme, anchors of the README, code spans, fenced blocks and HTML comments stay. A link to a path that HEAD does not have, one
+#     that leaves the repository, a site-absolute link, a relative image or a form that cannot be rewritten fails the packaging
+#     [chart_readme_link], and verify refuses a package whose README has a relative link. The README in the repository is unchanged.
 #  Both charts are covered: the server chart (deploy/helm/myriarch, image RELEASE_IMAGE_SERVER) and the collector chart
 #  (deploy/helm/myriarch-collector, RELEASE_IMAGE_UPDATER at the digest and the two upstream pins of ci/versions.env, four renderings).
 # shellcheck source=ci/tests/lib-test.sh
@@ -40,6 +45,7 @@ eq() { if [ "$2" = "$3" ]; then ok "$1"; else fail "$1 (expected '$2', got '$3')
 
 # ==== 1. chart-package.sh ====================================================================================================
 before="$(cat "${CHART}/values.yaml" "${CHART}/Chart.yaml" | cksum)"
+rbefore="$(cat "${CHART}/README.md" "${CCHART}/README.md" | cksum)"
 expect_ok "package: a release candidate" cp_run package --chart "${CHART}" --version 0.2.0-rc.1 --image-digest "${D1}" --out "${W}/rc"
 case "${OUT}" in *"CHART_PACKAGE=${W}/rc/myriarch-0.2.0-rc.1.tgz"*) ok "package: prints the package path" ;; *) fail "package: prints no CHART_PACKAGE line: ${OUT}" ;; esac
 expect_ok "package: a final version" cp_run package --chart "${CHART}" --version 0.2.0 --image-digest "${D1}" --out "${W}/final"
@@ -97,6 +103,80 @@ expect_fail "package: a second image that has a tag" "image_not_digest.*ghcr.io/
 expect_fail "usage: the digest is required" "usage:" cp_run verify --package "${W}/final/myriarch-0.2.0.tgz"
 PKG0="${W}/final/myriarch-0.2.0.tgz"
 
+# ---- README.md: the relative links point to the repository at the tag --------------------------------------------------------------
+GH=https://github.com/myriarch/myriarch
+R0="$(tar -xzOf "${PKG0}" myriarch/README.md)"
+has() { case "$2" in *"$1"*) ok "$3" ;; *) fail "$3 (missing: $1)" ;; esac; }
+has "[High availability](${GH}/blob/v0.2.0/docs/operations/high-availability.md)" "${R0}" "package: a link into docs/ points to the tag"
+has "(${GH}/blob/v0.2.0/docs/security/verify-releases.md#verify-the-helm-chart)" "${R0}" "package: the anchor of a link is kept"
+has '[`values.schema.json`]('"${GH}"'/blob/v0.2.0/deploy/helm/myriarch/values.schema.json)' "${R0}" "package: a link to a file of the chart"
+has "[example for clusters without Helm](${GH}/blob/v0.2.0/deploy/examples/production/monitoring/prometheusrule.yaml)" "${R0}" "package: a link into deploy/examples"
+has "[Values schema](#values-schema)" "${R0}" "package: an in-page link stays"
+if printf '%s\n' "${R0}" | grep -qE '\]\((\.\./|values|examples/)'; then fail "package: a relative link is left"; else ok "package: no relative link is left"; fi
+has "${GH}/blob/v0.2.0-rc.1/" "$(tar -xzOf "${W}/rc/myriarch-0.2.0-rc.1.tgz" myriarch/README.md)" "package: a release candidate links its own tag"
+
+readme_case() { # name block...: a copy of the server chart with each block appended to README.md after a blank line
+  local n="$1" b
+  shift
+  cp -R "${CHART}" "${W}/${n}"
+  for b in "$@"; do printf '\n%s\n' "${b}" >> "${W}/${n}/README.md"; done
+}
+rc_pkg() { cp_run package --chart "${W}/$1" --version 0.2.0 --image-digest "${D1}" --out "${W}/$1-out"; }
+readme_case c-links \
+  '[dir](examples/)' \
+  '[docs dir](../../../docs/operations)' \
+  $'[a link that\nwraps](../../../docs/operations/install-helm.md)' \
+  '[abs](https://example.com/a/../b.md) and [mail](mailto:maintainers@example.com)' \
+  '[ref]: ../../../docs/operations/install-helm.md#install-the-signed-oci-chart' \
+  '`[x](../../../docs/does-not-exist.md)`.' \
+  $'```text\n[in a fence](../../../docs/does-not-exist.md)\n```' \
+  '<!-- [in a comment](../../../docs/does-not-exist.md) -->' \
+  '[ref2]:
+  ../../../docs/operations/install-helm.md' \
+  '[q](values.yaml?plain=1#L1)' \
+  '[angle](<values.yaml#a b>)'
+expect_ok "package: links of every form" rc_pkg c-links
+RL="$(tar -xzOf "${W}/c-links-out/myriarch-0.2.0.tgz" myriarch/README.md)"
+has "[dir](${GH}/tree/v0.2.0/deploy/helm/myriarch/examples)" "${RL}" "package: a directory link of the chart becomes a tree link"
+has "[docs dir](${GH}/tree/v0.2.0/docs/operations)" "${RL}" "package: a link to a directory becomes a tree link"
+has "wraps](${GH}/blob/v0.2.0/docs/operations/install-helm.md)" "${RL}" "package: the target of a wrapped link is rewritten"
+has "[abs](https://example.com/a/../b.md) and [mail](mailto:maintainers@example.com)" "${RL}" "package: links with a scheme stay"
+has "[ref]: ${GH}/blob/v0.2.0/docs/operations/install-helm.md#install-the-signed-oci-chart" "${RL}" "package: a reference definition is rewritten"
+has '`[x](../../../docs/does-not-exist.md)`.' "${RL}" "package: a code span stays"
+has $'[in a fence](../../../docs/does-not-exist.md)\n```' "${RL}" "package: a fenced block stays"
+has "<!-- [in a comment](../../../docs/does-not-exist.md) -->" "${RL}" "package: an HTML comment stays"
+has $'[ref2]:\n  '"${GH}/blob/v0.2.0/docs/operations/install-helm.md" "${RL}" "package: a reference definition with the target on the next line is rewritten"
+has "[q](${GH}/blob/v0.2.0/deploy/helm/myriarch/values.yaml?plain=1#L1)" "${RL}" "package: query and anchor are kept"
+has "[angle](<${GH}/blob/v0.2.0/deploy/helm/myriarch/values.yaml#a b>)" "${RL}" "package: an angle-bracket target keeps its brackets"
+readme_case c-wrap $'The command `helm\ninstall` is in [the guide](../../../docs/operations/install-helm.md) and `helm test` checks it.'
+expect_ok "package: a code span that wraps a line" rc_pkg c-wrap
+has "[the guide](${GH}/blob/v0.2.0/docs/operations/install-helm.md)" "$(tar -xzOf "${W}/c-wrap-out/myriarch-0.2.0.tgz" myriarch/README.md)" "package: a link after a code span that wraps a line is rewritten"
+readme_case c-cspan $'Notes start with `<!--` in the template.\n\nSee [the values](values.yaml).'
+expect_ok "package: a comment opener inside a code span" rc_pkg c-cspan
+has "[the values](${GH}/blob/v0.2.0/deploy/helm/myriarch/values.yaml)" "$(tar -xzOf "${W}/c-cspan-out/myriarch-0.2.0.tgz" myriarch/README.md)" "package: a link after a comment opener in a code span is rewritten"
+readme_case c-gone '[gone](../../../docs/does-not-exist.md)'
+expect_fail "package: a link to a path that HEAD does not have" "chart_readme_link.*docs/does-not-exist\\.md" rc_pkg c-gone
+readme_case c-out '[out](../../../../outside.md)'
+expect_fail "package: a link that leaves the repository" "chart_readme_link.*leaves the repository" rc_pkg c-out
+readme_case c-root '[root](/docs/operations/install-helm.md)'
+expect_fail "package: a site-absolute link" "chart_readme_link.*relative to the README" rc_pkg c-root
+readme_case c-img '![logo](../../../assets/brand/og-image.png)'
+expect_fail "package: a relative image" "chart_readme_link.*image" rc_pkg c-img
+readme_case c-paren '[odd](notes(1).md)'
+expect_fail "package: a link that cannot be rewritten" "chart_readme_link.*cannot be rewritten" rc_pkg c-paren
+readme_case c-html '<a href="../../../docs/operations/install-helm.md">x</a>'
+expect_fail "package: a relative HTML link" "chart_readme_link.*cannot be rewritten" rc_pkg c-html
+cp -R "${CHART}" "${W}/c-noreadme" && rm "${W}/c-noreadme/README.md"
+expect_fail "package: a chart without README.md" "chart_dir.*README" rc_pkg c-noreadme
+mkdir -p "${W}/rl"
+tar -xzf "${PKG0}" -C "${W}/rl" && printf '\n[x](values.yaml)\n' >> "${W}/rl/myriarch/README.md"
+"${HELM_BIN}" package "${W}/rl/myriarch" --destination "${W}/rl/out" >/dev/null
+expect_fail "verify: a README with a relative link" "chart_readme_link" cp_run verify --package "${W}/rl/out/myriarch-0.2.0.tgz" --image-digest "${D1}" --version 0.2.0
+mkdir -p "${W}/rl2"
+tar -xzf "${PKG0}" -C "${W}/rl2" && printf '\nThe command `helm\ninstall` is in [x](values.yaml) and `helm test`.\n' >> "${W}/rl2/myriarch/README.md"
+"${HELM_BIN}" package "${W}/rl2/myriarch" --destination "${W}/rl2/out" >/dev/null
+expect_fail "verify: a relative link after a code span that wraps a line" "chart_readme_link" cp_run verify --package "${W}/rl2/out/myriarch-0.2.0.tgz" --image-digest "${D1}" --version 0.2.0
+
 # ---- the collector chart: the digest of the updater image lands in the slot and the annotation, the upstream pins stay -------------
 cbefore="$(cat "${CCHART}/values.yaml" "${CCHART}/Chart.yaml" | cksum)"
 cp_coll() { cp_run "$1" --chart-name myriarch-collector "${@:2}"; }
@@ -120,6 +200,10 @@ eq "collector package: a tag value does not win over the updater digest" "1" "${
 tar -xzOf "${CPKG}" myriarch-collector/values.yaml | grep -c 'digest: "\{0,1\}sha256:[0-9a-f]\{64\}' | grep -qx 3 \
   && ok "collector package: all three images have a digest in values.yaml" || fail "collector package: values.yaml does not hold three digests"
 eq "collector package: the upstream pins in values.yaml are those of the chart in the repository" "$(grep -E '^    (digest|tag):' "${CCHART}/values.yaml" | sed -n '3,6p')" "$(tar -xzOf "${CPKG}" myriarch-collector/values.yaml | grep -E '^    (digest|tag):' | sed -n '3,6p')"
+CR="$(tar -xzOf "${CPKG}" myriarch-collector/README.md)"
+has "[Install the collector with Helm](${GH}/blob/v0.2.0/docs/operations/install-collector-helm.md)" "${CR}" "collector package: links point to the tag"
+has "[docs/design/container-mode.md](${GH}/blob/v0.2.0/docs/design/container-mode.md)" "${CR}" "collector package: a link to a design document"
+eq "the READMEs in the repository are unchanged" "${rbefore}" "$(cat "${CHART}/README.md" "${CCHART}/README.md" | cksum)"
 expect_ok "collector verify: the package" cp_coll verify --package "${CPKG}" --image-digest "${D1}" --version 0.2.0
 expect_fail "collector verify: the digest of another image" "image_not_digest" cp_coll verify --package "${CPKG}" --image-digest "${D2}"
 expect_fail "collector verify: another version" "chart_version" cp_coll verify --package "${CPKG}" --image-digest "${D1}" --version 0.2.1

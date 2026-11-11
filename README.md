@@ -9,6 +9,17 @@
 
 <p align="center">Website: <a href="https://myriarch.dev">myriarch.dev</a> (documentation and API reference). The documentation sources are in <a href="docs/">docs/</a>.</p>
 
+<p align="center">
+  <a href="https://github.com/myriarch/myriarch/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI" src="https://github.com/myriarch/myriarch/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/myriarch/myriarch/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/myriarch/myriarch?sort=semver"></a>
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/myriarch/myriarch"><img alt="OpenSSF Scorecard" src="https://api.scorecard.dev/projects/github.com/myriarch/myriarch/badge"></a>
+  <a href="https://www.bestpractices.dev/projects/16568"><img alt="OpenSSF Best Practices" src="https://www.bestpractices.dev/projects/16568/badge"></a>
+  <a href="https://artifacthub.io/packages/search?repo=myriarch"><img alt="Artifact Hub: myriarch chart" src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/myriarch"></a>
+  <a href="https://artifacthub.io/packages/search?repo=myriarch-collector"><img alt="Artifact Hub: myriarch-collector chart" src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/myriarch-collector"></a>
+  <a href="https://pkg.go.dev/github.com/myriarch/myriarch"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/myriarch/myriarch.svg"></a>
+</p>
+
 Myriarch is an open-source OpAMP server and fleet manager for OpenTelemetry Collectors. It manages large fleets of
 OpenTelemetry Collector Contrib instances over [OpAMP](https://github.com/open-telemetry/opamp-spec) and is designed for
 around 1,000 collectors, with headroom up to 5,000 (design targets, not measured limits), spread over edge sites, data
