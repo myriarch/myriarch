@@ -9,7 +9,7 @@
 # shellcheck source=scripts/e2e/ui-updates/ui-phases.sh
 . "${ROOT}/scripts/e2e/ui-updates/ui-phases.sh"
 
-# case NAME EXPECTED ACTUAL: EXPECTED "yes" or "not yes"
+# is_yes NAME ACTUAL: ACTUAL must be "yes"; not_yes NAME ACTUAL: ACTUAL must be anything else (shown next to the name)
 is_yes() { if [ "$2" = yes ]; then ok "$1"; else fail "$1" "$2"; fi; }
 not_yes() { if [ "$2" != yes ]; then ok "$1 ($2)"; else fail "$1"; fi; }
 
@@ -30,6 +30,11 @@ not_yes "offered > failed > health_wait: live only after the end" "$(ui_live_bef
 empty="$(ui_live_before_end '{"phaseKeys":[]}')"
 not_yes "an empty key list" "${empty}"
 case "${empty}" in *"make web-build"*) ok "an empty key list names make web-build" ;; *) fail "an empty key list names make web-build" "${empty}" ;; esac
+is_yes "only health_wait seen live" "$(ui_live_before_end '{"phaseKeys":["offered","health_wait","failed","rolled_back"]}')"
+not_yes "a live phase only after the engine failed the target" "$(ui_live_before_end '{"phaseKeys":["offered","failed","rolling_back","rolled_back"]}')"
+blank="$(ui_live_before_end '{"phases":["x"],"phaseKeys":[""]}')"
+not_yes "a blank key from a UI build without data-phase" "${blank}"
+case "${blank}" in *"make web-build"*) ok "a blank key names make web-build" ;; *) fail "a blank key names make web-build" "${blank}" ;; esac
 not_yes "snapshots without health_check:running" "$(ui_step_running_before_failed '{"stepSnapshots":["offered:done","health_check:done","health_check:failed"]}' health_check)"
 not_yes "health_check:failed before health_check:running" "$(ui_step_running_before_failed '{"stepSnapshots":["health_check:failed","health_check:running"]}' health_check)"
 

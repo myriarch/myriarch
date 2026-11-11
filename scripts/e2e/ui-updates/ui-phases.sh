@@ -9,7 +9,7 @@
 # ui_live_before_end JSON: yes when .phaseKeys holds a live phase of the running update before the first final phase; else the keys
 ui_live_before_end() {
   printf '%s' "$1" | jq -r '
-    (.phaseKeys // []) as $k
+    (.phaseKeys // [] | map(select(. != ""))) as $k
     | if ($k | length) == 0 then "no phase key in the page (a UI build without data-phase: make web-build)"
       else
         ($k | map(. as $x | ["succeeded","failed","rolled_back","cancelled"] | any(.[]; . == $x)) | index(true)) as $end
