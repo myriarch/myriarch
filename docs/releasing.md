@@ -336,7 +336,7 @@ A final release is a normal release and is marked as the latest release when it 
    Without an exception, `off` is enough for release candidates only.
 3. Follow steps 2 to 11 of [Release a candidate](#release-a-candidate) with the tag `vX.Y.Z`. Step 6 is not needed any more, except for a package that no release has published before (v0.2.0: the two chart packages). If the
    repository on Artifact Hub carries its metadata already, step 10 is skipped for that chart: the next scan lists the new version by itself,
-   and the workflow runs again only when the metadata file has to change. On the first tag after `v0.2.1` it runs once for `myriarch-collector`.
+   and the workflow runs again only when the metadata file has to change.
 4. A final tag can be used **once**. If a problem shows up after publication, fix it and release `vX.Y.(Z+1)`.
 
 ## Review the texts before every tag
@@ -429,20 +429,18 @@ Other files of the repository, such as `deploy/README.md`, are not in an archive
 
 Artifact Hub lists each chart as a repository of its own: `myriarch` with the server chart (`oci://ghcr.io/myriarch/charts/myriarch`) and
 `myriarch-collector` with the collector chart (`oci://ghcr.io/myriarch/charts/myriarch-collector`). Each shows "Verified publisher" when its
-chart repository holds, under the tag `artifacthub.io`, a metadata file with its own repository ID. At the time of writing, `myriarch` is
-verified (the workflow ran on `v0.2.0`) and `myriarch-collector` is listed but not verified, because the workflow of the tags `v0.2.0` and
-`v0.2.1` writes only the server chart. The file carries the repository ID, which exists only after the board has
+chart repository holds, under the tag `artifacthub.io`, a metadata file with its own repository ID. The file carries the repository ID, which exists only after the board has
 added the repository on Artifact Hub, and that needs a published chart. So the upload is not a job of the release workflow: a workflow of its
 own, `.github/workflows/artifacthub.yml`, does it after the release, started by hand. Do the steps in this order (once per chart):
 
 1. **Publish the chart.** The release of a candidate or of a final version has finished (`finalize` is green), so the chart repository has a
    version tag. The workflow refuses to run without one (`chart_not_published`).
 2. **Create the repository on Artifact Hub** (the board, once per chart). Sign in at <https://artifacthub.io>, accept the terms of use and open the
-   control panel. Add a repository of the kind "Helm charts": for the server chart with the name `myriarch` and the URL
+   control panel. Add a repository of the kind "Helm charts": for the server chart with the name `myriarch`, the display name `Myriarch` and the URL
    `oci://ghcr.io/myriarch/charts/myriarch`, for the collector chart with the name `myriarch-collector` and the URL
    `oci://ghcr.io/myriarch/charts/myriarch-collector`.
 3. **Copy the repository ID** from the card of that repository in the control panel. It is a UUID in lower case. Each repository has its own ID.
-4. **Run the workflow on the release tag.** On GitHub open Actions, "artifacthub", Run workflow, choose the release tag (for example `v0.2.0`)
+4. **Run the workflow on the release tag.** On GitHub open Actions, "artifacthub", Run workflow, choose the release tag that was just published (`vX.Y.Z` or `vX.Y.Z-rc.N`; the input `chart` exists only in tags after `v0.2.1`)
    under "Use workflow from", choose the chart (`myriarch` or `myriarch-collector`) and enter the ID of that chart's repository. A branch, `main` included, and any other tag are refused: the environment `release` admits only
    tags `v*`, and the script checks the tag shape again. The workflow file has to be on `main` and in the tag; a fix to it takes effect with the
    next tag, because a tag is never moved. The job `tools` builds the pinned `crane`; the job `publish` waits for the approval in the

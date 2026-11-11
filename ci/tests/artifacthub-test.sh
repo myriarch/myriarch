@@ -231,6 +231,21 @@ expect_fail "other (${CHN}): the manifest of the other repository cannot be read
 eq "other (${CHN}): nothing is pushed after a failed manifest" "0" "$(count '^push ')"
 done
 CHN=myriarch; CHART=ghcr.io/myriarch/charts/myriarch; export CHN
+# both repositories follow identity.env (a copy of the tree with other values), so a literal in the script is found: the privileged job writes there
+IDT="${W}/idtree"; mkdir -p "${IDT}/ci"; cp -R "${REL}" "${IDT}/ci/release"; cp "${ROOT}/ci/versions.env" "${IDT}/ci/versions.env"
+sed -i.bak -e 's#^RELEASE_CHART=.*#RELEASE_CHART=ghcr.io/example/server-chart#' -e 's#^RELEASE_CHART_COLLECTOR=.*#RELEASE_CHART_COLLECTOR=ghcr.io/example/collector-chart#' "${IDT}/ci/release/identity.env"
+for CHN in myriarch myriarch-collector; do
+  export CHN
+  if [ "${CHN}" = myriarch ]; then IDREPO=ghcr.io/example/server-chart; IDOTH=ghcr.io/example/collector-chart; else IDREPO=ghcr.io/example/collector-chart; IDOTH=ghcr.io/example/server-chart; fi
+  reset; printf '0.2.0\n' > "${S}/tags.server-chart"; printf '0.2.0\n' > "${S}/tags.collector-chart"
+  ( export PATH="${RB}" TOOLS_BIN="${SB}" STUB_DIR="${S}" HOME="${HOME_DIR}" GITHUB_WORKFLOW_REF="${REF_WF}"; unset DOCKER_CONFIG
+    "${IDT}/ci/release/push-artifacthub.sh" --chart-name "${CHN}" --repository-id "${ID}" > /dev/null 2>&1 )
+  eq "identity (${CHN}): one push, to the repository that identity.env names" "1" "$(count "^push .* ${IDREPO}:artifacthub.io \$")"
+  eq "identity (${CHN}): no other push" "1" "$(count '^push ')"
+  eq "identity (${CHN}): the other repository of identity.env was listed" "1" "$(count "^ls ${IDOTH} \$")"
+  eq "identity (${CHN}): no literal repository was used" "0" "$(count 'ghcr.io/myriarch')"
+done
+CHN=myriarch; export CHN
 # verify-chart.sh admits the tag artifacthub.io only for exactly these media types: they must be the ones this script writes
 for mt in application/vnd.cncf.artifacthub.config.v1+yaml application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml; do
   for f in "${SCRIPT_AH}" "${REL}/verify-chart.sh"; do

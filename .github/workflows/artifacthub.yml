@@ -9,7 +9,7 @@
 # It is not part of release.yml: the repositoryID exists only after the board has added the chart repository on Artifact Hub, and that
 # is possible only after the chart is published. The board starts this workflow by hand (Actions, "artifacthub", Run workflow)
 # with the chart and the ID from the repository card of the Artifact Hub control panel and approves the job `publish` in the environment `release`.
-# It must run on a release tag (Run workflow, "Use workflow from": the tag, e.g. v0.2.0): the environment `release` admits only tags v*,
+# It must run on a release tag (Run workflow, "Use workflow from": the tag, e.g. vX.Y.Z): the environment `release` admits only tags v*,
 # and a branch (main included) is refused. The workflow file therefore has to be on main and in that tag; a fix to it takes effect with
 # the next tag, because a tag is never moved (the input `chart` exists from the first tag after v0.2.1 on).
 # The steps are in docs/releasing.md, "Artifact Hub".

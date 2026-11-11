@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **Artifact Hub: the metadata of the collector chart.** The workflow `artifacthub` asks for the chart (`myriarch` or `myriarch-collector`) next to the repository ID and writes the metadata file of the chosen chart repository, so the collector chart can show Verified publisher like the server chart. It refuses an ID that the other chart repository already carries. The workflow runs from a release tag, so the choice exists from the next release on; see [Releasing](docs/releasing.md#artifact-hub).
+- **Artifact Hub: the metadata of the collector chart.** The workflow `artifacthub` asks for the chart (`myriarch` or `myriarch-collector`) next to the repository ID and writes the metadata file of the chosen chart repository, so the collector chart can show Verified publisher like the server chart. It refuses an ID that the other chart repository already carries. The workflow runs from the release tag, so the tags `v0.2.0` and `v0.2.1` keep the workflow with one input, which writes the server chart only; see [Releasing](docs/releasing.md#artifact-hub).
 
 ## [0.2.1] - 2026-11-11
 
