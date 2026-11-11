@@ -1,7 +1,7 @@
 # 0050. Tagline backed by the documentation
 
-- Status: Proposed
-- Date: 2026-11-10
+- Status: Accepted
+- Date: 2026-11-11
 - Related: [ADR-0015](0015-project-name-and-naming-scheme.md), [ADR-0016](0016-trademark-usage-and-name-protection.md), [ADR-0031](0031-website-with-hugo-and-docsy.md)
 
 ## Context
@@ -26,7 +26,7 @@ The name keeps its etymology: *myriarchos*, "commander of ten thousand", as the 
 
 - The wordplay of the line is gone.
 - Platforms show the old card until they scrape the page again.
-- Once the record is accepted, ADR-0015 and the index must name it, for the tagline item and for the explanation of the name.
+- ADR-0015 and the index of the decision records name this record for the tagline item and for the explanation of the name.
 
 ## Alternatives considered
 
