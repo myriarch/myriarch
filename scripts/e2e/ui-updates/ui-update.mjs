@@ -92,7 +92,7 @@ async function observe(rolloutId, label) {
           phases.push(flow.phase);
           await shot(`${label}-${String(phases.length).padStart(2, '0')}-${flow.phase.replace(/[^A-Za-z0-9äöüß]+/g, '_')}`);  // check-language: ignore (UI text of the German locale, web/src/i18n/de.json)
         }
-        if (phaseKeys[phaseKeys.length - 1] !== flow.key) phaseKeys.push(flow.key);
+        if (flow.key && phaseKeys[phaseKeys.length - 1] !== flow.key) phaseKeys.push(flow.key);
         stepSnapshots.push(flow.steps.join(','));
         log('UI flow:', flow.phase, '|', flow.steps.join(' '));
       }
