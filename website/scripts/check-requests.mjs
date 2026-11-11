@@ -783,7 +783,7 @@ const NAVBAR_PAGES = ["/", "/project/faq/"];
 /** The items of the main menu that are shown but end outside the viewport while the row is not scrolled, the light/dark switch included. */
 const NAVBAR_OUT_OF_VIEW = `(() => {
   const row = document.getElementById("main_navbar");
-  if (row) row.scrollLeft = 0;
+  for (const el of [row, row?.querySelector(".navbar-nav")]) if (el) el.scrollLeft = 0;
   const items = [...document.querySelectorAll(".td-navbar .navbar-nav > .nav-item")].filter((e) => getComputedStyle(e).display !== "none");
   const isSwitch = (e) => e.classList.contains("td-navbar__light-dark-menu");
   if (!items.some(isSwitch)) return ["the light/dark switch is missing"];

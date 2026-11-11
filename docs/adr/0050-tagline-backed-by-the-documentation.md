@@ -8,7 +8,7 @@
 
 [ADR-0015](0015-project-name-and-naming-scheme.md) sets the tagline "Command ten thousand OpenTelemetry Collectors from one GitOps-governed control plane." and explains the name as "one control plane directing tens of thousands of collectors". The tagline is drawn on the Open Graph image of every page of the website and on the image prepared for the GitHub social preview (`assets/brand/social-preview.png`), and it is the meta description of the web UI.
 
-The [architecture document](../architecture.md#scaling) gives 1,000 collectors plus 1,000 updaters, with headroom for 5,000 plus 5,000, and says that the numbers are design targets, not measured limits. The number 10,000 appears only as the default connection limit of one replica (`opamp.maxConnectionsPerReplica`), which counts updaters as well. On a card the line reads as a capacity claim, and the explanation of the name in ADR-0015 makes the same claim.
+The [architecture document](../architecture.md#scaling) gives 1,000 collectors plus 1,000 updaters, with headroom for 5,000 plus 5,000, and says that the numbers are design targets, not measured limits. The number 10,000 appears only as a number of connections: the default limit of one replica (`opamp.maxConnectionsPerReplica`) and the message load at that limit; connections count updaters as well. On a card the line reads as a capacity claim, and the explanation of the name in ADR-0015 makes the same claim.
 
 ## Decision
 

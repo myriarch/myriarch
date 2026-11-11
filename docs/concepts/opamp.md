@@ -4,11 +4,12 @@ weight: 5
 description: "What OpAMP is, what the OpAMP Supervisor does and cannot do, how remote configuration reaches a collector, and where myriarch fits, with dated sources."
 ---
 
-OpAMP, the [Open Agent Management Protocol](https://github.com/open-telemetry/opamp-spec/blob/main/specification.md) of the OpenTelemetry project, is a network protocol with which a server manages a fleet
-of telemetry agents: the agents report their status, and the server sends remote configuration and offers packages. Myriarch is an
-OpAMP server for OpenTelemetry Collectors. This page explains the parts of an OpAMP setup, how a configuration reaches a collector
-and what the upstream OpAMP Supervisor cannot do. The statements about upstream software come from the [upstream
-notes](../design/upstream-notes.md), which name a public source and a date for each of them; upstream may have changed since.
+OpAMP, the [Open Agent Management Protocol](https://github.com/open-telemetry/opamp-spec/blob/main/specification.md) of the
+OpenTelemetry project, is a network protocol with which a server manages a fleet of telemetry agents: the agents report their
+status, and the server sends remote configuration and offers packages. Myriarch is an OpAMP server for OpenTelemetry Collectors.
+This page explains the parts of an OpAMP setup, how a configuration reaches a collector and what the upstream OpAMP Supervisor
+cannot do. The statements about upstream software come from the [upstream notes](../design/upstream-notes.md), which name a public
+source and a date for each of them; upstream may have changed since.
 
 Myriarch is an independent project. OpenTelemetry and Kubernetes are trademarks of The Linux Foundation, and myriarch is not
 affiliated with or endorsed by The Linux Foundation or the OpenTelemetry project; the names are used only to describe
@@ -43,8 +44,9 @@ compatibility ([ADR-0028](../adr/0028-relationship-to-opentelemetry-and-foundati
    the text.
 
 Rollback exists on two levels. On its own host, the Supervisor can go back to the last working remote configuration when
-`automatic_config_rollback` is set. It is off by default upstream ([upstream notes](../design/upstream-notes.md#configuration-keys-that-matter)); the Supervisor
-configurations that the myriarch installers and the collector chart write turn it on ([Server behaviour](../design/opamp-server.md#supervisor-configuration)). For a whole
+`automatic_config_rollback` is set. It is off by default upstream ([upstream
+notes](../design/upstream-notes.md#configuration-keys-that-matter)); the Supervisor configurations that the myriarch installers
+and the collector chart write turn it on ([Server behaviour](../design/opamp-server.md#supervisor-configuration)). For a whole
 rollout, the rollout policy decides whether a failed wave rolls back or pauses the rollout ([Failure threshold, pause and
 rollback](rollouts.md#failure-threshold-pause-and-rollback)).
 
@@ -74,8 +76,9 @@ again in the sources of 0.160.0 and 0.161.0 on 2026-10-15 ([Kubernetes options](
   Helm](../operations/install-collector-helm.md), [ADR-0008](../adr/0008-kubernetes-supervisor-and-collector-in-one-pod.md)). A
   new collector version is normally a new image reference in the deployment repository, and applying it replaces the pod. The
   `webhook` executor can start that change, for example through a pipeline that bumps the image tag; with the `manual` executor,
-  myriarch makes no call and only follows a change made outside it. Container mode of `myriarch-updater`, an explicit opt-in intended for air-gapped and edge
-  clusters, swaps the binary inside the pod instead ([Container mode](../design/container-mode.md),
+  myriarch makes no call and only follows a change made outside it. Container mode of `myriarch-updater`, an explicit opt-in
+  intended for air-gapped and edge clusters, swaps the binary inside the pod instead ([Container
+  mode](../design/container-mode.md),
   [ADR-0026](../adr/0026-collector-version-updates-on-kubernetes.md)).
 - **The Operator with its OpAMP Bridge.** In operator mode the Bridge is one OpAMP agent for the collector resources it manages. A
   remote configuration replaces the whole `spec` of each resource, and a message that lacks a resource that was applied earlier
