@@ -37,7 +37,7 @@
 #                      workflow-artifacts-test.sh (the artifact allow-lists and the shape of host-e2e.yml and e2e-kind.yml, with
 #                      ci/tests/workflow-artifacts-check.py and copies of the workflows that are broken on purpose),
 #                      kind-scripts-test.sh (empty arrays under bash 3.2 in hack/kind/quickstart.sh, content comparison of check 7.3 of
-#                      ci/kind-chart-test.sh; fakes for helm and kubectl)
+#                      ci/kind-chart-test.sh, the wait of the uninstall steps; fakes for helm and kubectl)
 #   installers         installer-verify.sh (bundle verification in install-linux.sh/.ps1), install-tools-test.sh (stamps of
 #                      ci/install-tools.sh), verify-testenv-test.sh, release-guard-test.sh (tag-on-release-branch guard of ci/lib.sh,
 #                      snapshot mode of ci/build-release.sh), windows-hook-test.sh (Windows stages, signing hook and acceptance
