@@ -5,7 +5,7 @@ type: application
 version: 0.2.0
 appVersion: "0.2.0"
 kubeVersion: ">=1.30.0-0"
-keywords: [opamp, opentelemetry, opentelemetry-collector, fleet-management]
+keywords: [opamp, opamp-supervisor, opentelemetry, opentelemetry-collector, fleet-management, observability, kubernetes]
 home: https://myriarch.dev
 icon: https://myriarch.dev/brand/myriarch-icon.svg
 sources:

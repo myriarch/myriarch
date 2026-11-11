@@ -19,7 +19,8 @@
 # 2. content    the chart layer (media type application/vnd.cncf.helm.chart.content.v1.tar+gzip) of RELEASE_CHART@--digest is fetched BY
 #               DIGEST and ci/release/chart-package.sh verify runs on it: every image of the renderings is the image of the release at
 #               --image-digest (the collector chart also the two upstream pins of ci/versions.env), and the chart and app version are
-#               the release version                                                                         [chart_layer] [image_not_digest]
+#               the release version, and the README of the package has no relative link [chart_readme_link]
+#                                                                                       [chart_layer] [image_not_digest]
 # 3. signature  `cosign verify` with the exact identity of the run (tag, commit)                                      [signature_invalid]
 # 4. provenance `gh attestation verify oci://RELEASE_CHART@--digest --bundle-from-oci` with the identity of the run [attestation_invalid]
 #

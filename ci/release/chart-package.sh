@@ -22,8 +22,13 @@
 #          artifacthub.io/images (the chart in the repository keeps the empty value and the placeholder), and runs
 #          `helm package --version V --app-version V` (the chart version is the app version is the tag without v). The slot is the
 #          line `  digest: ""` of the block `image:` (myriarch) or the line `    digest: ""` of `images:` -> `updater:` (myriarch-collector),
-#          the entry is `image: RELEASE_IMAGE_SERVER` or `image: RELEASE_IMAGE_UPDATER`; each must exist exactly once. Then it
-#          verifies the result. OUT must be new or empty. stdout: CHART_PACKAGE=<OUT>/<NAME>-<V>.tgz
+#          the entry is `image: RELEASE_IMAGE_SERVER` or `image: RELEASE_IMAGE_UPDATER`; each must exist exactly once. It rewrites every
+#          relative link of README.md in the copy to the repository at the tag v<version> (a file /blob/, a directory /tree/, the
+#          anchor kept; links with a scheme, #anchors and text in fenced code blocks, code spans and HTML comments stay), because Artifact Hub shows the README of the package and
+#          relative links do not resolve there. The targets are read from `git ls-tree` of HEAD, so a sparse checkout is enough; a link
+#          to a path that HEAD does not have, one that leaves the repository, starts with /, is a relative image or cannot be rewritten
+#          fails [chart_readme_link]. The README in the repository keeps its relative links. It needs git and a checkout of the
+#          repository. Then it verifies the result. OUT must be new or empty. stdout: CHART_PACKAGE=<OUT>/<NAME>-<V>.tgz
 #            [chart_dir] [chart_digest_slot] [chart_annotation_slot]
 # layout   pushes the package with `helm push --plain-http` to a throwaway registry (`crane registry serve` on 127.0.0.1, an ephemeral
 #          port, stopped at the end) and pulls the manifest by digest into the OCI layout OUT, which must be new or empty. The layout
@@ -31,8 +36,9 @@
 #          by digest, without a tag. stdout: chart-digest=<digest> (a GITHUB_OUTPUT line).  [chart_dir] [layout_failed]
 # verify   renders the package with `helm template` and requires that every `image:` of the output is as the chart allows, at least
 #          one image per rendering, that the annotation artifacthub.io/images names the image of the release at the digest, and, with
-#          --version, that the chart version and the app version are VERSION. A package without a digest, or with the digest of another
-#          repository, fails here [image_not_digest] [package_invalid] [chart_version]
+#          --version, that the chart version and the app version are VERSION, and that README.md of the package has no relative link
+#          [chart_readme_link]. A package without a digest, or with the digest of another repository, fails here
+#          [image_not_digest] [package_invalid] [chart_version] [chart_readme_link]
 #            myriarch            default values and the OpenShift profile: every image is RELEASE_IMAGE_SERVER@<digest>
 #            myriarch-collector  default (StatefulSet), mode=daemonset, containerMode.enabled and the OpenShift profile: every image is
 #                                RELEASE_IMAGE_UPDATER@<digest> or one of the two upstream pins of ci/versions.env
@@ -97,6 +103,149 @@ upstream_pin() {
   printf 'docker.io/%s@%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
 }
 
+# readme_links rewrite <README> <tag> <chart path in the repository> <ls-tree file>: writes every relative link of the README as an
+# absolute link to the repository at the tag (a file /blob/, a directory /tree/, query and anchor kept) and fails [chart_readme_link]
+# for a target that the tree does not have, that leaves the repository, starts with /, is a relative image, or has a form that cannot be
+# rewritten. readme_links check <README> <label>: fails [chart_readme_link] when a relative link is left. Links with a scheme, #anchors
+# and everything in fenced code blocks, code spans and HTML comments stay. The tree file is `git ls-tree -r -t -z` of the commit.
+readme_links() {
+  python3 -I - "${RELEASE_REPOSITORY}" "$@" <<'PY' || exit 1
+import posixpath, re, sys
+from urllib.parse import quote, unquote, urlsplit
+
+repo, mode = sys.argv[1:3]
+
+
+def fail(msg):
+    print("[chart-package] ERROR [chart_readme_link] %s" % msg, file=sys.stderr)
+    sys.exit(1)
+
+
+def mask(text):
+    # a copy of the text in which fenced code blocks, HTML comments and code spans are NUL characters (newlines and offsets stay)
+    if "\0" in text:
+        fail("README.md contains a NUL character")
+    out = list(text)
+
+    def blank(a, b):
+        for i in range(a, b):
+            if out[i] != "\n":
+                out[i] = "\0"
+
+    pos, fence, start = 0, None, 0
+    for line in text.splitlines(True):
+        body = line.rstrip("\r\n")
+        if fence is None:
+            m = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", body)
+            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+                fence, start = m.group(1), pos
+        else:
+            m = re.match(r"^ {0,3}(" + re.escape(fence[0]) + "{" + str(len(fence)) + r",})[ \t]*$", body)
+            if m:
+                blank(start, pos + len(body))
+                fence = None
+        pos += len(line)
+    if fence is not None:
+        blank(start, len(text))
+    # one left-to-right pass: the construct that starts first wins (a comment or a code span). A code span may continue over a line
+    # ending inside a paragraph, but not over a blank or masked line, and not into a list item, heading or table row.
+    stop = r"\n[ \t>]*(?:\n|\0|[-*+][ \t]|\d{1,9}[.)][ \t]|#{1,6}[ \t]|\|)"
+    for m in re.finditer(r"<!--.*?(?:-->|\Z)|(?<!`)(`+)(?!`)(?:(?!" + stop + r").)+?(?<!`)\1(?!`)", "".join(out), re.S):
+        blank(m.start(), m.end())
+    return "".join(out)
+
+
+SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+INLINE = re.compile(
+    r"(?P<img>!?)\[(?:[^\[\]]|\[[^\[\]]*\])*\]\([ \t\r\n]*(?P<target><[^<>\r\n]*>|[^\s()<>]+)"
+    r"""(?:[ \t\r\n]+(?:"[^"]*"|'[^']*'|\([^()]*\)))?[ \t\r\n]*\)"""
+)
+REFDEF = re.compile(r"(?m)^ {0,3}\[[^\]\r\n]+\]:[ \t]*(?:\r?\n[ \t]*)?(?P<target><[^<>\r\n]*>|\S+)")
+LEFT = [
+    re.compile(r"\]\([ \t\r\n]*(<[^<>\r\n]*>|[^\s()<>]*)"),
+    REFDEF,
+    re.compile(r"""(?i)\b(?:href|src)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"']+))"""),
+]
+
+
+def lineno(text, off):
+    return text.count("\n", 0, off) + 1
+
+
+def leftovers(masked):
+    # the relative targets that are left: (offset, target)
+    found = []
+    for rx in LEFT:
+        for m in rx.finditer(masked):
+            g = [x for x in m.groups() if x is not None]
+            t = g[-1] if g else ""
+            if t.startswith("<") and t.endswith(">"):
+                t = t[1:-1]
+            if not (SCHEME.match(t) or t.startswith("#")):
+                found.append((m.start(), t))
+    return sorted(found)
+
+
+if mode == "check":
+    path, label = sys.argv[3:5]
+    text = open(path, encoding="utf-8", newline="").read()
+    left = leftovers(mask(text))
+    if left:
+        print("[chart-package] ERROR [chart_readme_link] %s: README.md still has the relative link %s on line %d" % (label, left[0][1], lineno(text, left[0][0])), file=sys.stderr)
+        sys.exit(1)
+    sys.exit(0)
+
+path, tag, chart, treefile = sys.argv[3:7]
+types = {}
+for rec in open(treefile, "rb").read().split(b"\0"):
+    meta, _, p = rec.partition(b"\t")
+    if p:
+        types[p.decode("utf-8")] = meta.split()[1].decode("ascii")
+types["."] = "tree"
+text = open(path, encoding="utf-8", newline="").read()
+masked = mask(text)
+base = "https://github.com/%s" % repo
+edits = []
+for rx in (INLINE, REFDEF):
+    for m in rx.finditer(masked):
+        t, a, b = m.group("target"), m.start("target"), m.end("target")
+        angle = t.startswith("<") and t.endswith(">")
+        if angle:
+            t = t[1:-1]
+        where = "README.md, line %d: " % lineno(text, a)
+        if SCHEME.match(t) or t.startswith("#"):
+            continue
+        if t.startswith("//") or t.startswith("/"):
+            fail(where + "the link %s is site-absolute or protocol-relative; write it relative to the README" % t)
+        if t == "":
+            fail(where + "the link has an empty target")
+        if "img" in rx.groupindex and m.group("img"):
+            fail(where + "the image %s is relative and does not render from a blob URL; use an https URL" % t)
+        sp = urlsplit(t)
+        rel = posixpath.normpath(posixpath.join(chart, unquote(sp.path)))
+        if rel == ".." or rel.startswith("../"):
+            fail(where + "the link %s leaves the repository" % t)
+        kind = types.get(rel)
+        if kind not in ("blob", "tree"):
+            fail(where + "the link %s names %s, which is not a file or directory of the commit HEAD (is it committed?)" % (t, rel))
+        url = "%s/%s/%s%s" % (base, kind, tag, "" if rel == "." else "/" + quote(rel, safe="/"))
+        if sp.query:
+            url += "?" + sp.query
+        if sp.fragment:
+            url += "#" + sp.fragment
+        if angle:
+            url = "<" + url + ">"
+        edits.append((a, b, url))
+for a, b, url in sorted(edits, reverse=True):
+    text = text[:a] + url + text[b:]
+left = leftovers(mask(text))
+if left:
+    fail("README.md, line %d: the link %s cannot be rewritten (write it as [text](relative/path))" % (lineno(text, left[0][0]), left[0][1]))
+open(path, "w", encoding="utf-8", newline="").write(text)
+print("[chart-package] README.md: %d relative link(s) now point to %s/{blob,tree}/%s/" % (len(edits), base, tag), file=sys.stderr)
+PY
+}
+
 do_verify() {
   local pkg="$1" want_version="$2" profile profiles images n ref chart_yaml pkg_name want_ref i ok seen
   local -a profile_args allowed
@@ -155,6 +304,10 @@ EOT
     printf '%s\n' "${chart_yaml}" | grep -Fxq "version: ${want_version}" || err chart_version "the chart version of ${pkg} is not ${want_version}"
     printf '%s\n' "${chart_yaml}" | grep -Fxq "appVersion: ${want_version}" || err chart_version "the app version of ${pkg} is not ${want_version}"
   fi
+  # the README of the package is what Artifact Hub shows: no relative link may be left in it
+  "${TOOLS_BIN}/helm" show readme "${pkg}" > "${work}/readme.md" 2> "${work}/helm.err" || err package_invalid "helm show readme failed for ${pkg}"
+  [ -s "${work}/readme.md" ] || err chart_readme_link "${pkg} has no README.md"
+  readme_links check "${work}/readme.md" "${pkg}"
   info "${pkg} verified"
 }
 
@@ -164,6 +317,8 @@ case "${cmd}" in
     check_text chart_dir "--chart" "${chart}"
     check_text chart_dir "--out" "${out}"
     [ -f "${chart}/Chart.yaml" ] && [ -f "${chart}/values.yaml" ] || err chart_dir "${chart} is not a chart directory"
+    [ -f "${chart}/README.md" ] || err chart_dir "${chart} has no README.md"
+    have git || err tool_missing "git is needed to check the links of README.md"
     if [ -d "${out}" ] && [ -n "$(ls -A "${out}")" ]; then err chart_dir "${out} exists and is not empty"; fi
     [ "$(sed -n 's/^name:[[:space:]]*//p' "${chart}/Chart.yaml" | head -n 1)" = "${name}" ] || err chart_dir "${chart} is not the chart ${name} (name in Chart.yaml)"
     cp -R "${chart}" "${work}/${name}"
@@ -208,6 +363,11 @@ if n != 1:
     fail("chart_annotation_slot", "Chart.yaml must have exactly one entry `image: %s` in artifacthub.io/images, it has %d" % (image, n))
 open(path, "w", encoding="utf-8").write(new)
 PY
+    # the relative links of the README of the copy become links to the repository at the tag; the targets come from the tree of HEAD
+    # (never from the work tree: the job `chart` checks out only a few paths, but the trees of HEAD are complete)
+    git -C "${ROOT}" ls-tree -r -t -z --full-tree HEAD > "${work}/tree" 2> "${work}/git.err" \
+      || err chart_readme_link "git ls-tree HEAD failed in ${ROOT}: $(grep -v '^[[:space:]]*$' "${work}/git.err" | tail -n 1 | cut -c 1-300)"
+    readme_links rewrite "${work}/${name}/README.md" "v${version}" "deploy/helm/${name}" "${work}/tree"
     mkdir -p "${out}"
     "${TOOLS_BIN}/helm" package "${work}/${name}" --version "${version}" --app-version "${version}" --destination "${out}" > "${work}/helm.log" 2>&1 \
       || err package_invalid "helm package failed: $(tail -n 1 "${work}/helm.log" | cut -c 1-300)"
