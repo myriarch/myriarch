@@ -356,8 +356,8 @@ KaTeX has no override. The copy that the site serves is bundled into the Mermaid
 Mermaid 11.17.2 and 12.1.0 bundled 0.16.47. After a Mermaid update, read the bundled version in `chunks/mermaid.esm.min/katex-*.mjs`.
 The finding that remains is the copy under markdownlint, which accepts only a KaTeX range below 0.18 (micromark-extension-math 3.1.0
 has no newer release). markdownlint loads it but parses Markdown without rendering math, and nothing of it is shipped; an override
-would only make the lockfile report a version that no check uses. The copy is in development scope, so GitHub dismisses its alert
-automatically, as for braces.
+would only make the lockfile report a version that no check uses. GitHub does not dismiss the Dependabot alert for this copy by
+itself, so it is dismissed as a tolerable risk with this paragraph as the reason.
 
 ## Checks
 
