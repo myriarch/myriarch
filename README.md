@@ -9,9 +9,22 @@
 
 <p align="center">Website: <a href="https://myriarch.dev">myriarch.dev</a> (documentation and API reference). The documentation sources are in <a href="docs/">docs/</a>.</p>
 
-Myriarch manages large fleets of OpenTelemetry Collector Contrib instances over
-[OpAMP](https://github.com/open-telemetry/opamp-spec). It is designed for around 1,000 collectors, with headroom up
-to 5,000, spread over edge sites, data centers, cloud and Kubernetes.
+<p align="center">
+  <a href="https://github.com/myriarch/myriarch/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI" src="https://github.com/myriarch/myriarch/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/myriarch/myriarch/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/myriarch/myriarch?sort=semver"></a>
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/myriarch/myriarch"><img alt="OpenSSF Scorecard" src="https://api.scorecard.dev/projects/github.com/myriarch/myriarch/badge"></a>
+  <a href="https://www.bestpractices.dev/projects/16568"><img alt="OpenSSF Best Practices" src="https://www.bestpractices.dev/projects/16568/badge"></a>
+  <a href="https://artifacthub.io/packages/search?repo=myriarch"><img alt="Artifact Hub: myriarch chart" src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/myriarch"></a>
+  <a href="https://artifacthub.io/packages/search?repo=myriarch-collector"><img alt="Artifact Hub: myriarch-collector chart" src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/myriarch-collector"></a>
+  <a href="https://pkg.go.dev/github.com/myriarch/myriarch"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/myriarch/myriarch.svg"></a>
+</p>
+
+Myriarch is an open-source OpAMP server and fleet manager for OpenTelemetry Collectors. It manages large fleets of
+OpenTelemetry Collector Contrib instances over [OpAMP](https://github.com/open-telemetry/opamp-spec) and is designed for
+around 1,000 collectors, with headroom up to 5,000 (design targets, not measured limits), spread over edge sites, data
+centers, cloud and Kubernetes. New here? [What is Myriarch?](https://myriarch.dev/project/what-is-myriarch/) has the facts in
+one place, and the [comparison](https://myriarch.dev/project/comparison/) shows when it fits and when it does not.
 
 ## The problem it solves
 
@@ -73,7 +86,8 @@ If you run v0.1.0, read the [upgrade notes for v0.2.0](docs/operations/upgrade-t
 ## Quickstart
 
 This runs the server with an embedded PostgreSQL, the example GitOps repository and 1,000 simulated collectors on your
-machine. It needs no container runtime.
+machine. It needs no container runtime. With only Docker, follow [Docker Compose](docs/getting-started/docker-compose.md)
+and start the release images instead.
 
 Prerequisites: Go (the version required by `go.mod`), Node.js (the version in `.node-version`; at least 22.22.2 or 24.15, see `engines` in `web/package.json`), pnpm 10, `make`, `curl`, `jq` and
 `python3`. Git must be installed.
@@ -196,9 +210,11 @@ parallel. Details: [docs/architecture.md](docs/architecture.md).
 
 ## Documentation
 
+The documentation is published at <https://myriarch.dev/docs/>, with search and the REST API reference; the sources are linked below.
+
 - [Documentation home](docs/_index.md): map of all sections
 - [Getting started](docs/getting-started/_index.md): from source, with Docker Compose or on a kind cluster to a running system
-- [Concepts](docs/concepts/_index.md): GitOps, agents, blueprints, fleets, inventory, rollouts, executors
+- [Concepts](docs/concepts/_index.md): OpAMP and the Supervisor, GitOps, agents, blueprints, fleets, inventory, rollouts, executors
 - [Tasks](docs/tasks/_index.md): connect a host, roll out a change, simulate a fleet
 - [Operations](docs/operations/_index.md): installation with Helm (server and collector), authentication, high availability, upgrade notes, support levels, production checklist, troubleshooting
 - [Reference](docs/reference/_index.md): GitOps schema, command-line reference, [REST API](api/openapi.yaml)

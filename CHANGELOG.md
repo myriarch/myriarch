@@ -6,14 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Changed
+
+- The roadmap shows v0.3.0 to v0.6.0 with their themes ([ADR-0048](docs/adr/0048-release-scope-of-v0-3-0-to-v0-6-0.md)). The production Compose setup moves to v0.4.0, and MCP access, stage 1 moves from "Next" to "Later".
+
+## [0.2.1] - 2026-11-11
+
+Upgrading from v0.2.0: read the upgrade notes below; there is no migration and no new setting. Changes to security controls are in the section Security.
+
+### Upgrade notes
+
+- **From v0.2.0 only the version changes.** There is no database migration (the schema and its compatibility level are those of v0.2.0, so replicas of v0.2.0 and v0.2.1 can run side by side during a rolling update, and `helm rollback` to v0.2.0 works), no new or changed setting and no new or changed value of the two charts; the installers, the systemd units and `myriarch-updater` work as in v0.2.0. Update the server image or chart (`helm upgrade myriarch oci://ghcr.io/myriarch/charts/myriarch --version 0.2.1 -n myriarch -f <your values file>`) and, if you run it, the collector chart (`--version 0.2.1`): its pods restart once, because the chart version and the updater image are part of the pod template, while the collector and supervisor images keep the pins of v0.2.0. Hosts keep working with the updater of v0.2.0; run the installer of v0.2.1 on a host again to give it the updater that is built with Go 1.27.4 (see Security). Building from a checkout needs Go 1.27.4, the version in `go.mod`.
+- **Copied install commands name the version of the server.** A server serves only the installer bundles of the release it runs. After the update it fetches those of v0.2.1 from `install.bundleSourceBaseUrl`, so a mirror in an air gap needs `checksums.txt`, `checksums.txt.sigstore.json` and the updater archives of the platforms of `install.platforms` under `<base>/v0.2.1/` first, and a command that was copied before the update fails at the download with HTTP 404. Copy the command again from the dialog *Add host* once every replica runs v0.2.1.
+- **From v0.1.0**, follow [Upgrade from v0.1.0 to v0.2.0](docs/operations/upgrade-to-v0-2-0.md): it applies to v0.2.1 unchanged, with `0.2.1` where its commands name `0.2.0`.
+
 ### Added
 
 - `ci/check-stale-versions.py`, run by `ci/check-versions.sh`: a text that says "planned for" or "until" a release that exists, and a placeholder page planned for such a release, fail the check of the pull request that prepares the release.
+- **Website: OpAMP explained.** The concept page [OpAMP, the Supervisor and the Collector](docs/concepts/opamp.md) explains what OpAMP is and the parts of an OpAMP setup (server, Supervisor, collector, OpAMP Bridge and `myriarch-updater`). It shows how a configuration reaches a collector, how rollback works on the host and for a whole rollout, what the Supervisor cannot do and the two ways to run managed collectors on Kubernetes, with the dated sources of the upstream notes. The FAQ answers eight new questions: what OpAMP is, what the Supervisor can and cannot do, how the OpAMP extension differs from the Supervisor, which collector distribution myriarch manages, whether collectors can be updated without internet access, whether Ansible AWX or a pipeline can keep installing collectors, how to roll back a bad configuration, and how myriarch relates to the OpenTelemetry Operator and its OpAMP Bridge. The comparison has sections on the Operator and on existing automation. The page "What is Myriarch?" shows the key terms of `llms.txt` and the hosting model.
 
 ### Changed
 
 - The message of the server for an OpAMP Bridge that is held back from a version rollout no longer names an executor that does not exist.
-- The roadmap shows v0.3.0 to v0.6.0 with their themes ([ADR-0048](docs/adr/0048-release-scope-of-v0-3-0-to-v0-6-0.md)). The production Compose setup moves to v0.4.0, and MCP access, stage 1 moves from "Next" to "Later".
+- **Website: findability.** The landing page says in its first lines what myriarch is (an open-source OpAMP server and fleet manager for OpenTelemetry Collectors) and which gap of the OpAMP Supervisor it closes. The same sentence opens `llms.txt`, the FAQ, the project pages, the web app manifest, the README and the description of the home page. More pages have a search title of their own (`website/data/seo_titles.yaml`), and the main menu links the overview page; below a width of 992 px it leaves out the entry API reference, which the documentation links, so that the light/dark switch stays in view. The documentation index, the tutorials and the how-to guides link the overview, the comparison, the FAQ and the guide for many collectors. The Open Graph and Twitter titles of a page are its search title without the suffix, and the cards give the type, the size and a text alternative of the image. A page states a publication date only when it shows that date. The placeholder pages of planned guides carry `noindex, follow` and are left out of the sitemap; `check-indexing.py` and `check-seo.py` check both. `llms.txt` links more operator pages and states that the collector numbers are design targets. The production alias `myriarch.vercel.app` redirects to `https://myriarch.dev/`, and the release notes link the documentation on the website.
+- **Social images: a tagline that the documentation backs.** The Open Graph image of the website, the image prepared for the GitHub social preview (`assets/brand/social-preview.png`) and the description of the web UI now say "A GitOps-governed fleet manager for OpenTelemetry Collectors, built on OpAMP." The old line, "Command ten thousand OpenTelemetry Collectors from one GitOps-governed control plane.", read as a capacity claim, while the documentation gives around 1,000 collectors, with headroom up to 5,000, as design targets. [ADR-0050](docs/adr/0050-tagline-backed-by-the-documentation.md) records the change and supersedes the tagline item and the explanation of the name in ADR-0015; the name keeps its etymology.
+
+### Fixed
+
+- **The charts on Artifact Hub.** Artifact Hub shows the README of the chart package, and its links were relative to the repository (`../../../docs/operations/install-helm.md`, `values.schema.json`), so they did not resolve there. The release now writes the links of the packaged README of both charts as links to the repository at the release tag (`https://github.com/myriarch/myriarch/blob/v0.2.1/docs/operations/install-helm.md`, `tree` for a directory, the anchor kept) and stops the packaging when a link names a path that the tagged commit does not have; `verify-chart` refuses a chart whose README still has a relative link. The READMEs in the repository keep their relative links, which are right on GitHub and on the website. Both charts have more keywords for the search: `opamp-server`, `opentelemetry-collector`, `gitops` and `observability` for the server chart, and `opamp-supervisor`, `observability` and `kubernetes` for the collector chart.
+
+### Security
+
+- **Windows files of v0.2.1 are unsigned.** The SignPath signing is not set up yet, so `v0.2.1` ships `myriarch-updater.exe`, `myrctl.exe` and the two PowerShell scripts without Authenticode signatures, under a reviewed exception for exactly that tag (`WINDOWS_UNSIGNED_FINAL_TAG` in `deploy/release/windows-signing.env`, [ADR-0034](docs/adr/0034-authenticode-signing-of-windows-release-artifacts.md)). Verify them with cosign before you run them ([the security model](docs/security/model.md)).
+- **Go 1.27.4.** The Go toolchain of the main module and the Go build images (`myriarchd`, `myriarch-sim`, the deprecated combined collector image) move from 1.27.3 to 1.27.4, which fixes GO-2026-6859 in `net/http` reported by `govulncheck`.
+
+### Known issues
+
+- **A nightly browser test of updates from the UI fails at one check.** The job `ui-updates` of the `e2e` workflow does not always see the short health-check phase of an update before the update ends. The other checks of the test pass. The job is not part of `ci-ok` or of the tag guard.
 
 ## [0.2.0] - 2026-11-06
 

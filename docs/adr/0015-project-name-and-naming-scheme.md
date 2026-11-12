@@ -1,6 +1,6 @@
 # 0015. Project name "myriarch" and naming scheme
 
-- Status: Accepted; the owner-specific identifiers (Go module, container images) are superseded by [ADR-0029](0029-host-under-the-myriarch-organization.md)
+- Status: Accepted; the owner-specific identifiers (Go module, container images) are superseded by [ADR-0029](0029-host-under-the-myriarch-organization.md); the tagline and the explanation of the name are superseded by [ADR-0050](0050-tagline-backed-by-the-documentation.md)
 - Date: 2026-10-08
 - Related: [ADR-0016](0016-trademark-usage-and-name-protection.md), [ADR-0017](0017-repository-hosting-and-public-identity.md), [ADR-0018](0018-license-and-copyright.md), [ADR-0024](0024-container-registry-and-image-set.md), [ADR-0027](0027-mcp-principles.md), [ADR-0029](0029-host-under-the-myriarch-organization.md)
 

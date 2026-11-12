@@ -157,17 +157,17 @@ the release the way a user does.
 | `build-tools` | Builds goreleaser, syft, yq, go-winres and osslsigncode once from `ci/tools`; no cache. Only jobs with `contents: read` execute them. | |
 | `ui` | Builds the web UI (the only job with Node.js) and runs the release dependency and license gates. | |
 | `build-windows` | `goreleaser build` of the Windows targets in stage `collect`. | |
-| `sign-windows` | Runs the Windows signing hook (mode `off` in v0.1.0 and v0.2.0). | **Gate 1** |
+| `sign-windows` | Runs the Windows signing hook (mode `off` in v0.1.0, v0.2.0 and v0.2.1). | **Gate 1** |
 | `package` | `goreleaser release --skip=publish` in stage `apply`, then stages the 40 release files. | |
 | `images` | Builds the OCI layouts of both images from the release archives and their SBOMs. | |
 | `sign-blobs` | Signs `checksums.txt` keyless and attests the build provenance of its 39 files. | |
 | `push-images` | Pushes both images by digest (no release tags), signs them and attaches provenance and SBOM attestations. | |
-| `chart` | Packages the server chart with the digest of the server image written into `image.digest` and the collector chart with the digest of the updater image written into `images.updater.digest` (`ci/release/chart-package.sh`; chart version = app version = the tag without `v`; the two upstream images of the collector chart stay at the pins of `ci/versions.env`), checks the renderings, and turns each package into an OCI layout (exactly what `helm push` writes). It holds `contents: read` only and hands the layout on as an artifact. | |
+| `chart` | Packages the server chart with the digest of the server image written into `image.digest` and the collector chart with the digest of the updater image written into `images.updater.digest` (`ci/release/chart-package.sh`; chart version = app version = the tag without `v`; the two upstream images of the collector chart stay at the pins of `ci/versions.env`), points the relative links of each README to the files of the tag ([Artifact Hub](#artifact-hub)), checks the renderings, and turns each package into an OCI layout (exactly what `helm push` writes). It holds `contents: read` only and hands the layout on as an artifact. | |
 | `push-chart` | Pushes the layouts to `ghcr.io/myriarch/charts/myriarch` and `ghcr.io/myriarch/charts/myriarch-collector` by digest, without a tag, signs each keyless and attaches the provenance attestation, one chart after the other. It runs after `push-images`. The version tags of the charts are set by `finalize`, like the tags of the images. | |
 | `draft` | Renders the release notes and creates the draft release with 42 assets. It holds `contents: write` and runs before gate 2. | |
 | `verify` | Verifies signatures, provenance and images, and the files from which the draft was created (not the draft itself); writes the verified manifest and a summary. | |
 | `verify-images` | Runs both images on amd64 and arm64. | |
-| `verify-chart` | Verifies the pushed chart by digest: that the version tag does not exist yet (or, in a re-run after `finalize`, points at this digest), the chart layer (every image of the `helm template` renderings is the image of this run that the chart references: the server image, or for the collector chart the updater image and the two upstream pins), the signature and the provenance, for both charts. | |
+| `verify-chart` | Verifies the pushed chart by digest: that the version tag does not exist yet (or, in a re-run after `finalize`, points at this digest), the chart layer (every image of the `helm template` renderings is the image of this run that the chart references: the server image, or for the collector chart the updater image and the two upstream pins; the README has no relative link), the signature and the provenance, for both charts. | |
 | `verify-windows` | Checks version resources and Authenticode state of the Windows files on a Windows runner. | |
 | `finalize` | Binds the draft to the verified files (GitHub's asset digests), checks that the tag still points at the tagged commit and that all four packages (both images and both charts) are public, tags the images and the charts (`X.Y.Z[-rc.N]`), reads the draft again directly before it publishes, publishes the release, compares the published release with the verified files once more and checks that it is immutable. | **Gate 2** |
 | `smoke-assets`, `smoke-linux`, `smoke-windows`, `smoke-kind` | Anonymous downloads and verification, installers on amd64 and arm64, Windows staging, `docker run`, the Helm chart on kind. | |
@@ -331,9 +331,9 @@ A final release is a normal release and is marked as the latest release when it 
 2. **Windows signing decides before the tag.** A final tag with `WINDOWS_SIGNING=off` and no exception is refused by the guard. Before
    the pull request of step 1 is merged, the maintainers either set `signpath` or `kms` (the signing then has to be set up and
    tested) or review the exception for that one tag, which puts an "unsigned" banner on the release notes. This page does not choose.
-   The state at the time of writing: `WINDOWS_SIGNING=off` without an exception. `v0.2.0` was released under an exception, which
-   [ADR-0034](adr/0034-authenticode-signing-of-windows-release-artifacts.md) records. Without an exception, `off` is enough for
-   release candidates only.
+   The state at the time of writing: `WINDOWS_SIGNING=off` without an exception. `v0.2.0` and `v0.2.1` were each released under
+   an exception for exactly that tag, and [ADR-0034](adr/0034-authenticode-signing-of-windows-release-artifacts.md) records both.
+   Without an exception, `off` is enough for release candidates only.
 3. Follow steps 2 to 11 of [Release a candidate](#release-a-candidate) with the tag `vX.Y.Z`. Step 6 is not needed any more, except for a package that no release has published before (v0.2.0: the two chart packages). If the
    repository on Artifact Hub exists already, step 10 is skipped: the next scan lists the new version by itself, and the workflow
    runs again only when the metadata file has to change.
@@ -452,8 +452,12 @@ own, `.github/workflows/artifacthub.yml`, does it after the release, started by 
 The file has exactly one key, `repositoryID`. It has no `owners`; an owners entry would put an e-mail address into a public file, and
 the board has to ask for it explicitly, in a change of its own.
 
-Artifact Hub lists every version tag of the repository, release candidates included. A repository that is added after a candidate therefore
-shows the candidate (as a pre-release) until the final version is published.
+The page of a chart on Artifact Hub shows the `README.md` of the chart package. The READMEs are written for GitHub and the website, with links relative to the file (`../../../docs/operations/install-helm.md`), which do not resolve on artifacthub.io. `ci/release/chart-package.sh package` therefore rewrites every relative link in the copy of the README that it packages, for both charts: a link to a file becomes `https://github.com/myriarch/myriarch/blob/<tag>/<path>`, a link to a directory `https://github.com/myriarch/myriarch/tree/<tag>/<path>`, and an anchor is kept. Links with a scheme, links to a heading of the README itself (`#...`) and text in fenced code blocks, code spans and HTML comments stay as they are. The packaging stops with `chart_readme_link` when a link names a path that the tagged commit does not have (the script reads the tree of the commit with `git ls-tree`, so the sparse checkout of the job `chart` is enough), leaves the repository, starts with `/`, is a relative image or has a form that the script cannot rewrite; `chart-package.sh verify`, and with it the job `verify-chart`, refuses a package whose README still has a relative link. The READMEs in the repository keep their relative links. A published chart keeps the README it was published with: the listing of `0.2.0` keeps its relative links.
+
+Artifact Hub lists every version tag of the repository, release candidates included. A repository that is added after a candidate
+therefore shows the candidate until the final version is published. Artifact Hub documents the chart annotation
+[`artifacthub.io/prerelease`](https://artifacthub.io/docs/topics/annotations/helm/) for marking a version as a pre-release; the
+release flow does not set it yet, so check how the listing shows a candidate after its scan.
 
 ## Release post
 

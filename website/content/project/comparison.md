@@ -4,9 +4,9 @@ weight: 14
 description: "A neutral comparison of the OpAMP Supervisor alone, a server built on opamp-go and Myriarch, with sources and dates, and when Myriarch is not the right choice."
 ---
 
-You run OpenTelemetry Collectors at scale and want to manage them over OpAMP. This page compares three ways to do it, says when
+You run OpenTelemetry Collectors at scale and want to manage them over OpAMP, the Open Agent Management Protocol of the OpenTelemetry project. This page compares three ways to do it, says when
 each one fits, and names the cases in which Myriarch is **not** the right choice. Statements about other projects and products
-are taken from their public documentation, were read on **22 October 2026** (they are "as of October 2026") and link to
+are taken from their public documentation, were read on **22 October 2026** unless a section names another source and date (they are "as of October 2026") and link to
 their source. They can be out of date by the time you read this; check the source. The page makes no judgment about the
 quality of any other product.
 
@@ -62,6 +62,16 @@ The rows for the supervisor and opamp-go rest on the sources below; the rows for
 
 These are not all options. Other products and open-source servers exist; the list above is the part this page can cite.
 
+## On Kubernetes: the OpenTelemetry Operator and its OpAMP Bridge
+
+The OpenTelemetry Operator manages collectors on Kubernetes as custom resources. In its default operator mode, its OpAMP Bridge connects to an OpAMP server as one agent per Bridge process and reports the collector resources it manages. A remote configuration replaces the whole `spec` of each resource, and a message that lacks a resource that was applied earlier deletes it. Packages are not implemented, so a collector version changes only through `spec.image`. These statements come from the project's upstream notes on the OpenTelemetry Operator 0.160.0 ([Kubernetes options](/docs/design/upstream-notes/#kubernetes-options)); the remote-configuration rules were reviewed again in the Bridge sources of 0.160.0 and 0.161.0 on 15 October 2026.
+
+Myriarch takes another route on Kubernetes: its Helm chart `myriarch-collector` runs the upstream supervisor and collector in one pod, so every pod is its own OpAMP agent with remote configuration, rollback, health and the effective configuration ([Install the collector with Helm](/docs/operations/install-collector-helm/)). If you run the Operator, myriarch recognises its Bridge, shows it and, in operator mode, sends it nothing that changes a collector resource ([Bridge agents](/docs/concepts/fleets/#bridge-agents)). An integration with the Operator is on the [roadmap](/project/roadmap/#later) as a later item.
+
+## If you already use Ansible AWX or a deployment pipeline
+
+You can keep them. The `awx` executor of myriarch launches a job template of Ansible AWX or Ansible Automation Platform with the hosts of a wave as its limit, and the `webhook` executor calls a URL, for example a pipeline that changes an image tag. Myriarch decides which hosts update when, and a host counts as updated only when its collector reports the new version ([Executors](/docs/concepts/executors/)).
+
 ## When does what fit?
 
 **The supervisor alone fits** when you manage few collectors, you already have configuration management for the hosts, and you are
@@ -75,7 +85,7 @@ and you want to decide every behavior yourself. Expect to build and secure every
 yourself. Read the vendor's documentation for what it offers; Myriarch is software you run yourself, and its documentation
 describes no hosted service.
 
-**Myriarch fits** when you run many collectors (it is designed for around 1,000, with headroom up to 5,000), want Git to be the
+**Myriarch fits** when you run many collectors (it is designed for around 1,000, with headroom up to 5,000; these are design targets, not measured limits), want Git to be the
 source of truth, need changes to reach hosts in waves with approvals and rollback, need collector version updates that the
 supervisor cannot do, and want every operator action audited.
 
@@ -85,7 +95,7 @@ supervisor cannot do, and want every operator action audited.
 - **You need stable interfaces today.** Myriarch is alpha: interfaces, configuration and the GitOps format
   (`myriarch.dev/v1alpha1`) can still change. See the [roadmap](/project/roadmap/#from-alpha-to-beta) for what has to hold before
   the project calls itself beta.
-- **Your hosts are mostly Windows and you need more than experimental support.** In v0.2.0, Windows hosts are experimental; Linux
+- **Your hosts are mostly Windows and you need more than experimental support.** In v0.2.1, Windows hosts are experimental; Linux
   hosts, container mode and the server Helm chart are beta, and the collector Helm chart is experimental.
 - **You manage only a few collectors.** A server, a database and a Git workflow are more than a handful of hosts need.
 - **You need multi-tenancy.** It is on the [roadmap](/project/roadmap/#later) as a later item and not part of any release yet.
@@ -98,3 +108,4 @@ supervisor cannot do, and want every operator action audited.
 - [What is Myriarch?](/project/what-is-myriarch/)
 - [Upgrade the OpenTelemetry Collector on many hosts](/docs/tasks/upgrade-collectors-on-many-hosts/), the case the supervisor does not cover
 - [FAQ](/project/faq/)
+- [OpAMP, the Supervisor and the Collector](/docs/concepts/opamp/), the parts of an OpAMP setup and what the Supervisor cannot do

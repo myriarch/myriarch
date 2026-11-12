@@ -9,7 +9,9 @@
 //   - the search index (a file of the site, 1 MB of JSON that takes a long task to turn into the lunr index) requested while a page loads: it loads on the first use of a search box
 //     (website/assets/js/offline-search.js), once however often the box is used, and a query that is submitted before it has arrived is rendered when it has,
 //   - a search that does not recover from an index that cannot be loaded (a network error, the 404 of a tab from before a deployment, both answered by the check itself):
-//     the next query must request the index again and find results, and a query that waited for the failed load must get a hint instead of results.
+//     the next query must request the index again and find results, and a query that waited for the failed load must get a hint instead of results,
+//   - a main menu that does not fit at phone and tablet width: at 360, 375 and 768 px, on / and /project/faq/, every item of the navbar that is
+//     shown, the light/dark switch included, must end inside the viewport while the menu row is not scrolled (website/assets/scss/_styles_project.scss),
 //
 //   node website/scripts/check-requests.mjs [--base http://127.0.0.1:1313] [--pages website/scripts/request-pages.txt] [--page /path ...]
 //
@@ -775,6 +777,34 @@ async function checkMotion(browser, base, findings) {
   await checkWithoutScript(browser, base, findings);
 }
 
+/** Viewports (width, height) at which Docsy shows the main menu as one scrolling row; widths below 500 px are emulated as mobile devices. */
+const NAVBAR_VIEWPORTS = [[360, 780], [375, 812], [768, 1024]];
+const NAVBAR_PAGES = ["/", "/project/faq/"];
+/** The items of the main menu that are shown but end outside the viewport while the row is not scrolled, the light/dark switch included. */
+const NAVBAR_OUT_OF_VIEW = `(() => {
+  const row = document.getElementById("main_navbar");
+  for (const el of [row, row?.querySelector(".navbar-nav")]) if (el) el.scrollLeft = 0;
+  const items = [...document.querySelectorAll(".td-navbar .navbar-nav > .nav-item")].filter((e) => getComputedStyle(e).display !== "none");
+  const isSwitch = (e) => e.classList.contains("td-navbar__light-dark-menu");
+  if (!items.some(isSwitch)) return ["the light/dark switch is missing"];
+  return items
+    .filter((e) => e.getBoundingClientRect().right > window.innerWidth + 0.5)
+    .map((e) => (isSwitch(e) ? "the light/dark switch" : JSON.stringify(e.textContent.trim())) + " is out of view");
+})()`;
+
+async function checkNavbar(browser, base, findings) {
+  for (const [width, height] of NAVBAR_VIEWPORTS) {
+    for (const path of NAVBAR_PAGES) {
+      const page = await browser.newPage();
+      await page.setViewport(width, height, { mobile: width < 500 });
+      await page.setColorScheme("light");
+      await page.goto(base + path);
+      await page.waitForIdle();
+      for (const problem of await page.evaluate(NAVBAR_OUT_OF_VIEW)) findings.push(`${path} at ${width}x${height}: navbar: ${problem}`);
+    }
+  }
+}
+
 async function main() {
   let opts;
   try {
@@ -809,6 +839,7 @@ async function main() {
     }
     await checkSearchLoad(browser, opts.base, findings);
     await checkSearchLoadFailure(browser, opts.base, findings);
+    await checkNavbar(browser, opts.base, findings);
     await checkMotion(browser, opts.base, findings);
   } catch (e) {
     console.error(`check-requests: ${e.message}`);

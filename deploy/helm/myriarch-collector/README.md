@@ -31,7 +31,7 @@ kubectl -n observability create secret generic myriarch-enrollment --from-litera
 # from a checkout of the repository, or, from v0.2.0, from the signed OCI chart (verify it first, see the operations guide):
 helm install otel-gateway deploy/helm/myriarch-collector -n observability \
   --set server.endpoint=wss://fleet.example.com/v1/opamp --set site.id=k8s-de-prod --set site.name="Regional gateway DE"
-helm install otel-gateway oci://ghcr.io/myriarch/charts/myriarch-collector --version 0.2.0 -n observability \
+helm install otel-gateway oci://ghcr.io/myriarch/charts/myriarch-collector --version 0.2.1 -n observability \
   --set server.endpoint=wss://fleet.example.com/v1/opamp
 ```
 

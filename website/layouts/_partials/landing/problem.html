@@ -1,0 +1,20 @@
+{{- /*
+Copyright The Myriarch Authors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+  The paragraph below the hero: the gap of the OpAMP Supervisor that myriarch closes. Title, text and links are in data/landing.yaml (key
+  problem); the text restates README.md ("The problem it solves") and data/llms.yaml ("What it does"). A link names a page of the site.
+*/ -}}
+{{ $problem := hugo.Data.landing.problem -}}
+<section class="landing-section landing-section--alt" id="problem" aria-labelledby="landing-problem-title">
+  <div class="landing-container">
+    <h2 id="landing-problem-title" class="landing-h2">{{ $problem.title }}</h2>
+    <p class="landing-lead">{{ $problem.text }}</p>
+    {{ range $problem.links -}}
+    {{ $page := site.GetPage (path.Clean (strings.TrimSuffix ".md" .link)) -}}
+    {{ if not $page }}{{ errorf "landing: the link %q of the problem section names no page of the site" .link }}{{ end -}}
+    <p class="landing-more"><a href="{{ $page.RelPermalink }}">{{ .label }} <span aria-hidden="true">&rarr;</span></a></p>
+    {{ end -}}
+  </div>
+</section>

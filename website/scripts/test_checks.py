@@ -576,6 +576,48 @@ class IndexingTest(TempCase):
         self.assertEqual(rc, 1)
         self.assertIn("hidden/index.html", out)
 
+    PLACEHOLDER = PAGE + '<div class="alert td-placeholder" role="note">This page is being written.</div>'
+
+    def placeholder_site(self, content):
+        self.site(self.PROD_ROBOTS, "index, follow")
+        write(self.path("public", "later", "index.html"), self.PLACEHOLDER % content)
+
+    def test_a_production_placeholder_with_noindex_follow_passes(self):
+        self.placeholder_site("noindex, follow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("3 pages scanned, 0 findings", out)
+
+    def test_a_production_placeholder_without_noindex_fails(self):
+        self.placeholder_site("index, follow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 1)
+        self.assertIn("later/index.html: the placeholder page must carry the robots meta noindex, follow", out)
+
+    def test_a_production_placeholder_with_noindex_nofollow_fails(self):
+        self.placeholder_site("noindex, nofollow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 1)
+        self.assertIn("later/index.html: the placeholder page must carry the robots meta noindex, follow", out)
+
+    def test_a_page_that_is_no_placeholder_still_fails_with_noindex_follow(self):
+        self.site(self.PROD_ROBOTS, "index, follow")
+        write(self.path("public", "hidden", "index.html"), self.PAGE % "noindex, follow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 1)
+        self.assertIn("hidden/index.html: the production page carries a robots meta tag with noindex", out)
+
+    def test_a_preview_placeholder_behaves_as_any_preview_page(self):
+        os.environ["WEBSITE_ENV"] = "preview"
+        self.site(self.PREVIEW_ROBOTS, "noindex, nofollow")
+        write(self.path("public", "later", "index.html"), self.PLACEHOLDER % "noindex, nofollow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 0, out)
+        write(self.path("public", "later", "index.html"), self.PLACEHOLDER % "index, follow")
+        rc, out, _ = run_main(self.mod, [self.path("public")])
+        self.assertEqual(rc, 1)
+        self.assertIn("later/index.html: the preview page has no robots meta tag with noindex", out)
+
     def test_the_404_page_may_be_noindex_in_production_but_not_a_content_page(self):
         self.site(self.PROD_ROBOTS, "index, follow")
         write(self.path("public", "404.html"), self.PAGE % "noindex, nofollow")

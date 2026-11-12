@@ -25,7 +25,7 @@ kubectl -n myriarch create secret generic myriarch-secrets \
   --from-literal=database-dsn='postgres://myriarch:<password>@db.example.com:5432/myriarch?sslmode=verify-full'
 # from a checkout of the repository, or, from v0.2.0, from the signed OCI chart (verify it first, see "Signed OCI chart" below):
 helm install myriarch deploy/helm/myriarch -n myriarch --set config.server.publicUrl=https://fleet.example.com
-helm install myriarch oci://ghcr.io/myriarch/charts/myriarch --version 0.2.0 -n myriarch --set config.server.publicUrl=https://fleet.example.com
+helm install myriarch oci://ghcr.io/myriarch/charts/myriarch --version 0.2.1 -n myriarch --set config.server.publicUrl=https://fleet.example.com
 ```
 
 The documented release name and namespace are both `myriarch`, so the Service, Deployment, ConfigMap and ServiceAccount

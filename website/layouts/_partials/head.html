@@ -17,6 +17,9 @@ Changes against the upstream file:
      the description (website/README.md, "SEO and GEO"; website/scripts/check-seo.py checks the result).
   8. The title is partial seo/title.html: the home title, a title from data/seo_titles.yaml, "<tag> API" for the pages of the REST API
      reference, or the page title; then "| <site title>" as before (every title of the built site is unique, check-seo.py).
+  9. The Open Graph and Twitter tags come from partial seo/social.html instead of Hugo's embedded opengraph.html and twitter_cards.html: the
+     search title without the suffix, the canonical URL, the image with its type and size, no publication date.
+ 10. A placeholder page (params.placeholder) gets the robots meta "noindex, follow" in production.
 Re-check this file against the upstream one whenever Docsy is updated (website/scripts/check-overrides.py).
 */ -}}
 {{/* cSpell:ignore docsearch opengraph outputformat */ -}}
@@ -71,7 +74,11 @@ Re-check this file against the upstream one whenever Docsy is updated (website/s
 
 {{ $outputFormat := partial "outputformat.html" . -}}
 {{ if and hugo.IsProduction (ne (string .Site.Params.preview) "true") (ne .Kind "404") (ne $outputFormat "print") (ne .Site.Language.Name "xx") -}}
+{{ if .Params.placeholder -}}
+<meta name="robots" content="noindex, follow">
+{{ else -}}
 <meta name="robots" content="index, follow">
+{{ end -}}
 {{ else -}}
 <meta name="robots" content="noindex, nofollow">
 {{ end -}}
@@ -80,9 +87,8 @@ Re-check this file against the upstream one whenever Docsy is updated (website/s
 <title>{{ partial "seo/title.html" . }}</title>
 <meta name="description" content="{{ partial "page-description.html" . }}">
 {{ partial "seo/head.html" . -}}
-{{ partial "opengraph.html" . -}}
+{{ partial "seo/social.html" . -}}
 {{ partial "schema.html" . -}}
-{{ partial "twitter_cards.html" . -}}
 {{ partialCached "head-css.html" . "head-css-cache-key" -}}
 {{ if .Site.Params.offlineSearch -}}
 {{ with resources.Get "vendor/lunr/lunr.min.js" | fingerprint -}}

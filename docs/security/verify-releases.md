@@ -44,7 +44,7 @@ verification flaws and the installers refuse them). Download `checksums.txt` and
 you want from the release page of the tag, then:
 
 ```bash
-VERSION=0.2.0        # the release you verify, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
+VERSION=0.2.1        # the release you verify, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
 
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
@@ -65,7 +65,7 @@ Every file you downloaded must say `OK`. `--ignore-missing` skips the lines of f
 `checksums.txt` at all is not part of the release. On Windows compare one file at a time:
 
 ```powershell
-$file  = 'myriarch-updater_0.2.0_windows_amd64.exe'
+$file  = 'myriarch-updater_0.2.1_windows_amd64.exe'
 $lines = @(Get-Content checksums.txt | Where-Object { $_.EndsWith("  $file", [StringComparison]::Ordinal) })
 if ($lines.Count -ne 1) { throw "expected exactly one line for $file in checksums.txt" }
 $want = $lines[0].Split(' ')[0]
@@ -103,7 +103,7 @@ blocks for both systems: they create the folder and end at the first failed chec
 On Linux, in a root shell on the host, in a directory that only root can write, such as one below `/root`:
 
 ```bash
-VERSION=0.2.0                  # the release, without the "v"
+VERSION=0.2.1                  # the release, without the "v"
 BASE="https://github.com/myriarch/myriarch/releases/download/v${VERSION}"
 
 install -d -m 0700 /root/myriarch-setup && cd /root/myriarch-setup &&
@@ -131,7 +131,7 @@ folder:
 $Setup = 'C:\Program Files\myriarch-setup'
 Set-Location $Setup -ErrorAction Stop
 # download checksums.txt, checksums.txt.sigstore.json and the zip here and check them here, as shown above, then:
-Expand-Archive "$Setup\myriarch-updater_0.2.0_windows_amd64.zip" -DestinationPath "$Setup\package"
+Expand-Archive "$Setup\myriarch-updater_0.2.1_windows_amd64.zip" -DestinationPath "$Setup\package"
 Unblock-File "$Setup\package\deploy\scripts\install-windows.ps1"
 ```
 
@@ -183,7 +183,7 @@ images, [crane](https://github.com/google/go-containerregistry/blob/main/cmd/cra
 tag once:
 
 ```bash
-VERSION=0.2.0        # the release you verify, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
+VERSION=0.2.1        # the release you verify, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
 TAG="v${VERSION}"
 ```
 
@@ -313,14 +313,14 @@ For Compose, use `QUICKSTART_IMAGE=ghcr.io/myriarch/myriarch@${DIGEST}` (see the
 Two charts are published, the server chart and the collector chart; both are signed and attested like the images and are verified
 the same way. This section shows the server chart; [the collector chart](#the-collector-chart) follows below.
 
-The server chart is published at `ghcr.io/myriarch/charts/myriarch` with the version of the release as its tag (`0.2.0`; `0.2.0-rc.1`
+The server chart is published at `ghcr.io/myriarch/charts/myriarch` with the version of the release as its tag (`0.2.1`; `X.Y.Z-rc.N`
 for a candidate). It is signed by the same workflow identity as the files and the images and carries a provenance attestation. The
 workflow writes the digest of the signed server image into `image.digest` of the packaged chart, so the chart references that image
 by digest only; before publication it checks with `helm template` (default values and the OpenShift profile) that every image of
 the rendering is `ghcr.io/myriarch/myriarch@<digest>` of this release.
 
 ```bash
-VERSION=0.2.0; TAG="v${VERSION}"
+VERSION=0.2.1; TAG="v${VERSION}"
 CHART_DIGEST="$(crane digest "ghcr.io/myriarch/charts/myriarch:${VERSION}")"      # the digest is what you verify and install
 cosign verify "ghcr.io/myriarch/charts/myriarch@${CHART_DIGEST}" \
   --certificate-identity "https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG}" \
@@ -343,7 +343,7 @@ The `sha256-<hex>` tags of the chart package are part of the release like those 
 
 ### The collector chart
 
-The collector chart is published at `ghcr.io/myriarch/charts/myriarch-collector` with the same tag form (`0.2.0`, `0.2.0-rc.1`), signed
+The collector chart is published at `ghcr.io/myriarch/charts/myriarch-collector` with the same tag form (`0.2.1`, `X.Y.Z-rc.N`), signed
 by the same workflow identity and carrying a provenance attestation. It runs the unchanged upstream OpAMP Supervisor and collector
 (contrib) images, and its updater init container is the signed `ghcr.io/myriarch/myriarch-updater` of the release. The workflow
 writes the digest of that updater image into `images.updater.digest` of the packaged chart; the two upstream images are pinned by
@@ -352,7 +352,7 @@ tag and digest in the chart (the pins of `ci/versions.env`) and are not changed.
 of this release or one of the two upstream pins, so no image is referenced by a tag alone.
 
 ```bash
-VERSION=0.2.0; TAG="v${VERSION}"
+VERSION=0.2.1; TAG="v${VERSION}"
 COLLECTOR_CHART_DIGEST="$(crane digest "ghcr.io/myriarch/charts/myriarch-collector:${VERSION}")"
 cosign verify "ghcr.io/myriarch/charts/myriarch-collector@${COLLECTOR_CHART_DIGEST}" \
   --certificate-identity "https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/${TAG}" \

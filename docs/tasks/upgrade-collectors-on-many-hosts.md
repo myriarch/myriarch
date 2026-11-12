@@ -10,6 +10,8 @@ collector binary, so something else has to install the new version. The executor
 webhook or an AWX job), the rollout engine decides which hosts update when, and a host counts as done only when its collector
 reports the new `service.version`.
 
+It is the version part of [Manage many OpenTelemetry Collectors with OpAMP and Git](manage-many-collectors.md), which sets up the server, the GitOps repository and the hosts.
+
 ## Why the supervisor is not enough
 
 As of October 2026, the README of the upstream supervisor lists "Updates the Collector binary" without a checkmark and links

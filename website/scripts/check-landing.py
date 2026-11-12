@@ -13,7 +13,7 @@ Fails when
   - an image of index.html has no numeric width and height, no alt text, or a source that is not a file of the site,
   - an image has fetchpriority="high" and loading="lazy" at the same time (the image above the fold must not be lazy),
   - index.html loads a resource from another host (the same rules as check-third-party.py),
-  - a section of the landing page is missing (hero heading, features, architecture, screenshots, quickstart, community), the page
+  - a section of the landing page is missing (hero heading, problem, features, architecture, screenshots, quickstart, community), the page
     does not have exactly one h1, the architecture diagram has no role="img" and title, or the interim home page class is left over,
   - the mark in the hero is not exactly one inline svg (class landing-hero__mark) that is hidden from assistive technology (aria-hidden="true",
     focusable="false", no title) and consists of one path.ring and nine path.dot with the classes r1 to r3 and c0 to c3 in their rows, or the
@@ -46,7 +46,7 @@ SCREENSHOT_DIR = os.path.join(WEBSITE, "assets", "images", "screenshots")
 ICON = os.path.join(os.path.dirname(WEBSITE), "assets", "brand", "myriarch-icon.svg")
 EXPECTED_SIZE = (1440, 900)
 THEMES = ("light", "dark")
-SECTIONS = ("features", "architecture", "screenshots", "quickstart", "community")
+SECTIONS = ("problem", "features", "architecture", "screenshots", "quickstart", "community")
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 

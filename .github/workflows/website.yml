@@ -202,10 +202,13 @@ jobs:
             grep -qxF 'Sitemap: https://myriarch.dev/sitemap.xml' "${out}/static/robots.txt" \
               || { echo "::error::robots.txt of production does not name https://myriarch.dev/sitemap.xml"; exit 1; }
           fi
-          # The first route is the trailing-slash redirect that "vercel build" would emit for trailingSlash: /docs -> /docs/. It
+          # The production alias that Vercel gives the project serves the whole site. The first route redirects it to the site with
+          # a match on its host name, so previews and deployment URLs are untouched and the alias is no second indexable host.
+          # The second route is the trailing-slash redirect that "vercel build" would emit for trailingSlash: /docs -> /docs/. It
           # matches paths without a final slash and without a dot, so files (robots.txt, sitemap.xml) and "/" are left alone.
           cat > "${out}/config.json" <<'JSON'
           {"version":3,"routes":[
+            {"src":"^/(.*)$","has":[{"type":"host","value":"myriarch.vercel.app"}],"status":308,"headers":{"Location":"https://myriarch.dev/$1"}},
             {"src":"^/((?:[^/]+/)*[^/\\.]+)$","headers":{"Location":"/$1/"},"status":308},
             {"handle":"filesystem"},
             {"src":"/.*","status":404,"dest":"/404.html"}]}
@@ -213,7 +216,15 @@ jobs:
           python3 -I - "${out}/config.json" <<'PY'
           import json, re, sys
           routes = json.load(open(sys.argv[1]))["routes"]
-          redirect = re.compile(routes[0]["src"])
+          alias = {"src": "^/(.*)$", "has": [{"type": "host", "value": "myriarch.vercel.app"}], "status": 308, "headers": {"Location": "https://myriarch.dev/$1"}}
+          if routes[0] != alias:
+              sys.exit("::error::the first route is not the redirect of the vercel.app alias")
+          if sum(1 for r in routes if "has" in r) != 1:
+              sys.exit("::error::exactly one route may match on a host")
+          for path, want in (("/docs/concepts/gitops/", "https://myriarch.dev/docs/concepts/gitops/"), ("/", "https://myriarch.dev/")):
+              if re.sub(alias["src"], alias["headers"]["Location"].replace("$1", r"\1"), path) != want:
+                  sys.exit("::error::the alias route does not redirect " + path + " to " + want)
+          redirect = re.compile(routes[1]["src"])
           for path, hit in (("/docs", True), ("/docs/concepts", True), ("/", False), ("/docs/", False), ("/robots.txt", False), ("/sitemap.xml", False), ("/site.webmanifest", False)):
               if bool(redirect.search(path)) != hit:
                   sys.exit("::error::the trailing-slash route does not behave as expected for " + path)

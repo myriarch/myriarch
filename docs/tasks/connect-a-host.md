@@ -29,6 +29,8 @@ There are three ways to install a host:
   options. It stays supported, for sites that cannot accept the trust of the first command (see below), for hosts without access
   to the server and for the installers of v0.1.0. The rest of this page describes it.
 
+Enrolling the hosts is step 6 of [Manage many OpenTelemetry Collectors with OpAMP and Git](manage-many-collectors.md), the path from an empty repository to the first rollout.
+
 ## The quick way: the dialog "Add host"
 
 *Available from v0.2.0.* If your server runs a release of myriarch, the web UI gives you one ready command for each platform, and you do
@@ -267,7 +269,7 @@ result](#6-check-the-result).
 | Enrollment token | `--token-file` | `-TokenFile` | [Step 1](#1-create-an-enrollment-token). `--token` and `-Token` exist too, but an argument shows up in the process list |
 | Site type and ID | `--site-type`, `--site-id` | `-SiteType`, `-SiteId` | You choose them; the selectors of your fleets match on them (below) |
 | **Collector version** | `--collector-version` | `-CollectorVersion` | Without `v`: the version of `otelcol-contrib` to install, for example `0.162.0` (below). **Required** on Windows; `install-linux.sh` of v0.2.0 installs the version its release was tested with when you leave it out, and `latest` asks GitHub for the newest |
-| Installer release | none | none | The myriarch release whose archive you unpack, for example `0.2.0` ([step 2](#2-download-and-verify-the-installer)) |
+| Installer release | none | none | The myriarch release whose archive you unpack, for example `0.2.1` ([step 2](#2-download-and-verify-the-installer)) |
 | Sigstore verifier | `--verifier` (or `--with-updater` with `--updater-sha256`) | `-Verifier` (or `-WithUpdater` with `-UpdaterSha256`) | [Step 3](#3-choose-how-the-host-verifies-downloads) |
 | Updater (optional) | `--with-updater`, `--updater-url` and a hash source | `-WithUpdater`, `-UpdaterUrl` and a hash source | [Step 3](#3-choose-how-the-host-verifies-downloads) and the commands of step 4 or 5 |
 | Sigstore trusted root (optional) | `--trusted-root` | `-TrustedRoot` | Only for a host that cannot reach the Sigstore TUF repository (below): a `trusted_root.json` that you fetched on a connected machine |
@@ -361,7 +363,7 @@ On a host that cannot reach the Sigstore TUF repository, add `--trusted-root tru
 `/usr/local/bin/cosign`; a `cosign` in a home directory is not:
 
 ```bash
-VERSION=0.2.0                  # the myriarch release, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
+VERSION=0.2.1                  # the myriarch release, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
 ARCH=amd64                     # or arm64 (uname -m: x86_64 or aarch64)
 BASE="https://github.com/myriarch/myriarch/releases/download/v${VERSION}"
 SETUP=/root/myriarch-setup
@@ -390,7 +392,7 @@ the first failure too: a `throw` ends the whole block, so a failed check is neve
 that runs a pasted text line by line:
 
 ```powershell
-$Version = '0.2.0'       # the myriarch release, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
+$Version = '0.2.1'       # the myriarch release, without the "v"; the newest one is on https://github.com/myriarch/myriarch/releases
 $Arch    = 'amd64'
 $Base    = "https://github.com/myriarch/myriarch/releases/download/v$Version"
 $Zip     = "myriarch-updater_${Version}_windows_${Arch}.zip"
@@ -554,7 +556,7 @@ Remove-Item "$Setup\enrollment-token.txt"
 
 **Why this start.** A Windows client runs scripts under the execution policy `Restricted`, which refuses every script, and
 Windows Server under `RemoteSigned`, which refuses a script that still carries the Mark of the Web. The Windows files of
-v0.1.0 and v0.2.0 are not Authenticode-signed. Do not change the policy of the machine to get past this:
+v0.1.0, v0.2.0 and v0.2.1 are not Authenticode-signed. Do not change the policy of the machine to get past this:
 
 - `-ExecutionPolicy RemoteSigned` on the command line sets the policy for this one PowerShell process (scope *Process*), and it
   is gone when the process ends. `RemoteSigned` runs a script that is local and unblocked and still refuses one that carries the
@@ -565,7 +567,7 @@ v0.1.0 and v0.2.0 are not Authenticode-signed. Do not change the policy of the m
   which stays after the installation and weakens the host for everyone.
 - A policy set by Group Policy wins over the parameter. `Get-ExecutionPolicy -List` shows it: a value other than `Undefined`
   for `MachinePolicy` or `UserPolicy` decides. If it forbids the script (`Restricted`, or `AllSigned`, which also refuses the
-  unsigned files of v0.1.0 and v0.2.0), the installer cannot start; ask the owner of the policy for an exception.
+  unsigned files of v0.1.0, v0.2.0 and v0.2.1), the installer cannot start; ask the owner of the policy for an exception.
 - Under App Control for Business with script enforcement an unsigned script runs in Constrained Language Mode and
   `install-windows.ps1` fails. Allow it by its hash, after you verified the archive. The execution policy does not change
   this. From v0.2.0 the installer recognizes the mode first and stops with `language_mode_unsupported`

@@ -50,7 +50,7 @@ From v0.2.0 the chart is also a signed OCI artifact. Verify it before you instal
 files, see [Verify a release](../security/verify-releases.md)):
 
 ```bash
-VERSION=0.2.0                     # the release you install
+VERSION=0.2.1                     # the release you install
 CHART_DIGEST="$(crane digest "ghcr.io/myriarch/charts/myriarch-collector:${VERSION}")"
 cosign verify "ghcr.io/myriarch/charts/myriarch-collector@${CHART_DIGEST}" \
   --certificate-identity "https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/v${VERSION}" \

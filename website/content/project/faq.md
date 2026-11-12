@@ -1,12 +1,12 @@
 ---
 title: "FAQ"
 weight: 15
-description: "Short answers about what myriarch is, how it relates to OpenTelemetry, what it needs to run and how to take part."
+description: "Short answers about myriarch, OpAMP and the OpAMP Supervisor, the OpenTelemetry Operator, version updates, rollback, what it needs and how to take part."
 ---
 
 ## What is myriarch?
 
-Myriarch is a fleet manager for OpenTelemetry Collectors, built on OpAMP. Git is the source of truth for blueprints, fleets,
+Myriarch is an open-source OpAMP server and fleet manager for OpenTelemetry Collectors. Git is the source of truth for blueprints, fleets,
 rollout policies and the allowed collector versions. The web UI and the REST API operate within that frame, and every
 operator action is audited. The page [What is Myriarch?](/project/what-is-myriarch/) has the facts in one place; the
 [concepts](/docs/concepts/) and the [architecture](/docs/architecture/) explain how it works.
@@ -19,12 +19,28 @@ rollouts in waves, version updates through executors and an audit trail. The nam
 myriarch works with. See [ADR-0028](/docs/adr/0028-relationship-to-opentelemetry-and-foundation-path/) and the
 [brand and trademark rules](/project/brand/).
 
+## What is OpAMP?
+
+OpAMP, the [Open Agent Management Protocol](https://github.com/open-telemetry/opamp-spec/blob/main/specification.md) of the OpenTelemetry project, is a network protocol with which a server manages a fleet of telemetry agents: the agents report their status, and the server sends remote configuration and offers packages. Myriarch is an OpAMP server; the protocol, the supervisor and the collector stay upstream. [OpAMP, the Supervisor and the Collector](/docs/concepts/opamp/) explains the parts and how a configuration reaches a collector.
+
+## What can the OpAMP Supervisor do, and what can it not do?
+
+The OpAMP Supervisor is the upstream process that starts and monitors a collector and speaks OpAMP for it. It applies remote configuration, reports health and the effective configuration, and restarts the collector. It cannot replace the collector binary: in version 0.162.0 its package manager answers "unsupported" at run time. Myriarch therefore updates collector versions through executors. The sources and their dates are in the [upstream notes](/docs/design/upstream-notes/#no-binary-updates).
+
+## What is the difference between the OpAMP extension and the OpAMP Supervisor?
+
+The OpAMP extension is a component inside the collector; the OpAMP Supervisor is a separate process. The supervisor starts the collector with the extension in its configuration and learns the description and the components of the collector through the extension. It speaks OpAMP to the server for the collector: it applies remote configuration, reports health and the effective configuration, and restarts the collector. Myriarch documents collectors that run under the supervisor; the core distribution of the collector lacks the extension. See the upstream notes on [identity and reported attributes](/docs/design/upstream-notes/#identity-and-reported-attributes) and on [the Operator with the OpAMP Bridge](/docs/design/upstream-notes/#option-b-operator-with-the-opamp-bridge).
+
 ## Why is there an updater next to the supervisor?
 
 The upstream OpAMP Supervisor can manage configuration, health and restarts, but it cannot replace the collector binary.
 Version updates therefore go through exchangeable executors: the host agent `myriarch-updater`, a webhook or an AWX job. On
 Kubernetes the version is part of the image, so a pipeline changes it. See
 [Executors](/docs/concepts/executors/) and [ADR-0006](/docs/adr/0006-version-updates-via-exchangeable-executors/).
+
+## Can I keep Ansible AWX or my own pipeline for collector updates?
+
+Yes. The executor of a fleet decides what installs a new version: the `awx` executor launches a job template of Ansible AWX for the hosts of a wave, and the `webhook` executor calls a URL, for example a pipeline that bumps an image tag. The rollout engine still decides which hosts update when, and a host counts as updated only when its collector reports the new version. See [Executors](/docs/concepts/executors/).
 
 ## How do I manage many OpenTelemetry Collectors with OpAMP?
 
@@ -39,6 +55,10 @@ supervisor or collector distribution; see the [roadmap](/project/roadmap/#not-pl
 [comparison](/project/comparison/) shows when the supervisor alone, a server of your own on opamp-go or Myriarch fits, and when
 Myriarch is not the right choice.
 
+## Which collector distribution does myriarch manage?
+
+OpenTelemetry Collector Contrib (`otelcol-contrib`), run by the upstream OpAMP Supervisor. The field `spec.collector.distribution` of a fleet accepts only `otelcol-contrib`, and the documentation covers that distribution. See the [schema reference](/docs/reference/gitops-schema/#fleet).
+
 ## How do I upgrade the OpenTelemetry Collector on many hosts?
 
 Set the target version of the fleet in Git and give the fleet an executor: the host agent `myriarch-updater`, a webhook or an
@@ -46,11 +66,19 @@ AWX job installs it, because the supervisor cannot replace the collector binary.
 host is done when its collector reports the new version. See
 [Upgrade the OpenTelemetry Collector on many hosts](/docs/tasks/upgrade-collectors-on-many-hosts/).
 
+## Can collectors be updated without internet access?
+
+Yes, with the `updater` executor. Mirror the official release files one to one into an internal artifact repository and point `artifacts.sourceBaseUrl` of the server at it, with `artifacts.sourceAuth` for its credentials and, behind a proxy, the TUF settings under `artifacts.verify`; signature verification stays on. See [Work offline with a local mirror](/docs/tasks/roll-out-a-collector-version/#work-offline-with-a-local-mirror) and the [production checklist](/docs/operations/production-checklist/).
+
 ## How do I roll out a collector configuration change safely?
 
 Change the blueprint in Git and merge. The rollout policy of each affected fleet sets the waves, the approval of the next wave,
 the failure threshold and whether a failure rolls back or pauses. See
 [Roll out a configuration change](/docs/tasks/roll-out-a-config-change/).
+
+## How do I roll back a bad collector configuration?
+
+The rollout policy decides what happens when a wave reaches its failure threshold: `onFailure: rollback` returns every started target to its previous configuration, and `onFailure: pause` stops the rollout until an operator resumes it, retries the failed targets, aborts it or rolls it back. A rollback contradicts Git, so revert the change in Git as well. On a single host, the upstream supervisor can also return to its last working remote configuration when `automatic_config_rollback` is set; it is off by default upstream ([upstream notes](/docs/design/upstream-notes/#configuration-keys-that-matter)), and the supervisor configurations that the myriarch installers and the collector chart write turn it on ([server behaviour](/docs/design/opamp-server/#supervisor-configuration)). See [Failure threshold, pause and rollback](/docs/concepts/rollouts/#failure-threshold-pause-and-rollback).
 
 ## How do I check a collector configuration in CI?
 
@@ -65,7 +93,7 @@ such as an approval or a version chosen in the UI, is audited with the user and 
 
 ## What are the support levels?
 
-Myriarch is alpha. In v0.2.0, container mode, Linux hosts and the server Helm chart are beta; Windows hosts and the collector Helm
+Myriarch is alpha. In v0.2.1, container mode, Linux hosts and the server Helm chart are beta; Windows hosts and the collector Helm
 chart are experimental. The levels and what they mean are in
 [Support levels and tested platforms](/docs/operations/tested-platforms/); what has to hold before the project calls itself beta is
 in the [roadmap](/project/roadmap/#from-alpha-to-beta).
@@ -79,6 +107,10 @@ in Kubernetes pods. A development setup needs no container runtime at all: see
 [Docker Compose](/docs/getting-started/docker-compose/). To try it on Kubernetes, use
 [Kubernetes on kind](/docs/getting-started/kubernetes-kind/); for a real installation see
 [Install with Helm](/docs/operations/install-helm/) and [Install the collector with Helm](/docs/operations/install-collector-helm/).
+
+## How does myriarch relate to the OpenTelemetry Operator and its OpAMP Bridge?
+
+On Kubernetes, the Operator manages collectors as custom resources, and its OpAMP Bridge, in its default operator mode, reports them to an OpAMP server as one agent. Myriarch recognises a Bridge as an agent kind of its own. In operator mode it sends the Bridge nothing that changes a collector resource; a fleet configures a Bridge only in standalone mode and only with `spec.bridge.manage: true`. To run collectors that myriarch manages one by one, use the Helm chart `myriarch-collector`, which runs the supervisor and the collector in one pod. See [Bridge agents](/docs/concepts/fleets/#bridge-agents) and [Install the collector with Helm](/docs/operations/install-collector-helm/).
 
 ## How many collectors does it handle?
 

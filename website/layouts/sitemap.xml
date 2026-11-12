@@ -8,11 +8,13 @@ the page (enableGitInfo in hugo.yaml; website/README.md, "Sitemap and dates"), n
 commit write the same file. <changefreq> and <priority> are left out: Google ignores them, and the values of the embedded template
 (weekly, 0.5, and 0 for the pages of the content adapters) said nothing true. A page without a date gets no <lastmod>, and
 scripts/check-seo.py fails on it.
+A placeholder page (params.placeholder) is left out: its notice is no content, production marks it "noindex, follow" (head.html), and the real
+page is listed with its Git date when it replaces the placeholder.
 */ -}}
 {{ printf "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>" | safeHTML }}
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   {{- range where .Data.Pages "Sitemap.Disable" "ne" true }}
-  {{- if .Permalink }}
+  {{- if and .Permalink (not .Params.placeholder) }}
   <url>
     <loc>{{ .Permalink }}</loc>
     {{- if not .Lastmod.IsZero }}

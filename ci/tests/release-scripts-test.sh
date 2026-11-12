@@ -920,6 +920,7 @@ common_checks() { # name file tag
   lacks "$1: no {{" "{{" "${t}"; lacks "$1: no }}" "}}" "${t}"
   lacks "$1: no <!-- if" "<!-- if" "${t}"; lacks "$1: no <!-- end" "<!-- end" "${t}"
   lacks "$1: no SPDX line" "SPDX-License-Identifier" "${t}"
+  contains "$1: the documentation link" "Documentation: <https://myriarch.dev/docs/>" "${t}"
   contains "$1: the tag" "$3" "${t}"; contains "$1: the commit" "${C40}" "${t}"
   contains "$1: the server digest" "${SD}" "${t}"; contains "$1: the updater digest" "${UD}" "${t}"
   contains "$1: the exact identity" "https://github.com/myriarch/myriarch/.github/workflows/release.yml@refs/tags/$3" "${t}"
