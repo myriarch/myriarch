@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Changed
+
+- The roadmap shows v0.3.0 to v0.6.0 with their themes ([ADR-0048](docs/adr/0048-release-scope-of-v0-3-0-to-v0-6-0.md)). The production Compose setup moves to v0.4.0, and MCP access, stage 1 moves from "Next" to "Later".
+
 ## [0.2.1] - 2026-11-11
 
 Upgrading from v0.2.0: read the upgrade notes below; there is no migration and no new setting. Changes to security controls are in the section Security.
