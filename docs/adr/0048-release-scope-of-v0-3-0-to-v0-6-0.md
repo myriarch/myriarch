@@ -1,6 +1,6 @@
 # 0048. Release scope of v0.3.0 to v0.6.0
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-07
 - Related: [ADR-0021](0021-publication-gates-and-v0-1-0-scope.md), [ADR-0022](0022-white-label-and-neutral-examples.md), [ADR-0026](0026-collector-version-updates-on-kubernetes.md), [ADR-0027](0027-mcp-principles.md), [ADR-0034](0034-authenticode-signing-of-windows-release-artifacts.md)
 
