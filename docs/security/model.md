@@ -839,8 +839,10 @@ guidance after each item names what to do.
 - **Release tag guard.** `ci/release/guard.sh` runs as the first job (`guard`) of `release.yml`. It refuses a tag that is
   not `vX.Y.Z` or `vX.Y.Z-rc.N`, a lightweight tag, a tag that points at another commit than the run's, a commit that is
   not on `origin/main`, a `VERSION` or a copy of it that differs from the tag, a final tag without a dated `CHANGELOG.md`
-  heading, an rc tag without entries in "Unreleased", and a commit without a successful `ci-ok` check run of GitHub
-  Actions. It takes its inputs from the environment only, matches each value as a whole string and refuses control characters
+  heading, an rc tag without entries in "Unreleased", a commit without a successful `ci-ok` check run of GitHub
+  Actions, and a commit since the previous published release that fails the per-commit provenance check
+  ([ADR-0049](../adr/0049-sign-off-for-the-project-machine-account.md); it uses the token of the run, which needs `pull-requests: read`
+  besides `checks: read`). It takes its inputs from the environment only, matches each value as a whole string and refuses control characters
   (no value can add a line to a command, a URL or the `curl` configuration), sends the token to `curl` through standard
   input, never prints it, and fails closed on any API error. A final tag needs list items under its `CHANGELOG.md` heading
   and none left under "Unreleased"; an rc tag needs list items under "Unreleased". The Windows signing rule is part of it: `deploy/release/windows-signing.env` names the

@@ -290,7 +290,7 @@ expect_fail "config: an accepted advisory must be a GHSA ID" "is not a GHSA ID" 
 mut_cfg no-key $'allow-ghsas: []\n' ''
 expect_fail "config: a missing key fails" "the key allow-ghsas is missing" chk config "${M}/no-key.yml" "${ALLOWLIST}"
 
-mut_wf no-need "compliance, dependency-review, workflows" "compliance, workflows"
+mut_wf no-need "compliance, dependency-review, " "compliance, "
 expect_fail "workflow: a ci-ok that does not wait for dependency-review fails" "ci-ok does not wait for the job dependency-review" chk workflow "${M}/no-need.yml"
 mut_wf lower-severity "fail-on-severity: high" "fail-on-severity: critical"
 expect_fail "workflow: another severity threshold fails" "lacks the input 'fail-on-severity: high'" chk workflow "${M}/lower-severity.yml"

@@ -38,6 +38,13 @@ done
 cat >> "${STUB_CURL_STDIN:?}"
 printf '%s\n' "${url}" >> "${STUB_CURL_URLS:?}"
 [ "${STUB_CURL_EXIT:-0}" = 0 ] || exit "${STUB_CURL_EXIT}"
+case "${url}" in
+  */releases/tags/*) # the release of a tag: 404 for the tags in STUB_NO_RELEASE (a space-separated list), 200 for the others
+    t="${url##*/}"
+    case " ${STUB_NO_RELEASE:-} " in *" ${t} "*) printf '404'; exit 0 ;; esac
+    [ -z "${out}" ] || [ "${out}" = /dev/null ] || printf '{}' > "${out}"
+    printf '200'; exit 0 ;;
+esac
 [ -z "${out}" ] || cp "${STUB_CURL_BODY:?}" "${out}"
 printf '%s' "${STUB_CURL_STATUS:-200}"
 EOF
@@ -45,7 +52,8 @@ printf '#!/usr/bin/env bash\nprintf "make %%s\\n" "$*" >> "${STUB_GEN_LOG:?}"\n'
 printf '#!/usr/bin/env bash\nprintf "pnpm %%s (in %%s)\\n" "$*" "$(basename "$PWD")" >> "${STUB_GEN_LOG:?}"\n' > "${STUB_BIN}/pnpm"
 chmod +x "${STUB_BIN}/curl" "${STUB_BIN}/make" "${STUB_BIN}/pnpm"
 export STUB_CURL_LOG="${TEST_TMP}/curl.args" STUB_CURL_STDIN="${TEST_TMP}/curl.stdin" STUB_CURL_URLS="${TEST_TMP}/curl.urls"
-export STUB_GEN_LOG="${TEST_TMP}/gen.log"
+export STUB_GEN_LOG="${TEST_TMP}/gen.log" STUB_PROVENANCE_LOG="${TEST_TMP}/provenance.args"
+: > "${STUB_PROVENANCE_LOG}"
 : > "${STUB_CURL_LOG}"; : > "${STUB_CURL_STDIN}"; : > "${STUB_CURL_URLS}"; : > "${STUB_GEN_LOG}"
 
 # python3 text edit: edit <file> <old> <new> (the old text must occur)
@@ -66,6 +74,14 @@ tree() {
   mkdir -p "${d}/ci/release" "${d}/scripts" "${d}/deploy/release"
   cp "${ROOT}/ci/check-versions.sh" "${ROOT}/ci/version-copies.py" "${ROOT}/ci/check-stale-versions.py" "${d}/ci/"
   cp "${ROOT}/ci/release/guard.sh" "${d}/ci/release/"
+  # the provenance check has a test of its own (commit-provenance-test.sh): the guard gets a stub that records its arguments
+  cat > "${d}/ci/check-commit-provenance.sh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${STUB_PROVENANCE_LOG:?}"
+[ "${STUB_PROVENANCE_EXIT:-0}" = 0 ] || { printf 'FAIL 0123456789ab no valid sign-off\ncheck-commit-provenance: 1 commits checked, 1 failed\n'; exit "${STUB_PROVENANCE_EXIT}"; }
+printf 'ok   0123456789ab sign-off\n'
+STUB
+  chmod +x "${d}/ci/check-commit-provenance.sh"
   cp "${ROOT}/scripts/set-version.sh" "${d}/scripts/"
   cp "${ROOT}/deploy/release/windows-signing.env" "${d}/deploy/release/"
   while IFS= read -r f; do
@@ -227,6 +243,28 @@ grep -q "${TOKEN}" "${STUB_CURL_LOG}" && fail "  the token is in the curl argume
 # a checkout may have turned the annotated tag into a lightweight one: the guard fetches the real tag object again
 git -C "${W}" tag -d v0.1.0-rc.1 >/dev/null; git -C "${W}" tag v0.1.0-rc.1 "${sha}"
 gpass "rc tag whose local ref is lightweight but whose tag on origin is annotated" v0.1.0-rc.1 "${sha}"
+
+# --- the provenance of the commits (ADR-0049): the first tag checks all history, a later one the range since the previous tag -----
+grep -qx -- "--range ${sha}" "${STUB_PROVENANCE_LOG}" && ok "  the first tag checks the whole history" || fail "  unexpected provenance arguments: $(cat "${STUB_PROVENANCE_LOG}")"
+grefuse "a commit without valid provenance" "no valid provenance.*ADR-0049" v0.1.0-rc.1 "${sha}" STUB_PROVENANCE_EXIT=1
+grep -q 'guard:   FAIL 0123456789ab no valid sign-off' <<< "${OUT}" && ok "  names the failing commit" || fail "  the failing commit is not named"
+grep -q 'guard:   ok ' <<< "${OUT}" && fail "  passing commits are listed" || ok "  passing commits are not listed"
+fresh; sha="$(head_sha)"; tag_annotated v0.0.9
+printf 'y\n' > "${W}/later.txt"; push_main "a later commit"; later="$(head_sha)"; tag_annotated v0.1.0-rc.1
+: > "${STUB_PROVENANCE_LOG}"
+gpass "a tag after an earlier tag" v0.1.0-rc.1 "${later}"
+grep -qx -- "--range v0.0.9..${later}" "${STUB_PROVENANCE_LOG}" && ok "  checks the range since the previous tag" || fail "  unexpected provenance range: $(cat "${STUB_PROVENANCE_LOG}")"
+# a tag that the guard refused has no release: it does not move the start of the range (tags cannot be deleted)
+fresh; sha="$(head_sha)"; tag_annotated v0.0.9
+printf 'y\n' > "${W}/later.txt"; push_main "a bad commit"; tag_annotated v0.0.10
+printf 'z\n' > "${W}/later2.txt"; push_main "a commit after the refused tag"; later="$(head_sha)"; tag_annotated v0.1.0-rc.1
+: > "${STUB_PROVENANCE_LOG}"
+gpass "a tag after a refused tag" v0.1.0-rc.1 "${later}" STUB_NO_RELEASE=v0.0.10
+grep -qx -- "--range v0.0.9..${later}" "${STUB_PROVENANCE_LOG}" && ok "  the range starts at the last published release, not at the refused tag" || fail "  unexpected provenance range: $(cat "${STUB_PROVENANCE_LOG}")"
+: > "${STUB_PROVENANCE_LOG}"
+gpass "no tag in the history has a release" v0.1.0-rc.1 "${later}" "STUB_NO_RELEASE=v0.0.10 v0.0.9"
+grep -qx -- "--range ${later}" "${STUB_PROVENANCE_LOG}" && ok "  the whole history is checked" || fail "  unexpected provenance range: $(cat "${STUB_PROVENANCE_LOG}")"
+fresh; sha="$(head_sha)"; tag_annotated v0.1.0-rc.1
 
 # --- tag names ---------------------------------------------------------------------------------------------------------------
 for bad in 0.1.0-rc.1 v1 v1.0 v01.0.0 v0.01.0 v0.1.00 v0.1.0-rc.0 v0.1.0-rc.01 v0.1.0-rc v0.1.0-beta.1 v0.1.0-rc.1.1 v0.1.0+build v0.1.0-rc.1\ ; do

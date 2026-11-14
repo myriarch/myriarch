@@ -1,6 +1,6 @@
 # 0019. Contribution model: Developer Certificate of Origin, no CLA
 
-- Status: Accepted
+- Status: Accepted, amended by [ADR-0049](0049-sign-off-for-the-project-machine-account.md) (sign-off for the commits of the machine account)
 - Date: 2026-10-08
 - Related: [ADR-0017](0017-repository-hosting-and-public-identity.md), [ADR-0018](0018-license-and-copyright.md), [ADR-0028](0028-relationship-to-opentelemetry-and-foundation-path.md)
 
