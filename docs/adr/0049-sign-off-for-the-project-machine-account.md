@@ -1,6 +1,6 @@
 # 0049. Sign-off for the commits of the project's machine account
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-07
 - Related: [ADR-0019](0019-developer-certificate-of-origin.md), [ADR-0028](0028-relationship-to-opentelemetry-and-foundation-path.md), [ADR-0029](0029-host-under-the-myriarch-organization.md), [ADR-0035](0035-release-workflow-with-keyless-signing-and-verification-before-publication.md)
 

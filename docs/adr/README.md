@@ -41,7 +41,7 @@ Some early operational decisions were not kept as separate records. They are des
 | [0016](0016-trademark-usage-and-name-protection.md) | Trademark usage and protection of the project name | Accepted |
 | [0017](0017-repository-hosting-and-public-identity.md) | Repository hosting, maintainer identity and later move to a neutral organization | Superseded in part by [0029](0029-host-under-the-myriarch-organization.md) |
 | [0018](0018-license-and-copyright.md) | License: Apache-2.0 for code, CC-BY-4.0 for documentation | Accepted |
-| [0019](0019-developer-certificate-of-origin.md) | Contribution model: Developer Certificate of Origin, no CLA | Accepted |
+| [0019](0019-developer-certificate-of-origin.md) | Contribution model: Developer Certificate of Origin, no CLA | Accepted, amended by [0049](0049-sign-off-for-the-project-machine-account.md) |
 | [0020](0020-english-as-project-language.md) | English as the language of documentation and project communication | Accepted |
 | [0021](0021-publication-gates-and-v0-1-0-scope.md) | Publication gates and scope of the first release (v0.1.0) | Accepted |
 | [0022](0022-white-label-and-neutral-examples.md) | White-label meaning and vendor-neutral examples | Accepted |
@@ -63,7 +63,7 @@ Some early operational decisions were not kept as separate records. They are des
 | [0038](0038-dependency-license-policy.md) | Dependency license policy: a tripwire on the CNCF allowlist for pull requests, a narrower allowlist for releases | Accepted |
 | [0046](0046-host-installation-from-the-server.md) | Host installation from the server: versions, artifacts and the installer bundle as data, integrity anchored on the host | Accepted |
 | [0048](0048-release-scope-of-v0-3-0-to-v0-6-0.md) | Release scope of v0.3.0 to v0.6.0 | Accepted |
-| [0049](0049-sign-off-for-the-project-machine-account.md) | Sign-off for the commits of the project's machine account | Proposed |
+| [0049](0049-sign-off-for-the-project-machine-account.md) | Sign-off for the commits of the project's machine account | Accepted |
 | [0050](0050-tagline-backed-by-the-documentation.md) | Tagline backed by the documentation | Accepted |
 
 The Status column names the later records that refine, amend or supersede an earlier record; for example, [ADR-0024](0024-container-registry-and-image-set.md) supersedes the "own combined image" aspect of [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) for published artifacts, and [ADR-0026](0026-collector-version-updates-on-kubernetes.md) refines [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) and [ADR-0014](0014-binary-updates-in-the-pod-via-container-mode.md) (gitops-pr as the Kubernetes default, container mode as an opt-in).
