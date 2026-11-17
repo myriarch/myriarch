@@ -224,7 +224,7 @@ Used by: myriarchd, myrctl
 License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-jose/go-jose/v4 v4.1.4
+Component: github.com/go-jose/go-jose/v4 v4.1.6
 License: Apache-2.0 AND BSD-3-Clause
 Used by: myriarchd
 
@@ -4191,7 +4191,7 @@ Referenced by 1 component entry.
    limitations under the License.
 
 ==== [T26] ====
-First used by: github.com/go-jose/go-jose/v4 v4.1.4 (LICENSE)
+First used by: github.com/go-jose/go-jose/v4 v4.1.6 (LICENSE)
 Begins with: Apache License
 Referenced by 35 component entries.
 
@@ -4399,7 +4399,7 @@ Referenced by 35 component entries.
    limitations under the License.
 
 ==== [T27] ====
-First used by: github.com/go-jose/go-jose/v4 v4.1.4 (json/LICENSE)
+First used by: github.com/go-jose/go-jose/v4 v4.1.6 (json/LICENSE)
 Begins with: Copyright (c) 2012 The Go Authors. All rights reserved.
 Referenced by 1 component entry.
 
