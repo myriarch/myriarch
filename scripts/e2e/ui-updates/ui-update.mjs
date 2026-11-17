@@ -12,7 +12,8 @@
 //   BASE=http://127.0.0.1:18090 FLEET=local-gw VERSION=0.162.0 REASON="..." ROLLOUT=<id> SHOTS=<dir> TIMEOUT=240 \
 //   BROWSER=<chromium-based browser> NODE_PATH=<dir with playwright-core> node scripts/e2e/ui-updates/ui-update.mjs select|retry|inspect
 //
-// Output: the last stdout line is a JSON result; progress goes to stderr. Exit code 1 if a UI step could not be performed.
+// Output: the last stdout line is a JSON result (observe() returns phases = the phase labels, phaseKeys = every change of the
+// language-independent phase key (data-phase), stepSnapshots = the step statuses at every change); progress goes to stderr. Exit code 1 if a UI step could not be performed.
 import { createRequire } from 'node:module';
 import { mkdirSync } from 'node:fs';
 const require = createRequire(import.meta.url);
@@ -67,6 +68,7 @@ async function readFlow() {
     if (!bar) return null;
     return {
       phase: bar.querySelector('[data-testid="update-phase"]')?.textContent?.trim() ?? '',
+      key: bar.querySelector('[data-testid="update-phase"]')?.getAttribute('data-phase') ?? '',
       steps: [...bar.querySelectorAll('[data-step]')].map((e) => `${e.getAttribute('data-step')}:${e.getAttribute('data-status')}`),
     };
   });
@@ -74,6 +76,7 @@ async function readFlow() {
 
 async function observe(rolloutId, label) {
   const phases = [];
+  const phaseKeys = [];
   const stepSnapshots = [];
   const end = Date.now() + TIMEOUT;
   let lastKey = '';
@@ -89,6 +92,7 @@ async function observe(rolloutId, label) {
           phases.push(flow.phase);
           await shot(`${label}-${String(phases.length).padStart(2, '0')}-${flow.phase.replace(/[^A-Za-z0-9äöüß]+/g, '_')}`);  // check-language: ignore (UI text of the German locale, web/src/i18n/de.json)
         }
+        if (flow.key && phaseKeys[phaseKeys.length - 1] !== flow.key) phaseKeys.push(flow.key);
         stepSnapshots.push(flow.steps.join(','));
         log('UI flow:', flow.phase, '|', flow.steps.join(' '));
       }
@@ -104,7 +108,7 @@ async function observe(rolloutId, label) {
     await page.waitForTimeout(500);
   }
   await shot(`${label}-final`);
-  return { rolloutStatus: status, phases, finalSteps: stepSnapshots[stepSnapshots.length - 1] ?? '', stepSnapshots };
+  return { rolloutStatus: status, phases, phaseKeys, finalSteps: stepSnapshots[stepSnapshots.length - 1] ?? '', stepSnapshots };
 }
 
 try {

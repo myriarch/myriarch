@@ -216,16 +216,22 @@ agents_total() {
   a "/agents?attr=site.id%3D$1&kind=collector&limit=200" | jq '[.items[]?] | length'
 }
 
-# leftovers NAMESPACE RELEASE -> the resources of the release that still exist (without PVCs: Kubernetes keeps those of a
-# StatefulSet on purpose)
 # uninstall_clean NAMESPACE RELEASE: helm uninstall in the foreground (the default background cascade returns before the garbage
-# collector removed the ReplicaSets and pods) and then waits until nothing of the release is left
+# collector removed the ReplicaSets and pods) and wait with the strategy legacy: Helm reads every deleted resource until it is
+# NotFound, within five minutes. The default of a bare --wait in Helm 4 (watcher) can end its wait early or report a Deployment that
+# is still Terminating as an error (helm/helm#32261). A resource that stays fails the step; the evidence line names what is left.
 uninstall_clean() {
-  h uninstall "$2" -n "$1" --wait --cascade foreground --timeout 5m
+  local rc=0
+  h uninstall "$2" -n "$1" --wait=legacy --cascade foreground --timeout 5m || rc=$?
+  [ "${rc}" = 0 ] || printf 'left of the release: %s\n' "$(leftovers "$1" "$2" | tr '\n' ' ')"
+  return "${rc}"
 }
+# wait_leftovers_gone NAMESPACE RELEASE: the second, label-based proof that nothing of the release is left
 wait_leftovers_gone() {
   wait_until 180 "[ -z \"\$(leftovers '$1' '$2')\" ]" 3
 }
+# leftovers NAMESPACE RELEASE -> the resources of the release that still exist (without PVCs: Kubernetes keeps those of a
+# StatefulSet on purpose)
 leftovers() {
   kn "$1" get all,configmap,serviceaccount,networkpolicy,poddisruptionbudget,ingress -l "app.kubernetes.io/instance=$2" -o name 2>/dev/null \
     | grep -v '^configmap/kube-root-ca.crt$'

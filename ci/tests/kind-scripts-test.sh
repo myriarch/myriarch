@@ -6,7 +6,8 @@
 #  - bash 3.2 (the /bin/bash of macOS) treats an empty array as unset: "${ARR[@]}" under `set -u` stops with "unbound variable". The
 #    chart installs of hack/kind/quickstart.sh and the Secret helper of hack/kind/lib/install.sh run with an empty array in the
 #    commit mode; they run here with fakes for h/kn/k, with /bin/bash when that is bash 3.x and else with the bash of the PATH;
-#  - check 7.3 of ci/kind-chart-test.sh compares the content of the old and the new chart (chart_content_state), not the version.
+#  - check 7.3 of ci/kind-chart-test.sh compares the content of the old and the new chart (chart_content_state), not the version;
+#  - the uninstall steps of ci/kind-chart-test.sh (6.1, 6.3, 6.7, 7.13) wait with the Helm strategy legacy and name what is left.
 # shellcheck source=ci/tests/lib-test.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-test.sh"
 
@@ -76,5 +77,20 @@ chmod 600 "${new}/templates/locked.yaml"
 filter="$(awk "/^CONTAINERS_JQ='/ {p=1; sub(/^CONTAINERS_JQ='/, \"\")} p {print} p && /'\$/ {exit}" "${ROOT}/hack/kind/diag.sh" | sed "\$ s/'\$//")"
 nostate='{"items":[{"metadata":{"name":"p"},"status":{"containerStatuses":[{"name":"c","restartCount":0,"ready":false}],"initContainerStatuses":[{"name":"i","restartCount":1,"ready":false,"lastState":{"terminated":{"reason":"OOMKilled","exitCode":137}}}]}}]}'
 if out="$(printf '%s' "${nostate}" | jq -r "${filter}" 2>&1)" && printf '%s' "${out}" | grep -q 'OOMKilled' && printf '%s' "${out}" | grep -q 'now=-'; then ok "diag.sh: a container status without state is reported (now=-)"; else fail "diag.sh: a container status without state is reported" "${out}"; fi
+
+# uninstall_clean of ci/kind-chart-test.sh: the wait strategy legacy, and a resource that stays fails the step and is named
+cat > "${TEST_TMP}/uninstall.sh" <<EOS
+h() { printf '%s\n' "\$*" >> "\${CALLS}"; return "\${H_RC:-0}"; }
+kn() { shift; printf '%s\n' "\${LEFT}"; }
+$(fn_of "${ROOT}/ci/kind-chart-test.sh" uninstall_clean)
+$(fn_of "${ROOT}/ci/kind-chart-test.sh" leftovers)
+EOS
+run_un() { : > "${calls}"; CALLS="${calls}" H_RC="$1" LEFT="$2" "${TEST_BASH}" -c ". '${TEST_TMP}/uninstall.sh'; uninstall_clean ns rel"; }
+out="$(run_un 0 '')"; rc=$?
+if [ "${rc}" = 0 ] && [ "$(cat "${calls}")" = 'uninstall rel -n ns --wait=legacy --cascade foreground --timeout 5m' ]; then ok "uninstall_clean: helm uninstall --wait=legacy (not the watcher), status 0"; else fail "uninstall_clean: the helm call" "$(cat "${calls}")"; fi
+out="$(run_un 1 'deployment.apps/rel')"; rc=$?
+if [ "${rc}" != 0 ] && [ "${out}" = 'left of the release: deployment.apps/rel ' ]; then ok "uninstall_clean: a resource that stays fails the step and is named"; else fail "uninstall_clean: failure case" "rc=${rc} ${out}"; fi
+out="$(run_un 1 'configmap/kube-root-ca.crt')"
+if [ "${out}" = 'left of the release: ' ]; then ok "uninstall_clean: configmap/kube-root-ca.crt is never reported as left"; else fail "uninstall_clean: kube-root-ca.crt" "${out}"; fi
 
 finish_tests "kind-scripts-test"
