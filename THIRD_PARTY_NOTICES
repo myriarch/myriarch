@@ -49,7 +49,7 @@ Used by: myriarchd, myrctl, myriarch-updater
 License text: [T4]
 
 --------------------------------------------------------------------------------
-Component: github.com/Microsoft/go-winio v0.6.3
+Component: github.com/Microsoft/go-winio v0.6.4
 License: MIT
 Used by: myriarchd, myrctl
 
@@ -57,7 +57,7 @@ Used by: myriarchd, myrctl
 License text: [T5]
 
 --------------------------------------------------------------------------------
-Component: github.com/ProtonMail/go-crypto v1.1.6
+Component: github.com/ProtonMail/go-crypto v1.4.1
 License: BSD-3-Clause
 Used by: myriarchd, myrctl
 
@@ -81,20 +81,12 @@ Used by: myriarchd, myrctl, myriarch-sim
 License text: [T8]
 
 --------------------------------------------------------------------------------
-Component: github.com/blang/semver v3.5.1+incompatible
-License: MIT
-Used by: myriarchd, myriarch-updater
-
---- LICENSE ---
-License text: [T9]
-
---------------------------------------------------------------------------------
 Component: github.com/cenkalti/backoff/v4 v4.3.0
 License: MIT
 Used by: myriarch-updater, myriarch-sim
 
 --- LICENSE ---
-License text: [T10]
+License text: [T9]
 
 --------------------------------------------------------------------------------
 Component: github.com/cenkalti/backoff/v5 v5.0.3
@@ -102,7 +94,7 @@ License: MIT
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T10]
+License text: [T9]
 
 --------------------------------------------------------------------------------
 Component: github.com/cespare/xxhash/v2 v2.3.0
@@ -110,7 +102,7 @@ License: MIT
 Used by: myriarchd, myrctl, myriarch-updater, myriarch-sim
 
 --- LICENSE.txt ---
-License text: [T11]
+License text: [T10]
 
 --------------------------------------------------------------------------------
 Component: github.com/cloudflare/circl v1.6.3
@@ -118,7 +110,7 @@ License: BSD-3-Clause
 Used by: myriarchd, myrctl
 
 --- LICENSE ---
-License text: [T12]
+License text: [T11]
 
 --------------------------------------------------------------------------------
 Component: github.com/coreos/go-oidc/v3 v3.21.0
@@ -126,7 +118,7 @@ License: Apache-2.0
 Used by: myriarchd
 
 --- LICENSE ---
-License text: [T13]
+License text: [T12]
 
 --- NOTICE ---
 CoreOS Project
@@ -142,7 +134,7 @@ Used by: myriarchd, myriarch-updater
 Note: go-licenses cannot classify the LICENSE file; the file is the Apache-2.0 license notice (copyright line and boilerplate), not the full text. The full Apache-2.0 text is in the LICENSE file of this project.
 
 --- LICENSE ---
-License text: [T14]
+License text: [T13]
 
 --------------------------------------------------------------------------------
 Component: github.com/cyphar/filepath-securejoin v0.6.1
@@ -151,21 +143,21 @@ Used by: myriarchd, myrctl
 Note: Only the BSD-3-Clause packages (the root package and internal/consts) are linked; the MPL-2.0 files of the module are not part of the binaries.
 
 --- COPYING.md ---
-License text: [T15]
+License text: [T14]
 
 --- LICENSE.BSD ---
-License text: [T16]
+License text: [T15]
 
 --- LICENSE.MPL-2.0 ---
-License text: [T17]
+License text: [T16]
 
 --------------------------------------------------------------------------------
-Component: github.com/digitorus/pkcs7 v0.0.0-20230818184609-3a137a874352
+Component: github.com/digitorus/pkcs7 v0.0.0-20260821105541-05f79448fa77
 License: MIT
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T18]
+License text: [T17]
 
 --------------------------------------------------------------------------------
 Component: github.com/digitorus/timestamp v0.0.0-20231217203849-220c5c2851b7
@@ -173,7 +165,7 @@ License: BSD-2-Clause
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T19]
+License text: [T18]
 
 --------------------------------------------------------------------------------
 Component: github.com/elastic/proxy-connect-dialer-go v0.1.1
@@ -181,7 +173,7 @@ License: Apache-2.0
 Used by: myriarch-updater, myriarch-sim
 
 --- LICENSE ---
-License text: [T20]
+License text: [T19]
 
 --------------------------------------------------------------------------------
 Component: github.com/emirpasic/gods v1.18.1
@@ -189,7 +181,7 @@ License: BSD-2-Clause AND ISC
 Used by: myriarchd, myrctl
 
 --- LICENSE ---
-License text: [T21]
+License text: [T20]
 
 --------------------------------------------------------------------------------
 Component: github.com/fergusstrange/embedded-postgres v1.34.0
@@ -197,7 +189,7 @@ License: MIT
 Used by: myriarchd (development builds with the devpg tag only)
 
 --- LICENSE ---
-License text: [T22]
+License text: [T21]
 
 --------------------------------------------------------------------------------
 Component: github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376
@@ -205,7 +197,7 @@ License: BSD-3-Clause
 Used by: myriarchd, myrctl
 
 --- LICENSE ---
-License text: [T23]
+License text: [T22]
 
 --------------------------------------------------------------------------------
 Component: github.com/go-git/go-billy/v5 v5.9.2
@@ -213,7 +205,7 @@ License: Apache-2.0
 Used by: myriarchd, myrctl
 
 --- LICENSE ---
-License text: [T24]
+License text: [T23]
 
 --------------------------------------------------------------------------------
 Component: github.com/go-git/go-git/v5 v5.19.3
@@ -221,7 +213,7 @@ License: Apache-2.0
 Used by: myriarchd, myrctl
 
 --- LICENSE ---
-License text: [T25]
+License text: [T24]
 
 --------------------------------------------------------------------------------
 Component: github.com/go-jose/go-jose/v4 v4.1.6
@@ -229,10 +221,10 @@ License: Apache-2.0 AND BSD-3-Clause
 Used by: myriarchd
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --- json/LICENSE ---
-License text: [T27]
+License text: [T26]
 
 --------------------------------------------------------------------------------
 Component: github.com/go-logr/logr v1.4.4
@@ -240,7 +232,7 @@ License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T28]
+License text: [T27]
 
 --------------------------------------------------------------------------------
 Component: github.com/go-logr/stdr v1.2.2
@@ -248,31 +240,31 @@ License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T20]
+License text: [T19]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/analysis v0.25.5
+Component: github.com/go-openapi/analysis v1.0.0
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/errors v0.22.8
+Component: github.com/go-openapi/errors v0.22.9
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/jsonpointer v1.0.0
+Component: github.com/go-openapi/jsonpointer v1.0.1
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T20]
+License text: [T19]
 
 --- NOTICE ---
 Copyright 2015-2025 go-swagger maintainers
@@ -316,12 +308,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/jsonreference v1.0.0
+Component: github.com/go-openapi/jsonreference v1.0.2
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --- NOTICE ---
 Copyright 2015-2025 go-swagger maintainers
@@ -365,20 +357,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/loads v0.25.0
+Component: github.com/go-openapi/loads v0.25.3
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/runtime v0.33.0
+Component: github.com/go-openapi/runtime v0.33.3
 License: Apache-2.0 AND MIT
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --- NOTICE ---
 Copyright 2015-2025 go-swagger maintainers
@@ -428,143 +420,111 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 --- middleware/denco/LICENSE ---
-License text: [T29]
+License text: [T28]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/runtime/server-middleware v0.30.0
+Component: github.com/go-openapi/runtime/server-middleware v0.33.3
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/spec v0.22.9
+Component: github.com/go-openapi/spec v1.0.1
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/strfmt v0.27.0
+Component: github.com/go-openapi/strfmt v0.27.4
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/swag v0.26.1
+Component: github.com/go-openapi/swag/conv v0.29.2
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/swag/cmdutils v0.27.0
+Component: github.com/go-openapi/swag/fileutils v0.29.2
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/swag/conv v0.27.3
+Component: github.com/go-openapi/swag/jsonutils v0.29.2
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/swag/fileutils v0.27.3
+Component: github.com/go-openapi/swag/loading v0.29.2
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/swag/jsonname v0.26.1
+Component: github.com/go-openapi/swag/mangling v0.29.2
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/swag/jsonutils v0.27.3
+Component: github.com/go-openapi/swag/pools v0.29.2
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/swag/loading v0.27.3
+Component: github.com/go-openapi/swag/stringutils v0.29.2
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/swag/mangling v0.27.3
+Component: github.com/go-openapi/swag/typeutils v0.29.2
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/swag/netutils v0.27.0
+Component: github.com/go-openapi/swag/yamlutils v0.29.2
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/go-openapi/swag/pools v0.27.3
+Component: github.com/go-openapi/validate v1.0.0
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
-
---------------------------------------------------------------------------------
-Component: github.com/go-openapi/swag/stringutils v0.27.3
-License: Apache-2.0
-Used by: myriarchd, myriarch-updater
-
---- LICENSE ---
-License text: [T26]
-
---------------------------------------------------------------------------------
-Component: github.com/go-openapi/swag/typeutils v0.27.3
-License: Apache-2.0
-Used by: myriarchd, myriarch-updater
-
---- LICENSE ---
-License text: [T26]
-
---------------------------------------------------------------------------------
-Component: github.com/go-openapi/swag/yamlutils v0.27.3
-License: Apache-2.0
-Used by: myriarchd, myriarch-updater
-
---- LICENSE ---
-License text: [T26]
-
---------------------------------------------------------------------------------
-Component: github.com/go-openapi/validate v0.26.1
-License: Apache-2.0
-Used by: myriarchd, myriarch-updater
-
---- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
 Component: github.com/go-viper/mapstructure/v2 v2.5.0
@@ -572,7 +532,7 @@ License: MIT
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T30]
+License text: [T29]
 
 --------------------------------------------------------------------------------
 Component: github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8
@@ -580,23 +540,23 @@ License: Apache-2.0
 Used by: myriarchd, myrctl
 
 --- LICENSE ---
-License text: [T31]
+License text: [T30]
 
 --------------------------------------------------------------------------------
-Component: github.com/google/certificate-transparency-go v1.3.3
+Component: github.com/google/certificate-transparency-go v1.4.0
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/google/go-containerregistry v0.21.7
+Component: github.com/google/go-containerregistry v0.22.1
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
 Component: github.com/google/uuid v1.6.0
@@ -604,7 +564,7 @@ License: BSD-3-Clause
 Used by: myriarchd, myrctl, myriarch-updater, myriarch-sim
 
 --- LICENSE ---
-License text: [T32]
+License text: [T31]
 
 --------------------------------------------------------------------------------
 Component: github.com/gorilla/websocket v1.5.3
@@ -612,15 +572,15 @@ License: BSD-2-Clause
 Used by: myriarchd, myriarch-updater, myriarch-sim
 
 --- LICENSE ---
-License text: [T33]
+License text: [T32]
 
 --------------------------------------------------------------------------------
-Component: github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
+Component: github.com/grpc-ecosystem/grpc-gateway/v2 v2.32.0
 License: BSD-3-Clause
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T34]
+License text: [T33]
 
 --------------------------------------------------------------------------------
 Component: github.com/in-toto/attestation v1.2.0
@@ -629,7 +589,7 @@ Used by: myriarchd, myriarch-updater
 Note: go-licenses cannot classify the LICENSE file; the file is the Apache-2.0 license notice (copyright line and boilerplate), not the full text. The full Apache-2.0 text is in the LICENSE file of this project.
 
 --- LICENSE ---
-License text: [T35]
+License text: [T34]
 
 --------------------------------------------------------------------------------
 Component: github.com/in-toto/in-toto-golang v0.11.0
@@ -638,7 +598,7 @@ Used by: myriarchd, myriarch-updater
 Note: go-licenses cannot classify the LICENSE file; the file is the Apache-2.0 license notice (copyright line and boilerplate), not the full text. The full Apache-2.0 text is in the LICENSE file of this project.
 
 --- LICENSE ---
-License text: [T36]
+License text: [T35]
 
 --------------------------------------------------------------------------------
 Component: github.com/inconshreveable/mousetrap v1.1.0
@@ -646,7 +606,7 @@ License: Apache-2.0
 Used by: myriarchd, myrctl, myriarch-updater, myriarch-sim
 
 --- LICENSE ---
-License text: [T37]
+License text: [T36]
 
 --------------------------------------------------------------------------------
 Component: github.com/jackc/pgpassfile v1.0.0
@@ -654,7 +614,7 @@ License: MIT
 Used by: myriarchd
 
 --- LICENSE ---
-License text: [T38]
+License text: [T37]
 
 --------------------------------------------------------------------------------
 Component: github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761
@@ -662,15 +622,15 @@ License: MIT
 Used by: myriarchd
 
 --- LICENSE ---
-License text: [T39]
+License text: [T38]
 
 --------------------------------------------------------------------------------
-Component: github.com/jackc/pgx/v5 v5.11.0
+Component: github.com/jackc/pgx/v5 v5.12.0
 License: MIT
 Used by: myriarchd
 
 --- LICENSE ---
-License text: [T40]
+License text: [T39]
 
 --------------------------------------------------------------------------------
 Component: github.com/jackc/puddle/v2 v2.2.3
@@ -678,7 +638,7 @@ License: MIT
 Used by: myriarchd
 
 --- LICENSE ---
-License text: [T41]
+License text: [T40]
 
 --------------------------------------------------------------------------------
 Component: github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99
@@ -686,7 +646,7 @@ License: MIT
 Used by: myriarchd, myrctl
 
 --- LICENSE ---
-License text: [T42]
+License text: [T41]
 
 --------------------------------------------------------------------------------
 Component: github.com/kardianos/service v1.3.0
@@ -694,7 +654,7 @@ License: Zlib
 Used by: myriarch-updater
 
 --- LICENSE ---
-License text: [T43]
+License text: [T42]
 
 --------------------------------------------------------------------------------
 Component: github.com/kevinburke/ssh_config v1.2.0
@@ -702,7 +662,7 @@ License: MIT
 Used by: myriarchd, myrctl
 
 --- LICENSE ---
-License text: [T44]
+License text: [T43]
 
 --------------------------------------------------------------------------------
 Component: github.com/lib/pq v1.10.9
@@ -710,7 +670,7 @@ License: MIT
 Used by: myriarchd (development builds with the devpg tag only)
 
 --- LICENSE.md ---
-License text: [T45]
+License text: [T44]
 
 --------------------------------------------------------------------------------
 Component: github.com/mfridman/interpolate v0.0.2
@@ -718,7 +678,7 @@ License: MIT
 Used by: myriarchd
 
 --- LICENSE.txt ---
-License text: [T46]
+License text: [T45]
 
 --------------------------------------------------------------------------------
 Component: github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
@@ -726,15 +686,15 @@ License: BSD-3-Clause
 Used by: myriarchd, myrctl, myriarch-sim
 
 --- LICENSE ---
-License text: [T47]
+License text: [T46]
 
 --------------------------------------------------------------------------------
-Component: github.com/oklog/ulid/v2 v2.1.1
+Component: github.com/oklog/ulid/v2 v2.1.2
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T20]
+License text: [T19]
 
 --------------------------------------------------------------------------------
 Component: github.com/open-telemetry/opamp-go v0.25.0
@@ -742,7 +702,7 @@ License: Apache-2.0
 Used by: myriarchd, myriarch-updater, myriarch-sim
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
 Component: github.com/opencontainers/go-digest v1.0.0
@@ -751,9 +711,17 @@ Used by: myriarchd, myriarch-updater
 Note: The code of the module is Apache-2.0 (LICENSE). LICENSE.docs (CC-BY-SA-4.0) covers the documentation of the module, which is not part of the binaries.
 
 --- LICENSE ---
-License text: [T48]
+License text: [T47]
 
 --- LICENSE.docs ---
+License text: [T48]
+
+--------------------------------------------------------------------------------
+Component: github.com/pandatix/go-abnf v0.5.3
+License: MIT
+Used by: myriarchd, myrctl, myriarch-sim
+
+--- LICENSE ---
 License text: [T49]
 
 --------------------------------------------------------------------------------
@@ -773,7 +741,7 @@ Used by: myriarchd, myriarch-updater
 License text: [T51]
 
 --------------------------------------------------------------------------------
-Component: github.com/pressly/goose/v3 v3.29.0
+Component: github.com/pressly/goose/v3 v3.30.0
 License: MIT
 Used by: myriarchd
 
@@ -786,7 +754,7 @@ License: Apache-2.0 AND BSD-3-Clause
 Used by: myriarchd, myrctl, myriarch-sim
 
 --- LICENSE ---
-License text: [T20]
+License text: [T19]
 
 --- NOTICE ---
 Prometheus instrumentation library for Go applications
@@ -817,7 +785,7 @@ License: Apache-2.0
 Used by: myriarchd, myrctl, myriarch-sim
 
 --- LICENSE ---
-License text: [T20]
+License text: [T19]
 
 --- NOTICE ---
 Data model artifacts for Prometheus.
@@ -827,12 +795,12 @@ This product includes software developed at
 SoundCloud Ltd. (http://soundcloud.com/).
 
 --------------------------------------------------------------------------------
-Component: github.com/prometheus/common v0.72.0
+Component: github.com/prometheus/common v0.73.1
 License: Apache-2.0
 Used by: myriarchd, myrctl, myriarch-sim
 
 --- LICENSE ---
-License text: [T20]
+License text: [T19]
 
 --- NOTICE ---
 Common libraries shared by Prometheus Go components.
@@ -842,12 +810,12 @@ This product includes software developed at
 SoundCloud Ltd. (http://soundcloud.com/).
 
 --------------------------------------------------------------------------------
-Component: github.com/prometheus/procfs v0.22.0
+Component: github.com/prometheus/procfs v0.23.0
 License: Apache-2.0
 Used by: myriarchd, myrctl, myriarch-sim
 
 --- LICENSE ---
-License text: [T20]
+License text: [T19]
 
 --- NOTICE ---
 procfs provides functions to retrieve system, kernel and process
@@ -859,7 +827,7 @@ This product includes software developed at
 SoundCloud Ltd. (http://soundcloud.com/).
 
 --------------------------------------------------------------------------------
-Component: github.com/secure-systems-lab/go-securesystemslib v0.11.0
+Component: github.com/secure-systems-lab/go-securesystemslib v0.11.1
 License: MIT
 Used by: myriarchd, myriarch-updater
 
@@ -880,7 +848,7 @@ License: Apache-2.0
 Used by: myriarchd
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
 Component: github.com/shibumi/go-pathspec v1.3.0
@@ -888,7 +856,7 @@ License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T13]
+License text: [T12]
 
 --------------------------------------------------------------------------------
 Component: github.com/sigstore/protobuf-specs v0.5.2
@@ -896,47 +864,47 @@ License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/sigstore/rekor v1.5.3
+Component: github.com/sigstore/rekor v1.5.5
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/sigstore/rekor-tiles/v2 v2.3.0
+Component: github.com/sigstore/rekor-tiles/v2 v2.4.0
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T20]
+License text: [T19]
 
 --------------------------------------------------------------------------------
-Component: github.com/sigstore/sigstore v1.10.8
+Component: github.com/sigstore/sigstore v1.11.1
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: github.com/sigstore/sigstore-go v1.3.0
+Component: github.com/sigstore/sigstore-go v1.4.0
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T20]
+License text: [T19]
 
 --------------------------------------------------------------------------------
-Component: github.com/sigstore/timestamp-authority/v2 v2.1.3
+Component: github.com/sigstore/timestamp-authority/v2 v2.2.0
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T20]
+License text: [T19]
 
 --------------------------------------------------------------------------------
 Component: github.com/skeema/knownhosts v1.3.1
@@ -944,7 +912,7 @@ License: Apache-2.0
 Used by: myriarchd, myrctl
 
 --- LICENSE ---
-License text: [T28]
+License text: [T27]
 
 --- NOTICE ---
 Copyright 2025 Skeema LLC and the Skeema Knownhosts authors
@@ -1016,7 +984,7 @@ License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
 Component: github.com/transparency-dev/merkle v0.0.2
@@ -1024,7 +992,7 @@ License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
 Component: github.com/xanzy/ssh-agent v0.3.3
@@ -1032,7 +1000,7 @@ License: Apache-2.0
 Used by: myriarchd, myrctl
 
 --- LICENSE ---
-License text: [T28]
+License text: [T27]
 
 --------------------------------------------------------------------------------
 Component: github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
@@ -1056,7 +1024,7 @@ License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T20]
+License text: [T19]
 
 --------------------------------------------------------------------------------
 Component: go.opentelemetry.io/otel v1.47.0
@@ -1099,7 +1067,7 @@ Used by: myriarchd
 License text: [T65]
 
 --------------------------------------------------------------------------------
-Component: go.yaml.in/yaml/v3 v3.0.5
+Component: go.yaml.in/yaml/v3 v3.0.6
 License: MIT
 Used by: myriarchd, myrctl, myriarch-updater, myriarch-sim
 
@@ -1138,7 +1106,7 @@ Used by: myriarchd, myrctl, myriarch-updater, myriarch-sim
 License text: [T1]
 
 --------------------------------------------------------------------------------
-Component: golang.org/x/mod v0.41.0
+Component: golang.org/x/mod v0.42.0
 License: BSD-3-Clause
 Used by: myriarchd, myriarch-updater
 
@@ -1154,7 +1122,7 @@ Used by: myriarchd, myrctl, myriarch-updater
 License text: [T1]
 
 --------------------------------------------------------------------------------
-Component: golang.org/x/oauth2 v0.37.0
+Component: golang.org/x/oauth2 v0.38.0
 License: BSD-3-Clause
 Used by: myriarchd
 
@@ -1162,7 +1130,7 @@ Used by: myriarchd
 License text: [T1]
 
 --------------------------------------------------------------------------------
-Component: golang.org/x/sync v0.24.0
+Component: golang.org/x/sync v0.25.0
 License: BSD-3-Clause
 Used by: myriarchd, myriarch-updater
 
@@ -1170,7 +1138,7 @@ Used by: myriarchd, myriarch-updater
 License text: [T1]
 
 --------------------------------------------------------------------------------
-Component: golang.org/x/sys v0.49.0
+Component: golang.org/x/sys v0.50.0
 License: BSD-3-Clause
 Used by: myriarchd, myrctl, myriarch-updater, myriarch-sim
 
@@ -1186,7 +1154,7 @@ Used by: myriarchd, myriarch-updater
 License text: [T1]
 
 --------------------------------------------------------------------------------
-Component: golang.org/x/text v0.43.0
+Component: golang.org/x/text v0.44.0
 License: BSD-3-Clause
 Used by: myriarchd, myriarch-updater
 
@@ -1202,28 +1170,28 @@ Used by: myriarchd, myrctl, myriarch-sim
 License text: [T1]
 
 --------------------------------------------------------------------------------
-Component: google.golang.org/genproto/googleapis/api v0.0.0-20261005182115-fad411399dd8
+Component: google.golang.org/genproto/googleapis/api v0.0.0-20261110000943-09e21b237f2c
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: google.golang.org/genproto/googleapis/rpc v0.0.0-20261005182115-fad411399dd8
+Component: google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --------------------------------------------------------------------------------
-Component: google.golang.org/grpc v1.84.0
+Component: google.golang.org/grpc v1.85.0
 License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T26]
+License text: [T25]
 
 --- NOTICE.txt ---
 Copyright 2014 gRPC authors.
@@ -1262,7 +1230,7 @@ License: Apache-2.0
 Used by: myriarchd, myriarch-updater
 
 --- LICENSE ---
-License text: [T31]
+License text: [T30]
 
 3. Data embedded in the binaries
 ================================
@@ -2063,7 +2031,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==== [T5] ====
-First used by: github.com/Microsoft/go-winio v0.6.3 (LICENSE)
+First used by: github.com/Microsoft/go-winio v0.6.4 (LICENSE)
 Begins with: The MIT License (MIT)
 Referenced by 1 component entry.
 
@@ -2090,7 +2058,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==== [T6] ====
-First used by: github.com/ProtonMail/go-crypto v1.1.6 (LICENSE)
+First used by: github.com/ProtonMail/go-crypto v1.4.1 (LICENSE)
 Begins with: Copyright (c) 2009 The Go Authors. All rights reserved.
 Referenced by 1 component entry.
 
@@ -2176,33 +2144,6 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==== [T9] ====
-First used by: github.com/blang/semver v3.5.1+incompatible (LICENSE)
-Begins with: The MIT License
-Referenced by 1 component entry.
-
-The MIT License
-
-Copyright (c) 2014 Benedikt Lang <github at benediktlang.de>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-
-==== [T10] ====
 First used by: github.com/cenkalti/backoff/v4 v4.3.0 (LICENSE)
 Begins with: The MIT License (MIT)
 Referenced by 2 component entries.
@@ -2228,7 +2169,7 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-==== [T11] ====
+==== [T10] ====
 First used by: github.com/cespare/xxhash/v2 v2.3.0 (LICENSE.txt)
 Begins with: Copyright (c) 2016 Caleb Spare
 Referenced by 1 component entry.
@@ -2256,7 +2197,7 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-==== [T12] ====
+==== [T11] ====
 First used by: github.com/cloudflare/circl v1.6.3 (LICENSE)
 Begins with: Copyright (c) 2019 Cloudflare. All rights reserved.
 Referenced by 1 component entry.
@@ -2319,7 +2260,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-==== [T13] ====
+==== [T12] ====
 First used by: github.com/coreos/go-oidc/v3 v3.21.0 (LICENSE)
 Begins with: Apache License
 Referenced by 2 component entries.
@@ -2526,7 +2467,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
-==== [T14] ====
+==== [T13] ====
 First used by: github.com/cyberphone/json-canonicalization v0.0.0-20241213102144-19d51d7fe467 (LICENSE)
 Begins with: Copyright 2018 Anders Rundgren
 Referenced by 1 component entry.
@@ -2545,7 +2486,7 @@ Referenced by 1 component entry.
    See the License for the specific language governing permissions and
    limitations under the License.
 
-==== [T15] ====
+==== [T14] ====
 First used by: github.com/cyphar/filepath-securejoin v0.6.1 (COPYING.md)
 Begins with: ## COPYING ##
 Referenced by 1 component entry.
@@ -2998,7 +2939,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 ```
 
-==== [T16] ====
+==== [T15] ====
 First used by: github.com/cyphar/filepath-securejoin v0.6.1 (LICENSE.BSD)
 Begins with: Copyright (C) 2014-2015 Docker Inc & Go Authors. All rights reserved.
 Referenced by 1 component entry.
@@ -3032,7 +2973,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-==== [T17] ====
+==== [T16] ====
 First used by: github.com/cyphar/filepath-securejoin v0.6.1 (LICENSE.MPL-2.0)
 Begins with: Mozilla Public License Version 2.0
 Referenced by 1 component entry.
@@ -3411,8 +3352,8 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   This Source Code Form is "Incompatible With Secondary Licenses", as
   defined by the Mozilla Public License, v. 2.0.
 
-==== [T18] ====
-First used by: github.com/digitorus/pkcs7 v0.0.0-20230818184609-3a137a874352 (LICENSE)
+==== [T17] ====
+First used by: github.com/digitorus/pkcs7 v0.0.0-20260821105541-05f79448fa77 (LICENSE)
 Begins with: The MIT License (MIT)
 Referenced by 1 component entry.
 
@@ -3438,7 +3379,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-==== [T19] ====
+==== [T18] ====
 First used by: github.com/digitorus/timestamp v0.0.0-20231217203849-220c5c2851b7 (LICENSE)
 Begins with: BSD 2-Clause License
 Referenced by 1 component entry.
@@ -3469,7 +3410,7 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-==== [T20] ====
+==== [T19] ====
 First used by: github.com/elastic/proxy-connect-dialer-go v0.1.1 (LICENSE)
 Begins with: Apache License
 Referenced by 12 component entries.
@@ -3676,7 +3617,7 @@ Referenced by 12 component entries.
    See the License for the specific language governing permissions and
    limitations under the License.
 
-==== [T21] ====
+==== [T20] ====
 First used by: github.com/emirpasic/gods v1.18.1 (LICENSE)
 Begins with: Copyright (c) 2015, Emir Pasic
 Referenced by 1 component entry.
@@ -3723,7 +3664,7 @@ WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-==== [T22] ====
+==== [T21] ====
 First used by: github.com/fergusstrange/embedded-postgres v1.34.0 (LICENSE)
 Begins with: MIT License
 Referenced by 1 component entry.
@@ -3750,7 +3691,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-==== [T23] ====
+==== [T22] ====
 First used by: github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 (LICENSE)
 Begins with: Copyright (c) 2012 Péter Surányi. Portions Copyright (c) 2009 The Go
 Referenced by 1 component entry.
@@ -3784,7 +3725,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-==== [T24] ====
+==== [T23] ====
 First used by: github.com/go-git/go-billy/v5 v5.9.2 (LICENSE)
 Begins with: Apache License
 Referenced by 1 component entry.
@@ -3991,7 +3932,7 @@ Referenced by 1 component entry.
    See the License for the specific language governing permissions and
    limitations under the License.
 
-==== [T25] ====
+==== [T24] ====
 First used by: github.com/go-git/go-git/v5 v5.19.3 (LICENSE)
 Begins with: Apache License
 Referenced by 1 component entry.
@@ -4198,10 +4139,10 @@ Referenced by 1 component entry.
    See the License for the specific language governing permissions and
    limitations under the License.
 
-==== [T26] ====
+==== [T25] ====
 First used by: github.com/go-jose/go-jose/v4 v4.1.6 (LICENSE)
 Begins with: Apache License
-Referenced by 35 component entries.
+Referenced by 31 component entries.
 
 
                                  Apache License
@@ -4406,7 +4347,7 @@ Referenced by 35 component entries.
    See the License for the specific language governing permissions and
    limitations under the License.
 
-==== [T27] ====
+==== [T26] ====
 First used by: github.com/go-jose/go-jose/v4 v4.1.6 (json/LICENSE)
 Begins with: Copyright (c) 2012 The Go Authors. All rights reserved.
 Referenced by 1 component entry.
@@ -4439,7 +4380,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-==== [T28] ====
+==== [T27] ====
 First used by: github.com/go-logr/logr v1.4.4 (LICENSE)
 Begins with: Apache License
 Referenced by 3 component entries.
@@ -4646,8 +4587,8 @@ Referenced by 3 component entries.
    See the License for the specific language governing permissions and
    limitations under the License.
 
-==== [T29] ====
-First used by: github.com/go-openapi/runtime v0.33.0 (middleware/denco/LICENSE)
+==== [T28] ====
+First used by: github.com/go-openapi/runtime v0.33.3 (middleware/denco/LICENSE)
 Begins with: Copyright (c) 2014 Naoya Inada <naoina@kuune.org>
 Referenced by 1 component entry.
 
@@ -4671,7 +4612,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-==== [T30] ====
+==== [T29] ====
 First used by: github.com/go-viper/mapstructure/v2 v2.5.0 (LICENSE)
 Begins with: The MIT License (MIT)
 Referenced by 1 component entry.
@@ -4698,7 +4639,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-==== [T31] ====
+==== [T30] ====
 First used by: github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 (LICENSE)
 Begins with: Apache License
 Referenced by 2 component entries.
@@ -4895,7 +4836,7 @@ third-party archives.
    See the License for the specific language governing permissions and
    limitations under the License.
 
-==== [T32] ====
+==== [T31] ====
 First used by: github.com/google/uuid v1.6.0 (LICENSE)
 Begins with: Copyright (c) 2009,2014 Google Inc. All rights reserved.
 Referenced by 1 component entry.
@@ -4928,7 +4869,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-==== [T33] ====
+==== [T32] ====
 First used by: github.com/gorilla/websocket v1.5.3 (LICENSE)
 Begins with: Copyright (c) 2013 The Gorilla WebSocket Authors. All rights reserved.
 Referenced by 1 component entry.
@@ -4956,8 +4897,8 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-==== [T34] ====
-First used by: github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 (LICENSE)
+==== [T33] ====
+First used by: github.com/grpc-ecosystem/grpc-gateway/v2 v2.32.0 (LICENSE)
 Begins with: Copyright (c) 2015, Gengo, Inc.
 Referenced by 1 component entry.
 
@@ -4989,7 +4930,7 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-==== [T35] ====
+==== [T34] ====
 First used by: github.com/in-toto/attestation v1.2.0 (LICENSE)
 Begins with: Copyright 2021 in-toto Developers
 Referenced by 1 component entry.
@@ -5008,7 +4949,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-==== [T36] ====
+==== [T35] ====
 First used by: github.com/in-toto/in-toto-golang v0.11.0 (LICENSE)
 Begins with: Copyright 2018 New York University
 Referenced by 1 component entry.
@@ -5027,7 +4968,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-==== [T37] ====
+==== [T36] ====
 First used by: github.com/inconshreveable/mousetrap v1.1.0 (LICENSE)
 Begins with: Apache License
 Referenced by 1 component entry.
@@ -5234,7 +5175,7 @@ Referenced by 1 component entry.
    See the License for the specific language governing permissions and
    limitations under the License.
 
-==== [T38] ====
+==== [T37] ====
 First used by: github.com/jackc/pgpassfile v1.0.0 (LICENSE)
 Begins with: Copyright (c) 2019 Jack Christensen
 Referenced by 1 component entry.
@@ -5262,7 +5203,7 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-==== [T39] ====
+==== [T38] ====
 First used by: github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 (LICENSE)
 Begins with: Copyright (c) 2020 Jack Christensen
 Referenced by 1 component entry.
@@ -5290,8 +5231,8 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-==== [T40] ====
-First used by: github.com/jackc/pgx/v5 v5.11.0 (LICENSE)
+==== [T39] ====
+First used by: github.com/jackc/pgx/v5 v5.12.0 (LICENSE)
 Begins with: Copyright (c) 2013-2021 Jack Christensen
 Referenced by 1 component entry.
 
@@ -5318,7 +5259,7 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-==== [T41] ====
+==== [T40] ====
 First used by: github.com/jackc/puddle/v2 v2.2.3 (LICENSE)
 Begins with: Copyright (c) 2018 Jack Christensen
 Referenced by 1 component entry.
@@ -5346,7 +5287,7 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-==== [T42] ====
+==== [T41] ====
 First used by: github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 (LICENSE)
 Begins with: The MIT License (MIT)
 Referenced by 1 component entry.
@@ -5373,7 +5314,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-==== [T43] ====
+==== [T42] ====
 First used by: github.com/kardianos/service v1.3.0 (LICENSE)
 Begins with: Copyright (c) 2015 Daniel Theophanes
 Referenced by 1 component entry.
@@ -5399,7 +5340,7 @@ freely, subject to the following restrictions:
    3. This notice may not be removed or altered from any source
    distribution.
 
-==== [T44] ====
+==== [T43] ====
 First used by: github.com/kevinburke/ssh_config v1.2.0 (LICENSE)
 Begins with: Copyright (c) 2017 Kevin Burke.
 Referenced by 1 component entry.
@@ -5454,7 +5395,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-==== [T45] ====
+==== [T44] ====
 First used by: github.com/lib/pq v1.10.9 (LICENSE.md)
 Begins with: Copyright (c) 2011-2013, 'pq' Contributors
 Referenced by 1 component entry.
@@ -5468,7 +5409,7 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-==== [T46] ====
+==== [T45] ====
 First used by: github.com/mfridman/interpolate v0.0.2 (LICENSE.txt)
 Begins with: MIT License
 Referenced by 1 component entry.
@@ -5498,7 +5439,7 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-==== [T47] ====
+==== [T46] ====
 First used by: github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 (LICENSE)
 Begins with: Copyright (c) 2011, Open Knowledge Foundation Ltd.
 Referenced by 1 component entry.
@@ -5535,7 +5476,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-==== [T48] ====
+==== [T47] ====
 First used by: github.com/opencontainers/go-digest v1.0.0 (LICENSE)
 Begins with: Apache License
 Referenced by 1 component entry.
@@ -5733,7 +5674,7 @@ Referenced by 1 component entry.
    See the License for the specific language governing permissions and
    limitations under the License.
 
-==== [T49] ====
+==== [T48] ====
 First used by: github.com/opencontainers/go-digest v1.0.0 (LICENSE.docs)
 Begins with: Attribution-ShareAlike 4.0 International
 Referenced by 1 component entry.
@@ -6164,6 +6105,33 @@ licenses.
 
 Creative Commons may be contacted at creativecommons.org.
 
+==== [T49] ====
+First used by: github.com/pandatix/go-abnf v0.5.3 (LICENSE)
+Begins with: MIT License
+Referenced by 1 component entry.
+
+MIT License
+
+Copyright (c) 2024 Lucas TESSON - PandatiX <lucastesson@protonmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ==== [T50] ====
 First used by: github.com/pjbgf/sha1cd v0.7.0 (LICENSE)
 Begins with: Apache License
@@ -6401,7 +6369,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==== [T52] ====
-First used by: github.com/pressly/goose/v3 v3.29.0 (LICENSE)
+First used by: github.com/pressly/goose/v3 v3.30.0 (LICENSE)
 Begins with: MIT License
 Referenced by 1 component entry.
 
@@ -6462,7 +6430,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==== [T54] ====
-First used by: github.com/secure-systems-lab/go-securesystemslib v0.11.0 (LICENSE)
+First used by: github.com/secure-systems-lab/go-securesystemslib v0.11.1 (LICENSE)
 Begins with: The MIT License (MIT)
 Referenced by 1 component entry.
 
@@ -7329,7 +7297,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==== [T66] ====
-First used by: go.yaml.in/yaml/v3 v3.0.5 (LICENSE)
+First used by: go.yaml.in/yaml/v3 v3.0.6 (LICENSE)
 Begins with: This project is covered by two different licenses: MIT and Apache.
 Referenced by 1 component entry.
 
