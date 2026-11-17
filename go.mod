@@ -15,6 +15,7 @@ require (
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/prometheus/client_model v0.6.3
+	github.com/prometheus/common v0.72.0
 	github.com/sigstore/protobuf-specs v0.5.2
 	github.com/sigstore/sigstore-go v1.3.0
 	github.com/spf13/cobra v1.10.2
@@ -51,7 +52,7 @@ require (
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.2 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/analysis v0.25.5 // indirect
@@ -97,7 +98,6 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/pjbgf/sha1cd v0.7.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/prometheus/common v0.72.0 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/secure-systems-lab/go-securesystemslib v0.11.0 // indirect
