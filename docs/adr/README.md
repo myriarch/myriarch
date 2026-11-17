@@ -60,10 +60,11 @@ Some early operational decisions were not kept as separate records. They are des
 | [0035](0035-release-workflow-with-keyless-signing-and-verification-before-publication.md) | Release workflow: tag-only, isolated jobs, keyless signing and provenance, verification before an immutable publication, and a frozen signing identity | Accepted |
 | [0036](0036-database-schema-compatibility-and-rollback.md) | Database schema compatibility and rollback | Accepted |
 | [0037](0037-opamp-bridge-agents-until-the-operator-integration.md) | OpAMP Bridge agents are recognised and locked until the Operator integration | Accepted |
-| [0038](0038-dependency-license-policy.md) | Dependency license policy: a tripwire on the CNCF allowlist for pull requests, a narrower allowlist for releases | Accepted |
+| [0038](0038-dependency-license-policy.md) | Dependency license policy: a tripwire on the CNCF allowlist for pull requests, a narrower allowlist for releases | Accepted, superseded in part by [0051](0051-the-website-does-not-ship-the-elk-layout-of-mermaid.md) |
 | [0046](0046-host-installation-from-the-server.md) | Host installation from the server: versions, artifacts and the installer bundle as data, integrity anchored on the host | Accepted |
 | [0048](0048-release-scope-of-v0-3-0-to-v0-6-0.md) | Release scope of v0.3.0 to v0.6.0 | Accepted |
 | [0049](0049-sign-off-for-the-project-machine-account.md) | Sign-off for the commits of the project's machine account | Accepted |
 | [0050](0050-tagline-backed-by-the-documentation.md) | Tagline backed by the documentation | Accepted |
+| [0051](0051-the-website-does-not-ship-the-elk-layout-of-mermaid.md) | The website does not ship the ELK layout of Mermaid | Accepted |
 
 The Status column names the later records that refine, amend or supersede an earlier record; for example, [ADR-0024](0024-container-registry-and-image-set.md) supersedes the "own combined image" aspect of [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) for published artifacts, and [ADR-0026](0026-collector-version-updates-on-kubernetes.md) refines [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) and [ADR-0014](0014-binary-updates-in-the-pod-via-container-mode.md) (gitops-pr as the Kubernetes default, container mode as an opt-in).

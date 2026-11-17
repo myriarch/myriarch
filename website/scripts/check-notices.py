@@ -14,6 +14,10 @@ website/data/third_party.yaml is the source of the page /legal/third-party/. The
     license, url, use, source and license_file,
   - the built site (the argument) has no non-empty file at the license_file path of an entry (MIT and OFL-1.1 require the license
     text to accompany every copy, so the texts are published under /licenses/),
+  - a script or source map of the built site holds code of elkjs (EPL-2.0), the ELK layout of Mermaid. The site leaves that chunk
+    out and has no notice for it (ADR-0051). The code is recognized by the identifiers of the Eclipse Layout Kernel
+    (org.eclipse.elk), from which elkjs is compiled, so a Mermaid release that renames or splits the chunk cannot bring it back
+    unnoticed,
   - a version in package.json is not an exact version (a range would let the shipped version drift from the notice),
   - the version of the Mermaid plugin in config/_default/params.yaml differs from the one in package.json (Docsy loads the plugin
     with this version; the self-hosted file comes from node_modules),
@@ -30,6 +34,8 @@ import sys
 FIELDS = ("name", "package", "version", "license", "url", "use", "source", "license_file")
 EXACT = re.compile(r"^\d+\.\d+\.\d+$")
 DOCSY = "github.com/docsy/docsy/theme"
+ELK_MARKER = b"org.eclipse.elk"
+SCRIPT_SUFFIXES = (".js", ".mjs", ".map")
 
 
 def website_dir():
@@ -73,6 +79,21 @@ def mermaid_plugin_version(params_text):
     return m.group(1) if m else None
 
 
+def elk_files(public):
+    """Returns the paths below public (with /) of the scripts and source maps that hold code of elkjs, sorted."""
+    found = []
+    for root, dirs, files in os.walk(public):
+        dirs.sort()
+        for name in files:
+            if not name.endswith(SCRIPT_SUFFIXES):
+                continue
+            path = os.path.join(root, name)
+            with open(path, "rb") as fh:
+                if ELK_MARKER in fh.read():
+                    found.append(os.path.relpath(path, public).replace(os.sep, "/"))
+    return sorted(found)
+
+
 def check(site, public=None):
     """Returns (number of entries, findings). public is the built site; the published license texts are checked when it is a directory."""
     findings = []
@@ -104,6 +125,8 @@ def check(site, public=None):
                 findings.append("third_party.yaml: the license_file of %s must be a path below /licenses/" % e.get("name", "?"))
             elif not os.path.isfile(target) or os.path.getsize(target) == 0:
                 findings.append("third_party.yaml: the license text of %s is not published at %s" % (e.get("name", "?"), lf))
+        for rel in elk_files(public):
+            findings.append("%s: the site ships code of elkjs (the ELK layout of Mermaid), which has no notice (ADR-0051)" % rel)
 
     wanted = {}
     deps = pkg.get("dependencies", {})

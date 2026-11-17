@@ -123,9 +123,13 @@ module:
     - source: node_modules/lunr
       target: assets/vendor/lunr
       files: ['lunr.min.js']
+    # The chunk of the ELK layout (elk-*.mjs and its source map) stays out: it holds the code of elkjs (EPL-2.0), and Mermaid imports it
+    # only for the ELK layout, which the plugin options in params.yaml replace with dagre. The site ships no elkjs code and owes no notice
+    # for it (ADR-0051); check-notices.py fails when ELK code reaches the built site. A negated pattern comes first, because it ends the
+    # evaluation of the list for a file that it matches.
     - source: node_modules/mermaid/dist
       target: static/vendor/mermaid
-      files: ['mermaid.esm.min.mjs', 'chunks/mermaid.esm.min/**']
+      files: ['! chunks/mermaid.esm.min/elk-*', 'mermaid.esm.min.mjs', 'chunks/mermaid.esm.min/**']
     # The license texts of the shipped packages are published next to the site (/licenses/<package>/LICENSE.txt, linked from the
     # third-party page); website/scripts/check-notices.py fails when a listed component has no file there.
     - source: node_modules/bootstrap/LICENSE

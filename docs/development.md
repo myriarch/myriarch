@@ -602,10 +602,11 @@ version of a package URL, so an exception also covers the later versions of its 
 update it. An advisory that does not apply goes to `allow-ghsas` with its GHSA ID and a reason; `govulncheck` (gate `vulncheck`) is
 the check that knows which vulnerable symbols the code calls. The configuration comes from the checkout of the pull request, so a
 change of the lists or of an exception is a change of policy and is reviewed as one. `pkg:npm/elkjs` (EPL-2.0, a dependency of
-Mermaid) has no exception on purpose: whether the website owes a notice for it is still to be decided (ADR-0038, decision 5). A change
-fails the review when it adds `elkjs` or changes its resolved version (Mermaid 12.2.0 resolves 0.9.3 today); a Mermaid update that
-keeps the version passes. When the job fails because GitHub cannot return the comparison (a merge group that is not processed yet, for
-example), nothing runs it again: re-run the job, and queue the pull request again when its merge group failed.
+Mermaid) has an exception because the website ships none of its code: the site leaves the chunk of the ELK layout out of the Mermaid
+files that it publishes, and `website/scripts/check-notices.py` fails when ELK code reaches the built site
+([ADR-0051](adr/0051-the-website-does-not-ship-the-elk-layout-of-mermaid.md)). When the job fails because GitHub cannot return the
+comparison (a merge group that is not processed yet, for example), nothing runs it again: re-run the job, and queue the pull request
+again when its merge group failed.
 
 ### Vulnerability reports in code scanning
 

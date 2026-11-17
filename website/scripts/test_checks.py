@@ -422,6 +422,24 @@ class NoticesTest(TempCase):
         # without a built site only the sources are checked
         self.assertEqual(self.mod.check(site, self.path("missing")), (3, []))
 
+    def test_elk_code_in_the_built_site_is_reported(self):
+        site = self.site()
+        public = self.path("public")
+        for name in ("docsy", "bootstrap", "mermaid"):
+            write(os.path.join(public, "licenses", name, "LICENSE.txt"), "MIT License\n")
+        chunks = os.path.join(public, "vendor", "mermaid", "chunks", "mermaid.esm.min")
+        write(os.path.join(chunks, "chunk-AB12.mjs"), 'import("./elk-CD34.mjs");var layout="dagre";\n')
+        write(os.path.join(chunks, "flowchart-EF56.mjs"), "export{render};\n")
+        write(os.path.join(public, "index.html"), "<p>org.eclipse.elk in a page is no code</p>\n")
+        self.assertEqual(self.mod.check(site, public), (3, []))
+        write(os.path.join(chunks, "layout-GH78.mjs"), 'var o="org.eclipse.elk.algorithm";\n')
+        write(os.path.join(chunks, "layout-GH78.mjs.map"), '{"sourcesContent":["org.eclipse.elk.layered"]}\n')
+        _, findings = self.mod.check(site, public)
+        self.assertEqual(findings, [
+            "vendor/mermaid/chunks/mermaid.esm.min/layout-GH78.mjs: the site ships code of elkjs (the ELK layout of Mermaid), which has no notice (ADR-0051)",
+            "vendor/mermaid/chunks/mermaid.esm.min/layout-GH78.mjs.map: the site ships code of elkjs (the ELK layout of Mermaid), which has no notice (ADR-0051)",
+        ])
+
     def test_missing_entry_and_version_mismatch(self):
         site = self.site(entries=[("Docsy", "github.com/docsy/docsy/theme", "0.17.0"), ("Mermaid", "mermaid", "11.17.2")])
         _, findings = self.mod.check(site)

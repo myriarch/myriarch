@@ -302,13 +302,18 @@ attribution; the check fails only when a Docsy update puts content into one of t
 ## Updating Mermaid
 
 Mermaid is self-hosted: `config/_default/module.yaml` mounts `mermaid.esm.min.mjs` and `chunks/mermaid.esm.min/**` from
-`node_modules/mermaid/dist` to `/vendor/mermaid/`, and the Docsy plugin imports the first file. A new version needs, besides
-`package.json` and the lockfile:
+`node_modules/mermaid/dist` to `/vendor/mermaid/`, and the Docsy plugin imports the first file. The mount leaves out the chunk of the
+ELK layout (`elk-*.mjs` and its source map): it holds the code of `elkjs` (EPL-2.0), Mermaid imports it only for the ELK layout, and
+the plugin pins dagre, so the site ships no `elkjs` code and needs no notice for it
+([ADR-0051](../docs/adr/0051-the-website-does-not-ship-the-elk-layout-of-mermaid.md)). A new version needs, besides `package.json`
+and the lockfile:
 
 1. The version in `config/_default/params.yaml` and in `data/third_party.yaml` (`check-notices.py` fails on a difference).
 2. A check that the mounted files still exist and that the chunks import only each other (a relative `import` that points outside
    `chunks/mermaid.esm.min/` would be a 404 in the built site), and that no file of the bundle names another host
-   (`check-third-party.py` scans `public/`).
+   (`check-third-party.py` scans `public/`). The one exception is the dynamic `import` of the ELK chunk, which runs only for the ELK
+   layout. When Mermaid renames or splits that chunk, `check-notices.py` fails on the ELK code in `public/`; adjust the pattern of
+   the mount.
 3. A look at every diagram, not only at the build: `check-requests.mjs` stops at the first SVG of a page, and a diagram that fails to
    parse is also an SVG. The diagrams are in `docs/architecture.md` (four) and `docs/design/version-selection.md` (one); open both
    pages in the light and in the dark appearance and compare them with the previous version.
@@ -375,7 +380,7 @@ itself, so it is dismissed as a tolerable risk with this paragraph as the reason
 | `check-placeholders.py` | a placeholder whose page now exists, or a malformed placeholder |
 | `check-api-spec.py` | a missing API reference page, a download that is not exactly one fingerprinted copy of `api/openapi.yaml`, a page that loads a script of an API viewer, or a number of operation sections that differs from the contract |
 | `check-landing.py` | a missing or malformed screenshot, a section or the mark of the landing page that is broken, an image without size or alt text, or a status chip that differs from `data/release.yaml` (or a malformed `release.yaml`) |
-| `check-notices.py` | a shipped dependency without a notice, with another version in `data/third_party.yaml`, or without a published license text |
+| `check-notices.py` | a shipped dependency without a notice, with another version in `data/third_party.yaml`, or without a published license text, and code of `elkjs` (the ELK layout of Mermaid, which the site leaves out) in a script or source map of the built site |
 | `check-seo.py` | metadata for search engines and AI crawlers that differs from the configuration or breaks a rule of [SEO and GEO](#seo-and-geo): a page without exactly one canonical link to its own production URL, JSON-LD that is invalid, has a property its type does not define, names another version than `data/release.yaml` or a breadcrumb that differs from the visible one, a home title that is the bare site title, an image without alt text, an `llms.txt` that is missing, malformed, misspelled or links outside the site and the repository, a 404 page that can be indexed, a production `robots.txt` that blocks a crawler, a sitemap that differs from the canonical links or lists a placeholder, Open Graph and Twitter tags that differ from the title, the description, the canonical URL or the card file, an `og:image:alt` or `twitter:image:alt` that is missing or differs from the other or from `seo.imageAlt`, an `seo.imageAlt` that differs from the `<title>` of the SVG source of the card, a publication date that the page does not show; the mode comes from `WEBSITE_ENV` |
 
 A new check is a file `scripts/check-<name>.py` that takes the built site as its argument; the runner finds it. Outside the gate:
