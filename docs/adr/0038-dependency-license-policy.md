@@ -1,6 +1,6 @@
 # 0038. Dependency license policy: a tripwire on the CNCF allowlist for pull requests, a narrower allowlist for releases
 
-- Status: Accepted
+- Status: Accepted; decision 5 (`elkjs`) is superseded by [ADR-0051](0051-the-website-does-not-ship-the-elk-layout-of-mermaid.md)
 - Date: 2026-10-15
 - Related: [ADR-0018](0018-license-and-copyright.md), [ADR-0028](0028-relationship-to-opentelemetry-and-foundation-path.md), [ADR-0030](0030-reuse-compliance-and-third-party-notices.md), [ADR-0032](0032-continuous-integration-on-github-actions.md), [ADR-0033](0033-openssf-scorecard-as-the-only-third-party-action.md)
 

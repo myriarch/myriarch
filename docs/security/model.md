@@ -672,9 +672,10 @@ guidance after each item names what to do.
   dependency graph and can be wrong or missing (a missing license is only listed); the check looks at the dependencies a change adds
   or updates, not at the whole tree; an exception names a package and covers all its later versions; the configuration is read from
   the checkout of the pull request, so a pull request that changes the policy and a dependency together depends on the review of the
-  policy change (the maintainer owns every file in `.github/CODEOWNERS`); and `pkg:npm/elkjs` (EPL-2.0, a dependency of Mermaid that
-  the website serves) has no exception until the question of its notice is decided, so a change that adds it or changes its resolved
-  version fails the review.
+  policy change (the maintainer owns every file in `.github/CODEOWNERS`); and `pkg:npm/elkjs` (EPL-2.0, a dependency of Mermaid) has
+  an exception that rests on the website, not on the review: the site leaves the chunk of the ELK layout out of the Mermaid files that
+  it publishes, and `website/scripts/check-notices.py` fails when ELK code reaches the built site (ADR-0051), so the review no longer
+  reports a license change of `elkjs`.
 - **Static analysis in CI: CodeQL, Scorecard and zizmor.** Three controls look at the code and the pipeline, none replaces review:
   - *CodeQL* (`.github/workflows/codeql.yml`) analyses the Go code (built for Linux with and without the `embedui` and `devpg`
     build tags, for Windows with and without them and for macOS, so that the Windows-only code of the updater, which runs as

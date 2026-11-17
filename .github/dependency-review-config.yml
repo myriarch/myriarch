@@ -52,10 +52,6 @@ allow-ghsas: []
 # a LicenseRef identifier of the graph's own, such as LicenseRef-bad-bsd-2-clause-isc, is on no list. On 2026-10-15 every entry below was
 # needed: for at least one version of its package that a lockfile resolves, the graph reports an expression that allow-licenses does not
 # cover. Remove an entry when the graph reports an expression that allow-licenses covers for every such version.
-#
-# Not listed on purpose: pkg:npm/elkjs (EPL-2.0, weak copyleft), a dependency of Mermaid, whose chunks the website serves. Whether the
-# website needs a notice for it has to be decided before an exception is recorded. A change that adds it or changes its resolved version
-# fails the check (Mermaid 12.1.0 resolves 0.9.3 today); a Mermaid update that keeps the version passes.
 allow-dependencies-licenses:
   # github.com/cyphar/filepath-securejoin (BSD-3-Clause AND MPL-2.0), linked through go-git: the module has two licenses. The release builds
   # link only the packages under BSD-3-Clause (LICENSE.BSD); the exception with this scope in ci/license-overrides.txt makes the release
@@ -157,6 +153,13 @@ allow-dependencies-licenses:
   - 'pkg:npm/minipass'
   - 'pkg:npm/path-scurry'
   - 'pkg:npm/tar'
+
+  # elkjs (EPL-2.0 for 0.9.3, EPL-2.0 OR GPL-3.0-or-later for 0.12.1; weak copyleft), a dependency of Mermaid. Its code sits in one chunk
+  # of the Mermaid files (elk-*.mjs), which Mermaid imports only for the ELK layout. The website pins the dagre layout and leaves that chunk
+  # out of what it publishes (website/config/_default/module.yaml), and website/scripts/check-notices.py fails when ELK code reaches the
+  # built site, so the site ships no elkjs code and owes no notice for it (ADR-0051, which answers decision 5 of ADR-0038). Added on
+  # 2026-11-17, when Mermaid 12.3.0 moved elkjs from 0.9.3 to 0.12.1.
+  - 'pkg:npm/elkjs'
 
   # lru-cache, minimatch, yallist (BlueOak-1.0.0, permissive; the graph reports it for the newest versions that the lockfiles resolve and
   # ISC for older ones) and uri-js (BSD-2-Clause AND BSD-2-Clause-Views, permissive) in the tool trees of both web/ and website/.
