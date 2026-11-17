@@ -334,10 +334,12 @@ one, `pnpm.overrides` in `package.json` replaces the vulnerable version with the
 
 | Override | Replaces | Why |
 |---|---|---|
+| `@vercel/cli-config>zod@>=4.0.0 <4.6.6` | zod 4.1.11 | pinned by `@vercel/cli-config` 0.3.1, which `@vercel/oidc` pins under `@vercel/blob` and `@vercel/sandbox`; 4.6.6 is the fix of GHSA-mrhx-c7xc-m3w5. The key names the parent, so the zod 4.6.7 of the rest of the CLI stays. The range is the affected 4.x line: zod 3 has no fixed release (see the findings below) |
 | `@vercel/container>tar@<7.5.21` | tar 7.5.11 | pinned by `@vercel/container`; 7.5.21 is the first release without an advisory (7.5.18, the fix that the Dependabot alerts name, is still affected by GHSA-23hp-3jrh-7fpw and GHSA-r292-9mhp-454m). The key names the parent, so the tar 7.5.22 of `@mapbox/node-pre-gyp` and `@vercel/fun` stays |
-| `@vercel/python-analysis>minimatch@<10.2.3` | minimatch 10.1.1 | pinned by `@vercel/python-analysis`. The key names the parent, so the minimatch 10.2.6 that `glob` resolves from its `^10.2.2` stays |
+| `@vercel/python-analysis>minimatch@<10.2.3` | minimatch 10.1.1 | pinned by `@vercel/python-analysis`. The key names the parent, so the minimatch 10.2.6 that `glob` resolves from its `^10.2.2` stays. 10.2.3 removes three of the four advisories of 10.1.1; the fourth, GHSA-g3hv-75wg-m249, is fixed only in minimatch 11 (see the findings below) |
 | `js-yaml@>=4.0.0 <4.3.2` | js-yaml 4.1.1 | pinned by `@vercel/python-analysis`. The range is the affected 4.x line: its upper bound keeps js-yaml 5 (markdownlint-cli2) out, its lower bound a js-yaml 3 |
-| `smol-toml@<1.9.0` | smol-toml 1.5.2 and 1.8.0 | pinned by the Vercel CLI, its builders and markdownlint-cli2 |
+| `re2js@>=2.2.0 <2.8.7` | re2js 2.8.6 | pinned by markdownlint (under markdownlint-cli2); 2.8.7 is the fix of GHSA-gg6h-894w-4m9c, and the range is the affected one |
+| `smol-toml@<1.9.0` | smol-toml 1.5.2 | pinned by `@vercel/cli-support` (the Vercel CLI), its builders and `@vercel/python-analysis`; markdownlint-cli2 pins the fixed 1.9.1 |
 | `undici@<6.0.0` | undici 5.28.4 and 5.29.0 | pinned by the Vercel CLI and `@vercel/node`; undici 5 has no fix. The CLI imports undici only for its proxy support. undici 6 no longer depends on `@fastify/busboy`, which leaves the lockfile |
 
 pnpm applies a key when the version range that a package declares for the dependency intersects the range of the key. The keys
@@ -351,18 +353,21 @@ decision, an override or a row here:
 
 | Finding | Package and path | Why it stays |
 |---|---|---|
-| GHSA-j3q9-mxjg-w52f, GHSA-27v5-c462-wpq7 | path-to-regexp 8.3.0 under `vercel > @vercel/backends` | `@vercel/backends` is the builder for backend projects. It runs in `vercel build`, which this repository never calls: the deploy job runs `vercel deploy --prebuilt`. GitHub dismissed the alerts automatically (development scope) |
-| GHSA-2g4f-4pwh-qvx6 | ajv 8.6.3 under `vercel > @vercel/backends > @vercel/static-config` | The same builder, the same reason |
-| GHSA-vfj7-8cjw-p6xm | braces 3.0.3 under `markdownlint-cli2 > micromatch` | No fixed release exists. markdownlint-cli2 expands the glob patterns of its configuration and command line, which maintainers write. GitHub dismissed the alert automatically |
+| GHSA-j3q9-mxjg-w52f, GHSA-27v5-c462-wpq7 | path-to-regexp 8.3.0 under `vercel > @vercel/cli-support > @vercel/backends` | `@vercel/backends` is the builder for backend projects. It runs in `vercel build`, which this repository never calls: the deploy job runs `vercel deploy --prebuilt`. GitHub dismissed the alerts automatically (development scope) |
+| GHSA-2g4f-4pwh-qvx6 | ajv 8.6.3 under `vercel > @vercel/cli-support > @vercel/backends > @vercel/static-config` | The same builder, the same reason |
+| GHSA-3g3m-2fjr-6pw4 | glob 13.0.7 under `vercel > @vercel/cli-support > @vercel/backends > @vercel/nft` | The same builder, the same reason. The fix is glob 14.0.2, a major release above the `^13.0.0` of `@vercel/nft` |
+| GHSA-g3hv-75wg-m249 | minimatch 10.2.6 under `vercel > @vercel/cli-support > @vercel/backends > @vercel/nft > glob` and 10.2.3 under `vercel > @vercel/cli-support > @vercel/python-analysis` | The fix is minimatch 11.0.1, a major release. The first copy is in the same builder. The second is the version of the override above: `@vercel/python-analysis` looks for the entry point of a Python project when the CLI builds one, which the deploy job never does |
+| GHSA-mrhx-c7xc-m3w5 | zod 3.22.4 under `vercel > @vercel/cli-support > @vercel/backends` (and `@vercel/express`, `@vercel/hono` and `@vercel/python-analysis`) | zod 3 has no fixed release (the fix is 4.6.6, a major release). The packages are builders, which run only when the CLI builds a project, and the Python analysis above; the copy of zod 4 under `@vercel/cli-config` has an override |
+| GHSA-fc5q-39xc-vjpf | picomatch 2.3.2 under `markdownlint-cli2 > micromatch` and 4.0.7 under `vercel > @vercel/cli-support > @vercel/backends > @vercel/nft` | No fixed release exists. markdownlint-cli2 matches the glob patterns of its configuration and command line, which maintainers write; the other copy is in the same builder as above |
 | GHSA-238p-pmpm-9mq7 | katex 0.16.47 under `markdownlint-cli2 > markdownlint > micromark-extension-math` | There is no override; see below |
 
 KaTeX has no override. The copy that the site serves is bundled into the Mermaid files that the site ships (`mermaid.esm.min.mjs` and
-`chunks/mermaid.esm.min/**`), not taken from `node_modules`: Mermaid 12.2.0 bundles KaTeX 0.18.11, which has the fix (0.18.2), while
-Mermaid 11.17.2 and 12.1.0 bundled 0.16.47. After a Mermaid update, read the bundled version in `chunks/mermaid.esm.min/katex-*.mjs`.
-The finding that remains is the copy under markdownlint, which accepts only a KaTeX range below 0.18 (micromark-extension-math 3.1.0
-has no newer release). markdownlint loads it but parses Markdown without rendering math, and nothing of it is shipped; an override
-would only make the lockfile report a version that no check uses. GitHub does not dismiss the Dependabot alert for this copy by
-itself, so it is dismissed as a tolerable risk with this paragraph as the reason.
+`chunks/mermaid.esm.min/**`), not taken from `node_modules`: Mermaid 12.2.0 and 12.3.0 bundle KaTeX 0.18.11, which has the fix
+(0.18.2), while Mermaid 11.17.2 and 12.1.0 bundled 0.16.47. After a Mermaid update, read the bundled version in
+`chunks/mermaid.esm.min/katex-*.mjs`. The finding that remains is the copy under markdownlint, which accepts only a KaTeX range below
+0.18 (micromark-extension-math 3.1.0 has no newer release). markdownlint loads it but parses Markdown without rendering math, and
+nothing of it is shipped; an override would only make the lockfile report a version that no check uses. GitHub does not dismiss the
+Dependabot alert for this copy by itself, so it is dismissed as a tolerable risk with this paragraph as the reason.
 
 ## Checks
 

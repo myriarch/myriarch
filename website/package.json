@@ -12,11 +12,11 @@
     "@fortawesome/fontawesome-free": "7.3.1",
     "bootstrap": "5.3.8",
     "lunr": "2.3.9",
-    "mermaid": "12.2.0"
+    "mermaid": "12.3.0"
   },
   "devDependencies": {
-    "markdownlint-cli2": "0.23.3",
-    "vercel": "64.5.0"
+    "markdownlint-cli2": "0.24.0",
+    "vercel": "65.14.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [],
@@ -24,9 +24,11 @@
       "esbuild"
     ],
     "overrides": {
+      "@vercel/cli-config>zod@>=4.0.0 <4.6.6": "4.6.6",
       "@vercel/container>tar@<7.5.21": "7.5.21",
       "@vercel/python-analysis>minimatch@<10.2.3": "10.2.3",
       "js-yaml@>=4.0.0 <4.3.2": "4.3.2",
+      "re2js@>=2.2.0 <2.8.7": "2.8.7",
       "smol-toml@<1.9.0": "1.9.0",
       "undici@<6.0.0": "6.29.1"
     }
