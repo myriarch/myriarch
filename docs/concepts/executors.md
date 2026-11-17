@@ -48,6 +48,14 @@ the previous version and again waits for the reported version. Together with
 [`update.selection`](fleets.md#target-version-from-the-ui-within-the-git-frame) the UI chooses the target version and
 `myriarchd` waits for the change from outside.
 
+## GitOps pull request (planned)
+
+The `gitops-pr` executor is planned for v0.3.0 and not available yet. On Kubernetes it will change the collector image in the
+deployment repository through a pull or merge request instead of replacing the binary, and `myriarchd` gets no Kubernetes API
+access. Its design (configuration, life cycle of the request, abort and rollback, merge detection and credentials) is proposed
+in [ADR-0052](../adr/0052-gitops-pr-executor-bumps-the-image-through-a-pull-or-merge-request.md); until it ships, use `manual`
+or `webhook`. Completion is decided by the reported version, as for every executor.
+
 ## The Executor object
 
 The built-in executors `updater` and `manual` need no object. `webhook` and `awx` are described by an `Executor` object.
