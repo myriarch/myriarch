@@ -73,6 +73,8 @@ Further places:
 
 - `make test` and `make test-race` run `go test ./...` without tags (this covers the `devpg` stub) and additionally
   `go test -tags devpg ./internal/devpg/...` (the embedded PostgreSQL implementation).
+  To run only the unit tests of one package, pass its path to `go test`, for example `go test -count=1 ./internal/brand`;
+  `-count=1` bypasses the test cache.
 - `scripts/build-image-crane.sh` (`make image-crane`) builds `myriarchd` with `embedui,devpg` by default
   (`IMAGE_VARIANT=dev`). This is the dev and simulator image, and `myriarchd dev` runs there. `IMAGE_VARIANT=release`
   builds `myriarchd` with `embedui` only and leaves out `/opt/myriarch/release-fixtures`, so the image holds no OpenTelemetry
