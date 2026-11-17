@@ -66,6 +66,6 @@ Some early operational decisions were not kept as separate records. They are des
 | [0049](0049-sign-off-for-the-project-machine-account.md) | Sign-off for the commits of the project's machine account | Accepted |
 | [0050](0050-tagline-backed-by-the-documentation.md) | Tagline backed by the documentation | Accepted |
 | [0051](0051-the-website-does-not-ship-the-elk-layout-of-mermaid.md) | The website does not ship the ELK layout of Mermaid | Accepted |
-| [0052](0052-gitops-pr-executor-bumps-the-image-through-a-pull-or-merge-request.md) | The gitops-pr executor bumps the collector image through a pull or merge request | Proposed |
+| [0052](0052-gitops-pr-executor-bumps-the-image-through-a-pull-or-merge-request.md) | The gitops-pr executor bumps the collector image through a pull or merge request | Accepted |
 
 The Status column names the later records that refine, amend or supersede an earlier record; for example, [ADR-0024](0024-container-registry-and-image-set.md) supersedes the "own combined image" aspect of [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) for published artifacts, and [ADR-0026](0026-collector-version-updates-on-kubernetes.md) refines [ADR-0008](0008-kubernetes-supervisor-and-collector-in-one-pod.md) and [ADR-0014](0014-binary-updates-in-the-pod-via-container-mode.md) (gitops-pr as the Kubernetes default, container mode as an opt-in).
