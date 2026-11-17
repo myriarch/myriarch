@@ -9,7 +9,7 @@ export function notifySuccess(key: string, values?: Record<string, unknown>): vo
   notifications.show({
     color: 'teal',
     title: i18n.t('common.done'),
-    message: i18n.t(key, values),
+    message: i18n.t(key, values ?? {}),
     autoClose: 4000,
   });
 }
