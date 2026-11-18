@@ -1,6 +1,6 @@
 # 0052. The gitops-pr executor bumps the collector image through a pull or merge request
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-17
 - Related: [ADR-0003](0003-gitops-as-source-of-truth.md), [ADR-0006](0006-version-updates-via-exchangeable-executors.md), [ADR-0013](0013-target-version-from-the-ui-within-the-git-frame.md), [ADR-0026](0026-collector-version-updates-on-kubernetes.md), [ADR-0048](0048-release-scope-of-v0-3-0-to-v0-6-0.md)
 
