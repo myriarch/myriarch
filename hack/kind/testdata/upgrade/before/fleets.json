@@ -1,0 +1,43 @@
+{
+  "items": [
+    {
+      "fleet": {
+        "name": "sim-edge",
+        "priority": 10,
+        "selector": {"matchAttributes": {"site.type": "edge"}},
+        "blueprint": "sim",
+        "collector": {"distribution": "otelcol-contrib", "version": "0.161.0"},
+        "update": {"executor": "none"},
+        "rollout": {"config": "probe-config", "version": "probe-version"},
+        "source": {"path": "fleets/sim-edge.yaml", "commit": "1111111111111111111111111111111111111111"}
+      },
+      "status": {"agents": 3, "online": 3, "inSync": 3}
+    },
+    {
+      "fleet": {
+        "name": "sim-dc",
+        "priority": 10,
+        "selector": {"matchAttributes": {"site.type": "dc"}},
+        "blueprint": "sim",
+        "collector": {"distribution": "otelcol-contrib", "version": "0.161.0"},
+        "update": {"executor": "none"},
+        "rollout": {"config": "probe-config", "version": "probe-version"},
+        "source": {"path": "fleets/sim-dc.yaml", "commit": "1111111111111111111111111111111111111111"}
+      },
+      "status": {"agents": 1, "online": 1, "inSync": 1}
+    },
+    {
+      "fleet": {
+        "name": "kind-gw",
+        "priority": 20,
+        "selector": {"matchAttributes": {"labels.source": "kind-gw"}},
+        "blueprint": "kind-gw",
+        "collector": {"distribution": "otelcol-contrib", "version": "0.161.0"},
+        "update": {"executor": "none"},
+        "rollout": {"config": "probe-config", "version": "probe-version"},
+        "source": {"path": "fleets/kind-gw.yaml", "commit": "1111111111111111111111111111111111111111"}
+      },
+      "status": {"agents": 0, "online": 0, "inSync": 0}
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "items": [
+    {
+      "id": "00000000-0000-4000-8000-000000000004", "kind": "collector", "hostname": "dc-01.example.test", "serviceName": "otelcol-contrib",
+      "version": "0.161.0", "outdated": false, "osType": "linux", "arch": "arm64", "status": "online", "lastSeenAt": "2026-01-01T10:20:03Z",
+      "healthy": true, "healthStatus": "ok", "fleetName": "sim-dc", "configSync": "pending", "targetVersion": "0.161.0", "hasUpdater": false,
+      "labels": {"source": "kind-sim"}
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000002", "kind": "collector", "hostname": "edge-02.example.test", "serviceName": "otelcol-contrib",
+      "version": "0.161.0", "outdated": false, "osType": "linux", "arch": "arm64", "status": "online", "lastSeenAt": "2026-01-01T10:20:01Z",
+      "healthy": true, "healthStatus": "ok", "fleetName": "sim-edge", "configSync": "in_sync", "targetVersion": "0.161.0", "hasUpdater": false
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000001", "kind": "collector", "hostname": "edge-01.example.test", "serviceName": "otelcol-contrib",
+      "version": "0.161.0", "outdated": false, "osType": "linux", "arch": "arm64", "status": "online", "lastSeenAt": "2026-01-01T10:20:00Z",
+      "healthy": true, "healthStatus": "ok", "fleetName": "sim-edge", "configSync": "in_sync", "targetVersion": "0.161.0", "hasUpdater": false
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000003", "kind": "collector", "hostname": "edge-03.example.test", "serviceName": "otelcol-contrib",
+      "version": "0.161.0", "outdated": false, "osType": "linux", "arch": "arm64", "status": "online", "lastSeenAt": "2026-01-01T10:20:02Z",
+      "healthy": true, "healthStatus": "ok", "fleetName": "sim-edge", "configSync": "pending", "targetVersion": "0.161.0", "hasUpdater": false
+    }
+  ],
+  "total": 4,
+  "limit": 500,
+  "offset": 0
+}

@@ -1,0 +1,36 @@
+{
+  "items": [
+    {
+      "id": 6, "time": "2026-01-01T10:21:00Z", "actorType": "user", "actorId": "admin", "actorName": "admin",
+      "action": "gitops.sync", "targetType": "gitops", "targetId": "main",
+      "result": "success", "details": {"trigger": "manual"}, "sourceIp": "192.0.2.10", "requestId": "req-0006"
+    },
+    {
+      "id": 5, "time": "2026-01-01T10:15:00Z", "actorType": "system", "actorId": "myriarchd", "actorName": "myriarchd",
+      "action": "server.start", "result": "success", "requestId": "req-0005"
+    },
+    {
+      "id": 4, "time": "2026-01-01T09:59:00Z", "actorType": "user", "actorId": "admin", "actorName": "admin",
+      "action": "agent.resync", "targetType": "agent", "targetId": "00000000-0000-4000-8000-000000000002",
+      "result": "success", "details": {"reason": "manual"}, "sourceIp": "192.0.2.10", "requestId": "req-0004"
+    },
+    {
+      "id": 3, "time": "2026-01-01T09:58:00Z", "actorType": "user", "actorId": "admin", "actorName": "admin",
+      "action": "agent.resync", "targetType": "agent", "targetId": "00000000-0000-4000-8000-000000000001",
+      "result": "success", "details": {"reason": "manual"}, "sourceIp": "192.0.2.10", "requestId": "req-0003"
+    },
+    {
+      "id": 2, "time": "2026-01-01T09:57:00Z", "actorType": "user", "actorId": "admin", "actorName": "admin",
+      "action": "gitops.sync", "targetType": "gitops", "targetId": "main",
+      "result": "success", "details": {"trigger": "manual"}, "sourceIp": "192.0.2.10", "requestId": "req-0002"
+    },
+    {
+      "id": 1, "time": "2026-01-01T09:55:00Z", "actorType": "user", "actorId": "admin", "actorName": "admin",
+      "action": "auth.bootstrap.login", "targetType": "user", "targetId": "admin",
+      "result": "success", "sourceIp": "192.0.2.10", "requestId": "req-0001"
+    }
+  ],
+  "total": 6,
+  "limit": 500,
+  "offset": 0
+}

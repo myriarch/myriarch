@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `hack/kind/upgrade.sh` installs the signed server chart of the previous minor release on kind (v0.2.1; chart and image pinned by digest in `hack/kind/versions.env` and verified with cosign before the installation), upgrades to the chart and images of the commit and checks that fleets, assignments and the audit log are unchanged and that the agents stay connected. A full run needs Docker; the comparison has a fixture test that runs without a cluster.
 - `ci/check-commit-provenance.sh`, the CI job `provenance` and a step of the release tag guard: every commit needs a `Signed-off-by:` line that matches its author, or must be part of a pull request of the project's machine account (SSH-signed, verified, approved by a person other than the account, squash-merged) or of a Dependabot pull request ([ADR-0049](docs/adr/0049-sign-off-for-the-project-machine-account.md)). The release guard checks the history since the last published release and reads releases and pull requests; its job now also has `pull-requests: read`. `ci/provenance-exceptions.txt` records a commit on `main` that is accepted although it meets no rule.
 - `.github/dco.yml`: commits that GitHub shows as verified and whose author is a member of the organization no longer need a sign-off for the DCO check, and the button "Set DCO to pass" is off. The per-commit check above is what decides who may use this.
 

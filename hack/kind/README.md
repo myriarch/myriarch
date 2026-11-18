@@ -131,6 +131,8 @@ deletes the probe namespaces (and the CoreDNS rewrite); without a flag it requir
   helpers (REST calls with a cookie jar and CSRF token, port-forward lifecycle, rollout observation, installation steps).
 * `up.sh`, `down.sh`, `images.sh`, `install.sh` (installation without checks), `diag.sh` (diagnostics, called on failure).
   `ci/kind-chart-test.sh` (outside this directory) is the chart installation test that reuses them.
+* `upgrade.sh` is the [upgrade test](#upgrade-test-from-the-previous-release), `lib/upgrade.sh` its helpers (pins, snapshots, comparison)
+  and `testdata/upgrade/` the fixtures of the tests of the comparison.
 * `cluster.yaml`, `versions.env` (all image pins carry a digest; `ci/check.sh` verifies it), `manifests/`, `values/`, `gitops/`,
   `git/` (scripts of the Git server), `fault/killer.sh` (fault injection for the rollback check).
 
@@ -159,6 +161,48 @@ ci/kind-chart-test.sh --fresh    # cluster, registry and work directory from zer
 checkout needs the tag (the script fetches it when it is missing). Not covered, on purpose: a failover with `docker pause`,
 an arbitrary user ID, the Compose smoke test, updates of the container mode and a Quickstart on kind. The test shares the cluster
 and the work directory with `make kind-probe`: run one of the two at a time.
+
+## Upgrade test from the previous release
+
+`upgrade.sh` checks the upgrade path from the last minor release. It pulls the published server chart of the previous version from the
+OCI registry (`helm pull`), compares the digest that Helm reports with the pin, verifies the signature of the chart and of the server image
+with `cosign verify` against the identity of the release workflow, and only then installs that chart and image (the pulled archive, not the
+registry reference). It publishes the fleets of the GitOps fixture (`gitops/`), connects the simulated agents and creates audit entries. Then it
+upgrades to the chart and the images of this commit (`helm upgrade`, never `--reuse-values`) and compares the state before and after:
+
+* the fleets (name, priority, blueprint, selector and source),
+* the assignments (the fleet and the target version of every agent),
+* the audit log (every event from before is still there and unchanged; new events are allowed), and
+* the connections: every agent that was online is online again, and no agent has a new id (a new id would be a new registration).
+
+The script exits non-zero when one of them differs. The comparison is a shell function (`upgrade_compare` in `lib/upgrade.sh`) that works on
+three JSON files per state, so `go test ./hack/kind/` tests it against the fixtures in `testdata/upgrade` without a cluster. The same tests check
+the syntax of the script, its execute bit, that it stops with one line when a tool is missing, and the pins.
+
+```bash
+hack/kind/upgrade.sh --fresh    # cluster, registry and work directory from zero
+hack/kind/upgrade.sh --reset    # keep cluster and registry, delete the namespaces myriarch and probe-infra, then run
+hack/kind/upgrade.sh            # requires hack/kind/up.sh; stops when the namespace myriarch exists
+```
+
+A full run needs Docker (kind) and network access to `ghcr.io`, Docker Hub, Sigstore (the TUF root that `cosign` fetches) and the Go proxy.
+`kind`, `kubectl`, `helm` and `cosign` must be on the `PATH` (`make tools` installs the pinned ones into `.cache/bin`); the script stops with one
+line that names the first one that is missing. It also needs `docker`, `crane`, `jq`, `curl`, `git`, `python3`, `openssl`, `ssh-keygen` and `go`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `UPGRADE_KUBE` | `current` | `current` runs on `KIND_NODE_IMAGE`, `previous` on `KIND_NODE_IMAGE_PREVIOUS` |
+| `KIND_CLUSTER_NAME`, `PROBE_WORK`, `PROBE_PORT_API`, ... | see [Environment](#environment) | The same variables as the probe |
+
+The previous version and its pins are in `versions.env`: `UPGRADE_PREVIOUS_VERSION`, `UPGRADE_PREVIOUS_CHART_DIGEST` (the digest of the OCI
+manifest of the chart) and `UPGRADE_PREVIOUS_SERVER_IMAGE` (tag and digest of the index of the image). Renew the three together with `crane digest
+ghcr.io/myriarch/charts/myriarch:<version>` and `crane digest ghcr.io/myriarch/myriarch:<version>`, then run `hack/kind/upgrade.sh --fresh`. The
+Kubernetes versions are the node image pins of the probe; there is no pin of its own.
+
+The results are below `.cache/kind`: `results.txt` (`PASS|N.M|name|evidence`), `upgrade/before` and `upgrade/after` (the snapshots, `fleets.json`,
+`agents.json`, `audit.json`), `upgrade/compare.log` and `logs/` (`cosign-chart.log`, `cosign-image.log`, `helm-*.log`). The test shares the cluster,
+the registry and the work directory with the probe and the chart installation test: run one of the three at a time. No CI job runs the script yet, and it
+is not part of `ci-ok`.
 
 ## Inspecting and cleaning up
 
