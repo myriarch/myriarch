@@ -1,0 +1,35 @@
+[
+  {
+    "id": 1,
+    "time": "2026-11-18T09:00:00Z",
+    "actorType": "user",
+    "actorId": "bootstrap",
+    "actorName": "admin",
+    "action": "auth.bootstrap.login",
+    "targetType": "user",
+    "targetId": "bootstrap",
+    "result": "success"
+  },
+  {
+    "id": 2,
+    "time": "2026-11-18T09:05:00Z",
+    "actorType": "user",
+    "actorId": "bootstrap",
+    "actorName": "admin",
+    "action": "agent.resync",
+    "targetType": "agent",
+    "targetId": "0b1f6c52-3d1a-4e5b-9a7c-1d2e3f4a5b61",
+    "result": "success"
+  },
+  {
+    "id": 3,
+    "time": "2026-11-18T09:05:01Z",
+    "actorType": "user",
+    "actorId": "bootstrap",
+    "actorName": "admin",
+    "action": "agent.resync",
+    "targetType": "agent",
+    "targetId": "3c9d8e17-5f2b-4a60-8b1e-7a6c5d4e3f20",
+    "result": "success"
+  }
+]

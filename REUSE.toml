@@ -53,6 +53,7 @@ SPDX-License-Identifier = "Apache-2.0"
 # fixtures written for the tests). There is no upstream text in these files.
 [[annotations]]
 path = [
+  "hack/kind/testdata/**",
   "internal/blueprint/testdata/**",
   "internal/install/testdata/**",
   "internal/testdata/**",

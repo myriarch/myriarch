@@ -1,0 +1,4 @@
+[
+  {"name": "k8s-gateway", "priority": 30, "blueprint": "gateway", "selector": {"matchAttributes": {"site.type": "cloud"}}, "collector": {"distribution": "otelcol-contrib", "version": "0.162.0"}, "update": {"strategy": "manual"}, "rollout": {"policy": "default"}},
+  {"name": "linux-hosts", "priority": 20, "blueprint": "host-agent", "selector": {"matchAttributes": {"os.type": "linux"}}, "collector": {"distribution": "otelcol-contrib", "version": "0.162.0"}, "update": {"strategy": "manual"}, "rollout": {"policy": "default"}}
+]

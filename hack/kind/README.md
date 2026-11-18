@@ -131,8 +131,11 @@ deletes the probe namespaces (and the CoreDNS rewrite); without a flag it requir
   helpers (REST calls with a cookie jar and CSRF token, port-forward lifecycle, rollout observation, installation steps).
 * `up.sh`, `down.sh`, `images.sh`, `install.sh` (installation without checks), `diag.sh` (diagnostics, called on failure).
   `ci/kind-chart-test.sh` (outside this directory) is the chart installation test that reuses them.
+* `upgrade.sh` is the driver of the [upgrade test](#upgrade-test); `lib/upgrade.sh` holds its functions (the comparison, the check of
+  the tools, the split of the pins, the capture of the state), which the Go tests in `upgrade_test.go` call without a cluster.
 * `cluster.yaml`, `versions.env` (all image pins carry a digest; `ci/check.sh` verifies it), `manifests/`, `values/`, `gitops/`,
-  `git/` (scripts of the Git server), `fault/killer.sh` (fault injection for the rollback check).
+  `git/` (scripts of the Git server), `fault/killer.sh` (fault injection for the rollback check), `testdata/upgrade/` (fixtures of the
+  comparison of the upgrade test).
 
 ## Chart installation test
 
@@ -159,6 +162,56 @@ ci/kind-chart-test.sh --fresh    # cluster, registry and work directory from zer
 checkout needs the tag (the script fetches it when it is missing). Not covered, on purpose: a failover with `docker pause`,
 an arbitrary user ID, the Compose smoke test, updates of the container mode and a Quickstart on kind. The test shares the cluster
 and the work directory with `make kind-probe`: run one of the two at a time.
+
+## Upgrade test
+
+`upgrade.sh` is the third test on this cluster. It installs the **published** server chart of the previous minor release from the
+OCI registry, checks the digests and the cosign signatures of the chart and the image, creates fleets, agents with assignments and
+audit entries, upgrades the release to the chart and the images of this commit and proves that nothing is lost and that the agents
+stay connected.
+
+```bash
+hack/kind/upgrade.sh --fresh                                  # cluster, registry and work directory from zero
+hack/kind/upgrade.sh --reset                                  # keep cluster and registry, delete the namespaces of the test
+UPGRADE_KUBERNETES=previous hack/kind/upgrade.sh --fresh      # on the previous Kubernetes version
+```
+
+> **A full run needs Docker** (kind runs the nodes as containers) and network access to `ghcr.io` and Sigstore (the cosign
+> verification). Without Docker only the fixture test runs: `go test ./hack/kind/` compares the captured states against the files in
+> `testdata/upgrade/`, checks the tool check, the parsing of the pins and the syntax of the scripts, and needs no cluster.
+
+The script needs `kind`, `kubectl`, `helm` and `cosign` (and `crane`, `jq`, `curl` and `docker`) on the `PATH` or in `.cache/bin`
+(`make tools` installs the pinned ones). When one is missing it stops with one line that names it, before it touches anything.
+
+| Stage | What it does |
+|---|---|
+| 0 | Docker, the pins and the node platform |
+| 1 | Cluster and registry (`up.sh`); the Kubernetes version of the nodes is the chosen one |
+| 2 | Server image of the commit (`images.sh`) |
+| 3 | The previous release: `crane digest` of the chart and the image must equal the pins, `cosign verify` of both with the identity of the release workflow, `helm pull` of the chart. Any deviation ends the run before anything is installed |
+| 4 | PostgreSQL, Git server and the GitOps fixture (the fleets) |
+| 5 | `helm install` of the pulled chart with the image of the previous release by digest, Pods Ready |
+| 6 | Sign-in with the bootstrap token, the simulator registers its agents, fleets exist, two `agent.resync` calls add audit entries |
+| 7 | State before: fleets, assignments and audit log are written to `.cache/kind/upgrade/before` |
+| 8 | `helm upgrade` to the chart of the commit with the image of the commit by digest, rollout, session (the bootstrap token is rotated when the session does not survive) |
+| 9 | Agents online again, no restart of the simulator, state after in `.cache/kind/upgrade/after`, comparison |
+
+**Pins.** `UPGRADE_PREVIOUS_VERSION`, `UPGRADE_PREVIOUS_CHART` (digest of the OCI manifest) and `UPGRADE_PREVIOUS_SERVER_IMAGE` (digest of
+the multi-platform index) in `versions.env` name the release; update the three together (`crane digest <ref:tag>`). They are
+separate from `UPGRADE_FROM_SERVER_IMAGE`, which belongs to the chart installation test. The Kubernetes version comes from
+`KIND_NODE_IMAGE` (`UPGRADE_KUBERNETES=current`, the default) or `KIND_NODE_IMAGE_PREVIOUS` (`UPGRADE_KUBERNETES=previous`). Images are
+set only through `image.digest`, never through a tag.
+
+**Comparison.** Fleets and assignments must be complete and equal; a field that the new version adds is allowed, a changed or missing
+field or entry is not. For the audit log every entry from before must be there with the same `id` and unchanged content; new entries
+(the sign-in after the upgrade) are allowed. The script exits with 1 when a part differs and when a check fails. A state that is
+incomplete (a file is missing or not valid JSON) fails the run as well (`comparison incomplete`). The function is
+`upgrade_compare` in `lib/upgrade.sh`.
+
+The output is `.cache/kind/upgrade.log`, `upgrade-results.txt` (`PASS|N.M|name|evidence`), `upgrade-durations.txt` and the directories
+`upgrade/before` and `upgrade/after`; `diag/` has the diagnostics after a failure. The test shares the cluster and the work directory
+with the probe and the chart installation test: run one of the three at a time. It is not wired into CI yet; the workflow and the
+Make target follow separately.
 
 ## Inspecting and cleaning up
 

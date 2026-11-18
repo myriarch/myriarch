@@ -1,0 +1,5 @@
+[
+  {"agentId": "0b1f6c52-3d1a-4e5b-9a7c-1d2e3f4a5b61", "fleetName": "linux-hosts", "assignedConfigHash": "1111111111111111111111111111111111111111111111111111111111111111", "targetVersion": "0.162.0"},
+  {"agentId": "3c9d8e17-5f2b-4a60-8b1e-7a6c5d4e3f20", "fleetName": "linux-hosts", "assignedConfigHash": "1111111111111111111111111111111111111111111111111111111111111111", "targetVersion": "0.162.0"},
+  {"agentId": "7a2e4d90-1c3b-4f58-a6d7-9e8f0a1b2c34", "fleetName": "windows-hosts", "assignedConfigHash": "2222222222222222222222222222222222222222222222222222222222222222", "targetVersion": "0.162.0"}
+]
