@@ -131,6 +131,7 @@ deletes the probe namespaces (and the CoreDNS rewrite); without a flag it requir
   helpers (REST calls with a cookie jar and CSRF token, port-forward lifecycle, rollout observation, installation steps).
 * `up.sh`, `down.sh`, `images.sh`, `install.sh` (installation without checks), `diag.sh` (diagnostics, called on failure).
   `ci/kind-chart-test.sh` (outside this directory) is the chart installation test that reuses them.
+* `upgrade.sh` is the upgrade test (see [Upgrade test](#upgrade-test)); `lib/upgrade.sh` holds its comparison and snapshot helpers.
 * `cluster.yaml`, `versions.env` (all image pins carry a digest; `ci/check.sh` verifies it), `manifests/`, `values/`, `gitops/`,
   `git/` (scripts of the Git server), `fault/killer.sh` (fault injection for the rollback check).
 
@@ -159,6 +160,50 @@ ci/kind-chart-test.sh --fresh    # cluster, registry and work directory from zer
 checkout needs the tag (the script fetches it when it is missing). Not covered, on purpose: a failover with `docker pause`,
 an arbitrary user ID, the Compose smoke test, updates of the container mode and a Quickstart on kind. The test shares the cluster
 and the work directory with `make kind-probe`: run one of the two at a time.
+
+## Upgrade test
+
+`upgrade.sh` is the third test on this cluster. It starts from the published previous minor release, not from the Git tree: the
+server chart and the server image of that release come from `ghcr.io` by digest, and nothing is installed before `cosign` has
+verified the keyless signature of both against the fixed identity of the release workflow (`release.yml` at the tag of that
+release). The test then:
+
+1. installs the pulled chart with the probe values, GitOps over SSH and the declared enrollment tokens;
+2. creates data: a fleet through the GitOps repository, 20 simulated agents that the fleets pick up, and audited operator actions
+   (a version selection and its removal on a fleet, a resync of an agent);
+3. saves the answers of `GET /fleets`, `GET /agents` and `GET /audit`, upgrades to the chart and the server image of the commit with
+   the same values (never `--reuse-values`) and saves the answers again;
+4. compares them and checks that the same agents are connected again.
+
+The comparison (`upgrade_compare` in `lib/upgrade.sh`) fails when a fleet (name, priority, selector, blueprint) or the fleet of an
+agent differs, or when an audit entry of the first answer is missing or changed in the second one. New audit entries are allowed.
+Volatile fields (status, last seen, health, configuration state, version) are ignored. The test exits non-zero when one check fails.
+
+```bash
+make tools                        # kind, kubectl, helm, crane, yq and cosign into .cache/bin
+hack/kind/upgrade.sh --fresh      # cluster, registry and work directory from zero
+hack/kind/upgrade.sh --reset      # keep cluster and registry, delete the namespaces
+hack/kind/upgrade.sh              # requires hack/kind/up.sh and fails when the namespaces exist
+```
+
+A full run needs Docker (the kind cluster and the registry are containers), at least 6 GiB of memory for it, and network access to
+`ghcr.io` and Sigstore (the signature check and the trusted root). The script refuses to start with one line that names the tool
+when kind, kubectl, helm or cosign is missing; it also needs crane, jq and curl. It shares the cluster, the work directory and the
+ports with `make kind-probe` and the chart installation test: run one of them at a time.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `UPGRADE_NODE_IMAGE_VAR` | `KIND_NODE_IMAGE` | Which Kubernetes version of `versions.env` the cluster runs: `KIND_NODE_IMAGE` or `KIND_NODE_IMAGE_PREVIOUS` |
+| `PROBE_REUSE_IMAGES`, `ALLOW_DIRTY`, `WEB_BUILD`, `PROBE_WORK`, `PROBE_PORT_API` | as for the probe | See [Environment](#environment) |
+
+The pins are `UPGRADE_PREVIOUS_VERSION`, `UPGRADE_PREVIOUS_CHART` and `UPGRADE_PREVIOUS_SERVER_IMAGE` in `versions.env`; the script
+contains no version and no digest. To move to a newer release, run `crane digest <chart:tag>` and `crane digest <image:tag>`, enter
+the version and both references with their digests, and run `hack/kind/upgrade.sh --reset`: the run checks the digests and
+signatures and whether the chart accepts `values/probe.yaml`.
+
+Output: `.cache/kind/upgrade.log` (everything), `results.txt` (`PASS|N.M|name|evidence`), `upgrade/before` and `upgrade/after` (the
+raw answers that were compared) and `diag/<timestamp>/` after a failure. The comparison runs without a cluster on fixtures:
+`go test ./hack/kind/` (it needs bash and jq; the tests that check file modes and the tool check are skipped on Windows).
 
 ## Inspecting and cleaning up
 
