@@ -189,6 +189,9 @@ func (rc *runCtx) rollback() error {
 	if r.Kind == domain.RolloutKindConfig {
 		err = rc.rollbackConfig(touched)
 	} else {
+		// gitops-pr: requests that are still open are closed (nothing was
+		// merged); merged ones get a rollback request below
+		rc.closeOpenRequests("rollout was rolled back")
 		err = rc.rollbackVersion(touched)
 	}
 	if err != nil {
@@ -331,7 +334,7 @@ func (rc *runCtx) rollbackVersion(touched []int) error {
 		case t.FromRef == "":
 			rc.setTarget(i, domain.TargetRolledBack, "no previous version known")
 			continue
-		case versionOf(ag) == t.FromRef:
+		case versionOf(ag) == t.FromRef && !mergedUpdate(t):
 			rc.setTarget(i, domain.TargetRolledBack, "")
 			continue
 		}
@@ -364,7 +367,7 @@ func (rc *runCtx) rollbackVersion(touched []int) error {
 		idxs := byFrom[from]
 		req := executor.UpdateRequest{
 			RolloutID: rc.r.ID, Wave: rc.targets[idxs[0]].Wave, Fleet: rc.r.FleetName, Distribution: dist, ToVersion: from,
-			Spec: spec, Definition: def,
+			Spec: spec, Definition: def, Rollback: true,
 		}
 		d := &dispatch{kind: dispatchRollback, wave: req.Wave, to: from}
 		for _, i := range idxs {
@@ -400,9 +403,13 @@ func (rc *runCtx) applyRollback(d *dispatch) error {
 	}
 	sent := rc.rollbackSent()
 	var errs []string
+	opened := map[string]bool{}
 	for _, res := range d.results {
 		if res.Started && res.Error == "" {
 			sent[res.AgentID.String()] = true
+			if i, ok := rc.idx[res.AgentID]; ok {
+				rc.recordRequest(i, res, true, opened)
+			}
 		} else if res.Error != "" {
 			errs = append(errs, fmt.Sprintf("agent %s: %s", res.AgentID, res.Error))
 		}

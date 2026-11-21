@@ -4,6 +4,7 @@
 package rollout
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -182,6 +183,20 @@ func executorProgress(t *domain.RolloutTarget) *domain.TargetProgress {
 	if t.StartedAt != nil {
 		installing.Status, installing.StartedAt = domain.StepRunning, ptr(t.StartedAt)
 		installing.Detail = "external update, waiting for version " + t.ToRef
+	}
+	if t.Progress != nil && t.Progress.ChangeRequest != nil {
+		cr := *t.Progress.ChangeRequest
+		p.ChangeRequest = &cr
+		if t.StartedAt != nil {
+			switch cr.State {
+			case domain.ChangeRequestOpen:
+				installing.Detail = "waiting for merge of " + firstNonEmpty(cr.URL, cr.Ref)
+			case domain.ChangeRequestMerged:
+				installing.Detail = fmt.Sprintf("merged as %s, waiting for version %s", shortSHA(cr.MergeCommit), t.ToRef)
+			case domain.ChangeRequestClosed:
+				installing.Detail = "request closed without merge"
+			}
+		}
 	}
 	p.Steps = []domain.UpdateStep{offered, installing, {Name: domain.StepHealthWait, Status: domain.StepPending}}
 	return p

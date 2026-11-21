@@ -144,6 +144,7 @@ func TestOpenAPIContract(t *testing.T) {
 		"ReleaseFleetOption":         tof[dto.ReleaseFleetOption](),
 		"TargetProgress":             tof[domain.TargetProgress](),
 		"UpdateStep":                 tof[domain.UpdateStep](),
+		"ChangeRequest":              tof[domain.ChangeRequest](),
 		"InstallPlan":                tof[install.Plan](),
 		"InstallPlanVersion":         tof[install.PlanVersion](),
 		"InstallPlanOpAMP":           tof[install.PlanOpAMP](),

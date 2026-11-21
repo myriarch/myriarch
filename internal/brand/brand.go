@@ -73,6 +73,10 @@ const (
 	UpdateHealthComponent            = "dev.myriarch.update"
 )
 
+// GitOpsPRBranchPrefix starts the name of every branch that the gitops-pr
+// executor creates; it only ever deletes branches with this prefix.
+const GitOpsPRBranchPrefix = Name + "/rollout-"
+
 // HTTP names: cookies, webhook headers, AWX key and authentication realms.
 const (
 	SessionCookie = "myriarch_session"

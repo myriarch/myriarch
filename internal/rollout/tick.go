@@ -466,6 +466,7 @@ func (rc *runCtx) run() error {
 	} else if allFailed {
 		return rc.failRollout("no target of wave " + fmt.Sprintf("%q", r.Waves[min(wave, len(r.Waves)-1)].Name) + " could be started: " + rc.lastErrors(wave))
 	}
+	rc.pollRequests()
 	if err := rc.evalInFlight(); err != nil {
 		return err
 	}
@@ -699,6 +700,7 @@ func (rc *runCtx) countsTotal() domain.RolloutCounts {
 
 func (rc *runCtx) complete() error {
 	r := rc.r
+	rc.closeOpenRequests("rollout completed")
 	if err := rc.flush(); err != nil { // progress and targets before the status change
 		return err
 	}
@@ -721,6 +723,7 @@ func (rc *runCtx) complete() error {
 // failRollout ends a rollout that cannot proceed (docs 7.4 (b)).
 func (rc *runCtx) failRollout(reason string) error {
 	r := rc.r
+	rc.closeOpenRequests("rollout failed")
 	if err := rc.flush(); err != nil {
 		return err
 	}
@@ -1275,6 +1278,7 @@ func (rc *runCtx) applyStart(d *dispatch) (bool, error) {
 	}
 	var started []domain.AgentID
 	retry := 0
+	openedRefs := map[string]bool{}
 	for _, i := range starters {
 		t := &rc.targets[i]
 		res, ok := byAgent[t.AgentID]
@@ -1292,6 +1296,9 @@ func (rc *runCtx) applyStart(d *dispatch) (bool, error) {
 		case !res.Started:
 			rc.setTarget(i, domain.TargetFailed, "executor did not start the update")
 		default:
+			// the request (gitops-pr) is recorded first: the progress derived by
+			// setTarget shows it
+			rc.recordRequest(i, res, false, openedRefs)
 			rc.setTarget(i, domain.TargetInProgress, "")
 			ref := res.ExternalRef
 			if ref == "" {

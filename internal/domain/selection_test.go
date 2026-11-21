@@ -95,7 +95,7 @@ func TestResolveVersionTarget(t *testing.T) {
 
 func TestVersionRolloutsEnabled(t *testing.T) {
 	for exec, want := range map[ExecutorType]bool{
-		"": false, ExecutorNone: false, ExecutorUpdater: true, ExecutorWebhook: true, ExecutorAWX: true, ExecutorManual: true,
+		"": false, ExecutorNone: false, ExecutorUpdater: true, ExecutorWebhook: true, ExecutorAWX: true, ExecutorManual: true, ExecutorGitOpsPR: true,
 	} {
 		assert.Equal(t, want, VersionRolloutsEnabled(frameFleet("0.1.0", exec, nil)), "executor %q", exec)
 	}

@@ -8,9 +8,9 @@ All paths are relative to the base path `/api/v1` (same origin as the UI). Authe
 
 | Operation | Request | Permission |
 |---|---|---|
-| [Executor definitions (webhook/AWX) without secrets](#executor-definitions-webhookawx-without-secrets) | `GET /executors` | `read` (viewer) |
+| [Executor definitions (webhook/AWX/gitops-pr) without secrets](#executor-definitions-webhookawxgitops-pr-without-secrets) | `GET /executors` | `read` (viewer) |
 
-## Executor definitions (webhook/AWX) without secrets
+## Executor definitions (webhook/AWX/gitops-pr) without secrets
 
 `GET /api/v1/executors`
 

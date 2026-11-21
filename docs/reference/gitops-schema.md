@@ -55,8 +55,8 @@ See [Fleets](../concepts/fleets.md).
 | `spec.collector.distribution` | string | no | `otelcol-contrib` | The collector distribution. Only `otelcol-contrib` is supported (`invalid_field`). |
 | `spec.collector.version` | string | no | empty | The Git target version, a semantic version without a leading `v`, for example `0.162.0`. Empty means versions are not managed for this fleet (unless the UI chooses one, see `spec.update.selection`). |
 | `spec.update` | object | no | see fields | How collector versions are changed. |
-| `spec.update.executor` | string | no | `none` | `none`, `updater`, `webhook`, `awx` or `manual`. See [Executors](../concepts/executors.md). Any other value is `executor_invalid`. |
-| `spec.update.executorRef` | string | conditional | empty | Name of an `Executor` object. Required for `webhook` and `awx` (the type must match). For the other executors it is ignored with a warning. |
+| `spec.update.executor` | string | no | `none` | `none`, `updater`, `webhook`, `awx`, `manual` or `gitops-pr`. See [Executors](../concepts/executors.md). Any other value is `executor_invalid`. |
+| `spec.update.executorRef` | string | conditional | empty | Name of an `Executor` object. Required for `webhook`, `awx` and `gitops-pr` (the type must match). For the other executors it is ignored with a warning. |
 | `spec.update.params` | map of any | no | none | Free parameters passed to the executor, for example in the webhook payload. |
 | `spec.update.selection` | object | no | absent | The frame within which the UI may choose the target version. Absent means disabled. See [Target version from the UI](../concepts/fleets.md#target-version-from-the-ui-within-the-git-frame). |
 | `spec.update.selection.enabled` | bool | no | `false` | Allows UI and API updates. Requires an executor other than `none`. |
@@ -140,12 +140,12 @@ Negative durations are `policy_invalid`. The built-in policy used when no `defau
 
 ## Executor
 
-Describes an external update path for the executor types `webhook` and `awx`. The executors `updater` and `manual` need
-no object. See [Executors](../concepts/executors.md).
+Describes an external update path for the executor types `webhook`, `awx` and `gitops-pr`. The executors `updater` and
+`manual` need no object. See [Executors](../concepts/executors.md).
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `spec.type` | string | yes | none | `webhook` or `awx`. The matching block must be present, the other must not. |
+| `spec.type` | string | yes | none | `webhook`, `awx` or `gitops-pr`. The matching block must be present, the others must not. |
 | `spec.webhook` | object | conditional | none | Required for the type `webhook`. |
 | `spec.webhook.url` | string | yes | none | An absolute `http` or `https` URL without credentials. The host must be in `executors.allowedWebhookHosts` of the server configuration. |
 | `spec.webhook.method` | string | no | `POST` | `POST`, `PUT` or `PATCH`. |
@@ -165,6 +165,20 @@ no object. See [Executors](../concepts/executors.md).
 | `spec.awx.caFile` | string | no | empty | File name below `executors.secretDir` with an additional CA certificate for AWX. |
 | `spec.awx.timeout` | duration | no | `30s` | At most `5m`. |
 | `spec.awx.batchSize` | int | no | `100` | Hosts per job launch. Must not be negative. |
+| `spec.gitopsPr` | object | conditional | none | Required for the type `gitops-pr`. |
+| `spec.gitopsPr.provider` | string | yes | none | `github` or `gitlab`. |
+| `spec.gitopsPr.apiUrl` | string | no | `https://api.github.com` or `https://gitlab.com` | The API base, an absolute `http` or `https` URL without credentials; its host must be in `executors.allowedWebhookHosts`. GitLab appends `/api/v4`. For GitHub Enterprise give the full base such as `https://ghe.example.com/api/v3`. |
+| `spec.gitopsPr.repository` | string | yes | none | `owner/name` for GitHub; the project path with at least two segments for GitLab. |
+| `spec.gitopsPr.baseBranch` | string | yes | none | The branch that the request targets. No spaces or `..`, not starting with `-` or `/`, none of `~^:?*[\`. |
+| `spec.gitopsPr.path` | string | yes | none | The YAML file, relative to the repository root, ending in `.yaml` or `.yml`, without `..` segments. The only template expression allowed is `[[ attr "key" ]]`. |
+| `spec.gitopsPr.field` | string | yes | none | Dotted path to one YAML scalar, a sequence index as `[n]`, for example `spec.template.spec.containers[0].image`. |
+| `spec.gitopsPr.valueFormat` | string | no | `image` | `tag` writes the version; `image` keeps registry and name of the current value and replaces the tag. |
+| `spec.gitopsPr.tokenEnv` | string | conditional | none | Name of the environment variable that holds the API token. Exactly one of `tokenEnv`, `tokenFile` or `appId` with `privateKeyFile` is required. |
+| `spec.gitopsPr.tokenFile` | string | conditional | none | File below `executors.secretDir` or a name from `executors.secrets` with the API token. |
+| `spec.gitopsPr.appId` | string | conditional | none | The numeric GitHub App ID, only for `github`. Needs `privateKeyFile`. |
+| `spec.gitopsPr.privateKeyFile` | string | conditional | none | File below `executors.secretDir` or a name from `executors.secrets` with the App private key. Needs `appId`. |
+| `spec.gitopsPr.labels` | list of strings | no | none | Labels for the request. No empty entries, no commas. |
+| `spec.gitopsPr.reviewers` | list of strings | no | none | Reviewers for the request. No empty entries, no commas. |
 
 Violations of these rules are `missing_field` (a required field or block is absent) or `executor_invalid` (a value is
 wrong). Which secret names the server may read is decided by its configuration, see
@@ -322,7 +336,7 @@ for all sample renderings. Without it, component names are not checked against a
 | `deprecated_component` | warning | A component uses an old type name (an alias), for example `hostmetrics`. |
 | `duplicate_object` | error | Two objects of one kind have the same name, two fragments of one blueprint, or two sample agents. |
 | `env_syntax` | warning | An unbalanced `${` or an unknown scheme in a `${...}` expression of the rendered configuration. |
-| `executor_invalid` | error | An executor is wrong: URL, type, secret reference, header, method, timeout, block mismatch, or `update.executor` is not one of `none`, `updater`, `webhook`, `awx`, `manual`. As a warning: an `executorRef` that is ignored for `updater` and `manual`. |
+| `executor_invalid` | error | An executor is wrong: URL, type, secret reference, header, method, timeout, block mismatch, or `update.executor` is not one of `none`, `updater`, `webhook`, `awx`, `manual`, `gitops-pr`. For `gitops-pr`: the repository, path, field, value format or credential references are wrong. As a warning: an `executorRef` that is ignored for `updater` and `manual`. |
 | `executor_not_found` | error | `update.executorRef` names an executor that does not exist. |
 | `extends_cycle` | error | The `extends` chain of blueprints is a cycle. |
 | `file_too_large` | error | A YAML file is larger than 4 MiB. |

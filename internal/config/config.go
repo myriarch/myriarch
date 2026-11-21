@@ -672,10 +672,10 @@ type OutboundConfig struct {
 
 // ExecutorsConfig holds executor defaults.
 type ExecutorsConfig struct {
-	// AllowedWebhookHosts restricts webhook/AWX targets (host, host:port,
-	// `*.example.com`; http://host allows plain HTTP). An empty list refuses
-	// every webhook and AWX target (fail closed) in every mode; it does not
-	// stop startup.
+	// AllowedWebhookHosts restricts the webhook, AWX and gitops-pr API hosts
+	// (host, host:port, `*.example.com`; http://host allows plain HTTP). An
+	// empty list refuses every webhook, AWX and gitops-pr target (fail closed)
+	// in every mode; it does not stop startup.
 	AllowedWebhookHosts []string `yaml:"allowedWebhookHosts"`
 	// DefaultTimeout is the timeout for outbound executor calls (default
 	// 30s).

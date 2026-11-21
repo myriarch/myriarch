@@ -224,7 +224,7 @@ How to read the tables: **Type** `duration` is a string in Go syntax. **Default*
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `executors.allowedWebhookHosts` | list of strings | empty | `allowedWebhookHosts` restricts webhook/AWX targets (host, host:port, `*.example.com`; `http://host` allows plain HTTP). An empty list refuses every webhook and AWX target (fail closed) in every mode; it does not stop startup. |
+| `executors.allowedWebhookHosts` | list of strings | empty | `allowedWebhookHosts` restricts the webhook, AWX and gitops-pr API hosts (host, host:port, `*.example.com`; `http://host` allows plain HTTP). An empty list refuses every webhook, AWX and gitops-pr target (fail closed) in every mode; it does not stop startup. |
 | `executors.defaultTimeout` | duration | `30s` | `defaultTimeout` is the timeout for outbound executor calls (default 30s). |
 | `executors.maxTimeout` | duration | `5m` | `maxTimeout` caps the timeouts requested by Executor objects in Git (default 5m). |
 | `executors.secretEnvPrefix` | string | `"MYRIARCH_EXEC_"` | `secretEnvPrefix` is the prefix that environment variables must start with when an Executor object references them directly (secretEnv/tokenEnv; default `MYRIARCH_EXEC_`), so Git cannot read arbitrary variables. |

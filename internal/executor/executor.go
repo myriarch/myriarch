@@ -9,6 +9,8 @@
 //	internal/executor/webhookexec  ExecutorWebhook and ExecutorAWX (fail closed: targets must be listed in executors.allowedWebhookHosts)
 //	internal/executor/manualexec   ExecutorManual: no external call, the version changes outside of myriarchd
 //
+//	internal/executor/gitopsprexec ExecutorGitOpsPR: pull/merge request in the deployment repository
+//
 // Completion of a version update is NOT reported by executors. The rollout
 // engine observes the collector agent's reported service.version (and
 // health); executors only start the update and report immediate errors.
@@ -55,6 +57,9 @@ type UpdateRequest struct {
 	// Definition is the referenced Executor object (webhook/awx), nil for
 	// the updater executor.
 	Definition *domain.Executor `json:"definition,omitempty"`
+	// Rollback: the request returns targets to their previous version;
+	// gitops-pr opens a separate rollback request.
+	Rollback bool `json:"rollback,omitempty"`
 }
 
 // TargetResult is the immediate outcome for one target.
@@ -66,6 +71,8 @@ type TargetResult struct {
 	Error string `json:"error,omitempty"`
 	// ExternalRef: e.g. AWX job id or webhook delivery id.
 	ExternalRef string `json:"externalRef,omitempty"`
+	// ExternalURL: link to the external job or request.
+	ExternalURL string `json:"externalUrl,omitempty"`
 	// RetryLater: the target cannot be started YET (e.g. its artifact is
 	// still being downloaded and verified). Started=false and Error=="" must
 	// accompany it. The rollout engine keeps the target pending, does not
@@ -110,6 +117,41 @@ type Executor interface {
 	Start(ctx context.Context, req UpdateRequest) ([]TargetResult, error)
 	// Cancel best-effort withdraws pending updates.
 	Cancel(ctx context.Context, req CancelRequest) error
+}
+
+// StatusRequest asks for the state of external requests (pull/merge requests).
+type StatusRequest struct {
+	RolloutID  uuid.UUID `json:"rolloutId"`
+	Refs       []string  `json:"refs"`
+	Spec       domain.UpdateSpec
+	Definition *domain.Executor
+}
+
+// RequestState is the state of one external request.
+type RequestState struct {
+	Ref         string                    `json:"ref"`
+	URL         string                    `json:"url,omitempty"`
+	State       domain.ChangeRequestState `json:"state"`
+	MergeCommit string                    `json:"mergeCommit,omitempty"`
+}
+
+// RequestTracker is implemented by executors that hand over work as external
+// requests (gitops-pr).
+type RequestTracker interface {
+	// RequestStates is polled by the leader on the engine tick; the executor
+	// answers from its cache when a request was checked less than 30 s ago
+	// and backs off after rate-limit responses. Refs without a known state
+	// are absent from the result.
+	RequestStates(ctx context.Context, req StatusRequest) (map[string]RequestState, error)
+}
+
+// RequestCloser is implemented by executors that can close their external
+// requests.
+type RequestCloser interface {
+	// CloseRequests closes the still open requests of the rollout with a
+	// comment and deletes only branches the executor created. It never
+	// reverts merged requests and returns the requests it closed.
+	CloseRequests(ctx context.Context, req CancelRequest) ([]RequestState, error)
 }
 
 // Registry resolves executors by type.

@@ -1,7 +1,7 @@
 ---
 title: "Executors"
 weight: 70
-description: "How collector version updates are started: the executors none, updater, webhook, awx and manual, their payloads, signatures, secrets and the host allowlist."
+description: "How collector version updates are started: the executors none, updater, webhook, awx, manual and gitops-pr, their payloads, signatures, secrets and the host allowlist."
 ---
 
 An **executor** starts the update of a collector to a new version. The fleet chooses it with `spec.update.executor`.
@@ -17,9 +17,10 @@ system reports, and it is the rule behind
 | `webhook` | Sends a signed HTTP request with the list of targets. | yes (`executorRef`) |
 | `awx` | Launches a job template of Ansible AWX or Ansible Automation Platform. | yes (`executorRef`) |
 | `manual` | Makes no external call. The version is changed outside of `myriarchd`. | no |
+| `gitops-pr` | Opens a pull request (GitHub) or merge request (GitLab) in the deployment repository that changes only the collector image. | yes (`executorRef`) |
 
-For `updater` and `manual`, an `executorRef` is ignored with a warning. For `webhook` and `awx` it is required and must
-name an `Executor` object of the same type.
+For `updater` and `manual`, an `executorRef` is ignored with a warning. For `webhook`, `awx` and `gitops-pr` it is required
+and must name an `Executor` object of the same type.
 
 ## Updater
 
@@ -48,18 +49,89 @@ the previous version and again waits for the reported version. Together with
 [`update.selection`](fleets.md#target-version-from-the-ui-within-the-git-frame) the UI chooses the target version and
 `myriarchd` waits for the change from outside.
 
-## GitOps pull request (planned)
+## GitOps pull request
 
-The `gitops-pr` executor is planned for v0.3.0 and not available yet. On Kubernetes it will change the collector image in the
-deployment repository through a pull or merge request instead of replacing the binary, and `myriarchd` gets no Kubernetes API
-access. Its design (configuration, life cycle of the request, abort and rollback, merge detection and credentials) is proposed
-in [ADR-0052](../adr/0052-gitops-pr-executor-bumps-the-image-through-a-pull-or-merge-request.md); until it ships, use `manual`
-or `webhook`. Completion is decided by the reported version, as for every executor.
+The `gitops-pr` executor is for collectors on Kubernetes. It does not replace a binary and it never talks to the cluster.
+For each wave it opens a pull request (GitHub) or a merge request (GitLab) in the deployment repository that changes
+**only the collector image**, and the GitOps controller of the cluster applies the change after somebody merges it.
+`myriarchd` makes no call to a Kubernetes API, holds no cluster credentials, and the Helm chart grants it no RBAC. The
+decision is recorded in
+[ADR-0052](../adr/0052-gitops-pr-executor-bumps-the-image-through-a-pull-or-merge-request.md).
+
+```yaml
+apiVersion: myriarch.dev/v1alpha1
+kind: Executor
+metadata: {name: k8s-image-pr}
+spec:
+  type: gitops-pr
+  gitopsPr:
+    provider: github                    # github or gitlab
+    repository: example/deploy          # GitHub: owner/name; GitLab: the project path
+    baseBranch: main
+    path: 'clusters/[[ attr "k8s.cluster.name" ]]/otel-gateway/values.yaml'
+    field: image.tag                    # dotted path to one YAML scalar
+    valueFormat: tag                    # tag, or image (default) for a full image reference
+    tokenEnv: MYRIARCH_EXEC_GITHUB_TOKEN   # or tokenFile, or appId with privateKeyFile
+    labels: [collector-update]
+    reviewers: [platform-team-lead]
+```
+
+Fields:
+
+- `provider`, `repository`, `baseBranch`: where the request goes. `apiUrl` is optional. The default is
+  `https://api.github.com` or `https://gitlab.com`. For GitLab the server appends `/api/v4`. For GitHub Enterprise give the
+  complete API base, for example `https://ghe.example.com/api/v3`.
+- `path`: the file to change. It may contain `[[ attr "key" ]]` to choose the file by an agent attribute, so one executor
+  serves many clusters. Targets are grouped by the rendered path. A target whose attribute is missing fails alone.
+- `field`: the dotted path to one YAML scalar. A sequence index is written `[n]`, for example
+  `spec.template.spec.containers[0].image`. With `valueFormat: tag` the scalar holds the version. With `image` it holds an
+  image reference, and only its tag changes (a registry with a port is kept as it is).
+- `labels` and `reviewers` are added to the request on a best-effort basis.
+
+**Credentials** are named by reference and never stored in Git. Use one of: `tokenEnv` (an environment variable of
+`myriarchd`), `tokenFile` (a file below `executors.secretDir`), or a GitHub App with `appId` and `privateKeyFile`. The same
+rules as for the other executors apply, see [Secrets](#secrets). Give the credential the least rights it needs:
+
+- A GitHub App needs `contents: write`, `pull_requests: write` and `metadata: read` on the one repository. `myriarchd`
+  signs a short-lived JWT with the key and asks GitHub for an installation token for that repository only. The token stays
+  in memory and is renewed five minutes before it expires.
+- A GitLab project access token needs the role Developer and the scope `api`. Give it an expiry date.
+- Calls go only to hosts of `executors.allowedWebhookHosts` and redirects are not followed.
+
+**Life cycle of the request.** The branch is `myriarch/rollout-<rolloutId>/wave-<n>`. A rollback uses the suffix
+`-rollback`. If the request of that branch was merged or closed and more changes are needed, the next free suffix `-2`,
+`-3` and so on is used. The server makes one commit per wave with all changed files and opens one request for it. The
+request names the rollout, the fleet, the version and the wave and, if `server.publicUrl` is set, links to the rollout. A
+repeated call is idempotent: an existing branch and an open request are reused, and a base branch that already holds the
+version opens no request.
+
+**State of the request.** The leader asks the provider for the state of every open request at most every 30 seconds. After
+a rate-limit answer it waits for `Retry-After`, or else 60 seconds doubling up to 10 minutes. The state is shown as
+`changeRequest` in the [live progress](rollouts.md#live-progress-per-target) of the target:
+
+| Request | Target |
+|---|---|
+| open | stays `in_progress`, detail "waiting for merge". |
+| merged | stays `in_progress`, detail "merged as ..., waiting for version". The merge is audited. |
+| closed without merge | fails with a message. The failure policy of the wave decides what happens next. |
+
+A merge never completes a target. The target is done when the collector reports the version and stays healthy for
+`healthWait`, see [Completion](#completion). If the version is reported without a merge (for example another way applied
+it), the target succeeds as well.
+
+**Abort, rollback and the end of a rollout.** If a rollout is aborted, superseded, rolled back, failed or completed, open
+requests are closed with a comment and their branches are deleted, but only branches that the executor created for that
+rollout. A merged request is never reverted by the server. A rollback of a merged change opens a separate rollback request
+for the previous version that the operators merge.
+
+**Limits.** The executor changes YAML files only, one scalar per file, and keeps comments, order and line endings.
+Digest references (`@sha256:...`) are not supported. `myriarchd` does not merge requests, makes no Kubernetes API call
+and needs no RBAC.
 
 ## The Executor object
 
-The built-in executors `updater` and `manual` need no object. `webhook` and `awx` are described by an `Executor` object.
-Secrets are never stored in it. It only names them.
+The built-in executors `updater` and `manual` need no object. `webhook`, `awx` and `gitops-pr` are described by an
+`Executor` object. Secrets are never stored in it. It only names them.
 
 ```yaml
 apiVersion: myriarch.dev/v1alpha1
@@ -174,7 +246,7 @@ see empty contexts. The [limits of templates](blueprints.md#templates) apply.
 ## Allowed hosts
 
 The executors are **fail closed**: every target host must be listed in `executors.allowedWebhookHosts` of the server
-configuration, and an empty list refuses every webhook and AWX target in every mode. It does not stop the server from
+configuration, and an empty list refuses every webhook, AWX and gitops-pr target in every mode (for `gitops-pr` the host of the API URL). It does not stop the server from
 starting. An entry is a host name (`hooks.example.com`), a host with a port (`hooks.example.com:8443`) or a suffix
 (`*.example.com`). Plain HTTP is allowed only for a host that is listed explicitly as `http://host`, so credentials and
 signed payloads never travel unencrypted by accident.
@@ -194,6 +266,8 @@ of the `myriarchd` host, so that Git can never read arbitrary variables or paths
 - Alternatively the name is an entry of the registry `executors.secrets`, where the operator defines the source (`env` or
   `file`) and the `allowedHosts` of the secret. The secret is sent only to these hosts.
 - A webhook HMAC secret must be at least 32 bytes long.
+- For `gitops-pr`, `tokenEnv`, `tokenFile` and `privateKeyFile` follow these rules. The token, the key and the installation
+  token of a GitHub App never appear in logs, API responses, the audit log or the request text.
 
 The complete list of settings is in the server configuration (`myriarchd config print` shows the effective values). The
 security view is in the [security model](../security/model.md).
@@ -201,5 +275,6 @@ security view is in the [security model](../security/model.md).
 ## Completion
 
 A version update is finished when the collector **reports the target version** and stays healthy for `healthWait`. This
-holds for every executor and is independent of callbacks from the external system, see
+holds for every executor, including `gitops-pr` where a merged request alone is not enough, and is independent of
+callbacks from the external system, see
 [Rollouts](rollouts.md#targets-and-success).

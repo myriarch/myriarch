@@ -176,7 +176,7 @@ func TestSelectionValidation(t *testing.T) {
 `, code: "missing_field", severity: domain.SeverityWarning, contains: "update.executor is manual but collector.version is empty"},
 		{name: "unknown executor lists manual", spec: `  update:
     executor: ansible
-`, code: "executor_invalid", severity: domain.SeverityError, contains: "(none, updater, webhook, awx, manual)"},
+`, code: "executor_invalid", severity: domain.SeverityError, contains: "(none, updater, webhook, awx, manual, gitops-pr)"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

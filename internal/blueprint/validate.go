@@ -414,6 +414,9 @@ func (v *validator) checkExecutor(e *domain.Executor) {
 		if e.AWX != nil {
 			v.err("executor_invalid", "spec.awx must not be set for type webhook", src, obj, "spec.awx")
 		}
+		if e.GitOpsPR != nil {
+			v.err("executor_invalid", "spec.gitopsPr must not be set for type webhook", src, obj, "spec.gitopsPr")
+		}
 		checkURL(w.URL, "spec.webhook.url")
 		switch strings.ToUpper(w.Method) {
 		case "", "POST", "PUT", "PATCH":
@@ -450,6 +453,9 @@ func (v *validator) checkExecutor(e *domain.Executor) {
 		if e.Webhook != nil {
 			v.err("executor_invalid", "spec.webhook must not be set for type awx", src, obj, "spec.webhook")
 		}
+		if e.GitOpsPR != nil {
+			v.err("executor_invalid", "spec.gitopsPr must not be set for type awx", src, obj, "spec.gitopsPr")
+		}
 		checkURL(a.URL, "spec.awx.url")
 		if a.APIPrefix != "" && !validAPIPrefix(a.APIPrefix) {
 			v.err("executor_invalid", "apiPrefix must be an absolute path such as /api/v2/ or /api/controller/v2/ (segments of letters, digits, \".\", \"_\", \"~\" or \"-\"; no \".\" or \"..\" segments)", src, obj, "spec.awx.apiPrefix")
@@ -470,10 +476,26 @@ func (v *validator) checkExecutor(e *domain.Executor) {
 		for p, err := range v.r.CheckTemplates(a.ExtraVars) {
 			v.err("template_syntax", fmt.Sprintf("extraVars: %s: %v", p, err), src, obj, "spec.awx.extraVars::"+p)
 		}
+	case domain.ExecutorGitOpsPR:
+		g := e.GitOpsPR
+		if g == nil {
+			v.err("missing_field", "spec.gitopsPr is required for type gitops-pr", src, obj, "spec.gitopsPr")
+			return
+		}
+		if e.Webhook != nil {
+			v.err("executor_invalid", "spec.webhook must not be set for type gitops-pr", src, obj, "spec.webhook")
+		}
+		if e.AWX != nil {
+			v.err("executor_invalid", "spec.awx must not be set for type gitops-pr", src, obj, "spec.awx")
+		}
+		if g.APIURL != "" {
+			checkURL(g.APIURL, "spec.gitopsPr.apiUrl")
+		}
+		checkGitOpsPR(g, func(code, msg, field string) { v.err(code, msg, src, obj, "spec.gitopsPr."+field) })
 	case "":
-		v.err("missing_field", "type is required (webhook or awx)", src, obj, "spec.type")
+		v.err("missing_field", "type is required (webhook, awx or gitops-pr)", src, obj, "spec.type")
 	default:
-		v.err("executor_invalid", fmt.Sprintf("type %q is not supported (webhook or awx)", e.Type), src, obj, "spec.type")
+		v.err("executor_invalid", fmt.Sprintf("type %q is not supported (webhook, awx or gitops-pr)", e.Type), src, obj, "spec.type")
 	}
 }
 
@@ -583,7 +605,7 @@ func (v *validator) checkFleet(f *domain.Fleet) {
 		if f.Update.Executor == domain.ExecutorUpdater || f.Update.Executor == domain.ExecutorManual {
 			noVersionHint(f.Update.Executor)
 		}
-	case domain.ExecutorWebhook, domain.ExecutorAWX:
+	case domain.ExecutorWebhook, domain.ExecutorAWX, domain.ExecutorGitOpsPR:
 		if f.Update.ExecutorRef == "" {
 			v.err("missing_field", fmt.Sprintf("executorRef is required for executor %q", f.Update.Executor), src, obj, "spec.update.executorRef")
 		} else if ex := v.findExecutor(f.Update.ExecutorRef); ex == nil {
@@ -593,7 +615,7 @@ func (v *validator) checkFleet(f *domain.Fleet) {
 		}
 		noVersionHint(f.Update.Executor)
 	default:
-		v.err("executor_invalid", fmt.Sprintf("update.executor %q is invalid (none, updater, webhook, awx, manual)", f.Update.Executor), src, obj, "spec.update.executor")
+		v.err("executor_invalid", fmt.Sprintf("update.executor %q is invalid (none, updater, webhook, awx, manual, gitops-pr)", f.Update.Executor), src, obj, "spec.update.executor")
 	}
 	v.checkSelection(f)
 	for p, err := range v.r.CheckTemplates(f.Update.Params) {

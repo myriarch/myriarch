@@ -268,7 +268,8 @@ Executor objects in Git configure where version-update calls go. The following c
 
 | Control | Setting and default |
 |---|---|
-| Webhook and AWX targets must match an allowlist. An empty list refuses every target (fail closed, in every mode); the server still starts. Plain `http` needs an explicit `http://host` entry. | `executors.allowedWebhookHosts`, default empty. |
+| Webhook, AWX and gitops-pr targets must match an allowlist. An empty list refuses every target (fail closed, in every mode); the server still starts. Plain `http` needs an explicit `http://host` entry. For `gitops-pr` the host of the API URL of GitHub or GitLab is checked. | `executors.allowedWebhookHosts`, default empty. |
+| The `gitops-pr` executor opens pull or merge requests through the GitHub or GitLab API. Its token or GitHub App key is only a reference (environment variable with the prefix, file below `executors.secretDir`, or an entry of `executors.secrets`) and is bound to hosts like every executor secret. The installation token of a GitHub App lives only in memory and is renewed before it expires. Redirects are not followed. Neither credentials nor reference names appear in logs, API responses, the audit log or the text of a request. The server holds no Kubernetes credentials, makes no call to a Kubernetes API and the Helm chart grants no RBAC for it. | Fixed in code; tests `TestCredentialsNeverLeak`, `TestServerHasNoKubernetesAPIClient` and `TestChartGrantsNoRBAC`. |
 | Environment variables referenced from Git must start with a prefix. Files are read only below one directory, with relative names, no `..`, through `os.OpenInRoot`. Without `executors.secretDir`, file references are refused. | `executors.secretEnvPrefix`, default `MYRIARCH_EXEC_`; `executors.secretDir`, default empty. |
 | Every secret is bound to destination hosts: through `executors.secrets` with `allowedHosts`, or through `executors.secretEnvHosts` and `executors.secretFileHosts`. In production a reference without a binding is refused, also during validation; a bound secret is sent only to its hosts, even when another host is on the allowlist. | The bindings are empty by default. |
 | Webhook secrets need at least 32 bytes. Timeouts requested in Git are capped. | `executors.maxTimeout`, default 5 minutes; `executors.defaultTimeout`, default 30 seconds. |
@@ -292,7 +293,7 @@ Executor objects in Git configure where version-update calls go. The following c
 
 ## Outbound connections
 
-Everything `myriarchd` itself connects to goes through one set of HTTP clients in `internal/netguard`: OIDC discovery and token exchange, Git over https and ssh, the GitHub API and raw files, the artifact upstream or mirror, the release source of the installer bundles, the Sigstore TUF repository, webhook and AWX executors, and notifications.
+Everything `myriarchd` itself connects to goes through one set of HTTP clients in `internal/netguard`: OIDC discovery and token exchange, Git over https and ssh, the GitHub API and raw files, the artifact upstream or mirror, the release source of the installer bundles, the Sigstore TUF repository, webhook, AWX and gitops-pr executors, and notifications.
 
 | Control | Setting and default |
 |---|---|

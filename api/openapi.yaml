@@ -993,7 +993,7 @@ paths:
     get:
       operationId: listExecutors
       tags: [executors]
-      summary: Executor definitions (webhook/AWX) without secrets
+      summary: Executor definitions (webhook/AWX/gitops-pr) without secrets
       x-permission: read
       responses:
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -2033,11 +2033,13 @@ components:
       enum: [Fleet, Blueprint, RolloutPolicy, Executor, Inventory]
     ExecutorType:
       type: string
-      enum: [none, updater, webhook, awx, manual]
+      enum: [none, updater, webhook, awx, manual, gitops-pr]
       description: |
         none = versions are only reported; updater = OpAMP package offers to myriarch-updater; webhook/awx = external
         call (Executor object); manual = version rollouts are created and wait for the reported version without any
-        external call (the version is changed outside of myriarchd, e.g. image tag by merge request).
+        external call (the version is changed outside of myriarchd, e.g. image tag by merge request); gitops-pr =
+        a pull request (GitHub) or merge request (GitLab) in the deployment repository that changes only the
+        collector image (Executor object); completion is still decided by the reported version.
     ParameterType:
       type: string
       enum: [string, int, number, bool, duration, list, map]
@@ -2100,7 +2102,7 @@ components:
       description: |
         updater = steps reported by the myriarch-updater (health component "dev.myriarch.update"); package_status = only the
         OpAMP package status of the updater is known (older or simulated updater without the component); executor =
-        webhook/awx/manual executors (no host-side steps: offered, then waiting for the reported version).
+        webhook/awx/manual/gitops-pr executors (no host-side steps: offered, then waiting for the reported version).
     ArtifactStatus:
       type: string
       enum: [pending, downloading, ready, failed]
@@ -2947,7 +2949,7 @@ components:
         name: { type: string }
         type: { $ref: '#/components/schemas/ExecutorType' }
         description: { type: string }
-        target: { type: string, description: Redacted destination URL }
+        target: { type: string, description: 'Redacted destination URL; for gitops-pr the API URL of the repository (no credentials, no reference names)' }
         source: { $ref: '#/components/schemas/SourceRef' }
         usedBy: { type: array, items: { type: string } }
     ExecutorSummaryList:
@@ -3226,7 +3228,11 @@ components:
         verifiedAt: { type: string, format: date-time }
         finishedAt: { type: string, format: date-time }
         lastError: { type: string }
-        executorRef: { type: string }
+        executorRef:
+          type: string
+          description: |
+            External reference returned by the executor, for example "awx-job:12", "github-pr:<owner>/<repo>#<n>" or
+            "gitlab-mr:<project>!<iid>".
         updatedAt: { type: string, format: date-time }
         progress: { $ref: '#/components/schemas/TargetProgress' }
     TargetProgress:
@@ -3251,9 +3257,35 @@ components:
           description: |
             Fixed order offered, downloading, verifying, installing, restarting, health_check, rolling_back (only when
             a rollback happened), health_wait. Executor source: offered, installing (external update until the
-            version is reported), health_wait.
+            version is reported), health_wait. With gitops-pr the detail of installing tells whether the request is
+            waiting for merge or merged and waiting for the version.
           items: { $ref: '#/components/schemas/UpdateStep' }
+        changeRequest:
+          $ref: '#/components/schemas/ChangeRequest'
         updatedAt: { type: string, format: date-time }
+    ChangeRequestState:
+      type: string
+      enum: [open, merged, closed]
+      description: |
+        State of a pull or merge request of the gitops-pr executor. open = waiting for merge; merged = merged, the
+        target still waits for the reported version; closed = closed without merge (the target fails) or closed by
+        myriarchd on abort, rollback or the end of the rollout.
+    ChangeRequest:
+      type: object
+      description: |
+        The pull request (GitHub) or merge request (GitLab) that the gitops-pr executor opened for the target. Present
+        only for gitops-pr. The server asks the provider at most every 30 seconds per request. A merged request never
+        completes a target: completion is decided by the reported version.
+      required: [provider, ref, state]
+      properties:
+        provider: { type: string, enum: [github, gitlab] }
+        ref:
+          type: string
+          description: 'Reference, "github-pr:<owner>/<repo>#<n>" or "gitlab-mr:<project>!<iid>"'
+        url: { type: string, description: Link to the request in the provider }
+        state: { $ref: '#/components/schemas/ChangeRequestState' }
+        mergeCommit: { type: string, description: Merge commit once the request is merged }
+        rollback: { type: boolean, description: True for a request that returns the target to its previous version }
     UpdateStep:
       type: object
       required: [name, status]
