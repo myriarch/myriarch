@@ -9,20 +9,20 @@ require (
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/jackc/pgx/v5 v5.12.0
+	github.com/jackc/pgx/v5 v5.13.0
 	github.com/kardianos/service v1.3.0
 	github.com/open-telemetry/opamp-go v0.25.0
-	github.com/pressly/goose/v3 v3.30.0
+	github.com/pressly/goose/v3 v3.30.1
 	github.com/prometheus/client_golang v1.25.0
 	github.com/prometheus/client_model v0.6.3
-	github.com/prometheus/common v0.73.1
+	github.com/prometheus/common v0.74.0
 	github.com/sigstore/protobuf-specs v0.5.2
 	github.com/sigstore/sigstore-go v1.4.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
 	github.com/theupdateframework/go-tuf/v2 v2.4.2
 	go.yaml.in/yaml/v3 v3.0.6
-	golang.org/x/crypto v0.58.0
+	golang.org/x/crypto v0.59.0
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20261005185213-c3db4df58582
 	golang.org/x/net v0.62.0
 	golang.org/x/oauth2 v0.38.0
@@ -87,11 +87,11 @@ require (
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
 	github.com/lib/pq v1.10.9 // indirect
-	github.com/mfridman/interpolate v0.0.2 // indirect
+	github.com/mfridman/interpolate v0.2.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oklog/ulid/v2 v2.1.2 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
-	github.com/pandatix/go-abnf v0.5.3 // indirect
+	github.com/pandatix/go-abnf v0.5.5 // indirect
 	github.com/pjbgf/sha1cd v0.7.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/procfs v0.23.0 // indirect
@@ -118,7 +118,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/mod v0.42.0 // indirect
-	golang.org/x/term v0.47.0 // indirect
+	golang.org/x/term v0.48.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20261110000943-09e21b237f2c // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c // indirect
