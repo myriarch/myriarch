@@ -471,7 +471,7 @@ type GitLab struct{ *store }
 func NewGitLab(t *testing.T) *GitLab {
 	t.Helper()
 	g := &GitLab{}
-	g.store = newStore(t, "glpat-test-token-0123456789", func(s *store, w http.ResponseWriter, r *http.Request) { g.handle(w, r) },
+	g.store = newStore(t, "gitlab-fake-access-0123456789", func(s *store, w http.ResponseWriter, r *http.Request) { g.handle(w, r) },
 		func(r *http.Request) string { return r.Header.Get("PRIVATE-TOKEN") }, http.StatusTooManyRequests)
 	return g
 }

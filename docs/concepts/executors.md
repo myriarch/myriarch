@@ -1,7 +1,7 @@
 ---
 title: "Executors"
 weight: 70
-description: "How collector version updates are started: the executors none, updater, webhook, awx, manual and gitops-pr, their payloads, signatures, secrets and the host allowlist."
+description: "How collector version updates are started: the executors none, updater, webhook, awx, manual and gitops-pr, their payloads, secrets and host allowlist."
 ---
 
 An **executor** starts the update of a collector to a new version. The fleet chooses it with `spec.update.executor`.
