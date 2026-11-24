@@ -299,7 +299,9 @@ attempt counts as not yet begun (`offered`). Missed intermediate reports do no h
 
 The audit log records the requests of `gitops-pr` as `rollout.change_request.opened`, `rollout.change_request.merged`
 (with the merge commit) and `rollout.change_request.closed` (closed without merge, or closed by the server when the
-rollout ended or was withdrawn). They never contain credentials.
+rollout ended or was withdrawn). If the server cannot close a request when the rollout ends, it records
+`rollout.change_request.close_failed`; close the request by hand then. A request that was already merged or closed by a
+person is recorded with that state, never as closed by the server. The events never contain credentials.
 
 The rollout page lists the targets with running work first (in progress and verifying, then waiting for a maintenance
 window, failed and rolled back, pending, succeeded, skipped, cancelled) and offers the wave order as an alternative.

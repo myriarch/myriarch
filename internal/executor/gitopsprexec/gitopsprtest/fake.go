@@ -347,6 +347,17 @@ func (g *GitHub) handle(w http.ResponseWriter, r *http.Request) {
 			Parents []string `json:"parents"`
 		}
 		decode(r, &in)
+		// the parent must be the current head of a branch, never absent (orphan)
+		parentOK := false
+		for _, head := range g.refs {
+			if len(in.Parents) == 1 && in.Parents[0] == head {
+				parentOK = true
+			}
+		}
+		if !parentOK {
+			g.fail(w, r, 422, "parents must be exactly the head of an existing branch")
+			return
+		}
 		g.seq++
 		sha := fmt.Sprintf("%040x", g.seq)
 		g.commits[sha] = in.Tree
@@ -411,6 +422,12 @@ func (g *GitHub) handle(w http.ResponseWriter, r *http.Request) {
 		case len(parts) == 2 && m == "GET":
 			writeJSON(w, 200, g.pull(rq))
 		case len(parts) == 2 && m == "PATCH":
+			var in struct{ State string }
+			decode(r, &in)
+			if in.State != "closed" {
+				g.fail(w, r, 422, "only state closed is supported")
+				return
+			}
 			rq.State = "closed"
 			writeJSON(w, 200, g.pull(rq))
 		case len(parts) == 3 && parts[2] == "comments" && m == "POST":
@@ -578,6 +595,14 @@ func (g *GitLab) handle(w http.ResponseWriter, r *http.Request) {
 		case len(parts) == 1 && m == "GET":
 			writeJSON(w, 200, g.mr(rq))
 		case len(parts) == 1 && m == "PUT":
+			var in struct {
+				StateEvent string `json:"state_event"`
+			}
+			decode(r, &in)
+			if in.StateEvent != "close" {
+				g.fail(w, r, 400, "only state_event close is supported")
+				return
+			}
 			rq.State = "closed"
 			writeJSON(w, 200, g.mr(rq))
 		case len(parts) == 2 && parts[1] == "notes" && m == "POST":

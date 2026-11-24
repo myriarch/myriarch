@@ -6,6 +6,7 @@ package rollout
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -145,12 +146,25 @@ func (rc *runCtx) pollRequests() {
 		return
 	}
 	spec, def := rc.e.updateSpec(rc.ctx, r)
-	ctx, cancel := context.WithTimeout(rc.ctx, requestPollTimeout)
-	defer cancel()
-	states, err := tr.RequestStates(ctx, executor.StatusRequest{RolloutID: r.ID, Refs: refs, Spec: spec, Definition: def})
-	if err != nil {
-		rc.e.log.Warn("checking the requests of the rollout failed", "rollout_id", r.ID, "executor", r.Executor, "error", err)
-	}
+	// Bounded like every executor call: a slow provider API must not hold the tick.
+	var (
+		mu     sync.Mutex
+		states map[string]executor.RequestState
+	)
+	rc.e.bestEffort(rc.ctx, func(cctx context.Context) {
+		cctx, cancel := context.WithTimeout(cctx, requestPollTimeout)
+		defer cancel()
+		got, err := tr.RequestStates(cctx, executor.StatusRequest{RolloutID: r.ID, Refs: refs, Spec: spec, Definition: def})
+		if err != nil {
+			rc.e.log.Warn("checking the requests of the rollout failed", "rollout_id", r.ID, "executor", r.Executor, "error", err)
+		}
+		mu.Lock()
+		states = got
+		mu.Unlock()
+	})
+	mu.Lock()
+	states = maps.Clone(states)
+	mu.Unlock()
 	audited := map[string]bool{}
 	for i := range rc.targets {
 		t := &rc.targets[i]
@@ -217,7 +231,7 @@ func (rc *runCtx) closeOpenRequests(reason string) {
 	}
 	out := rc.e.closeRequests(rc.ctx, rc.r, refs, reason)
 	if out == nil {
-		return // the call failed or is still running: the next tick tries again
+		return // the call is still running: the next tick tries again
 	}
 	for i := range rc.targets {
 		cr := openChange(&rc.targets[i])
@@ -227,11 +241,14 @@ func (rc *runCtx) closeOpenRequests(reason string) {
 		if _, ok := refs[rc.targets[i].AgentID]; !ok {
 			continue
 		}
-		next := *cr
-		next.State = domain.ChangeRequestClosed
-		if !out.closed[cr.Ref] {
-			next.State = domain.ChangeRequestMerged // it was not open any more
+		// Take the state the executor observed. A request it could not check
+		// stays open here, so that a later tick tries again.
+		st, ok := out.states[cr.Ref]
+		if !ok || st.State == domain.ChangeRequestOpen {
+			continue
 		}
+		next := *cr
+		next.State, next.MergeCommit = st.State, st.MergeCommit
 		rc.setChangeRequest(i, next)
 		rc.refreshProgress(i)
 	}
@@ -239,13 +256,14 @@ func (rc *runCtx) closeOpenRequests(reason string) {
 
 // closeOutcome is the result of a closeRequests call.
 type closeOutcome struct {
-	closed map[string]bool // refs the executor closed
+	states map[string]executor.RequestState // observed state of the requests that were checked
 }
 
 // closeRequests closes the open requests named by refs through the executor
 // (best effort, bounded like every executor call) and audits each closed
-// request. It returns nil if the executor cannot close requests, the call
-// failed or did not finish in time.
+// request. The outcome holds the observed state of every request the executor
+// could check, also when the call failed for others. It returns nil if the
+// executor cannot close requests or the call did not finish in time.
 func (e *Engine) closeRequests(ctx context.Context, r *domain.Rollout, refs map[domain.AgentID]string, reason string) *closeOutcome {
 	ex, ok := e.deps.Executors.Get(r.Executor)
 	if !ok {
@@ -267,16 +285,18 @@ func (e *Engine) closeRequests(ctx context.Context, r *domain.Rollout, refs map[
 	)
 	e.bestEffort(ctx, func(cctx context.Context) {
 		closed, err := rcl.CloseRequests(cctx, req)
+		o := &closeOutcome{states: map[string]executor.RequestState{}}
 		for _, c := range closed {
-			e.auditSystem(cctx, "rollout.change_request.closed", r, map[string]any{"ref": c.Ref, "url": c.URL, "reason": reason})
+			o.states[c.Ref] = c
+			if c.Closed {
+				e.auditSystem(cctx, "rollout.change_request.closed", r, map[string]any{"ref": c.Ref, "url": c.URL, "reason": reason})
+			}
 		}
 		if err != nil {
+			// The rollout may be at its end and no later tick may retry: leave
+			// a trace for the operators.
 			e.log.Warn("closing requests failed", "rollout_id", r.ID, "executor", r.Executor, "error", err)
-			return
-		}
-		o := &closeOutcome{closed: map[string]bool{}}
-		for _, c := range closed {
-			o.closed[c.Ref] = true
+			e.auditSystem(cctx, "rollout.change_request.close_failed", r, map[string]any{"reason": reason, "error": err.Error()})
 		}
 		mu.Lock()
 		out = o

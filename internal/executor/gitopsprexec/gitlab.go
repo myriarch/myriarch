@@ -153,11 +153,14 @@ func (g *gitLab) getRequest(ctx context.Context, id string) (*remoteRequest, err
 
 func (g *gitLab) closeRequest(ctx context.Context, id, comment string) error {
 	base := g.p("/merge_requests/" + url.PathEscape(id))
-	if _, err := g.c.do(ctx, call{method: "POST", path: base + "/notes", in: map[string]any{"body": comment}, ok: []int{201}}); err != nil {
+	// Close first: a note that cannot be posted must not keep the request open.
+	if _, err := g.c.do(ctx, call{method: "PUT", path: base, in: map[string]any{"state_event": "close"}, ok: []int{200}}); err != nil {
 		return err
 	}
-	_, err := g.c.do(ctx, call{method: "PUT", path: base, in: map[string]any{"state_event": "close"}, ok: []int{200}})
-	return err
+	if _, err := g.c.do(ctx, call{method: "POST", path: base + "/notes", in: map[string]any{"body": comment}, ok: []int{201}}); err != nil {
+		g.log.Warn("commenting on a closed request failed", "id", id, "error", err)
+	}
+	return nil
 }
 
 func (g *gitLab) deleteBranch(ctx context.Context, branch string) error {

@@ -276,7 +276,7 @@ func TestStartRollbackUsesOwnBranch(t *testing.T) {
 	})
 }
 
-func TestStartUsesNextSuffixAfterMerge(t *testing.T) {
+func TestStartUsesNextSuffixAfterClose(t *testing.T) {
 	eachProvider(t, func(t *testing.T, f *fixture) {
 		e := f.exec(t, nil)
 		rid := uuid.New()
@@ -362,6 +362,16 @@ func TestCancelClosesOpenRequestsAndDeletesOwnBranches(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, closed, 1)
 		assert.Equal(t, domain.ChangeRequestClosed, closed[0].State)
+		assert.True(t, closed[0].Closed)
+
+		// an already merged request is reported as merged, not as closed by us
+		seen, err := e.CloseRequests(context.Background(), executor.CancelRequest{RolloutID: ridB, Definition: f.def,
+			Refs: map[domain.AgentID]string{uuid.New(): b[0].ExternalRef}})
+		require.NoError(t, err)
+		require.Len(t, seen, 1)
+		assert.Equal(t, domain.ChangeRequestMerged, seen[0].State)
+		assert.False(t, seen[0].Closed)
+		assert.NotEmpty(t, seen[0].MergeCommit)
 		reqs := f.d.Requests()
 		assert.Equal(t, "closed", reqs[0].State)
 		require.Len(t, reqs[0].Comments, 1)

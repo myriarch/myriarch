@@ -408,8 +408,8 @@ func (e *Executor) RequestStates(ctx context.Context, req executor.StatusRequest
 		if err != nil {
 			var rl *rateLimitError
 			if errors.As(err, &rl) {
-				e.noteRateLimit(rl, now)
-				e.log.Warn("rate limit reached, backing off", "repository", s.Repository, "until", e.limitUntil.Format(time.RFC3339))
+				until := e.noteRateLimit(rl, now)
+				e.log.Warn("rate limit reached, backing off", "repository", s.Repository, "until", until.Format(time.RFC3339))
 				continue
 			}
 			e.log.Warn("checking a change request failed", "repository", s.Repository, "ref", ref, "error", err)
@@ -428,7 +428,7 @@ func (e *Executor) RequestStates(ctx context.Context, req executor.StatusRequest
 	return out, firstErr
 }
 
-func (e *Executor) noteRateLimit(rl *rateLimitError, now time.Time) {
+func (e *Executor) noteRateLimit(rl *rateLimitError, now time.Time) time.Time {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	wait := rl.wait
@@ -441,6 +441,7 @@ func (e *Executor) noteRateLimit(rl *rateLimitError, now time.Time) {
 		wait = e.backoff
 	}
 	e.limitUntil = now.Add(wait)
+	return e.limitUntil
 }
 
 // ----------------------------------------------------------------- close ----
@@ -468,7 +469,7 @@ func (e *Executor) CloseRequests(ctx context.Context, req executor.CancelRequest
 	}
 	ownPrefix := brand.GitOpsPRBranchPrefix + req.RolloutID.String() + "/"
 	comment := fmt.Sprintf("Closed by %s: rollout %s was aborted, superseded or finished.", brand.ServerBinary, req.RolloutID)
-	var closed []executor.RequestState
+	var closed []executor.RequestState // observed state of every request that could be checked
 	var errs []error
 	for _, ref := range sortedKeys(refs) {
 		id, ok := splitRef(s, ref)
@@ -480,17 +481,19 @@ func (e *Executor) CloseRequests(ctx context.Context, req executor.CancelRequest
 			errs = append(errs, err)
 			continue
 		}
+		st := executor.RequestState{Ref: ref, URL: rq.URL, State: rq.State, MergeCommit: rq.MergeCommit}
 		if rq.State == domain.ChangeRequestOpen {
 			if err := prov.closeRequest(ctx, id, comment); err != nil {
 				errs = append(errs, err)
 				continue
 			}
-			closed = append(closed, executor.RequestState{Ref: ref, URL: rq.URL, State: domain.ChangeRequestClosed})
-			e.mu.Lock()
-			e.cache[ref] = &cached{state: executor.RequestState{Ref: ref, URL: rq.URL, State: domain.ChangeRequestClosed}, final: true}
-			e.mu.Unlock()
+			st.State, st.Closed = domain.ChangeRequestClosed, true
 			e.log.Info("change request closed", "repository", s.Repository, "ref", ref)
 		}
+		closed = append(closed, st)
+		e.mu.Lock()
+		e.cache[ref] = &cached{state: executor.RequestState{Ref: ref, URL: rq.URL, State: st.State, MergeCommit: st.MergeCommit}, final: true}
+		e.mu.Unlock()
 		// only branches that this executor created for this rollout are deleted
 		if strings.HasPrefix(rq.Head, ownPrefix) {
 			if err := prov.deleteBranch(ctx, rq.Head); err != nil {

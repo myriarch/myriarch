@@ -133,6 +133,9 @@ type RequestState struct {
 	URL         string                    `json:"url,omitempty"`
 	State       domain.ChangeRequestState `json:"state"`
 	MergeCommit string                    `json:"mergeCommit,omitempty"`
+	// Closed is set by CloseRequests for a request that this call closed
+	// (as opposed to one that was already merged or closed).
+	Closed bool `json:"closed,omitempty"`
 }
 
 // RequestTracker is implemented by executors that hand over work as external
@@ -150,7 +153,10 @@ type RequestTracker interface {
 type RequestCloser interface {
 	// CloseRequests closes the still open requests of the rollout with a
 	// comment and deletes only branches the executor created. It never
-	// reverts merged requests and returns the requests it closed.
+	// reverts merged requests. It returns the observed state of every request
+	// it could check, even when it also returns an error for others: Closed
+	// marks the requests it closed itself, a request that was already merged
+	// or closed is reported with that state.
 	CloseRequests(ctx context.Context, req CancelRequest) ([]RequestState, error)
 }
 

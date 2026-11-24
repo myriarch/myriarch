@@ -179,11 +179,14 @@ func (g *gitHub) getRequest(ctx context.Context, id string) (*remoteRequest, err
 }
 
 func (g *gitHub) closeRequest(ctx context.Context, id, comment string) error {
-	if _, err := g.c.do(ctx, call{method: "POST", path: g.p("/issues/%s/comments", url.PathEscape(id)), in: map[string]any{"body": comment}, ok: []int{201}}); err != nil {
+	// Close first: a comment that cannot be posted must not keep the request open.
+	if _, err := g.c.do(ctx, call{method: "PATCH", path: g.p("/pulls/%s", url.PathEscape(id)), in: map[string]any{"state": "closed"}, ok: []int{200}}); err != nil {
 		return err
 	}
-	_, err := g.c.do(ctx, call{method: "PATCH", path: g.p("/pulls/%s", url.PathEscape(id)), in: map[string]any{"state": "closed"}, ok: []int{200}})
-	return err
+	if _, err := g.c.do(ctx, call{method: "POST", path: g.p("/issues/%s/comments", url.PathEscape(id)), in: map[string]any{"body": comment}, ok: []int{201}}); err != nil {
+		g.log.Warn("commenting on a closed request failed", "id", id, "error", err)
+	}
+	return nil
 }
 
 func (g *gitHub) deleteBranch(ctx context.Context, branch string) error {

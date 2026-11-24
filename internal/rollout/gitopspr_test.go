@@ -277,6 +277,27 @@ func TestGitOpsPRRollbackClosesOpenRequest(t *testing.T) {
 	})
 }
 
+// A request that a person closed between two polls is not recorded as merged
+// when the rollback finds it closed already.
+func TestGitOpsPRRollbackOfRequestClosedByPersonIsNotMerged(t *testing.T) {
+	eachPRProvider(t, func(t *testing.T, p *prEnv) {
+		r := p.start(spec(allWave()))
+		p.d.CloseWithoutMerge(p.d.Requests()[0].ID) // the engine has not polled yet
+
+		_, err := p.eng.Action(p.ctx, r.ID, domain.ActionRollback, 0, "bad idea", operator)
+		require.NoError(t, err)
+		require.True(t, p.runUntil(20, func() bool { return p.rollout(r.ID).Status == domain.RolloutRolledBack }))
+
+		assert.Len(t, p.d.Requests(), 1, "no rollback request for a change that was never merged")
+		for _, cr := range p.changeRequests(r.ID) {
+			require.NotNil(t, cr)
+			assert.Equal(t, domain.ChangeRequestClosed, cr.State)
+		}
+		assert.Empty(t, p.audit("rollout.change_request.merged"))
+		assert.Equal(t, 2, p.targetStatus(r.ID)[domain.TargetRolledBack])
+	})
+}
+
 func TestGitOpsPRRollbackOfMergedChangeOpensRollbackRequest(t *testing.T) {
 	eachPRProvider(t, func(t *testing.T, p *prEnv) {
 		r := p.start(spec(allWave()))

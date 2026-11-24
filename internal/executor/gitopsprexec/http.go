@@ -167,7 +167,7 @@ func scrub(s, token string) string {
 func excerpt(b []byte, token string) string {
 	s := strings.Join(strings.Fields(scrub(string(b), token)), " ")
 	if len(s) > maxErrorBody {
-		s = s[:maxErrorBody] + "..."
+		s = strings.ToValidUTF8(s[:maxErrorBody], "") + "..."
 	}
 	return s
 }
