@@ -22,6 +22,7 @@ func TestValuesArePinned(t *testing.T) {
 		{"ServerBinary", ServerBinary, "myriarchd"},
 		{"CLIBinary", CLIBinary, "myrctl"},
 		{"CLIAlias", CLIAlias, "myr"},
+		{"GitOpsPRBranchPrefix", GitOpsPRBranchPrefix, "myriarch/rollout-"},
 		{"UpdaterBinary", UpdaterBinary, "myriarch-updater"},
 		{"SimBinary", SimBinary, "myriarch-sim"},
 		{"MCPBinary", MCPBinary, "myriarch-mcp"},

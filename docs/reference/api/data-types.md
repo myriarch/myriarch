@@ -374,6 +374,33 @@ Exactly one of password (together with username) and token.
 | `text` (required) | `string` |  |
 | `issues` | array of `integer` |  |
 
+## ChangeRequest
+
+The pull request (GitHub) or merge request (GitLab) that the gitops-pr executor opened for the target. Present
+only for gitops-pr. The server asks the provider at most every 30 seconds per request. A merged request never
+completes a target: completion is decided by the reported version.
+
+| Field | Type | Description |
+|---|---|---|
+| `provider` (required) | `string` | One of `github`, `gitlab`. |
+| `ref` (required) | `string` | Reference, "github-pr:&lt;owner>/&lt;repo>#&lt;n>" or "gitlab-mr:&lt;project>!&lt;iid>". |
+| `url` | `string` | Link to the request in the provider. |
+| `state` (required) | [ChangeRequestState](#changerequeststate) |  |
+| `mergeCommit` | `string` | Merge commit once the request is merged. |
+| `rollback` | `boolean` | True for a request that returns the target to its previous version. |
+
+## ChangeRequestState
+
+State of a pull or merge request of the gitops-pr executor. open = waiting for merge; merged = merged, the
+target still waits for the reported version; closed = closed without merge (the target fails) or closed by
+myriarchd on abort, rollback or the end of the rollout.
+
+Type: `string`. Values:
+
+- `open`
+- `merged`
+- `closed`
+
 ## ChannelInfo
 
 | Field | Type | Description |
@@ -547,7 +574,7 @@ Type: `string`. Example `30s`.
 | `name` (required) | `string` |  |
 | `type` (required) | [ExecutorType](#executortype) |  |
 | `description` | `string` |  |
-| `target` (required) | `string` | Redacted destination URL. |
+| `target` (required) | `string` | Redacted destination URL; for gitops-pr the API URL of the repository (no credentials, no reference names). |
 | `source` (required) | [SourceRef](#sourceref) |  |
 | `usedBy` (required) | array of `string` |  |
 
@@ -561,7 +588,9 @@ Type: `string`. Example `30s`.
 
 none = versions are only reported; updater = OpAMP package offers to myriarch-updater; webhook/awx = external
 call (Executor object); manual = version rollouts are created and wait for the reported version without any
-external call (the version is changed outside of myriarchd, e.g. image tag by merge request).
+external call (the version is changed outside of myriarchd, e.g. image tag by merge request); gitops-pr =
+a pull request (GitHub) or merge request (GitLab) in the deployment repository that changes only the
+collector image (Executor object); completion is still decided by the reported version.
 
 Type: `string`. Values:
 
@@ -570,6 +599,7 @@ Type: `string`. Values:
 - `webhook`
 - `awx`
 - `manual`
+- `gitops-pr`
 
 ## FacetValue
 
@@ -1143,7 +1173,7 @@ Type: `string`. Values:
 
 updater = steps reported by the myriarch-updater (health component "dev.myriarch.update"); package_status = only the
 OpAMP package status of the updater is known (older or simulated updater without the component); executor =
-webhook/awx/manual executors (no host-side steps: offered, then waiting for the reported version).
+webhook/awx/manual/gitops-pr executors (no host-side steps: offered, then waiting for the reported version).
 
 Type: `string`. Values:
 
@@ -1444,7 +1474,7 @@ Type: `string`. Values:
 | `verifiedAt` | `string` | Format `date-time`. |
 | `finishedAt` | `string` | Format `date-time`. |
 | `lastError` | `string` |  |
-| `executorRef` | `string` |  |
+| `executorRef` | `string` | External reference returned by the executor, for example "awx-job:12", "github-pr:&lt;owner>/&lt;repo>#&lt;n>" or "gitlab-mr:&lt;project>!&lt;iid>". |
 | `updatedAt` (required) | `string` | Format `date-time`. |
 | `progress` | [TargetProgress](#targetprogress) |  |
 
@@ -1598,7 +1628,8 @@ target reaches a final status. Absent for config rollouts and for targets that w
 | `toVersion` | `string` |  |
 | `downloadPercent` | `number` | Range 0 to 100. |
 | `error` | `string` | Error of the failed step or of the target (English). |
-| `steps` (required) | array of [UpdateStep](#updatestep) | Fixed order offered, downloading, verifying, installing, restarting, health_check, rolling_back (only when a rollback happened), health_wait. Executor source: offered, installing (external update until the version is reported), health_wait. |
+| `steps` (required) | array of [UpdateStep](#updatestep) | Fixed order offered, downloading, verifying, installing, restarting, health_check, rolling_back (only when a rollback happened), health_wait. Executor source: offered, installing (external update until the version is reported), health_wait. With gitops-pr the detail of installing tells whether the request is waiting for merge or merged and waiting for the version. |
+| `changeRequest` | [ChangeRequest](#changerequest) |  |
 | `updatedAt` (required) | `string` | Format `date-time`. |
 
 ## TargetStatus

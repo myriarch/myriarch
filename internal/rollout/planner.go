@@ -544,6 +544,24 @@ func (e *Engine) cancelOpenTargets(ctx context.Context, r *domain.Rollout, reaso
 				refs[t.AgentID.String()] = t.ExecutorRef
 			}
 		}
+		// requests of targets that already ended (failed, succeeded) may still
+		// be open
+		if ex, ok := e.deps.Executors.Get(r.Executor); ok {
+			if _, ok := ex.(executor.RequestCloser); ok {
+				ended, _, err := rs.ListTargets(ctx, r.ID, store.TargetFilter{
+					Status: []domain.TargetStatus{domain.TargetFailed, domain.TargetSucceeded},
+				})
+				if err != nil {
+					return fmt.Errorf("list ended targets: %w", err)
+				}
+				for i := range ended {
+					if cr := openChange(&ended[i]); cr != nil {
+						cancelIDs = append(cancelIDs, ended[i].AgentID)
+						refs[ended[i].AgentID.String()] = cr.Ref
+					}
+				}
+			}
+		}
 	}
 	if _, err := rs.CancelOpenTargets(ctx, r.ID, reason); err != nil {
 		return fmt.Errorf("cancel open targets: %w", err)
@@ -590,6 +608,12 @@ func (e *Engine) cancelExecutor(ctx context.Context, r *domain.Rollout, ids []do
 				typed[id] = ref
 			}
 		}
+	}
+	if _, ok := ex.(executor.RequestCloser); ok {
+		// gitops-pr: close the open requests and delete the branches the
+		// executor created; each closed request is audited
+		e.closeRequests(ctx, r, typed, "rollout was cancelled or superseded")
+		return
 	}
 	req := executor.CancelRequest{RolloutID: r.ID, AgentIDs: ids, Refs: typed, Spec: spec, Definition: def}
 	// Best effort and bounded: a hanging receiver must not stall the planner

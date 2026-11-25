@@ -84,10 +84,12 @@ A **target** is one agent within a rollout.
 
 - **Start** (`pending` to `in_progress`). A target starts only if the agent is online, its local maintenance window is
   open, and `maxConcurrent` is not exhausted. For a configuration, the desired hash of the agent is set to the target hash
-  and pushed. For a version, the executor's `Start` is called (an updater package offer, a webhook or an AWX job).
+  and pushed. For a version, the executor's `Start` is called (an updater package offer, a webhook, an AWX job or, for
+  `gitops-pr`, a pull or merge request per wave; the target stays `in_progress` while the request is open or merged).
 - **Success reported** (`in_progress` to `verifying`). For a configuration the agent reports `remote_config_status =
   APPLIED` for the target hash. For a version the collector reports `service.version` equal to the target version.
-  Success is **never** reported by an executor.
+  Success is **never** reported by an executor. With `gitops-pr` a merged request does not count either: only the reported
+  version does.
 - **Success** (`verifying` to `succeeded`). The agent stays online and healthy for `healthWait`.
   - An update or a configuration change restarts the collector. An unhealthy report that was sent **before** the target
     entered `verifying`, from the old process that is stopping, does not count as a failure. The target waits, for at most
@@ -102,10 +104,11 @@ A **target** is one agent within a rollout.
     a configuration was applied, is allowed.
 - **Failure** (`failed`). The agent reports `FAILED` (configuration), or the updater reports `INSTALL_FAILED`. Or the
   agent becomes unhealthy or goes offline during the health wait, `applyTimeout` is exceeded, or the executor returns an
-  error.
+  error. With `gitops-pr` a request that is closed without a merge fails its targets.
 - **Offline.** Targets that are offline at their planned start wait. After `offlineGracePeriod`, counted from the start
   of the wave, they become `skipped`.
-- **Abort.** Targets that have not started become `cancelled`.
+- **Abort.** Targets that have not started become `cancelled`. Open `gitops-pr` requests are closed and the branches of
+  the executor are deleted.
 - **One of each kind per fleet.** At most one configuration rollout and one version rollout run at the same time for a
   fleet, independent of each other. If a version update restarts the collector of a host while its configuration target
   is in the health wait, the configuration target fails. Use `retry-failed`, or finish the version rollout first.
@@ -197,7 +200,9 @@ the rollout is still working on its current wave.
 - `onFailure: rollback` rolls back automatically. All targets in `in_progress`, `verifying`, `succeeded` or `failed` are
   reset to their starting state: for a configuration the desired hash returns to the `from` hash, for a version the
   package offer or executor call is repeated with the previous version. They end as `rolled_back`, and the rollout goes
-  through `rolling_back` to `rolled_back` (notification `rollout.rolled_back`).
+  through `rolling_back` to `rolled_back` (notification `rollout.rolled_back`). For `gitops-pr` the rollback closes the
+  requests that are still open. A request that was already merged is not reverted by the server: it gets a separate
+  rollback request that the operators merge.
 - The rollout status `failed` (notification `rollout.failed`) arises only when a rollback cannot finish within
   `applyTimeout`, or when the rollout cannot continue at all, for example when the executor is misconfigured and all
   startable targets of a wave fail in `Start` or `Validate`, or when the policy or the fleet disappeared.
@@ -241,7 +246,7 @@ it has connected again since. Otherwise a permanently switched-off edge machine 
 1. If an active rollout exists whose open targets (`pending`, `waiting_window`, `in_progress`, `verifying`) have a
    **different** target than their agent's current target (a new commit with another hash, a changed target version, a
    new choice in the UI, a hold), that rollout becomes `superseded`. Its open targets are cancelled, and for versions
-   `Cancel` is called on the executor. Continue with step 3.
+   `Cancel` is called on the executor (for `gitops-pr` it closes the open requests). Continue with step 3.
 2. If an active rollout exists and all its open targets still have the current target, relevant agents that have **no**
    target in it yet (stragglers, for example agents that connected later) are added to the **last wave**. Done.
 3. Without an active rollout, a new rollout is created with all relevant, not excluded agents. Its `toRef` is the current
@@ -275,8 +280,12 @@ field of the rollout target), stores it and freezes it with the final status of 
 - `phase`: `offered`, `downloading`, `verifying`, `installing`, `restarting`, `health_check`, `rolling_back`,
   `health_wait`, `succeeded`, `failed`, `rolled_back` or `cancelled`.
 - `source`: `updater` (steps reported by the `myriarch-updater`), `package_status` (only the OpAMP package status of the
-  updater is known, for example with an older or simulated updater) or `executor` (webhook, AWX or manual: `offered`, then
-  `installing`, which means "external update, waiting for version X", then `health_wait`).
+  updater is known, for example with an older or simulated updater) or `executor` (webhook, AWX, manual or gitops-pr:
+  `offered`, then `installing`, which means "external update, waiting for version X", then `health_wait`).
+- `changeRequest` (only for `gitops-pr`): the pull or merge request of the target with its `ref`, `url`, `state` (`open`,
+  `merged` or `closed`), `mergeCommit` and `rollback` (set for a rollback request). The server asks the provider at most
+  every 30 seconds. The `detail` of `installing` reads "waiting for merge of ...", "merged as ..., waiting for version X"
+  or "request closed without merge".
 - `steps[]` in the fixed order `offered`, `downloading`, `verifying`, `installing`, `restarting`, `health_check`,
   optionally `rolling_back`, then `health_wait`, each with a `status` (`pending`, `running`, `done`, `failed` or
   `skipped`), `startedAt`, `finishedAt` and `detail`. Also `downloadPercent` from the package status, and `error`,
@@ -287,6 +296,12 @@ children `version` (the offered version, with a leading `v`), `from` and `step:<
 status time and `last_error`. The server assigns the reported attempt to a target when `version == "v" + toRef` and
 the attempt did not begin earlier than 2 minutes before the target (a tolerance for clock differences). Otherwise the
 attempt counts as not yet begun (`offered`). Missed intermediate reports do no harm.
+
+The audit log records the requests of `gitops-pr` as `rollout.change_request.opened`, `rollout.change_request.merged`
+(with the merge commit) and `rollout.change_request.closed` (closed without merge, or closed by the server when the
+rollout ended or was withdrawn). If the server cannot close a request when the rollout ends, it records
+`rollout.change_request.close_failed`; close the request by hand then. A request that was already merged or closed by a
+person is recorded with that state, never as closed by the server. The events never contain credentials.
 
 The rollout page lists the targets with running work first (in progress and verifying, then waiting for a maintenance
 window, failed and rolled back, pending, succeeded, skipped, cancelled) and offers the wave order as an alternative.

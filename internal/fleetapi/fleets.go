@@ -456,11 +456,23 @@ func (s *service) executorSummary(snap *domain.GitOpsSnapshot, e *domain.Executo
 		raw = e.Webhook.URL
 	case e.AWX != nil:
 		raw = e.AWX.URL
+	case e.GitOpsPR != nil:
+		raw = e.GitOpsPR.EffectiveAPIURL()
 	}
 	if u, err := url.Parse(raw); err == nil && u.Host != "" {
+		// scheme, host and path only: no credentials, no query, and never the
+		// name of a token or key reference
 		target = u.Scheme + "://" + u.Host + u.Path
 		if e.AWX != nil {
 			target = strings.TrimRight(target, "/") + fmt.Sprintf("/api/v2/job_templates/%d", e.AWX.JobTemplateID)
+		}
+		if g := e.GitOpsPR; g != nil {
+			target = strings.TrimRight(target, "/")
+			if g.Provider == domain.GitOpsPRProviderGitLab {
+				target += "/api/v4/projects/" + url.PathEscape(g.Repository)
+			} else {
+				target += "/repos/" + g.Repository
+			}
 		}
 	}
 	users := []string{}

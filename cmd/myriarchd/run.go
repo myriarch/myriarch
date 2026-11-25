@@ -35,6 +35,7 @@ import (
 	"github.com/myriarch/myriarch/internal/eventbus"
 	"github.com/myriarch/myriarch/internal/eventbus/pgbus"
 	"github.com/myriarch/myriarch/internal/executor"
+	"github.com/myriarch/myriarch/internal/executor/gitopsprexec"
 	"github.com/myriarch/myriarch/internal/executor/manualexec"
 	"github.com/myriarch/myriarch/internal/executor/updaterexec"
 	"github.com/myriarch/myriarch/internal/executor/webhookexec"
@@ -278,6 +279,9 @@ func run(ctx context.Context, cfg config.Config, opts runOptions) error {
 		domain.ExecutorAWX:     webhookexec.NewAWX(cfg.Executors, httpClient, logger),
 		domain.ExecutorManual:  manualexec.New(),
 	}
+	// Pull or merge requests in the deployment repository: no Kubernetes API
+	// call and no cluster credentials (ADR-0052).
+	executors[domain.ExecutorGitOpsPR] = gitopsprexec.New(cfg.Executors, httpClient, logger, gitopsprexec.Options{PublicURL: cfg.Server.PublicURL})
 	assigner := assignment.New(assignment.Deps{
 		Store: st, Bus: bus, Control: agentCtl, Renderer: renderer, Logger: logger, Registerer: reg,
 	})

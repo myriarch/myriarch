@@ -223,7 +223,8 @@
       "updater": "myriarch-updater",
       "webhook": "Webhook",
       "awx": "Ansible AWX",
-      "manual": "Manuell (wartet auf gemeldete Version)"
+      "manual": "Manuell (wartet auf gemeldete Version)",
+      "gitops-pr": "GitOps-Pull- oder Merge-Request (wartet auf gemeldete Version)"
     },
     "paramType": {
       "string": "Text",

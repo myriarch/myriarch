@@ -96,6 +96,9 @@ const (
 	// version without any external call (the version is changed outside of
 	// myriarchd, e.g. by an image tag merge request).
 	ExecutorManual ExecutorType = "manual"
+	// ExecutorGitOpsPR: a pull request (GitHub) or merge request (GitLab) in
+	// the deployment repository changes the collector image (ADR-0052).
+	ExecutorGitOpsPR ExecutorType = "gitops-pr"
 )
 
 // UpdateSpec configures version updates of a fleet.
@@ -332,9 +335,67 @@ type Executor struct {
 
 // ExecutorSpec is the "spec" of kind Executor.
 type ExecutorSpec struct {
-	Type    ExecutorType         `json:"type" yaml:"type"` // webhook|awx
-	Webhook *WebhookExecutorSpec `json:"webhook,omitempty" yaml:"webhook,omitempty"`
-	AWX     *AWXExecutorSpec     `json:"awx,omitempty" yaml:"awx,omitempty"`
+	Type     ExecutorType          `json:"type" yaml:"type"` // webhook|awx|gitops-pr
+	Webhook  *WebhookExecutorSpec  `json:"webhook,omitempty" yaml:"webhook,omitempty"`
+	AWX      *AWXExecutorSpec      `json:"awx,omitempty" yaml:"awx,omitempty"`
+	GitOpsPR *GitOpsPRExecutorSpec `json:"gitopsPr,omitempty" yaml:"gitopsPr,omitempty"`
+}
+
+// Providers and value formats of the gitops-pr executor.
+const (
+	GitOpsPRProviderGitHub = "github"
+	GitOpsPRProviderGitLab = "gitlab"
+	ValueFormatTag         = "tag"
+	ValueFormatImage       = "image"
+)
+
+// GitOpsPRExecutorSpec configures the gitops-pr executor.
+type GitOpsPRExecutorSpec struct {
+	// Provider is github or gitlab.
+	Provider string `json:"provider" yaml:"provider"`
+	// APIURL is the API base. Default https://api.github.com or
+	// https://gitlab.com (GitLab appends /api/v4). GitHub Enterprise gives
+	// the full API base, e.g. https://ghe.example.com/api/v3.
+	APIURL string `json:"apiUrl,omitempty" yaml:"apiUrl,omitempty"`
+	// Repository is owner/name (GitHub) or the project path (GitLab).
+	Repository string `json:"repository" yaml:"repository"`
+	// BaseBranch is the branch that the request targets.
+	BaseBranch string `json:"baseBranch" yaml:"baseBranch"`
+	// Path is the YAML file in the repository; it may contain
+	// [[ attr "key" ]] expressions.
+	Path string `json:"path" yaml:"path"`
+	// Field is the dotted path to a YAML scalar; a sequence index is written
+	// as [n], e.g. spec.template.spec.containers[0].image.
+	Field string `json:"field" yaml:"field"`
+	// ValueFormat is tag or image (default image).
+	ValueFormat string `json:"valueFormat,omitempty" yaml:"valueFormat,omitempty"`
+	// TokenEnv names the environment variable that holds the API token.
+	TokenEnv string `json:"tokenEnv,omitempty" yaml:"tokenEnv,omitempty"`
+	// TokenFile names a file under executors.secretDir or an entry of
+	// executors.secrets that holds the API token.
+	TokenFile string `json:"tokenFile,omitempty" yaml:"tokenFile,omitempty"`
+	// AppID is the numeric GitHub App ID (not a secret).
+	AppID string `json:"appId,omitempty" yaml:"appId,omitempty"`
+	// PrivateKeyFile is a reference to the GitHub App private key: a file
+	// under executors.secretDir or a name from executors.secrets.
+	PrivateKeyFile string `json:"privateKeyFile,omitempty" yaml:"privateKeyFile,omitempty"`
+	// Labels are added to the request (best effort).
+	Labels []string `json:"labels,omitempty" yaml:"labels,omitempty"`
+	// Reviewers are requested on the request (best effort).
+	Reviewers []string `json:"reviewers,omitempty" yaml:"reviewers,omitempty"`
+}
+
+// EffectiveAPIURL returns the API base with the provider default and without
+// a trailing slash.
+func (s *GitOpsPRExecutorSpec) EffectiveAPIURL() string {
+	u := strings.TrimRight(s.APIURL, "/")
+	if u != "" {
+		return u
+	}
+	if s.Provider == GitOpsPRProviderGitLab {
+		return "https://gitlab.com"
+	}
+	return "https://api.github.com"
 }
 
 // WebhookExecutorSpec configures the generic webhook executor.

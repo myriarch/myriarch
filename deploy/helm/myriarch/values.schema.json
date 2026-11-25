@@ -710,7 +710,7 @@
           "properties": {
             "allowedWebhookHosts": {
               "type": "array",
-              "description": "`allowedWebhookHosts` restricts webhook/AWX targets (host, host:port, `*.example.com`; http://host allows plain HTTP). An empty list refuses every webhook and AWX target (fail closed) in every mode; it does not stop startup.",
+              "description": "`allowedWebhookHosts` restricts the webhook, AWX and gitops-pr API hosts (host, host:port, `*.example.com`; http://host allows plain HTTP). An empty list refuses every webhook, AWX and gitops-pr target (fail closed) in every mode; it does not stop startup.",
               "items": {
                 "type": "string"
               }

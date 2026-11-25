@@ -158,7 +158,7 @@ func ResolveVersionTarget(f *Fleet, sel *FleetVersionSelection) VersionTarget {
 // through an executor (everything but "none").
 func VersionRolloutsEnabled(f *Fleet) bool {
 	switch f.Update.Executor {
-	case ExecutorUpdater, ExecutorWebhook, ExecutorAWX, ExecutorManual:
+	case ExecutorUpdater, ExecutorWebhook, ExecutorAWX, ExecutorManual, ExecutorGitOpsPR:
 		return true
 	}
 	return false
@@ -319,6 +319,39 @@ type UpdateStep struct {
 	Detail     string           `json:"detail,omitempty"`
 }
 
+// ChangeRequestState is the state of a pull or merge request of the gitops-pr
+// executor.
+type ChangeRequestState string
+
+const (
+	ChangeRequestOpen   ChangeRequestState = "open"
+	ChangeRequestMerged ChangeRequestState = "merged"
+	ChangeRequestClosed ChangeRequestState = "closed"
+)
+
+// Prefixes of the external references of change requests.
+const (
+	ChangeRequestRefGitHub = "github-pr:"
+	ChangeRequestRefGitLab = "gitlab-mr:"
+)
+
+// IsChangeRequestRef reports whether an executor reference names a pull or
+// merge request.
+func IsChangeRequestRef(ref string) bool {
+	return strings.HasPrefix(ref, ChangeRequestRefGitHub) || strings.HasPrefix(ref, ChangeRequestRefGitLab)
+}
+
+// ChangeRequest is the pull or merge request that the gitops-pr executor
+// opened for a target.
+type ChangeRequest struct {
+	Provider    string             `json:"provider"`
+	Ref         string             `json:"ref"`
+	URL         string             `json:"url,omitempty"`
+	State       ChangeRequestState `json:"state"`
+	MergeCommit string             `json:"mergeCommit,omitempty"`
+	Rollback    bool               `json:"rollback,omitempty"`
+}
+
 // TargetProgress is the live progress of a version-rollout target, derived by
 // the rollout engine and stored with the target.
 type TargetProgress struct {
@@ -330,13 +363,18 @@ type TargetProgress struct {
 	DownloadPercent *float64       `json:"downloadPercent,omitempty"`
 	Error           string         `json:"error,omitempty"`
 	Steps           []UpdateStep   `json:"steps"`
-	UpdatedAt       time.Time      `json:"updatedAt"`
+	// ChangeRequest is set for the gitops-pr executor only.
+	ChangeRequest *ChangeRequest `json:"changeRequest,omitempty"`
+	UpdatedAt     time.Time      `json:"updatedAt"`
 }
 
 // SameContent compares two progress values ignoring UpdatedAt.
 func (p *TargetProgress) SameContent(o *TargetProgress) bool {
 	if p == nil || o == nil {
 		return p == o
+	}
+	if (p.ChangeRequest == nil) != (o.ChangeRequest == nil) || (p.ChangeRequest != nil && *p.ChangeRequest != *o.ChangeRequest) {
+		return false
 	}
 	if p.Phase != o.Phase || p.Source != o.Source || p.Attempt != o.Attempt || p.FromVersion != o.FromVersion ||
 		p.ToVersion != o.ToVersion || p.Error != o.Error || len(p.Steps) != len(o.Steps) {
@@ -405,6 +443,10 @@ func ProgressOf(t RolloutTarget) *TargetProgress {
 	}
 	p := *t.Progress
 	p.Steps = append([]UpdateStep{}, t.Progress.Steps...)
+	if t.Progress.ChangeRequest != nil {
+		cr := *t.Progress.ChangeRequest
+		p.ChangeRequest = &cr
+	}
 	if t.Progress.DownloadPercent != nil {
 		v := *t.Progress.DownloadPercent
 		p.DownloadPercent = &v
