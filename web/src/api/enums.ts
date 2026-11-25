@@ -68,6 +68,7 @@ export const EXECUTOR_TYPES = enumOf<ExecutorType>()([
   'webhook',
   'awx',
   'manual',
+  'gitops-pr',
 ]);
 export const PARAMETER_TYPES = enumOf<ParameterType>()([
   'string',
