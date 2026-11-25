@@ -567,7 +567,7 @@ Used by: myriarchd, myrctl, myriarch-updater, myriarch-sim
 License text: [T31]
 
 --------------------------------------------------------------------------------
-Component: github.com/gorilla/websocket v1.5.3
+Component: github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4
 License: BSD-2-Clause
 Used by: myriarchd, myriarch-updater, myriarch-sim
 
@@ -1116,7 +1116,7 @@ License text: [T1]
 --------------------------------------------------------------------------------
 Component: golang.org/x/net v0.62.0
 License: BSD-3-Clause
-Used by: myriarchd, myrctl, myriarch-updater
+Used by: myriarchd, myrctl, myriarch-updater, myriarch-sim
 
 --- LICENSE ---
 License text: [T1]
@@ -4870,7 +4870,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==== [T32] ====
-First used by: github.com/gorilla/websocket v1.5.3 (LICENSE)
+First used by: github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4 (LICENSE)
 Begins with: Copyright (c) 2013 The Gorilla WebSocket Authors. All rights reserved.
 Referenced by 1 component entry.
 

@@ -8,7 +8,7 @@ require (
 	github.com/fergusstrange/embedded-postgres v1.34.0
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/websocket v1.5.3
+	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/kardianos/service v1.3.0
 	github.com/open-telemetry/opamp-go v0.25.0
